@@ -5,6 +5,7 @@
  * Uso:
  *   node scripts/ops/cleanup-prod-test-data.js            # dry-run
  *   node scripts/ops/cleanup-prod-test-data.js --apply    # aplica limpeza
+ *   node scripts/ops/cleanup-prod-test-data.js --financial-only --apply
  */
 
 const fs = require('fs');
@@ -12,6 +13,8 @@ const path = require('path');
 const admin = require('firebase-admin');
 
 const apply = process.argv.includes('--apply');
+const financialOnly = process.argv.includes('--financial-only');
+const identityOnly = process.argv.includes('--identity-only');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const REPORT_DIR = path.join(ROOT, 'reports');
@@ -81,6 +84,18 @@ const STRICT_VEHICLE_NOTE_PATTERNS = [
   /\bsmoke\b/i
 ];
 
+const STRICT_TEST_RIDE_ID_PATTERN = /(^|_)ride_e2e_|^ride_normal_|dispatch_smoke|_smoke$|(^|_)test(_|$)|(^|_)mock(_|$)/i;
+
+const FINANCIAL_TEST_COLLECTIONS = [
+  'ride_payments',
+  'payment_holdings',
+  'payment_distributions',
+  'payment_intents',
+  'financial_reconciliation_reports',
+  'financial_ledger_events',
+  'financial_ledger_lines'
+];
+
 function matchesAny(value, patterns) {
   if (!value) return false;
   const text = String(value);
@@ -94,6 +109,10 @@ function isStrictTestIdentity({ uid, email, phone, displayName }) {
     matchesAny(phone, STRICT_TEST_PHONE_PATTERNS) ||
     matchesAny(displayName, STRICT_TEST_NAME_PATTERNS)
   );
+}
+
+function isStrictTestRideId(value) {
+  return STRICT_TEST_RIDE_ID_PATTERN.test(String(value || ''));
 }
 
 async function listAllAuthUsers() {
@@ -114,14 +133,53 @@ function safeDate(value) {
   return String(value);
 }
 
+function getAdditionalInfoValue(data = {}, key) {
+  const rows = Array.isArray(data.metadata?.additionalInfo) ? data.metadata.additionalInfo : [];
+  const match = rows.find((row) => String(row?.key || '').toLowerCase() === key);
+  return match?.value || null;
+}
+
+function resolveRideIdFromFinancialDoc(id, data = {}, knownTestUIDs = new Set()) {
+  const candidates = [
+    data.rideId,
+    data.bookingId,
+    data.sourceRideId,
+    data.metadata?.rideId,
+    getAdditionalInfoValue(data, 'ride_id'),
+    id
+  ];
+  const testRideId = candidates.find((candidate) => isStrictTestRideId(candidate));
+  if (testRideId) return testRideId;
+
+  const identityCandidates = [
+    data.passengerId,
+    data.customerId,
+    data.driverId,
+    data.userId,
+    data.metadata?.passengerId,
+    data.metadata?.customerId,
+    data.metadata?.driverId,
+    getAdditionalInfoValue(data, 'passenger_id'),
+    getAdditionalInfoValue(data, 'customer_id'),
+    getAdditionalInfoValue(data, 'driver_id')
+  ];
+  const hasKnownTestIdentity = identityCandidates
+    .filter(Boolean)
+    .some((value) => knownTestUIDs.has(String(value)));
+
+  return hasKnownTestIdentity ? (data.rideId || data.bookingId || id) : null;
+}
+
 async function collectTargets() {
   const targets = {
     authUsers: [],
     rtdbUsers: [],
     rtdbVehicles: [],
     firestoreUsers: [],
-    firestoreAdminUsers: []
+    firestoreAdminUsers: [],
+    firestoreFinancialDocs: []
   };
+  const knownTestUIDs = new Set();
 
   const authUsers = await listAllAuthUsers();
   for (const u of authUsers) {
@@ -133,7 +191,10 @@ async function collectTargets() {
       createdAt: u.metadata?.creationTime || null,
       lastSignIn: u.metadata?.lastSignInTime || null
     };
-    if (isStrictTestIdentity(row)) targets.authUsers.push(row);
+    if (isStrictTestIdentity(row)) {
+      knownTestUIDs.add(row.uid);
+      if (!financialOnly) targets.authUsers.push(row);
+    }
   }
 
   const usersSnap = await rtdb.ref('users').once('value');
@@ -147,7 +208,10 @@ async function collectTargets() {
       usertype: v?.usertype || v?.userType || null,
       createdAt: safeDate(v?.createdAt)
     };
-    if (isStrictTestIdentity(row)) targets.rtdbUsers.push(row);
+    if (isStrictTestIdentity(row)) {
+      knownTestUIDs.add(row.uid);
+      if (!financialOnly) targets.rtdbUsers.push(row);
+    }
   }
 
   const fsUsersSnap = await firestore.collection('users').get();
@@ -161,48 +225,77 @@ async function collectTargets() {
       usertype: v?.usertype || v?.userType || null,
       createdAt: safeDate(v?.createdAt)
     };
-    if (isStrictTestIdentity(row)) targets.firestoreUsers.push(row);
-  });
-
-  const fsAdminsSnap = await firestore.collection('adminUsers').get();
-  fsAdminsSnap.forEach((doc) => {
-    const v = doc.data() || {};
-    const row = {
-      id: doc.id,
-      email: v?.email || null,
-      role: v?.role || null,
-      displayName: v?.displayName || v?.name || null,
-      createdAt: safeDate(v?.createdAt)
-    };
-    if (
-      matchesAny(row.id, STRICT_TEST_UID_PATTERNS) ||
-      matchesAny(row.email, STRICT_TEST_EMAIL_PATTERNS) ||
-      matchesAny(row.displayName, STRICT_TEST_NAME_PATTERNS)
-    ) {
-      targets.firestoreAdminUsers.push(row);
+    if (isStrictTestIdentity(row)) {
+      knownTestUIDs.add(row.uid);
+      if (!financialOnly) targets.firestoreUsers.push(row);
     }
   });
+
+  if (!financialOnly) {
+    const fsAdminsSnap = await firestore.collection('adminUsers').get();
+    fsAdminsSnap.forEach((doc) => {
+      const v = doc.data() || {};
+      const row = {
+        id: doc.id,
+        email: v?.email || null,
+        role: v?.role || null,
+        displayName: v?.displayName || v?.name || null,
+        createdAt: safeDate(v?.createdAt)
+      };
+      if (
+        matchesAny(row.id, STRICT_TEST_UID_PATTERNS) ||
+        matchesAny(row.email, STRICT_TEST_EMAIL_PATTERNS) ||
+        matchesAny(row.displayName, STRICT_TEST_NAME_PATTERNS)
+      ) {
+        targets.firestoreAdminUsers.push(row);
+      }
+    });
+  }
 
   const deleteUIDs = new Set();
   for (const row of targets.authUsers) deleteUIDs.add(row.uid);
   for (const row of targets.rtdbUsers) deleteUIDs.add(row.uid);
   for (const row of targets.firestoreUsers) deleteUIDs.add(row.uid);
 
-  const vehiclesSnap = await rtdb.ref('vehicles').once('value');
-  const vehiclesVal = vehiclesSnap.val() || {};
-  for (const [id, v] of Object.entries(vehiclesVal)) {
-    const driver = v?.driver || null;
-    const note = v?.other_info || null;
-    const shouldDelete =
-      (driver && deleteUIDs.has(driver)) ||
-      matchesAny(note, STRICT_VEHICLE_NOTE_PATTERNS);
-    if (shouldDelete) {
-      targets.rtdbVehicles.push({
-        id,
-        driver,
-        plate: v?.vehicleNumber || v?.carPlate || null,
-        note,
-        createdAt: safeDate(v?.createdAt)
+  if (!financialOnly) {
+    const vehiclesSnap = await rtdb.ref('vehicles').once('value');
+    const vehiclesVal = vehiclesSnap.val() || {};
+    for (const [id, v] of Object.entries(vehiclesVal)) {
+      const driver = v?.driver || null;
+      const note = v?.other_info || null;
+      const shouldDelete =
+        (driver && deleteUIDs.has(driver)) ||
+        matchesAny(note, STRICT_VEHICLE_NOTE_PATTERNS);
+      if (shouldDelete) {
+        targets.rtdbVehicles.push({
+          id,
+          driver,
+          plate: v?.vehicleNumber || v?.carPlate || null,
+          note,
+          createdAt: safeDate(v?.createdAt)
+        });
+      }
+    }
+  }
+
+  if (!identityOnly) {
+    for (const collectionName of FINANCIAL_TEST_COLLECTIONS) {
+      const snapshot = await firestore.collection(collectionName).get();
+      snapshot.forEach((doc) => {
+        const data = doc.data() || {};
+        const rideId = resolveRideIdFromFinancialDoc(doc.id, data, knownTestUIDs);
+        if (!rideId) return;
+
+        targets.firestoreFinancialDocs.push({
+          collection: collectionName,
+          id: doc.id,
+          rideId,
+          amount: data.amount || data.amountCents || data.totalAmount || data.totalDebitCents || null,
+          status: data.status || null,
+          eventType: data.eventType || null,
+          checkedAtIso: data.checkedAtIso || null,
+          createdAt: safeDate(data.createdAt || data.createdAtIso)
+        });
       });
     }
   }
@@ -234,6 +327,7 @@ async function applyCleanup({ targets, deleteUIDs }) {
     rtdbVehiclesDeleted: 0,
     firestoreUsersDeleted: 0,
     firestoreAdminUsersDeleted: 0,
+    firestoreFinancialDocsDeleted: 0,
     rtdbAuxDeleted: 0,
     errors: []
   };
@@ -282,6 +376,42 @@ async function applyCleanup({ targets, deleteUIDs }) {
     else stats.errors.push({ scope: 'firestore.adminUsers', id: row.id, error: r.message });
   }
 
+  if (targets.firestoreFinancialDocs.length > 0 && typeof firestore.batch === 'function') {
+    const batchSize = 400;
+    for (let index = 0; index < targets.firestoreFinancialDocs.length; index += batchSize) {
+      const rows = targets.firestoreFinancialDocs.slice(index, index + batchSize);
+      const batch = firestore.batch();
+      rows.forEach((row) => {
+        batch.delete(firestore.collection(row.collection).doc(row.id));
+      });
+
+      const r = await removeWithIgnore(() => batch.commit());
+      if (r.ok) {
+        stats.firestoreFinancialDocsDeleted += rows.length;
+      } else {
+        stats.errors.push({
+          scope: 'firestore.financialBatch',
+          offset: index,
+          count: rows.length,
+          error: r.message
+        });
+      }
+    }
+  } else {
+    for (const row of targets.firestoreFinancialDocs) {
+      const r = await removeWithIgnore(() => firestore.collection(row.collection).doc(row.id).delete());
+      if (r.ok) stats.firestoreFinancialDocsDeleted += 1;
+      else {
+        stats.errors.push({
+          scope: `firestore.${row.collection}`,
+          id: row.id,
+          rideId: row.rideId,
+          error: r.message
+        });
+      }
+    }
+  }
+
   return stats;
 }
 
@@ -292,12 +422,14 @@ async function main() {
   const summary = {
     generatedAt: new Date().toISOString(),
     mode: apply ? 'apply' : 'dry-run',
+    scope: financialOnly ? 'financial-only' : identityOnly ? 'identity-only' : 'all',
     targets: {
       authUsers: targets.authUsers.length,
       rtdbUsers: targets.rtdbUsers.length,
       rtdbVehicles: targets.rtdbVehicles.length,
       firestoreUsers: targets.firestoreUsers.length,
       firestoreAdminUsers: targets.firestoreAdminUsers.length,
+      firestoreFinancialDocs: targets.firestoreFinancialDocs.length,
       distinctUIDs: deleteUIDs.length
     },
     samples: {
@@ -305,7 +437,20 @@ async function main() {
       rtdbUsers: targets.rtdbUsers.slice(0, 15),
       rtdbVehicles: targets.rtdbVehicles.slice(0, 15),
       firestoreUsers: targets.firestoreUsers.slice(0, 15),
-      firestoreAdminUsers: targets.firestoreAdminUsers.slice(0, 15)
+      firestoreAdminUsers: targets.firestoreAdminUsers.slice(0, 15),
+      firestoreFinancialDocs: targets.firestoreFinancialDocs.slice(0, 20)
+    },
+    targetIds: {
+      authUsers: targets.authUsers.map((row) => row.uid),
+      rtdbUsers: targets.rtdbUsers.map((row) => row.uid),
+      rtdbVehicles: targets.rtdbVehicles.map((row) => row.id),
+      firestoreUsers: targets.firestoreUsers.map((row) => row.uid),
+      firestoreAdminUsers: targets.firestoreAdminUsers.map((row) => row.id),
+      firestoreFinancialDocs: targets.firestoreFinancialDocs.map((row) => ({
+        collection: row.collection,
+        id: row.id,
+        rideId: row.rideId
+      }))
     }
   };
 
@@ -319,7 +464,15 @@ async function main() {
 
   fs.writeFileSync(outPath, JSON.stringify(summary, null, 2));
   summary.reportPath = outPath;
-  console.log(JSON.stringify(summary, null, 2));
+  const consoleSummary = {
+    generatedAt: summary.generatedAt,
+    mode: summary.mode,
+    scope: summary.scope,
+    targets: summary.targets,
+    applyStats: summary.applyStats || null,
+    reportPath: summary.reportPath
+  };
+  console.log(JSON.stringify(consoleSummary, null, 2));
   await admin.app().delete();
 }
 
