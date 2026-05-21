@@ -30,6 +30,10 @@ const WITHDRAWAL_PASSWORD_LOCKOUT_SECONDS = Number.parseInt(
   10
 );
 
+function isLegacyManualPaymentDistributionEnabled() {
+  return String(process.env.ENABLE_LEGACY_MANUAL_PAYMENT_DISTRIBUTION || 'false').toLowerCase() === 'true';
+}
+
 function extractBearerToken(req) {
   const header = req.headers.authorization || '';
   if (!header.startsWith('Bearer ')) return null;
@@ -540,6 +544,14 @@ router.post('/payment/refund', authenticatePaymentActor, requirePaymentAdmin(), 
  */
 router.post('/payment/distribute', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
   try {
+    if (!isLegacyManualPaymentDistributionEnabled()) {
+      return res.status(403).json({
+        success: false,
+        error: 'Distribuição manual desativada',
+        code: 'MANUAL_PAYMENT_DISTRIBUTION_DISABLED'
+      });
+    }
+
     const { rideId, driverId, wooviClientId, totalAmount } = req.body;
 
     if (!rideId || !driverId || !totalAmount) {

@@ -167,6 +167,9 @@ function main() {
     if (boolEnv('ENABLE_MANUAL_PAYMENT_CONFIRMATION')) {
       blockers.push('ENABLE_MANUAL_PAYMENT_CONFIRMATION=true bloqueado em produção');
     }
+    if (boolEnv('ENABLE_LEGACY_MANUAL_PAYMENT_DISTRIBUTION')) {
+      blockers.push('ENABLE_LEGACY_MANUAL_PAYMENT_DISTRIBUTION=true bloqueado em produção');
+    }
     if (boolEnv('ENABLE_DASHBOARD_MOCK_ENDPOINTS')) {
       blockers.push('ENABLE_DASHBOARD_MOCK_ENDPOINTS=true bloqueado em produção');
     }

@@ -396,21 +396,101 @@ async function beginWooviWebhookIdempotency({ event, chargeId, amount }) {
     return { duplicate: false, key: null };
   }
 
+  const key = [
+    'woovi:webhook:idempotency',
+    String(chargeId),
+    normalizeEventName(event),
+    String(Number.isFinite(Number(amount)) ? Math.round(Number(amount)) : 0)
+  ].join(':');
+
+  try {
+    const firebaseConfig = require('../firebase-config');
+    const admin = require('firebase-admin');
+    const firestore = firebaseConfig.getFirestore();
+
+    if (firestore) {
+      const docId = crypto.createHash('sha256').update(key).digest('hex');
+      const eventRef = firestore.collection('woovi_webhook_events').doc(docId);
+      const durableClaim = await firestore.runTransaction(async (transaction) => {
+        const eventDoc = await transaction.get(eventRef);
+        if (eventDoc.exists) {
+          return {
+            duplicate: true,
+            source: 'firestore',
+            docId,
+            existing: eventDoc.data() || {}
+          };
+        }
+
+        transaction.set(eventRef, {
+          idempotencyKey: key,
+          event: normalizeEventName(event),
+          chargeId: String(chargeId),
+          amount: Number.isFinite(Number(amount)) ? Math.round(Number(amount)) : 0,
+          status: 'received',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAtIso: new Date().toISOString(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAtIso: new Date().toISOString()
+        });
+
+        return {
+          duplicate: false,
+          source: 'firestore',
+          docId
+        };
+      });
+
+      if (durableClaim.duplicate) {
+        return {
+          duplicate: true,
+          key,
+          source: durableClaim.source,
+          durableEventId: durableClaim.docId
+        };
+      }
+
+      try {
+        const redisPool = require('../utils/redis-pool');
+        await redisPool.ensureConnection();
+        const redis = redisPool.getConnection();
+        const ttlSeconds = Number.parseInt(process.env.WOOVI_WEBHOOK_IDEMPOTENCY_TTL_SECONDS || '172800', 10);
+        await redis.set(key, new Date().toISOString(), 'NX', 'EX', ttlSeconds);
+      } catch (redisCacheError) {
+        logStructured('debug', 'Falha ao gravar cache Redis de webhook já persistido', {
+          service: 'woovi-routes',
+          chargeId,
+          event,
+          error: redisCacheError.message
+        });
+      }
+
+      return {
+        duplicate: false,
+        key,
+        source: durableClaim.source,
+        durableEventId: durableClaim.docId
+      };
+    }
+  } catch (durableIdempotencyError) {
+    logStructured('warn', 'Falha ao aplicar idempotência durável do webhook Woovi; usando fallback Redis', {
+      service: 'woovi-routes',
+      chargeId,
+      event,
+      error: durableIdempotencyError.message
+    });
+  }
+
   try {
     const redisPool = require('../utils/redis-pool');
     await redisPool.ensureConnection();
     const redis = redisPool.getConnection();
-    const key = [
-      'woovi:webhook:idempotency',
-      String(chargeId),
-      normalizeEventName(event),
-      String(Number.isFinite(Number(amount)) ? Math.round(Number(amount)) : 0)
-    ].join(':');
     const ttlSeconds = Number.parseInt(process.env.WOOVI_WEBHOOK_IDEMPOTENCY_TTL_SECONDS || '172800', 10);
     const result = await redis.set(key, new Date().toISOString(), 'NX', 'EX', ttlSeconds);
     return {
       duplicate: result !== 'OK',
-      key
+      key,
+      source: 'redis'
     };
   } catch (idempotencyError) {
     logStructured('warn', 'Falha ao aplicar idempotência do webhook Woovi; seguindo com processamento', {

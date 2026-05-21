@@ -227,6 +227,111 @@ describe('PaymentService payment status cache', () => {
     expect(mockCreateChargeWithSplit).not.toHaveBeenCalled();
   });
 
+  it('reuses the same advance payment intent on Pix charge retries', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockCreateCharge.mockResolvedValueOnce({
+      success: true,
+      charge: {
+        id: 'charge_retry_1',
+        qrCodeImage: 'qr_retry',
+        paymentLinkUrl: 'https://pay.local/retry'
+      }
+    });
+    const service = new PaymentService();
+    const paymentData = {
+      passengerId: 'passenger_retry',
+      amount: 2210,
+      rideId: 'ride_retry_1',
+      quoteVersion: 'quote_v7',
+      rideDetails: {
+        origin: 'Origem',
+        destination: 'Destino'
+      },
+      passengerName: 'Passageiro',
+      passengerEmail: 'passenger@leaf.app.br'
+    };
+
+    const first = await service.processAdvancePayment(paymentData);
+    const second = await service.processAdvancePayment(paymentData);
+
+    expect(first).toMatchObject({
+      success: true,
+      chargeId: 'charge_retry_1',
+      paymentIntentId: service.buildAdvancePaymentIntentId('ride_retry_1')
+    });
+    expect(second).toMatchObject({
+      success: true,
+      idempotentReplay: true,
+      chargeId: 'charge_retry_1',
+      paymentIntentId: service.buildAdvancePaymentIntentId('ride_retry_1')
+    });
+    expect(mockCreateCharge).toHaveBeenCalledTimes(1);
+    expect(mockCreateCharge.mock.calls[0][0]).toMatchObject({
+      value: 2210,
+      correlationID: service.buildAdvanceChargeCorrelationID(paymentData)
+    });
+    expect(firestore.docs.get(`payment_intents/${service.buildAdvancePaymentIntentId('ride_retry_1')}`)).toMatchObject({
+      status: 'charge_created',
+      chargeId: 'charge_retry_1',
+      amountCents: 2210
+    });
+  });
+
+  it('rejects advance payment retries with changed financial parameters', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const paymentData = {
+      passengerId: 'passenger_conflict',
+      amount: 1506,
+      rideId: 'ride_conflict_1',
+      rideDetails: {
+        origin: 'Origem',
+        destination: 'Destino'
+      },
+      passengerName: 'Passageiro',
+      passengerEmail: 'passenger@leaf.app.br'
+    };
+
+    const first = await service.processAdvancePayment(paymentData);
+    const conflict = await service.processAdvancePayment({
+      ...paymentData,
+      amount: 1800
+    });
+
+    expect(first.success).toBe(true);
+    expect(conflict).toMatchObject({
+      success: false,
+      code: 'PAYMENT_INTENT_CONFLICT'
+    });
+    expect(mockCreateCharge).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed in production when the payment intent cannot be persisted', async () => {
+    process.env.NODE_ENV = 'production';
+    firebaseConfig.getFirestore.mockReturnValue(null);
+    const service = new PaymentService();
+
+    const result = await service.processAdvancePayment({
+      passengerId: 'passenger_safe',
+      amount: 1506,
+      rideId: 'ride_safe_1',
+      rideDetails: {
+        origin: 'Origem',
+        destination: 'Destino'
+      },
+      passengerName: 'Passageiro',
+      passengerEmail: 'passenger@leaf.app.br'
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'PAYMENT_INTENT_STORE_UNAVAILABLE'
+    });
+    expect(mockCreateCharge).not.toHaveBeenCalled();
+  });
+
   it('defers driver settlement even when driver pix key is provided on advance payment', async () => {
     const service = new PaymentService();
 

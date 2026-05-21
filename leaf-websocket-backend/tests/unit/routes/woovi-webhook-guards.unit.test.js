@@ -34,6 +34,18 @@ jest.mock('../../../utils/redis-pool', () => ({
   }))
 }));
 
+jest.mock('../../../firebase-config', () => ({
+  getFirestore: jest.fn(() => null)
+}));
+
+jest.mock('firebase-admin', () => ({
+  firestore: {
+    FieldValue: {
+      serverTimestamp: jest.fn(() => '__SERVER_TIMESTAMP__')
+    }
+  }
+}));
+
 const wooviRoutes = require('../../../routes/woovi');
 const {
   verifyWooviWebhookSignature,
@@ -41,6 +53,48 @@ const {
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking
 } = wooviRoutes.__private;
+const firebaseConfig = require('../../../firebase-config');
+
+function createInMemoryFirestore() {
+  const docs = new Map();
+
+  const writeDoc = (ref, data, options = {}) => {
+    const previous = docs.get(ref.path) || {};
+    docs.set(ref.path, options.merge ? { ...previous, ...data } : { ...data });
+  };
+
+  const collection = (path) => ({
+    doc: (id) => doc(`${path}/${id}`)
+  });
+
+  const doc = (path) => ({
+    path,
+    get: async () => ({
+      exists: docs.has(path),
+      data: () => docs.get(path)
+    }),
+    set: async (data, options) => writeDoc({ path }, data, options)
+  });
+
+  return {
+    docs,
+    collection,
+    runTransaction: async (handler) => {
+      const pendingWrites = [];
+      const transaction = {
+        get: async (ref) => ({
+          exists: docs.has(ref.path),
+          data: () => docs.get(ref.path)
+        }),
+        set: (ref, data, options) => pendingWrites.push([ref, data, options])
+      };
+
+      const result = await handler(transaction);
+      pendingWrites.forEach(([ref, data, options]) => writeDoc(ref, data, options));
+      return result;
+    }
+  };
+}
 
 function createReq({ body = {}, rawBody, headers = {} } = {}) {
   const normalizedHeaders = Object.fromEntries(
@@ -76,6 +130,7 @@ describe('woovi webhook guards', () => {
     delete process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED;
     delete process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED;
     process.env.NODE_ENV = 'test';
+    firebaseConfig.getFirestore.mockReturnValue(null);
   });
 
   afterAll(() => {
@@ -211,6 +266,33 @@ describe('woovi webhook guards', () => {
     expect(first.duplicate).toBe(false);
     expect(second.duplicate).toBe(true);
     expect(first.key).toContain('charge_123');
+  });
+
+  it('marks duplicate webhook events through durable Firestore idempotency when available', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockRedisSet.mockResolvedValue('OK');
+
+    const first = await beginWooviWebhookIdempotency({
+      event: 'charge.completed',
+      chargeId: 'charge_durable_123',
+      amount: 1590
+    });
+    const second = await beginWooviWebhookIdempotency({
+      event: 'charge.completed',
+      chargeId: 'charge_durable_123',
+      amount: 1590
+    });
+
+    expect(first).toMatchObject({
+      duplicate: false,
+      source: 'firestore'
+    });
+    expect(second).toMatchObject({
+      duplicate: true,
+      source: 'firestore'
+    });
+    expect(firestore.docs.size).toBe(1);
   });
 
   it('extracts expected booking amount from canonical cent fields first', () => {

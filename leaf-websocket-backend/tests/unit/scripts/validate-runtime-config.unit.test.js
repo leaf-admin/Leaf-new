@@ -58,4 +58,19 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     expect(result.report.ok).toBe(true);
     expect(result.report.summary.blockers).toEqual([]);
   });
+
+  it('blocks legacy manual payment distribution in production', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      ENABLE_LEGACY_MANUAL_PAYMENT_DISTRIBUTION: 'true'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'ENABLE_LEGACY_MANUAL_PAYMENT_DISTRIBUTION=true bloqueado em produção'
+    );
+  });
 });

@@ -4,6 +4,7 @@ const admin = require('firebase-admin');
 const crypto = require('crypto');
 const circuitBreakerService = require('./circuit-breaker-service');
 const subscriptionStateService = require('./subscription-state-service');
+const FinancialLedgerService = require('./financial-ledger-service');
 const { logStructured, logError } = require('../utils/logger');
 const traceContext = require('../utils/trace-context');
 const redisPool = require('../utils/redis-pool');
@@ -17,12 +18,14 @@ class PaymentService {
       process.env.LEAF_ENV,
       process.env.ENVIRONMENT
     ].some((value) => ['production', 'prod'].includes(String(value || '').toLowerCase()));
+    this.productionRuntime = productionRuntime;
     this.LEAF_ACCOUNT_ID = process.env.LEAF_WOOVI_ACCOUNT_ID || 'leaf-main-account';
     // Chave Pix da conta Leaf (origem das transferências)
     // ⚠️ ATENÇÃO: Configurar LEAF_PIX_KEY em produção via variável de ambiente
     this.LEAF_PIX_KEY = process.env.LEAF_PIX_KEY || 'test@leaf.app.br'; // ⚠️ Valor de teste - configurar em produção
     // Criar instância do WooviDriverService
     this.wooviDriverService = new WooviDriverService();
+    this.financialLedgerService = new FinancialLedgerService();
     // Taxas operacionais por faixa de valor (regra vigente)
     this.OPERATIONAL_FEE_UP_TO_10 = 79; // R$ 0,79 para corridas até R$ 10,00 (em centavos)
     this.OPERATIONAL_FEE_10_TO_25 = 99; // R$ 0,99 para corridas acima de R$ 10,00 até R$ 25,00 (em centavos)
@@ -180,6 +183,276 @@ class PaymentService {
     const legacyExplicitOptIn =
       String(process.env.ENABLE_LEGACY_RIDE_COMPLETION_PIXOUT || 'false').toLowerCase() === 'true';
     return requested && legacyExplicitOptIn;
+  }
+
+  normalizePaymentAmountCents(value) {
+    const amountCents = Math.round(Number(value));
+    return Number.isFinite(amountCents) ? amountCents : 0;
+  }
+
+  normalizeQuoteVersion(paymentData = {}) {
+    const raw =
+      paymentData.quoteVersion ||
+      paymentData.quote_version ||
+      paymentData.rideDetails?.quoteVersion ||
+      paymentData.rideDetails?.quote_version ||
+      paymentData.rideDetails?.pricingVersion ||
+      'v1';
+    const normalized = String(raw || '').trim();
+    return normalized || 'v1';
+  }
+
+  buildAdvancePaymentIntentId(rideId) {
+    const hash = crypto
+      .createHash('sha256')
+      .update(`advance_payment:${rideId || 'unknown-ride'}`)
+      .digest('hex')
+      .slice(0, 32);
+    return `advance_${hash}`;
+  }
+
+  buildAdvanceChargeCorrelationID(paymentData = {}) {
+    const rideId = String(paymentData.rideId || '').trim() || 'unknown-ride';
+    const quoteVersion = this.normalizeQuoteVersion(paymentData);
+    const hash = crypto
+      .createHash('sha256')
+      .update(`leaf_ride_charge:${rideId}:${quoteVersion}`)
+      .digest('hex')
+      .slice(0, 24);
+    return `leaf_ride_${hash}`;
+  }
+
+  buildAdvancePaymentIntentResponse(existing = {}) {
+    return {
+      success: true,
+      idempotentReplay: true,
+      message: 'Cobrança Pix já criada para esta corrida',
+      chargeId: existing.chargeId || existing.paymentId || null,
+      qrCode: existing.qrCode || null,
+      paymentLink: existing.paymentLink || null,
+      rideId: existing.rideId || null,
+      amount: existing.amountCents || existing.amount || null,
+      paymentIntentId: existing.paymentIntentId || null,
+      correlationID: existing.correlationID || null,
+      splitApplied: false,
+      splitDeferred: true,
+      settlementPolicy: 'post_ride_ledger',
+      splitTarget: null,
+      splitCalculation: null
+    };
+  }
+
+  async beginAdvancePaymentIntent(paymentData = {}) {
+    const firestore = firebaseConfig.getFirestore();
+    const rideId = String(paymentData.rideId || '').trim();
+    const passengerId = String(paymentData.passengerId || '').trim();
+    const amountCents = this.normalizePaymentAmountCents(paymentData.amount);
+    const quoteVersion = this.normalizeQuoteVersion(paymentData);
+    const paymentIntentId = this.buildAdvancePaymentIntentId(rideId);
+    const correlationID = this.buildAdvanceChargeCorrelationID(paymentData);
+    const nowIso = new Date().toISOString();
+    const inProgressTtlMs = Math.max(
+      15,
+      Number.parseInt(process.env.PAYMENT_INTENT_IN_PROGRESS_TTL_SECONDS || '120', 10) || 120
+    ) * 1000;
+
+    if (!firestore) {
+      if (this.productionRuntime) {
+        return {
+          success: false,
+          code: 'PAYMENT_INTENT_STORE_UNAVAILABLE',
+          error: 'Não foi possível registrar a intenção de pagamento com segurança',
+          paymentIntentId,
+          correlationID
+        };
+      }
+
+      return {
+        success: true,
+        firestoreAvailable: false,
+        paymentIntentId,
+        correlationID,
+        amountCents,
+        quoteVersion
+      };
+    }
+
+    const intentRef = firestore.collection('payment_intents').doc(paymentIntentId);
+
+    try {
+      return await firestore.runTransaction(async (transaction) => {
+        const intentDoc = await transaction.get(intentRef);
+        if (intentDoc.exists) {
+          const existing = intentDoc.data() || {};
+          const existingAmountCents = this.normalizePaymentAmountCents(existing.amountCents || existing.amount);
+          const existingPassengerId = String(existing.passengerId || '').trim();
+          const existingRideId = String(existing.rideId || '').trim();
+
+          if (
+            existingRideId !== rideId ||
+            existingAmountCents !== amountCents ||
+            (existingPassengerId && existingPassengerId !== passengerId)
+          ) {
+            return {
+              success: false,
+              code: 'PAYMENT_INTENT_CONFLICT',
+              error: 'Já existe uma cobrança para esta corrida com dados diferentes',
+              paymentIntentId,
+              existingAmountCents,
+              incomingAmountCents: amountCents
+            };
+          }
+
+          if (existing.status === 'charge_created' && existing.chargeId) {
+            return {
+              success: true,
+              firestoreAvailable: true,
+              idempotentReplay: true,
+              existing,
+              paymentIntentId,
+              correlationID: existing.correlationID || correlationID,
+              amountCents,
+              quoteVersion
+            };
+          }
+
+          const lastAttemptMs = Date.parse(existing.lastAttemptAtIso || existing.updatedAtIso || '');
+          const stillInProgress =
+            existing.status === 'creating_charge' &&
+            Number.isFinite(lastAttemptMs) &&
+            Date.now() - lastAttemptMs < inProgressTtlMs;
+
+          if (stillInProgress) {
+            return {
+              success: false,
+              code: 'PAYMENT_INTENT_IN_PROGRESS',
+              error: 'A cobrança Pix desta corrida ainda está sendo criada',
+              paymentIntentId
+            };
+          }
+        }
+
+        const intentPayload = {
+          paymentIntentId,
+          rideId,
+          passengerId,
+          amountCents,
+          quoteVersion,
+          correlationID,
+          status: 'creating_charge',
+          settlementPolicy: 'post_ride_ledger',
+          driverSettlement: 'deferred_until_ride_completed',
+          lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastAttemptAtIso: nowIso,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAtIso: nowIso
+        };
+
+        if (!intentDoc.exists) {
+          intentPayload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+          intentPayload.createdAtIso = nowIso;
+        }
+
+        transaction.set(intentRef, intentPayload, { merge: true });
+
+        return {
+          success: true,
+          firestoreAvailable: true,
+          paymentIntentId,
+          correlationID,
+          amountCents,
+          quoteVersion
+        };
+      });
+    } catch (error) {
+      if (this.productionRuntime) {
+        return {
+          success: false,
+          code: 'PAYMENT_INTENT_STORE_UNAVAILABLE',
+          error: 'Não foi possível registrar a intenção de pagamento com segurança',
+          paymentIntentId,
+          correlationID,
+          details: error.message
+        };
+      }
+
+      logStructured('warn', 'Falha ao iniciar payment intent; seguindo com correlationID determinístico', {
+        service: 'PaymentService',
+        rideId,
+        paymentIntentId,
+        error: error.message
+      });
+      return {
+        success: true,
+        firestoreAvailable: false,
+        paymentIntentId,
+        correlationID,
+        amountCents,
+        quoteVersion,
+        intentPersistenceError: error.message
+      };
+    }
+  }
+
+  async markAdvancePaymentIntentFailed(intent = {}, errorPayload = {}) {
+    if (!intent.firestoreAvailable || !intent.paymentIntentId) {
+      return false;
+    }
+
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) return false;
+      await firestore.collection('payment_intents').doc(intent.paymentIntentId).set({
+        status: 'charge_failed',
+        error: errorPayload?.message || errorPayload?.error || errorPayload || 'Falha ao criar cobrança',
+        errorPayload,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAtIso: new Date().toISOString()
+      }, { merge: true });
+      return true;
+    } catch (error) {
+      logStructured('warn', 'Falha ao persistir erro da payment intent', {
+        service: 'PaymentService',
+        paymentIntentId: intent.paymentIntentId,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  async completeAdvancePaymentIntent(intent = {}, chargeData = {}) {
+    if (!intent.firestoreAvailable || !intent.paymentIntentId) {
+      return false;
+    }
+
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) return false;
+      await this.retryOperation(
+        async () => {
+          await firestore.collection('payment_intents').doc(intent.paymentIntentId).set({
+            status: 'charge_created',
+            chargeId: chargeData.chargeId || null,
+            qrCode: chargeData.qrCode || null,
+            paymentLink: chargeData.paymentLink || null,
+            chargeCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            chargeCreatedAtIso: new Date().toISOString(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAtIso: new Date().toISOString()
+          }, { merge: true });
+        },
+        'completeAdvancePaymentIntent'
+      );
+      return true;
+    } catch (error) {
+      logStructured('error', 'Falha ao persistir cobrança criada na payment intent', {
+        service: 'PaymentService',
+        paymentIntentId: intent.paymentIntentId,
+        chargeId: chargeData.chargeId || null,
+        error: error.message
+      });
+      return false;
+    }
   }
 
   async resolveDriverSplitTarget(paymentData = {}) {
@@ -503,25 +776,60 @@ class PaymentService {
         return bypassResult;
       }
 
+      const paymentIntent = await this.beginAdvancePaymentIntent(paymentData);
+      if (!paymentIntent.success) {
+        logStructured('warn', 'Payment intent recusou criação de cobrança', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          passengerId: paymentData.passengerId,
+          paymentIntentId: paymentIntent.paymentIntentId || null,
+          code: paymentIntent.code || null
+        });
+        return {
+          success: false,
+          error: paymentIntent.error || 'Não foi possível criar a cobrança Pix',
+          code: paymentIntent.code || 'PAYMENT_INTENT_ERROR',
+          paymentIntentId: paymentIntent.paymentIntentId || null,
+          details: paymentIntent
+        };
+      }
+
+      if (paymentIntent.idempotentReplay) {
+        logStructured('info', 'Reutilizando cobrança Pix já criada para a corrida', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          paymentIntentId: paymentIntent.paymentIntentId,
+          chargeId: paymentIntent.existing?.chargeId || null
+        });
+        return this.buildAdvancePaymentIntentResponse({
+          ...paymentIntent.existing,
+          paymentIntentId: paymentIntent.paymentIntentId,
+          correlationID: paymentIntent.correlationID
+        });
+      }
+
       // 1. Criar cobrança PIX para o passageiro
       const commentRaw = `Corrida Leaf - ${paymentData.rideDetails.origin} para ${paymentData.rideDetails.destination}`;
       const comment =
         commentRaw.length > 140 ? `${commentRaw.slice(0, 137)}...` : commentRaw;
 
-      // ✅ Garantir correlationID único (inclui timestamp + random para evitar duplicatas)
-      const timestamp = Date.now();
-      const randomSuffix = Math.random().toString(36).substring(2, 9);
-      const uniqueCorrelationID = `ride_${paymentData.rideId}_${timestamp}_${randomSuffix}`;
+      const uniqueCorrelationID = paymentIntent.correlationID || this.buildAdvanceChargeCorrelationID(paymentData);
 
-      logStructured('debug', 'Gerando correlationID único', { service: 'PaymentService', correlationID: uniqueCorrelationID });
+      logStructured('debug', 'Usando correlationID determinístico para cobrança', {
+        service: 'PaymentService',
+        correlationID: uniqueCorrelationID,
+        paymentIntentId: paymentIntent.paymentIntentId || null
+      });
 
       const chargeData = {
-        value: paymentData.amount,
+        value: paymentIntent.amountCents || paymentData.amount,
         comment,
         correlationID: uniqueCorrelationID,
         additionalInfo: [
           { key: 'passenger_id', value: paymentData.passengerId },
           { key: 'ride_id', value: paymentData.rideId },
+          { key: 'payment_intent_id', value: paymentIntent.paymentIntentId || '' },
+          { key: 'quote_version', value: paymentIntent.quoteVersion || this.normalizeQuoteVersion(paymentData) },
           { key: 'payment_type', value: 'advance_payment' },
           { key: 'service', value: 'ride_sharing' },
           { key: 'settlement_model', value: 'post_ride_ledger' },
@@ -556,6 +864,7 @@ class PaymentService {
       const chargeResult = await this.wooviDriverService.createCharge(chargeData);
 
       if (!chargeResult.success) {
+        await this.markAdvancePaymentIntentFailed(paymentIntent, chargeResult.error || chargeResult.details || {});
         logStructured('warn', 'Erro ao criar cobrança na Woovi', {
           service: 'PaymentService',
           error: chargeResult.error,
@@ -620,6 +929,10 @@ class PaymentService {
       });
 
       if (!chargeId) {
+        await this.markAdvancePaymentIntentFailed(paymentIntent, {
+          message: 'A Woovi retornou cobrança sem identificador',
+          correlationID: chargeData.correlationID
+        });
         return {
           success: false,
           error: 'Falha ao identificar cobrança PIX',
@@ -632,6 +945,11 @@ class PaymentService {
 
       // Apenas cria a cobrança. O webhook materializa o holding e o crédito do
       // motorista acontece somente após ride.completed no worker de billing.
+      await this.completeAdvancePaymentIntent(paymentIntent, {
+        chargeId,
+        qrCode,
+        paymentLink
+      });
 
       return {
         success: true,
@@ -640,7 +958,9 @@ class PaymentService {
         qrCode,
         paymentLink,
         rideId: paymentData.rideId,
-        amount: paymentData.amount,
+        amount: paymentIntent.amountCents || paymentData.amount,
+        paymentIntentId: paymentIntent.paymentIntentId || null,
+        correlationID: chargeData.correlationID,
         splitApplied: false,
         splitDeferred: true,
         settlementPolicy: 'post_ride_ledger',
@@ -783,6 +1103,27 @@ class PaymentService {
         paymentAmount: typeof amount === 'number' ? amount : existingData.amount || null,
         paymentConfirmedAt: now
       }, { merge: true });
+
+      const ledgerResult = await this.financialLedgerService.recordPaymentReceived({
+        rideId,
+        chargeId,
+        amountCents: typeof amount === 'number' ? amount : existingData.amount,
+        passengerId: passengerId || existingData.passengerId,
+        metadata: {
+          source: 'storeConfirmedPayment',
+          webhookEvent: metadata?.event || null,
+          correlationID: metadata?.correlationID || null
+        }
+      });
+
+      if (!ledgerResult.success) {
+        logStructured('warn', 'Pagamento confirmado sem ledger financeiro canônico', {
+          service: 'PaymentService',
+          rideId,
+          chargeId,
+          ledgerError: ledgerResult.error || ledgerResult.code
+        });
+      }
 
       logStructured('info', 'Pagamento confirmado armazenado', {
         service: 'PaymentService',
@@ -1071,6 +1412,10 @@ class PaymentService {
       const status = refundData.status || 'REFUNDED';
       const refundAmount = refundData.refundAmount || 0;
       const cancellationFee = refundData.cancellationFee || 0;
+      const paymentRef = firestore.collection('ride_payments').doc(rideId);
+      const existingPaymentDoc = await paymentRef.get();
+      const existingPayment = existingPaymentDoc.exists ? existingPaymentDoc.data() : {};
+      const chargeId = refundData.chargeId || existingPayment.chargeId || existingPayment.paymentId || null;
 
       const updates = {
         status,
@@ -1085,7 +1430,7 @@ class PaymentService {
         refundedAt: admin.firestore.FieldValue.serverTimestamp()
       };
 
-      await firestore.collection('ride_payments').doc(rideId).set(updates, { merge: true });
+      await paymentRef.set(updates, { merge: true });
 
       // ✅ NOVO: Atualizar payment_holdings também
       await this.updatePaymentHolding(rideId, {
@@ -1099,6 +1444,27 @@ class PaymentService {
         refundReason: refundData.reason || null,
         refundedAt: admin.firestore.FieldValue.serverTimestamp()
       });
+
+      if (refundAmount > 0 && chargeId) {
+        const ledgerResult = await this.financialLedgerService.recordRefund({
+          rideId,
+          chargeId,
+          refundId: refundData.refundId || null,
+          amountCents: refundAmount,
+          passengerId: refundData.passengerId || existingPayment.passengerId || null,
+          reason: refundData.reason || null,
+          metadata: refundData.metadata || {}
+        });
+
+        if (!ledgerResult.success) {
+          logStructured('warn', 'Reembolso registrado sem ledger financeiro canônico', {
+            service: 'PaymentService',
+            rideId,
+            chargeId,
+            ledgerError: ledgerResult.error || ledgerResult.code
+          });
+        }
+      }
 
       logStructured('info', 'Pagamento marcado como reembolsado', {
         service: 'PaymentService',
@@ -1516,7 +1882,7 @@ class PaymentService {
         status: 'distributed',
         distributedAt: new Date().toISOString(),
         netAmount: netCalculation.netAmount,
-        retainedFees: retainedFees,
+        subscriptionRetainedFee: retainedFees,
         transferId: transferId || null, // ID da transferência (se BaaS estiver disponível)
         balanceCreditId: creditResult.balanceId || null, // ID do crédito no Firestore
         calculation: netCalculation,
@@ -1524,9 +1890,41 @@ class PaymentService {
         retainedFees: {
           operationalFee: netCalculation.operationalFee,
           wooviFee: netCalculation.wooviFee,
-          totalRetained: netCalculation.operationalFee + netCalculation.wooviFee
+          subscriptionRetainedFee: retainedFees,
+          totalRetained: netCalculation.operationalFee + netCalculation.wooviFee + retainedFees
         }
       };
+
+      const ledgerResult = await this.financialLedgerService.recordRideSettlement({
+        rideId: rideData.rideId,
+        driverId: rideData.driverId,
+        totalAmountCents: netCalculation.totalAmount,
+        netAmountCents: netCalculation.netAmount,
+        operationalFeeCents: netCalculation.operationalFee,
+        wooviFeeCents: netCalculation.wooviFee,
+        retainedFeeCents: retainedFees,
+        metadata: {
+          transferId: transferId || null,
+          balanceCreditId: creditResult.balanceId || null,
+          refundAmountCents: passengerRefundAmount || 0,
+          refundId: passengerRefundResult?.refundId || null
+        }
+      });
+
+      if (!ledgerResult.success) {
+        logStructured('error', 'Falha ao registrar ledger financeiro do settlement', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          driverId: rideData.driverId,
+          ledgerError: ledgerResult.error || ledgerResult.code
+        });
+        return {
+          success: false,
+          error: 'Falha ao registrar ledger financeiro do settlement',
+          details: ledgerResult.error || ledgerResult.code,
+          retryable: true
+        };
+      }
 
       // ✅ Salvar distribuição no Firestore
       await this.saveDistributionToFirestore(distributionData);
@@ -1539,9 +1937,19 @@ class PaymentService {
           netAmount: netCalculation.netAmount,
           transferId: transferId,
           balanceCreditId: creditResult.balanceId,
+          ledgerEventId: ledgerResult.eventId || null,
           retainedFees: distributionData.retainedFees
         }
       });
+
+      this.financialLedgerService.reconcileRideFinancials({ rideId: rideData.rideId })
+        .catch((reconciliationError) => {
+          logStructured('warn', 'Falha ao reconciliar corrida após settlement', {
+            service: 'PaymentService',
+            rideId: rideData.rideId,
+            error: reconciliationError.message
+          });
+        });
 
       logStructured('info', 'Distribuição líquida processada', {
         service: 'payment-service',
@@ -1632,6 +2040,32 @@ class PaymentService {
           totalRetained: this.WOOVI_FEE_MINIMUM
         }
       };
+
+      const ledgerResult = await this.financialLedgerService.recordCancellationSettlement({
+        rideId: rideData.rideId,
+        driverId: rideData.driverId,
+        cancellationFeeCents: rideData.cancellationFee,
+        netAmountCents: netAmount,
+        wooviFeeCents: this.WOOVI_FEE_MINIMUM,
+        metadata: {
+          balanceCreditId: creditResult.balanceId || null
+        }
+      });
+
+      if (!ledgerResult.success) {
+        logStructured('error', 'Falha ao registrar ledger financeiro do cancelamento', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          driverId: rideData.driverId,
+          ledgerError: ledgerResult.error || ledgerResult.code
+        });
+        return {
+          success: false,
+          error: 'Falha ao registrar ledger financeiro do cancelamento',
+          details: ledgerResult.error || ledgerResult.code,
+          retryable: true
+        };
+      }
 
       await this.saveDistributionToFirestore(distributionData);
 
@@ -2222,6 +2656,28 @@ class PaymentService {
         };
       }
 
+      const withdrawalLedgerResult = await this.financialLedgerService.recordWithdrawalRequested({
+        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+        driverId,
+        amountCents,
+        withdrawFeeCents,
+        subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
+        requestId,
+        metadata: {
+          totalDebitCents,
+          source: 'requestDriverWithdrawal'
+        }
+      });
+
+      if (!withdrawalLedgerResult.success) {
+        logStructured('warn', 'Saque solicitado sem ledger financeiro canônico', {
+          service: 'payment-service',
+          driverId,
+          withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+          ledgerError: withdrawalLedgerResult.error || withdrawalLedgerResult.code
+        });
+      }
+
       let settlementSync = {
         success: true,
         settledCents: 0,
@@ -2470,6 +2926,26 @@ class PaymentService {
       transferId: transferResult.transferId || transferResult.transactionId || null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
+
+    const processedLedgerResult = await this.financialLedgerService.recordWithdrawalProcessed({
+      withdrawalId,
+      driverId: withdrawal.driverId,
+      amountCents,
+      transferId: transferResult.transferId || transferResult.transactionId || null,
+      metadata: {
+        actorId,
+        source: 'processDriverWithdrawal'
+      }
+    });
+
+    if (!processedLedgerResult.success) {
+      logStructured('warn', 'Saque processado sem ledger financeiro canônico', {
+        service: 'payment-service',
+        withdrawalId,
+        driverId: withdrawal.driverId,
+        ledgerError: processedLedgerResult.error || processedLedgerResult.code
+      });
+    }
 
     logStructured('info', 'Saque processado com sucesso', {
       service: 'payment-service',
