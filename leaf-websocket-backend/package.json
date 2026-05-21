@@ -31,6 +31,7 @@
     "smoke:supersede": "node scripts/tests/supersede-rebooking-smoke.cjs",
     "smoke:driver-ready": "node scripts/tests/smoke-driver-ready-booking.cjs",
     "ops:headroom:battery": "node scripts/tests/run-go-live-headroom-battery.cjs",
+    "ops:financial-reconcile": "node scripts/ops/reconcile-financial-ledger.cjs",
     "report:ride-cost": "node scripts/tests/report-ride-cost-telemetry.cjs",
     "benchmark": "node scripts/benchmark/performance-benchmark.js",
     "stress-test": "node scripts/benchmark/stress-test.js",

@@ -951,7 +951,7 @@ class WooviDriverService {
    * @param {string} rideId - ID da corrida
    * @returns {Promise<Object>} - Resultado da transferência
    */
-  async transferDirectToDriver(wooviAccountId, value, description, rideId, driverPixKey = null, leafPixKey = null) {
+  async transferDirectToDriver(wooviAccountId, value, description, rideId, driverPixKey = null, leafPixKey = null, options = {}) {
     try {
       logStructured('info', 'Transferindo valor líquido para motorista', { service: 'woovi-driver-service',
         accountId: wooviAccountId,
@@ -978,7 +978,8 @@ class WooviDriverService {
       const transferData = {
         value: value, // Valor em centavos
         fromPixKey: leafPixKey, // Chave Pix da conta Leaf (origem)
-        toPixKey: driverPixKey // Chave Pix da conta do motorista (destino)
+        toPixKey: driverPixKey, // Chave Pix da conta do motorista (destino)
+        correlationID: options.correlationID || options.idempotencyKey || `leaf_transfer_${rideId}`
       };
 
       logStructured('info', 'Enviando transferência via /api/v1/transfer', { service: 'woovi-driver-service', accountId: wooviAccountId, rideId, value });

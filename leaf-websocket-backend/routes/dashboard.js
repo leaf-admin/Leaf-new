@@ -21,6 +21,8 @@ const driverSubscriptionService = require('../services/driver-subscription-servi
 const subscriptionStateService = require('../services/subscription-state-service');
 const modernMetricsService = require('../services/modern-metrics-service');
 const h3MapService = require('../services/h3-map-service');
+const financialReconciliationDashboardService = require('../services/financial-reconciliation-dashboard-service');
+const FinancialLedgerService = require('../services/financial-ledger-service');
 const { resolveDriverReactivationState } = require('../services/dashboard-user-management-service');
 const {
   recomputeDriverActivationStatus
@@ -1561,6 +1563,63 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
     logError(error, 'Erro ao rejeitar aplicação:', { service: 'dashboard-routes' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
+});
+
+// Ledger financeiro: relatorios e reconciliacao de corridas
+router.get('/api/financial/reconciliation/reports', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+  const result = await financialReconciliationDashboardService.listReports({
+    status: req.query.status,
+    severity: req.query.severity,
+    code: req.query.code,
+    rideId: req.query.rideId,
+    limit: req.query.limit,
+    cursor: req.query.cursor
+  });
+
+  if (!result.success) {
+    const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
+    return res.status(statusCode).json(result);
+  }
+
+  return res.json(result);
+});
+
+router.get('/api/financial/reconciliation/rides/:rideId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+  const result = await financialReconciliationDashboardService.getRideDetail(req.params.rideId);
+
+  if (!result.success) {
+    const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
+    return res.status(statusCode).json(result);
+  }
+
+  return res.json(result);
+});
+
+router.post('/api/financial/reconciliation/rides/:rideId/run', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+  const ledgerService = new FinancialLedgerService();
+  const result = await ledgerService.reconcileRideFinancials({ rideId: req.params.rideId });
+
+  if (!result.success) {
+    const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
+    return res.status(statusCode).json(result);
+  }
+
+  return res.json(result);
+});
+
+router.post('/api/financial/reconciliation/run', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+  const ledgerService = new FinancialLedgerService();
+  const result = await ledgerService.reconcileRecentRideFinancials({
+    rideId: req.body?.rideId || req.query.rideId || null,
+    limit: req.body?.limit || req.query.limit || 100
+  });
+
+  if (!result.success) {
+    const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
+    return res.status(statusCode).json(result);
+  }
+
+  return res.json(result);
 });
 
 // 📊 Financial Metrics - DADOS REAIS (Firebase)

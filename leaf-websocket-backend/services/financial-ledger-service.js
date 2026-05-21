@@ -588,6 +588,94 @@ class FinancialLedgerService {
       };
     }
   }
+
+  getSnapshotDocs(snapshot) {
+    if (!snapshot) return [];
+    if (Array.isArray(snapshot.docs)) {
+      return snapshot.docs.map((doc) => ({
+        id: doc.id,
+        data: typeof doc.data === 'function' ? doc.data() : {}
+      }));
+    }
+
+    const docs = [];
+    if (typeof snapshot.forEach === 'function') {
+      snapshot.forEach((doc) => {
+        docs.push({
+          id: doc.id,
+          data: typeof doc.data === 'function' ? doc.data() : {}
+        });
+      });
+    }
+    return docs;
+  }
+
+  async reconcileRecentRideFinancials({ rideId = null, limit = 100 } = {}) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) {
+      return {
+        success: false,
+        error: 'Firestore não disponível'
+      };
+    }
+
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 500);
+
+    try {
+      const rideIds = [];
+      if (rideId) {
+        rideIds.push(String(rideId));
+      } else {
+        let query = firestore.collection('ride_payments');
+        if (typeof query.limit === 'function') {
+          query = query.limit(safeLimit);
+        }
+
+        const snapshot = await query.get();
+        this.getSnapshotDocs(snapshot).forEach((doc) => {
+          const resolvedRideId = doc.data?.rideId || doc.id;
+          if (resolvedRideId) rideIds.push(String(resolvedRideId));
+        });
+      }
+
+      const uniqueRideIds = Array.from(new Set(rideIds)).slice(0, safeLimit);
+      const results = [];
+
+      for (const currentRideId of uniqueRideIds) {
+        const result = await this.reconcileRideFinancials({ rideId: currentRideId });
+        results.push({
+          rideId: currentRideId,
+          success: Boolean(result.success),
+          ok: Boolean(result.report?.ok),
+          issueCount: result.report?.issues?.length || 0,
+          error: result.error || null,
+          report: result.report || null
+        });
+      }
+
+      const failed = results.filter((result) => !result.success);
+      const divergent = results.filter((result) => result.success && !result.ok);
+
+      return {
+        success: failed.length === 0,
+        scannedRideCount: uniqueRideIds.length,
+        reconciledRideCount: results.length - failed.length,
+        divergentRideCount: divergent.length,
+        failedRideCount: failed.length,
+        results
+      };
+    } catch (error) {
+      logError(error, 'Erro ao reconciliar lote financeiro de corridas', {
+        service: 'financial-ledger-service',
+        rideId,
+        limit: safeLimit
+      });
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
 }
 
 module.exports = FinancialLedgerService;

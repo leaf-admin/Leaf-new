@@ -581,6 +581,38 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it('passes stable gateway correlation id when processing withdrawals', async () => {
+    process.env.LEAF_PIX_KEY = 'leaf@pix.test';
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_withdrawals/wd_gateway_1', {
+      driverId: 'driver_gateway',
+      pixKey: 'driver@pix.test',
+      amountCents: 4500,
+      status: 'pending'
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockTransferDirectToDriver.mockResolvedValue({
+      success: true,
+      transferId: 'transfer_gateway_1'
+    });
+    const service = new PaymentService();
+
+    const result = await service.processDriverWithdrawal('wd_gateway_1', 'admin_1');
+
+    expect(result.success).toBe(true);
+    expect(mockTransferDirectToDriver).toHaveBeenCalledWith(
+      'driver_gateway',
+      4500,
+      'Saque motorista driver_gateway - wd_gateway_1',
+      'withdraw_wd_gateway_1',
+      'driver@pix.test',
+      'leaf@pix.test',
+      {
+        correlationID: 'leaf_withdrawal_wd_gateway_1'
+      }
+    );
+  });
+
   it('settles completed ride into internal ledger without Woovi account or Pix key', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);

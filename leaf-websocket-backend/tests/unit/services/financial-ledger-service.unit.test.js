@@ -268,4 +268,41 @@ describe('FinancialLedgerService', () => {
       ok: true
     });
   });
+
+  it('reconciles a recent batch of ride payments into reports', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    firestore.docs.set('ride_payments/ride_batch_1', {
+      rideId: 'ride_batch_1',
+      chargeId: 'charge_batch_1',
+      amount: 1800,
+      status: 'CONFIRMED'
+    });
+    firestore.docs.set('payment_holdings/ride_batch_1', {
+      rideId: 'ride_batch_1',
+      amount: 1800,
+      status: 'in_holding'
+    });
+
+    const result = await service.reconcileRecentRideFinancials({ limit: 20 });
+
+    expect(result).toMatchObject({
+      success: true,
+      scannedRideCount: 1,
+      reconciledRideCount: 1,
+      divergentRideCount: 1,
+      failedRideCount: 0
+    });
+    expect(firestore.docs.get('financial_reconciliation_reports/ride_batch_1')).toMatchObject({
+      rideId: 'ride_batch_1',
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'PAYMENT_WITHOUT_LEDGER_EVENT'
+        })
+      ])
+    });
+  });
 });

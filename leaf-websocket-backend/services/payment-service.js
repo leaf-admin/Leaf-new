@@ -1821,7 +1821,10 @@ class PaymentService {
               `Ganhos da corrida ${rideData.rideId}`,
               rideData.rideId,
               driverPixKey,
-              this.LEAF_PIX_KEY
+              this.LEAF_PIX_KEY,
+              {
+                correlationID: `leaf_ride_completion_${rideData.rideId}_${rideData.driverId}`
+              }
             );
           },
           async () => {
@@ -2894,7 +2897,10 @@ class PaymentService {
       `Saque motorista ${withdrawal.driverId} - ${withdrawalId}`,
       withdrawal.rideId || `withdraw_${withdrawalId}`,
       driverPixKey,
-      this.LEAF_PIX_KEY
+      this.LEAF_PIX_KEY,
+      {
+        correlationID: `leaf_withdrawal_${withdrawalId}`
+      }
     );
 
     if (!transferResult.success) {
