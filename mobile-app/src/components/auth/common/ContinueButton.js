@@ -1,32 +1,47 @@
-import React from 'react';
-import { TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { fonts } from '../../../common-local/font';
+import React, { useRef } from 'react';
+import { Animated, Text, StyleSheet, Pressable, Platform } from 'react-native';
+import { fonts } from '../../../theme/runtimeTokens';
+import onboardingTheme from './onboardingTheme';
 
-// Cores padronizadas
-const colors = {
-    leafGreen: '#1A330E',
-    lightGrey: '#F5F5F5',
-    white: '#FFFFFF',
-    greyPlaceholder: '#BDBDBD',
-};
+const { color, radius, spacing } = onboardingTheme;
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const ContinueButton = ({
     onPress,
     disabled = false,
     text = 'Continuar',
     style = {},
-    textStyle = {}
+    textStyle = {},
+    accessibilityRole = 'button',
+    accessibilityState,
+    ...props
 }) => {
+    const scaleAnim = useRef(new Animated.Value(1)).current;
+
+    const animateTo = (value) => {
+        Animated.timing(scaleAnim, {
+            toValue: value,
+            duration: 120,
+            useNativeDriver: true
+        }).start();
+    };
+
     return (
-        <TouchableOpacity
+        <AnimatedPressable
             style={[
                 styles.continueButton,
                 disabled && styles.continueButtonDisabled,
-                style
+                style,
+                { transform: [{ scale: scaleAnim }] }
             ]}
             onPress={onPress}
             disabled={disabled}
-            activeOpacity={0.8}
+            accessibilityRole={accessibilityRole}
+            accessibilityLabel={props.accessibilityLabel || text}
+            accessibilityState={{ ...(accessibilityState || {}), disabled }}
+            onPressIn={() => !disabled && animateTo(0.97)}
+            onPressOut={() => !disabled && animateTo(1)}
+            {...props}
         >
             <Text style={[
                 styles.continueButtonText,
@@ -35,40 +50,40 @@ const ContinueButton = ({
             ]}>
                 {text}
             </Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
     );
 };
 
 const styles = StyleSheet.create({
     continueButton: {
-        backgroundColor: colors.leafGreen,
-        borderRadius: 16,
-        paddingVertical: 18,
+        backgroundColor: color.accent,
+        borderRadius: radius.md,
+        borderWidth: 0,
+        paddingVertical: 0,
         alignItems: 'center',
-        marginTop: 16,
-        marginHorizontal: 24,
-        marginBottom: 40, // Aumentado de 20 para 40 para garantir visibilidade acima da barra do sistema
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
+        justifyContent: 'center',
+        marginTop: spacing.sm,
+        marginBottom: Platform.OS === 'android' ? spacing.xl : spacing.md,
+        shadowColor: color.accent,
+        shadowOffset: { width: 0, height: 16 },
+        shadowOpacity: 0.20,
+        shadowRadius: 30,
         elevation: 8,
-        minHeight: 56, // Altura mínima consistente
+        minHeight: 58
     },
     continueButtonDisabled: {
-        backgroundColor: colors.lightGrey,
+        backgroundColor: color.accentSoft,
+        shadowOpacity: 0.04
     },
     continueButtonText: {
-        color: colors.white,
-        fontSize: 18,
-        fontFamily: fonts.Bold,
-        textAlign: 'center',
+        color: color.accentText,
+        fontSize: 16,
+        fontFamily: fonts.SemiBold,
+        textAlign: 'center'
     },
     continueButtonTextDisabled: {
-        color: colors.greyPlaceholder,
-    },
+        color: color.textMuted
+    }
 });
 
 export default ContinueButton;
-
-

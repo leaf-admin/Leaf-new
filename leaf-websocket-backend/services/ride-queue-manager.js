@@ -10,11 +10,87 @@ const GeoHashUtils = require('../utils/geohash-utils');
 const RideStateManager = require('./ride-state-manager');
 const eventSourcing = require('./event-sourcing');
 const { logger } = require('../utils/logger');
+const { getVisibleBookingKey, BOOKING_VISIBILITY_TTL_SEC } = require('./booking-visibility-service');
+
+function serializeJSONField(value, fallback = {}) {
+    if (typeof value === 'string') {
+        return value;
+    }
+    return JSON.stringify(value || fallback);
+}
+
+function buildSerializedBookingSnapshot(bookingData, regionHash, timestamp) {
+    const initialState = bookingData.state || RideStateManager.STATES.PENDING;
+    const initialStatus = bookingData.status || (
+        initialState === RideStateManager.STATES.AWAITING_PAYMENT ? 'AWAITING_PAYMENT' : 'REQUESTED'
+    );
+
+    return {
+        bookingId: bookingData.bookingId,
+        customerId: bookingData.customerId,
+        pickupLocation: JSON.stringify(bookingData.pickupLocation),
+        destinationLocation: JSON.stringify(bookingData.destinationLocation || {}),
+        estimatedFare: String(bookingData.estimatedFare || 0),
+        estimatedOperationalFee: String(bookingData.estimatedOperationalFee || 0),
+        estimatedPaymentIntermediationFee: String(bookingData.estimatedPaymentIntermediationFee || 0),
+        estimatedTotalFees: String(bookingData.estimatedTotalFees || 0),
+        estimatedDriverNetAmount: String(bookingData.estimatedDriverNetAmount || 0),
+        routeDistanceKm: String(bookingData.routeDistanceKm || 0),
+        routeDurationSecs: String(bookingData.routeDurationSecs || 0),
+        tollFee: String(bookingData.tollFee || 0),
+        fareSource: bookingData.fareSource || '',
+        pricingPayload: serializeJSONField(bookingData.pricingPayload),
+        preferences: serializeJSONField(bookingData.preferences),
+        femaleDriverOnly: bookingData.femaleDriverOnly ? 'true' : 'false',
+        operationalState: bookingData.operationalState || '',
+        scorePressao: String(bookingData.scorePressao || 0),
+        scoreExcecao: String(bookingData.scoreExcecao || 0),
+        carType: bookingData.carType || '',
+        paymentMethod: bookingData.paymentMethod || 'pix',
+        paymentStatus: bookingData.paymentStatus || 'pending_payment',
+        paymentChargeId: bookingData.paymentChargeId || '',
+        paymentReferenceRideId: bookingData.paymentReferenceRideId || '',
+        paymentAmountInCents: String(bookingData.paymentAmountInCents || ''),
+        paymentConfirmedAt: bookingData.paymentConfirmedAt || '',
+        pricingSnapshotLocked: bookingData.pricingSnapshotLocked ? 'true' : 'false',
+        pricingSnapshotLockedAt: bookingData.pricingSnapshotLockedAt || '',
+        region: regionHash,
+        state: initialState,
+        status: initialStatus,
+        createdAt: timestamp,
+        updatedAt: timestamp
+    };
+}
+
+function deferRideQueuedEvent({ bookingId, customerId, regionHash, pickupLocation }) {
+    setImmediate(() => {
+        const { EVENT_TYPES } = require('./event-sourcing');
+        eventSourcing
+            .recordEvent(EVENT_TYPES.RIDE_QUEUED, {
+                bookingId,
+                customerId,
+                region: regionHash,
+                pickupLocation
+            })
+            .catch((error) => {
+                logger.warn(`⚠️ Falha ao registrar evento assíncrono ride.queued para ${bookingId}: ${error.message}`);
+            });
+    });
+}
 
 class RideQueueManager {
     constructor() {
         this.redis = redisPool.getConnection();
         this.defaultBatchSize = 10;
+        this.activeRegionsSetKey = process.env.RIDE_QUEUE_ACTIVE_REGIONS_SET_KEY || 'ride_queue:regions';
+        this.activeRegionsCacheTtlMs = Math.max(
+            250,
+            Number.parseInt(process.env.RIDE_QUEUE_ACTIVE_REGIONS_CACHE_TTL_MS || '2000', 10) || 2000
+        );
+        this.activeRegionsCache = {
+            regions: [],
+            expiresAt: 0
+        };
     }
 
     /**
@@ -28,48 +104,80 @@ class RideQueueManager {
      * @param {string} bookingData.paymentMethod - Método de pagamento
      * @returns {Promise<{success: boolean, regionHash: string, bookingId: string}>}
      */
-    async enqueueRide(bookingData) {
+    async enqueueRide(bookingData, options = {}) {
         try {
             const { bookingId, pickupLocation } = bookingData;
+            const { deferEventSourcing = false } = options || {};
 
             // Obter região (GeoHash)
             const regionHash = GeoHashUtils.getRegionHashFromLocation(pickupLocation);
-
-            // Armazenar dados completos da corrida
-            // IMPORTANTE: Serializar objetos para JSON strings (Redis requer strings)
             const bookingKey = `booking:${bookingId}`;
-            await this.redis.hset(bookingKey, {
-                bookingId: bookingData.bookingId,
-                customerId: bookingData.customerId,
-                pickupLocation: JSON.stringify(bookingData.pickupLocation),
-                destinationLocation: JSON.stringify(bookingData.destinationLocation || {}),
-                estimatedFare: String(bookingData.estimatedFare || 0),
-                carType: bookingData.carType || '',
-                paymentMethod: bookingData.paymentMethod || 'pix',
-                region: regionHash,
-                state: RideStateManager.STATES.PENDING,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-            });
-
-            // Adicionar à fila pendente da região (Sorted Set com timestamp como score)
+            const visibleKey = getVisibleBookingKey(bookingId);
             const pendingQueueKey = `ride_queue:${regionHash}:pending`;
-            await this.redis.zadd(
-                pendingQueueKey,
-                Date.now(), // Score = timestamp (ordem cronológica)
-                bookingId
+            const timestamp = new Date().toISOString();
+            const serializedSnapshot = buildSerializedBookingSnapshot(bookingData, regionHash, timestamp);
+            const shouldQueueForDispatch = serializedSnapshot.state !== RideStateManager.STATES.AWAITING_PAYMENT;
+
+            // Escreve snapshot primário + visível em batch. A fila de dispatch só recebe corrida paga.
+            if (typeof this.redis.pipeline === 'function') {
+                const pipeline = this.redis.pipeline();
+                pipeline.hset(bookingKey, serializedSnapshot);
+                pipeline.hset(visibleKey, {
+                    ...serializedSnapshot,
+                    visibilityUpdatedAt: timestamp
+                });
+                pipeline.expire(visibleKey, BOOKING_VISIBILITY_TTL_SEC);
+                if (shouldQueueForDispatch) {
+                    pipeline.zadd(
+                        pendingQueueKey,
+                        Date.now(),
+                        bookingId
+                    );
+                    pipeline.sadd(this.activeRegionsSetKey, regionHash);
+                }
+                await pipeline.exec();
+            } else {
+                await this.redis.hset(bookingKey, serializedSnapshot);
+                await this.redis.hset(visibleKey, {
+                    ...serializedSnapshot,
+                    visibilityUpdatedAt: timestamp
+                });
+                await Promise.resolve(this.redis.expire(visibleKey, BOOKING_VISIBILITY_TTL_SEC)).catch(() => null);
+                if (shouldQueueForDispatch) {
+                    await this.redis.zadd(
+                        pendingQueueKey,
+                        Date.now(),
+                        bookingId
+                    );
+                    await this.redis.sadd(this.activeRegionsSetKey, regionHash);
+                }
+            }
+            if (shouldQueueForDispatch) {
+                this.invalidateActiveRegionsCache();
+            }
+
+            if (deferEventSourcing) {
+                deferRideQueuedEvent({
+                    bookingId,
+                    customerId: bookingData.customerId,
+                    regionHash,
+                    pickupLocation
+                });
+            } else {
+                const { EVENT_TYPES } = require('./event-sourcing');
+                await eventSourcing.recordEvent(EVENT_TYPES.RIDE_QUEUED, {
+                    bookingId,
+                    customerId: bookingData.customerId,
+                    region: regionHash,
+                    pickupLocation
+                });
+            }
+
+            logger.info(
+                shouldQueueForDispatch
+                    ? `✅ Corrida ${bookingId} adicionada à fila da região ${regionHash}`
+                    : `⏸️ Corrida ${bookingId} criada aguardando pagamento; dispatch não enfileirado`
             );
-
-            // Registrar evento
-            const { EVENT_TYPES } = require('./event-sourcing');
-            await eventSourcing.recordEvent(EVENT_TYPES.RIDE_QUEUED, {
-                bookingId,
-                customerId: bookingData.customerId,
-                region: regionHash,
-                pickupLocation
-            });
-
-            logger.info(`✅ Corrida ${bookingId} adicionada à fila da região ${regionHash}`);
 
             return {
                 success: true,
@@ -109,6 +217,7 @@ class RideQueueManager {
             // Remover de fila ativa
             const activeQueueKey = `ride_queue:${regionHash}:active`;
             await this.redis.hdel(activeQueueKey, bookingId);
+            await this.refreshRegionActivity(regionHash);
 
             logger.debug(`🗑️ Corrida ${bookingId} removida da fila da região ${regionHash}`);
 
@@ -127,12 +236,17 @@ class RideQueueManager {
         try {
             // ✅ CORRIGIDO: Usar SCAN ao invés de KEYS() (não bloqueante)
             const RedisScan = require('../utils/redis-scan');
+            const affectedRegions = new Set();
             
             // Buscar todas as chaves de fila
             const queueKeys = await RedisScan.scanKeys(this.redis, 'ride_queue:*:pending');
             let removed = false;
 
             for (const key of queueKeys) {
+                const pendingMatch = key.match(/ride_queue:(.+):pending/);
+                if (pendingMatch && pendingMatch[1]) {
+                    affectedRegions.add(pendingMatch[1]);
+                }
                 const result = await this.redis.zrem(key, bookingId);
                 if (result > 0) {
                     removed = true;
@@ -143,7 +257,15 @@ class RideQueueManager {
             // Remover também de filas ativas
             const activeKeys = await RedisScan.scanKeys(this.redis, 'ride_queue:*:active');
             for (const key of activeKeys) {
+                const activeMatch = key.match(/ride_queue:(.+):active/);
+                if (activeMatch && activeMatch[1]) {
+                    affectedRegions.add(activeMatch[1]);
+                }
                 await this.redis.hdel(key, bookingId);
+            }
+
+            for (const regionHash of affectedRegions) {
+                await this.refreshRegionActivity(regionHash);
             }
 
             return removed;
@@ -189,6 +311,7 @@ class RideQueueManager {
             const pendingRides = await this.getPendingRides(regionHash, batchSize);
 
             if (pendingRides.length === 0) {
+                await this.refreshRegionActivity(regionHash);
                 logger.debug(`📭 Nenhuma corrida pendente na região ${regionHash}`);
                 return [];
             }
@@ -239,6 +362,7 @@ class RideQueueManager {
             }
 
             logger.info(`✅ ${processedRides.length} corridas processadas da região ${regionHash}`);
+            await this.refreshRegionActivity(regionHash);
 
             return processedRides;
         } catch (error) {
@@ -306,24 +430,72 @@ class RideQueueManager {
         }
     }
 
+    invalidateActiveRegionsCache() {
+        this.activeRegionsCache = {
+            regions: [],
+            expiresAt: 0
+        };
+    }
+
+    async refreshRegionActivity(regionHash) {
+        if (!regionHash) {
+            return;
+        }
+
+        try {
+            const pendingQueueKey = `ride_queue:${regionHash}:pending`;
+            const pendingCount = await this.redis.zcard(pendingQueueKey);
+
+            if (pendingCount > 0) {
+                await this.redis.sadd(this.activeRegionsSetKey, regionHash);
+            } else {
+                await this.redis.srem(this.activeRegionsSetKey, regionHash);
+            }
+
+            this.invalidateActiveRegionsCache();
+        } catch (error) {
+            logger.warn(`⚠️ Erro ao atualizar índice de região ${regionHash}: ${error.message}`);
+        }
+    }
+
     /**
      * Obter todas as regiões com corridas pendentes
      * @returns {Promise<Array<string>>} Array de regionHashes
      */
     async getActiveRegions() {
         try {
-            const queueKeys = await this.redis.keys('ride_queue:*:pending');
-            const regions = new Set();
+            const now = Date.now();
+            if (this.activeRegionsCache.expiresAt > now) {
+                return [...this.activeRegionsCache.regions];
+            }
 
-            for (const key of queueKeys) {
-                // Extrair regionHash do padrão: ride_queue:{regionHash}:pending
-                const match = key.match(/ride_queue:(.+):pending/);
-                if (match && match[1]) {
-                    regions.add(match[1]);
+            let regions = await this.redis.smembers(this.activeRegionsSetKey);
+
+            if (!regions || regions.length === 0) {
+                const RedisScan = require('../utils/redis-scan');
+                const queueKeys = await RedisScan.scanKeys(this.redis, 'ride_queue:*:pending');
+                const scannedRegions = new Set();
+
+                for (const key of queueKeys) {
+                    // Extrair regionHash do padrão: ride_queue:{regionHash}:pending
+                    const match = key.match(/ride_queue:(.+):pending/);
+                    if (match && match[1]) {
+                        scannedRegions.add(match[1]);
+                    }
+                }
+
+                regions = Array.from(scannedRegions);
+                if (regions.length > 0) {
+                    await this.redis.sadd(this.activeRegionsSetKey, ...regions);
                 }
             }
 
-            return Array.from(regions);
+            this.activeRegionsCache = {
+                regions: Array.isArray(regions) ? regions : [],
+                expiresAt: now + this.activeRegionsCacheTtlMs
+            };
+
+            return [...this.activeRegionsCache.regions];
         } catch (error) {
             logger.error(`❌ Erro ao obter regiões ativas:`, error);
             return [];

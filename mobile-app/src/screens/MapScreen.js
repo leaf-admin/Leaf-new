@@ -19,30 +19,50 @@ import {
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Icon } from 'react-native-elements';
-import { colors, darkTheme, lightTheme } from '../common-local/theme';
+import { colors, darkTheme, lightTheme } from '../theme/runtimeTokens';
 import * as Location from 'expo-location';
 var { height, width } = Dimensions.get('window');
 import i18n from '../i18n';
 import DatePicker from 'react-native-date-picker';
 import { useSelector, useDispatch } from 'react-redux';
-import { api, FirebaseContext } from '../common-local';
+import { FirebaseContext } from '../services/runtime/firebaseCompatBridge';
+import {
+    fetchAddressfromCoords,
+    fetchDrivers,
+    fetchNearbyDrivers,
+    updateTripPickup,
+    updateTripDrop,
+    updatSelPointType,
+    getDistanceMatrix,
+    MinutesPassed,
+    updateTripCar,
+    getEstimate,
+    clearEstimate,
+    addBooking,
+    clearBooking,
+    clearTripPoints,
+    GetDistance,
+    updateProfile,
+    updateProfileWithEmail,
+    checkUserExists,
+    storeAddresses
+} from '../services/runtime/mapRuntimeBridge';
 import { OptionModal } from '../components/OptionModal';
-import BookingModal, { appConsts } from '../common-local/sharedFunctions';
-import { prepareEstimateObject } from '../common/sharedFunctions';
+import BookingModal, { appConsts, prepareEstimateObject, FareCalculator } from '../common/sharedFunctions';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline, UrlTile } from 'react-native-maps';
 import { startActivityAsync, ActivityAction } from 'expo-intent-launcher';
 import Button from '../components/Button';
-import { fonts } from "../common-local/font";
+import { fonts } from "../theme/runtimeTokens";
 import DeviceInfo from 'react-native-device-info';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
-import { fetchPlacesAutocomplete, fetchCoordsfromPlace } from '../common-local/sharedFunctions';
+import { fetchPlacesAutocomplete, fetchCoordsfromPlace } from '../services/runtime/locationRouteBridge';
+import { BACKEND_BASE_URL } from '../config/backendBaseUrl';
 import uuid from 'react-native-uuid';
-import { FareCalculator } from '../common-local/sharedFunctions';
 import database from '@react-native-firebase/database';
 import * as DecodePolyLine from '@mapbox/polyline';
-import { tollData } from '../common-local/actions/estimateactions'; // ajuste o caminho se necessário
-import { calcularPedagiosPorPolyline } from '../common-local/other/TollUtils';
+import { tollData } from '../services/runtime/passengerMapBridge';
+import { calcularPedagiosPorPolyline } from '../services/runtime/mapGeoService';
 import * as SplashScreen from 'expo-splash-screen';
 import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -197,12 +217,13 @@ const fallbackCarTypes = [
         name: 'Leaf Plus',
         image: 'https://cdn.pixabay.com/photo/2017/06/03/08/11/car-2368193_640.png',
         min_fare: 8.50,
-        base_fare: 3.13,
-        rate_per_hour: 16.20,
-        rate_per_unit_distance: 1.42,
+        base_fare: 2.79,
+        fixed_fee: 1.10,
+        rate_per_hour: 15.60,
+        rate_per_unit_distance: 1.53,
         convenience_fee_type: 'flat',
         convenience_fees: 0,
-        extra_info: 'Capacity: 3, Type: Taxi',
+        extra_info: 'Capacity: 4, Type: Taxi',
         fleet_admin_fee: 1.55,
         pos: 5,
         id: 'type1'
@@ -210,16 +231,32 @@ const fallbackCarTypes = [
     {
         name: 'Leaf Elite',
         image: 'https://cdn.pixabay.com/photo/2022/01/23/18/20/car-6961567_640.png',
-        min_fare: 11.50,
-        base_fare: 5.59,
-        rate_per_hour: 18.00,
-        rate_per_unit_distance: 2.29,
+        min_fare: 10.50,
+        base_fare: 4.98,
+        fixed_fee: 1.80,
+        rate_per_hour: 17.40,
+        rate_per_unit_distance: 2.41,
         convenience_fee_type: 'flat',
         convenience_fees: 0,
         extra_info: 'Capacity: 4, Type: Sedan',
         fleet_admin_fee: 3.2,
         pos: 10,
         id: 'type3'
+    },
+    {
+        name: 'Leaf Moto',
+        image: 'https://cdn.pixabay.com/photo/2013/07/13/12/46/motorcycle-160175_640.png',
+        min_fare: 6.90,
+        base_fare: 2.18,
+        fixed_fee: 0.86,
+        rate_per_hour: 12.17,
+        rate_per_unit_distance: 1.19,
+        convenience_fee_type: 'flat',
+        convenience_fees: 0,
+        extra_info: 'Capacity: 1, Type: Moto',
+        fleet_admin_fee: 1.1,
+        pos: 15,
+        id: 'type_moto'
     }
 ];
 
@@ -249,29 +286,6 @@ async function fetchPlaceName(placeId) {
 }
 
 export default function MapScreen(props) {
-    const {
-        fetchAddressfromCoords,
-        fetchDrivers,
-        fetchNearbyDrivers,
-        updateTripPickup,
-        updateTripDrop,
-        updatSelPointType,
-        getDistanceMatrix,
-        MinutesPassed,
-        updateTripCar,
-        getEstimate,
-        clearEstimate,
-        addBooking,
-        clearBooking,
-        clearTripPoints,
-        GetDistance,
-        updateProfile,
-        updateProfileWithEmail,
-        checkUserExists,
-        storeAddresses,
-        fetchPlacesAutocomplete,
-        fetchCoordsfromPlace
-    } = api;
     const dispatch = useDispatch();
 
     // Verificar se o FirebaseContext está disponível antes de usar
@@ -298,16 +312,13 @@ export default function MapScreen(props) {
 
     // Fallback final para config se não estiver disponível
     if (!config) {
-        config = {
-            projectId: "leaf-reactnative",
-            appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
-            databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
-            storageBucket: "leaf-reactnative.firebasestorage.app",
-            apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
-            authDomain: "leaf-reactnative.firebaseapp.com",
-            messagingSenderId: "106504629884",
-            measurementId: "G-22368DBCY9"
-        };
+        try {
+            const { FirebaseConfig } = require('../../config/FirebaseConfig');
+            config = FirebaseConfig;
+        } catch (cfgError) {
+            Logger.warn('FirebaseConfig fallback indisponível:', cfgError);
+            config = {};
+        }
     }
 
     const { t } = useTranslation();
@@ -1509,6 +1520,17 @@ export default function MapScreen(props) {
         dispatch(updateTripCar(value));
     }
 
+    const MATRIX_DRIVER_LIMIT = 8;
+    const estimateArrivalFromDistance = (distanceKm) => {
+        const safeDistance = Number.isFinite(Number(distanceKm)) ? Number(distanceKm) : 2;
+        const minutes = Math.max(2, Math.round((safeDistance / 28) * 60));
+        return {
+            timein_text: `${minutes} min`,
+            found: true,
+            source: 'approx'
+        };
+    };
+
     const getDrivers = async () => {
         if (tripdata.pickup) {
             try {
@@ -1529,40 +1551,44 @@ export default function MapScreen(props) {
                     let arr = {};
                     let startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
                     let distArr = [];
+                    const etaByDriverId = {};
 
-                    // Usar motoristas já ordenados por distância do Redis/Firebase
-                    const sortedDrivers = settings.useDistanceMatrix ? nearbyDrivers.slice(0, 25) : nearbyDrivers;
+                    // Mantém o pool completo de motoristas, mas limita o custo da Matrix para os mais próximos.
+                    const sortedDrivers = [...nearbyDrivers].sort(
+                        (a, b) => (Number(a?.distance) || Number.MAX_SAFE_INTEGER) - (Number(b?.distance) || Number.MAX_SAFE_INTEGER)
+                    );
+                    const matrixCandidates = settings.useDistanceMatrix
+                        ? sortedDrivers.slice(0, MATRIX_DRIVER_LIMIT)
+                        : [];
 
                     if (sortedDrivers.length > 0) {
-                        // Preparar destinos para Distance Matrix (se necessário)
-                        let driverDest = "";
-                        for (let i = 0; i < sortedDrivers.length; i++) {
-                            let driver = { ...sortedDrivers[i] };
-                            driverDest = driverDest + driver.location.lat + "," + driver.location.lng;
-                            if (i < (sortedDrivers.length - 1)) {
-                                driverDest = driverDest + '|';
-                            }
-                        }
-
                         // Obter tempos de chegada
-                        if (settings.useDistanceMatrix) {
-                            distArr = await getDistanceMatrix(startLoc, driverDest);
-                        } else {
-                            // Usar distância já calculada pelo Redis/Firebase
-                            for (let i = 0; i < sortedDrivers.length; i++) {
-                                const driver = sortedDrivers[i];
-                                const timeEstimate = driver.distance ?
-                                    ((driver.distance * 2) + 1).toFixed(0) + ' min' :
-                                    '5 min';
-                                distArr.push({ timein_text: timeEstimate, found: true });
+                        if (settings.useDistanceMatrix && matrixCandidates.length > 0) {
+                            let driverDest = "";
+                            for (let i = 0; i < matrixCandidates.length; i++) {
+                                const driver = matrixCandidates[i];
+                                driverDest = driverDest + driver.location.lat + "," + driver.location.lng;
+                                if (i < (matrixCandidates.length - 1)) {
+                                    driverDest = driverDest + '|';
+                                }
                             }
+                            distArr = await getDistanceMatrix(startLoc, driverDest);
+
+                            for (let i = 0; i < matrixCandidates.length; i++) {
+                                const matrixEta = distArr[i];
+                                if (matrixEta && matrixEta.found) {
+                                    etaByDriverId[matrixCandidates[i].id] = matrixEta;
+                                }
+                            }
+                        } else {
+                            Logger.log('ℹ️ Distance Matrix desativada para busca de motoristas.');
                         }
 
                         // Processar motoristas
                         for (let i = 0; i < sortedDrivers.length; i++) {
                             let driver = { ...sortedDrivers[i] };
-                            if (distArr[i] && distArr[i].found && cars) {
-                                driver.arriveTime = distArr[i];
+                            if (cars) {
+                                driver.arriveTime = etaByDriverId[driver.id] || estimateArrivalFromDistance(driver.distance);
 
                                 // Adicionar imagem do carro
                                 for (let j = 0; j < cars.length; j++) {
@@ -1634,7 +1660,11 @@ export default function MapScreen(props) {
                     setFreeCars(availableDrivers);
                     setAllCarTypes(carWiseArr);
 
-                    Logger.log('✅ Motoristas processados:', availableDrivers.length);
+                    Logger.log('✅ Motoristas processados:', {
+                        total: availableDrivers.length,
+                        matrixUsed: Object.keys(etaByDriverId).length,
+                        approximateUsed: Math.max(0, availableDrivers.length - Object.keys(etaByDriverId).length)
+                    });
                 } else {
                     Logger.log('⚠️ Nenhum motorista encontrado na área');
                     setFreeCars([]);
@@ -1947,17 +1977,12 @@ export default function MapScreen(props) {
                 const plat = tripdata.pickup?.lat || location.coords.latitude;
                 const plng = tripdata.pickup?.lng || location.coords.longitude;
 
-                // Aqui usamos o BACKEND_URL público ou ngrok no lugar de localhost (exemplo estrutural)
-                // Vamos usar a mesma constante url do config
-                const configPath = require('../../config/GoogleMapApiConfig');
-                // Alternativamente, vamos pegar o servidor do FirebaseContext que o app usa se estiver rodando em Expo/Standalone
-                // Aqui faremos a requisição direto ao backend novo (que atende na porta 3000 local ou variável)
-                const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+                const backendUrl = BACKEND_BASE_URL;
 
                 const response = await fetch(`${backendUrl}/api/geofence/check?lat=${plat}&lng=${plng}`);
                 if (response.ok) {
                     const data = await response.json();
-                    if (!data.allowed) {
+                    if (data.isAllowed === false || data.allowed === false) {
                         setBookModelLoading(false);
                         Alert.alert("Região não atendida", data.reason || "A Leaf ainda não opera neste local.");
                         return; // 🛑 Cancela o processo e não manda firebase request
@@ -2060,7 +2085,10 @@ export default function MapScreen(props) {
 
     const handleSelectAddress = useCallback(async (address) => {
         try {
-            const coords = await fetchCoordsfromPlace(address.place_id);
+            const coords = await fetchCoordsfromPlace(address.place_id, null, null, {
+                query: address.description,
+                location: region ? { lat: region.latitude, lng: region.longitude } : null,
+            });
             if (coords) {
                 const newAddress = {
                     lat: coords.lat,
@@ -2079,7 +2107,7 @@ export default function MapScreen(props) {
         } catch (error) {
             Logger.error('Erro ao selecionar endereço:', error);
         }
-    }, [activeField]);
+    }, [activeField, region]);
 
     useEffect(() => {
         const loadAddressHistory = async () => {
@@ -2430,21 +2458,37 @@ export default function MapScreen(props) {
 
     // Otimizar useEffects
     useEffect(() => {
-        // Configurar listener para atualizações em tempo real dos tipos de carro
-        const carTypesRef = database().ref('car_types');
+        // Configurar listener para atualizações em tempo real dos tipos de carro.
+        // Primeiro tenta "cartypes" (fonte principal), com fallback legado para "car_types".
+        const carTypesRef = database().ref('cartypes');
+        const legacyCarTypesRef = database().ref('car_types');
 
-        const handleCarTypesUpdate = (snapshot) => {
-            const carTypesData = snapshot.val();
-            if (carTypesData) {
-                const carTypesArray = Object.values(carTypesData).filter(car => car && car.name);
-                setAllCarTypes(carTypesArray);
-            }
+        const hydrateCarTypes = (rawData) => {
+            if (!rawData || typeof rawData !== 'object') return [];
+            return Object.values(rawData).filter(car => car && car.name);
         };
 
-        carTypesRef.on('value', handleCarTypesUpdate);
+        const handlePrimaryCarTypesUpdate = (snapshot) => {
+            const primaryTypes = hydrateCarTypes(snapshot.val());
+            if (primaryTypes.length > 0) {
+                setAllCarTypes(primaryTypes);
+                return;
+            }
+
+            legacyCarTypesRef.once('value').then((legacySnapshot) => {
+                const legacyTypes = hydrateCarTypes(legacySnapshot.val());
+                if (legacyTypes.length > 0) {
+                    setAllCarTypes(legacyTypes);
+                }
+            }).catch(() => {
+                // manter fallback local se leitura legada falhar
+            });
+        };
+
+        carTypesRef.on('value', handlePrimaryCarTypesUpdate);
 
         return () => {
-            carTypesRef.off('value', handleCarTypesUpdate);
+            carTypesRef.off('value', handlePrimaryCarTypesUpdate);
         };
     }, []);
 

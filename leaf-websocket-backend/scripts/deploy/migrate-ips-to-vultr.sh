@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 🚀 Script de Migração de IPs para Vultr VPS
-# Migra todas as referências de localhost/216.238.107.59 para o IP da Vultr
+# Migra todas as referências de localhost/147.182.204.181 para o IP da Vultr
 # MANTÉM as portas originais para preservar o load balancing
 
 set -e
@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 # Configuração
 OLD_IP="127.0.0.1"
 OLD_LOCALHOST="localhost:3001"
-NEW_IP="216.238.107.59"
+NEW_IP="147.182.204.181"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo -e "${BLUE}🚀 MIGRAÇÃO DE IPs PARA VULTR VPS${NC}"
@@ -54,8 +54,8 @@ migrate_ips() {
     # Contador de alterações
     TOTAL_CHANGES=0
     
-    # 1. Migrar 127.0.0.1 para 216.238.107.59 (MANTENDO PORTAS)
-    echo -e "${BLUE}   📍 Migrando 127.0.0.1 → 216.238.107.59${NC}"
+    # 1. Migrar 127.0.0.1 para 147.182.204.181 (MANTENDO PORTAS)
+    echo -e "${BLUE}   📍 Migrando 127.0.0.1 → 147.182.204.181${NC}"
     CHANGES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "${OLD_IP}" {} \; | wc -l)
     
     if [ "$CHANGES" -gt 0 ]; then
@@ -66,8 +66,8 @@ migrate_ips() {
         echo -e "${YELLOW}   ℹ️  Nenhum arquivo com 127.0.0.1 encontrado${NC}"
     fi
     
-    # 2. Migrar localhost:3001 para 216.238.107.59:3001 (MANTENDO PORTA)
-    echo -e "${BLUE}   📍 Migrando localhost:3001 → 216.238.107.59:3001${NC}"
+    # 2. Migrar localhost:3001 para 147.182.204.181:3001 (MANTENDO PORTA)
+    echo -e "${BLUE}   📍 Migrando localhost:3001 → 147.182.204.181:3001${NC}"
     CHANGES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "${OLD_LOCALHOST}" {} \; | wc -l)
     
     if [ "$CHANGES" -gt 0 ]; then
@@ -78,8 +78,8 @@ migrate_ips() {
         echo -e "${YELLOW}   ℹ️  Nenhum arquivo com localhost:3001 encontrado${NC}"
     fi
     
-    # 3. Migrar http://localhost para http://216.238.107.59 (MANTENDO PORTAS)
-    echo -e "${BLUE}   📍 Migrando http://localhost → http://216.238.107.59${NC}"
+    # 3. Migrar http://localhost para http://147.182.204.181 (MANTENDO PORTAS)
+    echo -e "${BLUE}   📍 Migrando http://localhost → http://147.182.204.181${NC}"
     CHANGES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "http://localhost" {} \; | wc -l)
     
     if [ "$CHANGES" -gt 0 ]; then
@@ -90,8 +90,8 @@ migrate_ips() {
         echo -e "${YELLOW}   ℹ️  Nenhum arquivo com http://localhost encontrado${NC}"
     fi
     
-    # 4. Migrar ws://localhost para ws://216.238.107.59 (MANTENDO PORTAS)
-    echo -e "${BLUE}   📍 Migrando ws://localhost → ws://216.238.107.59${NC}"
+    # 4. Migrar ws://localhost para ws://147.182.204.181 (MANTENDO PORTAS)
+    echo -e "${BLUE}   📍 Migrando ws://localhost → ws://147.182.204.181${NC}"
     CHANGES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "ws://localhost" {} \; | wc -l)
     
     if [ "$CHANGES" -gt 0 ]; then
@@ -102,8 +102,8 @@ migrate_ips() {
         echo -e "${YELLOW}   ℹ️  Nenhum arquivo com ws://localhost encontrado${NC}"
     fi
     
-    # 5. Migrar localhost:3000 para 216.238.107.59:3000 (Dashboard)
-    echo -e "${BLUE}   📍 Migrando localhost:3000 → 216.238.107.59:3000${NC}"
+    # 5. Migrar localhost:3000 para 147.182.204.181:3000 (Dashboard)
+    echo -e "${BLUE}   📍 Migrando localhost:3000 → 147.182.204.181:3000${NC}"
     CHANGES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "localhost:3000" {} \; | wc -l)
     
     if [ "$CHANGES" -gt 0 ]; then

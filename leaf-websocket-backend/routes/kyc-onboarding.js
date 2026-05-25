@@ -8,6 +8,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs').promises;
 const { logStructured, logError } = require('../utils/logger');
+const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
 let firebaseConfig = null;
 try {
   firebaseConfig = require('../firebase-config');
@@ -39,10 +40,15 @@ const upload = multer({
  * POST /api/drivers/kyc/onboarding
  * Processar onboarding KYC (CNH + Selfie)
  */
-router.post('/api/drivers/kyc/onboarding', upload.fields([
-  { name: 'cnh', maxCount: 1 },
-  { name: 'selfie', maxCount: 1 }
-]), async (req, res) => {
+router.post(
+  '/api/drivers/kyc/onboarding',
+  requireFirebaseUser,
+  upload.fields([
+    { name: 'cnh', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 }
+  ]),
+  requireFirebaseSelf((req) => req.body?.driverId),
+  async (req, res) => {
   try {
     const { driverId } = req.body;
     const isDeviceFirst = req.is('application/json') || req.body?.onboardingMode === 'device_signature_v1';
@@ -71,9 +77,8 @@ router.post('/api/drivers/kyc/onboarding', upload.fields([
 
       // Persistir âncora do device para verificações futuras (assinatura, não imagem)
       try {
-        if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-          const db = firebaseConfig.getRealtimeDB();
-          await db.ref(`users/${driverId}`).update({
+        if (firebaseConfig && firebaseConfig.updateRealtimeDB) {
+          await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
             kycDeviceAnchorSignature: req.body?.selfieSignature || null,
             kycDeviceAnchorAlgorithm: req.body?.signatureAlgorithm || 'simhash-base64-v1',
             kycDeviceAnchorUpdatedAt: new Date().toISOString(),
@@ -197,13 +202,19 @@ router.post('/api/drivers/kyc/onboarding', upload.fields([
       message: error.message
     });
   }
-});
+  }
+);
 
 /**
  * POST /api/drivers/:driverId/kyc/reverify
  * Re-verificar identidade do motorista
  */
-router.post('/api/drivers/:driverId/kyc/reverify', upload.single('selfie'), async (req, res) => {
+router.post(
+  '/api/drivers/:driverId/kyc/reverify',
+  requireFirebaseUser,
+  requireFirebaseSelf((req) => req.params?.driverId),
+  upload.single('selfie'),
+  async (req, res) => {
   try {
     const { driverId } = req.params;
 
@@ -250,6 +261,7 @@ router.post('/api/drivers/:driverId/kyc/reverify', upload.single('selfie'), asyn
       message: error.message
     });
   }
-});
+  }
+);
 
 module.exports = router;

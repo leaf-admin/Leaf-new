@@ -57,8 +57,8 @@ cat > ./apk/leaf-app-bundle.json << 'EOF'
   "assets": 73,
   "modules": 2031,
   "buildDate": "2025-07-28T15:45:00Z",
-  "apiUrl": "http://147.93.66.253:3000",
-  "websocketUrl": "ws://147.93.66.253:3001",
+  "apiUrl": "http://147.182.204.181:3000",
+  "websocketUrl": "ws://147.182.204.181:3001",
   "features": [
     "Real-time tracking",
     "Payment integration",
@@ -115,13 +115,13 @@ echo "2. Configure as credenciais"
 echo "3. Teste as funcionalidades"
 echo ""
 echo "🔗 URLs IMPORTANTES:"
-echo "   - API: http://147.93.66.253:3000"
-echo "   - WebSocket: ws://147.93.66.253:3001"
-echo "   - Health Check: http://147.93.66.253:3000/api/health"
+echo "   - API: http://147.182.204.181:3000"
+echo "   - WebSocket: ws://147.182.204.181:3001"
+echo "   - Health Check: http://147.182.204.181:3000/api/health"
 echo ""
 echo "📊 MONITORAMENTO:"
 echo "   - Logs: adb logcat | grep 'Leaf'"
-echo "   - VPS: ssh root@147.93.66.253"
+echo "   - VPS: ssh root@147.182.204.181"
 echo "   - PM2: pm2 logs leaf-api"
 EOF
 
@@ -171,14 +171,14 @@ Edite o arquivo `.env.production` com suas chaves:
 - `MERCADOPAGO_PUBLIC_KEY`
 
 ### URLs de Produção
-- **API:** http://147.93.66.253:3000
-- **WebSocket:** ws://147.93.66.253:3001
+- **API:** http://147.182.204.181:3000
+- **WebSocket:** ws://147.182.204.181:3001
 - **Firebase:** https://us-central1-leaf-app-91dfdce0.cloudfunctions.net
 
 ## 📊 STATUS
 
 ### VPS
-- ✅ Online: http://147.93.66.253:3000/api/health
+- ✅ Online: http://147.182.204.181:3000/api/health
 - ✅ APIs: Funcionando
 - ✅ Redis: Conectado
 - ✅ WebSocket: Ativo
@@ -207,8 +207,8 @@ Edite o arquivo `.env.production` com suas chaves:
    - Verificar se há espaço suficiente
 
 ## 📞 SUPORTE
-- **API Status:** http://147.93.66.253:3000/api/health
-- **VPS Status:** ssh root@147.93.66.253
+- **API Status:** http://147.182.204.181:3000/api/health
+- **VPS Status:** ssh root@147.182.204.181
 - **Logs:** pm2 logs leaf-api
 EOF
 
@@ -232,8 +232,8 @@ cat > ./apk/status.json << 'EOF'
   },
   "vps": {
     "status": "online",
-    "url": "http://147.93.66.253:3000",
-    "health": "http://147.93.66.253:3000/api/health"
+    "url": "http://147.182.204.181:3000",
+    "health": "http://147.182.204.181:3000/api/health"
   },
   "apis": {
     "update_user_location": "working",
@@ -273,7 +273,7 @@ echo "   2. Conecte um dispositivo Android"
 echo "   3. Execute: cd apk && ./install-leaf-app.sh"
 echo ""
 echo "🔗 LINKS ÚTEIS:"
-echo "   - VPS Status: http://147.93.66.253:3000/api/health"
+echo "   - VPS Status: http://147.182.204.181:3000/api/health"
 echo "   - Documentação: apk/README.md"
 echo "   - Status: apk/status.json"
 echo ""

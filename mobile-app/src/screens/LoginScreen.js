@@ -19,7 +19,6 @@ import {
 import MaterialButtonDark from "../components/MaterialButtonDark";
 import { TouchableOpacity } from "react-native-gesture-handler";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '../common-local/api';
 import { colors } from '../common/theme';
 import RNPickerSelect from '../components/RNPickerSelect';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -31,7 +30,6 @@ import rnauth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { TextInputMask } from 'react-native-masked-text';
 import { useSelector, useDispatch } from 'react-redux';
-import { checkUserExists } from '../common-local/actions/authactions';
 import { useAuth } from '../hooks/useAuth';
 var { width,height } = Dimensions.get('window');
 import ClientIds from '../../config/ClientIds';

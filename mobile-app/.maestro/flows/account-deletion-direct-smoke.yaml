@@ -1,0 +1,19 @@
+appId: br.com.leaf.ride
+---
+- tapOn:
+    point: "89%,11%"
+- waitForAnimationToEnd
+- takeScreenshot: "account-deletion-01-menu"
+- tapOn:
+    id: "robotaxi-menu-item-edit-profile"
+- waitForAnimationToEnd
+- takeScreenshot: "account-deletion-02-profile"
+- assertVisible:
+    id: "profile-account-deletion-shortcut"
+- tapOn:
+    id: "profile-account-deletion-shortcut"
+- waitForAnimationToEnd
+- takeScreenshot: "account-deletion-03-confirmation"
+- assertVisible: "Excluir Conta"
+- assertVisible: "Cancelar"
+- tapOn: "Cancelar"

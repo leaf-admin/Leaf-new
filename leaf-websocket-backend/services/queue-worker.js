@@ -35,17 +35,43 @@ class QueueWorker {
         // Configurações
         this.config = {
             // Intervalo entre processamentos (2-5 segundos conforme TODO)
-            processingInterval: 3000, // 3 segundos (meio-termo)
+            processingInterval: Math.max(
+                250,
+                Number.parseInt(process.env.QUEUE_WORKER_INTERVAL_MS || '1000', 10) || 1000
+            ),
             
             // Tamanho do batch por região
-            batchSizePerRegion: 10, // Máximo de corridas processadas por região por iteração
+            batchSizePerRegion: Math.max(
+                1,
+                Number.parseInt(process.env.QUEUE_WORKER_BATCH_SIZE_PER_REGION || '10', 10) || 10
+            ),
             
             // Máximo de regiões processadas por iteração (para evitar sobrecarga)
-            maxRegionsPerIteration: 50,
+            maxRegionsPerIteration: Math.max(
+                1,
+                Number.parseInt(process.env.QUEUE_WORKER_MAX_REGIONS_PER_ITERATION || '50', 10) || 50
+            ),
             
             // Timeout para operações Redis
             redisTimeout: 5000 // 5 segundos
         };
+    }
+
+    async isBookingCurrentForCustomer(bookingId, bookingData) {
+        if (!bookingData) return false;
+
+        const status = String(bookingData.status || '').toUpperCase();
+        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+            return false;
+        }
+
+        const customerId = bookingData.customerId;
+        if (!customerId) {
+            return true;
+        }
+
+        const activeBookingId = await this.redis.get(`customer_active_booking:${customerId}`);
+        return !activeBookingId || activeBookingId === bookingId;
     }
 
     /**
@@ -173,6 +199,13 @@ class QueueWorker {
                         continue;
                     }
 
+                    const isCurrentForCustomer = await this.isBookingCurrentForCustomer(bookingId, bookingData);
+                    if (!isCurrentForCustomer) {
+                        logger.info(`⏭️ [QueueWorker] Corrida stale ignorada e removida da fila: ${bookingId}`);
+                        await rideQueueManager.dequeueRide(bookingId, regionHash);
+                        continue;
+                    }
+
                     // Parse seguro de pickupLocation
                     let pickupLocation = {};
                     try {
@@ -223,34 +256,8 @@ class QueueWorker {
      */
     async getActiveRegions() {
         try {
-            // Buscar todas as chaves de filas pendentes
-            // Padrão: ride_queue:{regionHash}:pending
-            const queueKeys = await this.redis.keys('ride_queue:*:pending');
-
-            if (!queueKeys || queueKeys.length === 0) {
-                return [];
-            }
-
-            const regions = [];
-            const regionSet = new Set(); // Para evitar duplicatas
-
-            for (const key of queueKeys) {
-                // Extrair regionHash da chave
-                // Exemplo: ride_queue:75cmd:pending → 75cmd
-                const match = key.match(/ride_queue:([^:]+):pending/);
-                if (match && match[1]) {
-                    const regionHash = match[1];
-                    
-                    // Verificar se há corridas pendentes nesta região
-                    const count = await this.redis.zcard(key);
-                    if (count > 0 && !regionSet.has(regionHash)) {
-                        regionSet.add(regionHash);
-                        regions.push(regionHash);
-                    }
-                }
-            }
-
-            return regions;
+            // Hotfix de performance: reutiliza índice/cache do manager para evitar SCAN redundante em loop.
+            return await rideQueueManager.getActiveRegions();
         } catch (error) {
             logger.error(`❌ [QueueWorker] Erro ao buscar regiões ativas:`, error);
             return [];
@@ -302,5 +309,3 @@ class QueueWorker {
 }
 
 module.exports = QueueWorker;
-
-

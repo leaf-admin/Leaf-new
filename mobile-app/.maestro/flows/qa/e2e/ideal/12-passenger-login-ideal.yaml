@@ -1,0 +1,194 @@
+appId: br.com.leaf.ride
+---
+- launchApp:
+    clearState: true
+
+- openLink: ${MAESTRO_METRO_URL_PASSENGER}
+
+- runFlow: ../../_accept-open-prompt.yaml
+
+- runFlow:
+    when:
+      visible: "Fitness"
+    commands:
+      - tapOn: "Leaf"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Buscar"
+    commands:
+      - tapOn: "Leaf"
+      - waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible: ".*(DEVELOPMENT SERVERS|Sign in to view updates|No development servers found|Connected to:|auth-phone-input|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Para onde vamos\\?|Quero viajar).*"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible: "Sign in to view updates"
+    commands:
+      - tapOn: "Home"
+
+- runFlow:
+    when:
+      visible: "http://.*:8081"
+    commands:
+      - tapOn: "http://.*:8081"
+
+- runFlow:
+    when:
+      visible: "Enter URL manually"
+    commands:
+      - tapOn: "Enter URL manually"
+      - inputText: "http://${MAESTRO_METRO_HOST}:8081"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+      - runFlow:
+          when:
+            visible: "Open"
+          commands:
+            - tapOn: "Open"
+
+- runFlow:
+    when:
+      visible: "No development servers found"
+    commands:
+      - tapOn: "Enter URL manually"
+      - inputText: "http://${MAESTRO_METRO_HOST}:8081"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+      - runFlow:
+          when:
+            visible: "Open"
+          commands:
+            - tapOn: "Open"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-phone-input"
+    commands:
+      - tapOn:
+          id: "auth-phone-input"
+      - eraseText
+      - inputText: "21102938475"
+      - tapOn:
+          id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-otp-digit-0"
+    commands:
+      - tapOn:
+          id: "auth-otp-digit-0"
+      - inputText: "9"
+      - tapOn:
+          id: "auth-otp-digit-1"
+      - inputText: "9"
+      - tapOn:
+          id: "auth-otp-digit-2"
+      - inputText: "2"
+      - tapOn:
+          id: "auth-otp-digit-3"
+      - inputText: "1"
+      - tapOn:
+          id: "auth-otp-digit-4"
+      - inputText: "1"
+      - tapOn:
+          id: "auth-otp-digit-5"
+      - inputText: "1"
+      - runFlow:
+          when:
+            visible:
+              id: "auth-otp-verify-btn"
+          commands:
+            - tapOn:
+                id: "auth-otp-verify-btn"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-profile-selection-trigger"
+    commands:
+      - tapOn:
+          id: "auth-profile-selection-trigger"
+      - tapOn:
+          id: "auth-profile-option-customer"
+      - tapOn:
+          id: "auth-profile-selection-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 90000
+
+- takeScreenshot: "ideal-passenger-01-home-ready"

@@ -10,7 +10,7 @@
 const admin = require('firebase-admin');
 const https = require('https');
 const http = require('http');
-const { getFirestore, getRealtimeDB } = require('../firebase-config');
+const { getFirestore, getFromRealtimeDB } = require('../firebase-config');
 const { logStructured, logError } = require('../utils/logger');
 
 class FirebaseStorageService {
@@ -126,12 +126,10 @@ class FirebaseStorageService {
       }
 
       // Fallback: Realtime Database
-      const db = getRealtimeDB();
-      if (db) {
+      if (typeof getFromRealtimeDB === 'function') {
         try {
           // Estrutura nova: users/{userId}/documents/cnh
-          const snapshot = await db.ref(`users/${userId}/documents/cnh`).once('value');
-          const cnhData = snapshot.val();
+          const cnhData = await getFromRealtimeDB(`users/${userId}/documents/cnh`);
           
           if (cnhData && cnhData.fileUrl) {
             logStructured('info', 'URL da CNH encontrada no Realtime DB (estrutura nova)', { service: 'firebase-storage-service', userId });
@@ -139,8 +137,7 @@ class FirebaseStorageService {
           }
           
           // Estrutura antiga: users/{userId}.licenseImage
-          const userSnapshot = await db.ref(`users/${userId}`).once('value');
-          const userData = userSnapshot.val();
+          const userData = await getFromRealtimeDB(`users/${userId}`);
           
           if (userData && userData.licenseImage) {
             logStructured('info', 'URL da CNH encontrada no Realtime DB (estrutura antiga)', { service: 'firebase-storage-service', userId });
@@ -316,4 +313,3 @@ class FirebaseStorageService {
 }
 
 module.exports = FirebaseStorageService;
-

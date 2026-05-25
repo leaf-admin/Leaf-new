@@ -13,10 +13,9 @@ import {
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
-import { api } from '../common-local';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import PromotionService from '../services/PromotionService';
 
 

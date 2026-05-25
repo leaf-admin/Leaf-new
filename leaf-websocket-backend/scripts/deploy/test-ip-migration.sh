@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Configuração
 OLD_IP="127.0.0.1"
 OLD_LOCALHOST="localhost:3001"
-NEW_IP="216.238.107.59"
+NEW_IP="147.182.204.181"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo -e "${BLUE}🧪 TESTE DA MIGRAÇÃO DE IPs${NC}"
@@ -29,7 +29,7 @@ echo ""
 check_old_references() {
     echo -e "${YELLOW}🔍 Verificando se ainda existem referências antigas...${NC}"
     
-    # Verificar 216.238.107.59
+    # Verificar 147.182.204.181
     OLD_IP_FILES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "${OLD_IP}" {} \; 2>/dev/null || true)
     
     if [ -n "$OLD_IP_FILES" ]; then
@@ -86,7 +86,7 @@ check_old_references() {
 check_new_references() {
     echo -e "${YELLOW}🔍 Verificando se as novas referências foram criadas...${NC}"
     
-    # Verificar 216.238.107.59
+    # Verificar 147.182.204.181
     NEW_IP_FILES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "${NEW_IP}" {} \; 2>/dev/null || true)
     
     if [ -n "$NEW_IP_FILES" ]; then
@@ -99,7 +99,7 @@ check_new_references() {
         echo -e "${RED}❌ Nenhuma referência a ${NEW_IP} encontrada${NC}"
     fi
     
-    # Verificar http://216.238.107.59
+    # Verificar http://147.182.204.181
     HTTP_NEW_IP_FILES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "http://${NEW_IP}" {} \; 2>/dev/null || true)
     
     if [ -n "$HTTP_NEW_IP_FILES" ]; then
@@ -108,7 +108,7 @@ check_new_references() {
         echo -e "${RED}❌ Nenhuma referência a http://${NEW_IP} encontrada${NC}"
     fi
     
-    # Verificar 216.238.107.59:3001
+    # Verificar 147.182.204.181:3001
     NEW_IP_3001_FILES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "${NEW_IP}:3001" {} \; 2>/dev/null || true)
     
     if [ -n "$NEW_IP_3001_FILES" ]; then
@@ -117,7 +117,7 @@ check_new_references() {
         echo -e "${RED}❌ Nenhuma referência a ${NEW_IP}:3001 encontrada${NC}"
     fi
     
-    # Verificar 216.238.107.59:3000
+    # Verificar 147.182.204.181:3000
     NEW_IP_3000_FILES=$(find "${PROJECT_ROOT}" -type f \( -name "*.js" -o -name "*.cjs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" -o -name "*.conf" -o -name "*.env*" \) -exec grep -l "${NEW_IP}:3000" {} \; 2>/dev/null || true)
     
     if [ -n "$NEW_IP_3000_FILES" ]; then

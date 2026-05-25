@@ -36,6 +36,13 @@ class WooviService {
                 rideDetails: paymentData.rideDetails,
                 passengerName: paymentData.passengerName,
                 passengerEmail: paymentData.passengerEmail,
+                driverId: paymentData.driverId,
+                driverPixKey: paymentData.driverPixKey,
+                driverSubaccountPixKey: paymentData.driverSubaccountPixKey,
+                wooviSubaccountPixKey: paymentData.wooviSubaccountPixKey,
+                subaccountPixKey: paymentData.subaccountPixKey,
+                tollFee: paymentData.tollFee,
+                tollFeeCents: paymentData.tollFeeCents,
                 comment
             });
             
@@ -95,6 +102,44 @@ class WooviService {
             return response.data;
         } catch (error) {
             Logger.error('Erro ao verificar status do pagamento:', error);
+            throw error;
+        }
+    }
+
+    async simulateTestWebhook({
+        chargeId,
+        rideId,
+        passengerId,
+        amountInCents,
+        paymentType = 'advance_payment'
+    }) {
+        try {
+            const paidAt = new Date().toISOString();
+            const payload = {
+                event: 'OPENPIX:CHARGE_COMPLETED',
+                charge: {
+                    identifier: chargeId,
+                    transactionID: chargeId,
+                    correlationID: rideId || chargeId,
+                    status: 'COMPLETED',
+                    value: Number(amountInCents || 0),
+                    paidAt,
+                    additionalInfo: [
+                        { key: 'passenger_id', value: passengerId || '' },
+                        { key: 'ride_id', value: rideId || '' },
+                        { key: 'payment_type', value: paymentType },
+                        { key: 'service', value: 'ride_sharing' }
+                    ]
+                },
+                pix: {
+                    status: 'COMPLETED'
+                }
+            };
+
+            const response = await this.backendApi.post('/api/woovi/test-webhook', payload);
+            return response.data;
+        } catch (error) {
+            Logger.error('Erro ao simular webhook de pagamento:', error);
             throw error;
         }
     }
@@ -174,8 +219,29 @@ class WooviService {
             const response = await this.backendApi.post(`/api/woovi/cancel-charge/${paymentId}`);
             return response.data || { success: true };
         } catch (error) {
+            const status = Number(error?.response?.status || 0);
+            const payload = error?.response?.data || {};
+            const providerStatus = Number(payload?.status || 0);
+            const providerError = String(payload?.error || '').toLowerCase();
+
+            // A Woovi pode retornar 404 para cobranças já liquidadas/expiradas.
+            // Tratamos como cancelamento idempotente para evitar erro falso no app.
+            if ((status === 400 || status === 404) && (providerStatus === 404 || providerError.includes('not found'))) {
+                Logger.warn('⚠️ [Woovi] cancelPayment retornou Not Found; tratando como já finalizada/cancelada.', {
+                    paymentId,
+                    status,
+                    providerStatus,
+                    payload
+                });
+                return {
+                    success: true,
+                    alreadyFinalized: true,
+                    message: 'Cobrança já finalizada ou indisponível para cancelamento'
+                };
+            }
+
             Logger.error('Erro ao cancelar pagamento:', error);
-            return { success: false, error: error?.response?.data || error.message };
+            return { success: false, error: payload || error.message };
         }
     }
 }

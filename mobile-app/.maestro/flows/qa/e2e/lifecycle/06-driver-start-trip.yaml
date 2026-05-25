@@ -1,0 +1,8 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/home?qaAutomation=1&qaDriverAction=start_trip&qaNonce=lifecycle-driver-start-trip"
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-primary-action-complete-button"
+    timeout: 120000

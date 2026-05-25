@@ -55,13 +55,13 @@ app.post('/api/send-notification', async (req, res) => {
 console.log('📋 Endpoint de notificação FCM criado!');
 console.log('📤 Para adicionar ao server.js do Vultr, execute:');
 console.log('');
-console.log('ssh root@216.238.107.59 "cd leaf-system && cp server.js server.js.backup"');
-console.log('ssh root@216.238.107.59 "cd leaf-system && echo \'');
+console.log('ssh root@147.182.204.181 "cd leaf-system && cp server.js server.js.backup"');
+console.log('ssh root@147.182.204.181 "cd leaf-system && echo \'');
 console.log(notificationEndpoint);
 console.log('\' >> server.js"');
-console.log('ssh root@216.238.107.59 "cd leaf-system && pkill -f \'node.*server.js\' && nohup node server.js > server.log 2>&1 &"');
+console.log('ssh root@147.182.204.181 "cd leaf-system && pkill -f \'node.*server.js\' && nohup node server.js > server.log 2>&1 &"');
 console.log('');
 console.log('🧪 Para testar:');
-console.log('curl -X POST http://216.238.107.59:3001/api/send-notification \\');
+console.log('curl -X POST http://147.182.204.181:3001/api/send-notification \\');
 console.log('  -H "Content-Type: application/json" \\');
 console.log('  -d \'{"token":"test_token","notification":{"title":"Teste","body":"Mensagem de teste"}}\'');

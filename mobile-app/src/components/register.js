@@ -20,7 +20,7 @@ import i18n from '../i18n';
 import RadioForm from 'react-native-simple-radio-button';
 import RNPickerSelect from './RNPickerSelect';
 import { useSelector,useDispatch } from 'react-redux';
-import { api } from '../common-local/api';
+import { countries } from '../services/runtime/registrationRuntimeBridge';
 import { Feather, AntDesign } from '@expo/vector-icons';
 import { MAIN_COLOR } from '../common/sharedFunctions';
 import Button from './Button';
@@ -32,10 +32,6 @@ const hasNotch = DeviceInfo.hasNotch();
 export default function Registration(props) {
     const { t } = i18n;
     const isRTL = i18n.locale && (i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0);
-    const {
-        countries,
-        editreferral
-    } = api;
     const [state, setState] = useState({
         usertype: 'customer',
         firstName: '',
@@ -819,6 +815,4 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
 });
-
-
 

@@ -44,7 +44,7 @@ async function testHttpConnection(url, description) {
 async function testRedisVultr() {
     // Testar se o Redis na VPS está respondendo
     return await testHttpConnection(
-        'http://216.238.107.59:3001/api/health',
+        'http://147.182.204.181:3001/api/health',
         'Redis VPS Vultr'
     );
 }
@@ -52,7 +52,7 @@ async function testRedisVultr() {
 // Função para testar WebSocket Backend na VPS
 async function testWebSocketBackend() {
     return await testHttpConnection(
-        'http://216.238.107.59:3001/api/health',
+        'http://147.182.204.181:3001/api/health',
         'WebSocket Backend VPS'
     );
 }
@@ -68,7 +68,7 @@ async function testFirebaseFunctions() {
 // Função para testar Redis API na VPS (endpoint correto)
 async function testRedisAPI() {
     return await testHttpConnection(
-        'http://216.238.107.59:3001/api/stats',
+        'http://147.182.204.181:3001/api/stats',
         'Redis API VPS (endpoint correto)'
     );
 }
@@ -86,7 +86,7 @@ async function testVultrAPIs() {
     
     for (const api of apis) {
         const result = await testHttpConnection(
-            `http://216.238.107.59:3001${api.url}`,
+            `http://147.182.204.181:3001${api.url}`,
             `API ${api.name}`
         );
         results.push({ ...result, endpoint: api.name });
@@ -183,7 +183,7 @@ if (require.main === module) {
         }
         
         console.log('\n✅ Teste de status concluído!');
-        console.log('🏠 VPS Vultr: 216.238.107.59:3001');
+        console.log('🏠 VPS Vultr: 147.182.204.181:3001');
         console.log('🌐 Firebase: https://us-central1-leaf-app-91dfdce0.cloudfunctions.net');
     });
 }

@@ -1,211 +1,126 @@
 import Logger from '../../../utils/Logger';
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions } from 'react-native';
-import { fonts } from '../../../common-local/font';
+import React, { useCallback, useEffect, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../../../theme/runtimeTokens';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
+import onboardingTheme from '../common/onboardingTheme';
 
-
-const { width, height } = Dimensions.get('window');
-
-// Constantes de cores
-const WHITE = '#FFFFFF';
-const BLACK = '#000000';
-const GRAY = '#666666';
-const LIGHT_GRAY = '#F5F5F5';
-const DARK_GRAY = '#333333';
-const LEAF_GREEN = '#1A330E';
-const BORDER_COLOR = '#E0E0E0';
+const { color, radius, spacing, elevation } = onboardingTheme;
 
 const options = [
   {
-    key: 'passenger',
+    key: 'customer',
     title: 'Quero viajar',
     icon: 'car-outline',
-    description: 'Faça viagens com total segurança',
+    description: 'Solicite viagens com experiência premium'
   },
   {
     key: 'driver',
     title: 'Quero dirigir',
     icon: 'navigate-outline',
-    description: 'Dirija e ganhe com suas viagens',
-  },
+    description: 'Dirija com a Leaf e receba por corrida'
+  }
 ];
 
+function normalizeUserType(userType) {
+  if (userType === 'passenger') {
+    return 'customer';
+  }
+  return userType;
+}
+
 const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {} }) => {
-  const [selected, setSelected] = useState(null);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownAnim = useRef(new Animated.Value(0)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const [selected, setSelected] = useState(options[0]);
 
-  // Carregar dados iniciais se disponível
   useEffect(() => {
-    if (initialData.userType) {
-      const option = options.find(opt => opt.key === initialData.userType);
-      if (option) {
-        setSelected(option);
-        Logger.log('ProfileSelectionStep - 📥 Dados iniciais carregados:', initialData);
-      }
+    const normalizedType = normalizeUserType(initialData?.userType);
+    if (!normalizedType) {
+      return;
     }
-  }, [initialData]);
 
-  const toggleDropdown = () => {
-    setIsDropdownOpen(!isDropdownOpen);
-    
-    Animated.parallel([
-      Animated.timing(dropdownAnim, {
-        toValue: isDropdownOpen ? 0 : 1,
-        duration: 300,
-        useNativeDriver: false,
-      }),
-      Animated.timing(rotateAnim, {
-        toValue: isDropdownOpen ? 0 : 1,
-        duration: 300,
-        useNativeDriver: false,
-      }),
-    ]).start();
-  };
+    const match = options.find(item => item.key === normalizedType);
+    if (match) {
+      setSelected(match);
+      Logger.log('ProfileSelectionStep - dados iniciais carregados:', normalizedType);
+    }
+  }, [initialData?.userType]);
 
-  const handleOptionSelect = useCallback(async (option) => {
-    setSelected(option);
-    setIsDropdownOpen(false);
-    
-    // Salvar automaticamente no AsyncStorage
-    await saveStepData('profile_selection', { userType: option.key });
-    
-    Animated.parallel([
-      Animated.timing(dropdownAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: false,
-      }),
-      Animated.timing(rotateAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: false,
-      }),
-    ]).start();
-  }, []);
+  const handleOptionSelect = useCallback(
+    async option => {
+      setSelected(option);
+
+      await saveStepData('profile_selection', { userType: option.key });
+    },
+    []
+  );
 
   const handleContinue = () => {
-    if (selected) {
-      Logger.log('ProfileSelectionStep - 🔄 Usuário selecionou:', selected.key);
-      
-      const profileData = {
-        userType: selected.key,
-        timestamp: new Date().toISOString()
-      };
-      
-      onProfileSelected(profileData);
+    if (!selected) {
+      return;
     }
-  };
 
-  const selectedOption = options.find(option => option.key === selected?.key);
+    onProfileSelected({
+      userType: selected.key,
+      timestamp: new Date().toISOString()
+    });
+  };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Escolha o seu perfil:</Text>
-
-      {/* Dropdown Container */}
-      <View style={styles.dropdownContainer}>
+      <View style={styles.header}>
         <TouchableOpacity
-          style={[
-            styles.dropdownButton,
-            isDropdownOpen && styles.dropdownButtonActive,
-            selected && styles.dropdownButtonSelected
-          ]}
-          onPress={toggleDropdown}
+          style={styles.iconBackButton}
+          onPress={onBack}
+          testID="auth-profile-selection-back-btn"
+          accessibilityLabel="auth-profile-selection-back-btn"
         >
-          <Text style={[
-            styles.dropdownButtonText,
-            selected && styles.dropdownButtonTextSelected
-          ]}>
-            {selected ? selected.title : 'Selecione um perfil'}
-          </Text>
-          <Animated.View
-            style={[
-              styles.arrowContainer,
-              {
-                transform: [{
-                  rotate: rotateAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0deg', '180deg']
-                  })
-                }]
-              }
-            ]}
-          >
-            <Ionicons
-              name="chevron-down"
-              size={24}
-              color={selected ? WHITE : GRAY}
-            />
-          </Animated.View>
+          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
         </TouchableOpacity>
-
-        {/* Dropdown Options */}
-        <Animated.View
-          style={[
-            styles.dropdownOptions,
-            {
-              maxHeight: dropdownAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, 200]
-              }),
-              opacity: dropdownAnim
-            }
-          ]}
-        >
-          {options.map((option) => (
-            <TouchableOpacity
-              key={option.key}
-              style={[
-                styles.optionItem,
-                selected?.key === option.key && styles.optionItemSelected
-              ]}
-              onPress={() => handleOptionSelect(option)}
-            >
-              <View style={styles.optionContent}>
-                <Ionicons
-                  name={option.icon}
-                  size={24}
-                  color={selected?.key === option.key ? WHITE : LEAF_GREEN}
-                />
-                <View style={styles.optionTextContainer}>
-                  <Text style={[
-                    styles.optionTitle,
-                    selected?.key === option.key && styles.optionTitleSelected
-                  ]}>
-                    {option.title}
-                  </Text>
-                  <Text style={[
-                    styles.optionDescription,
-                    selected?.key === option.key && styles.optionDescriptionSelected
-                  ]}>
-                    {option.description}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </Animated.View>
       </View>
 
-      {/* Continue Button */}
+      <Text style={styles.title}>Como você quer usar a Leaf?</Text>
+      <Text style={styles.subtitle}>Escolha agora. Você pode trocar depois no perfil.</Text>
+
+      <View style={styles.roleList}>
+        {options.map(option => {
+          const selectedOption = selected?.key === option.key;
+          return (
+            <TouchableOpacity
+              key={option.key}
+              style={[styles.roleCard, selectedOption ? styles.roleCardSelected : null]}
+              onPress={() => handleOptionSelect(option)}
+              activeOpacity={0.9}
+              testID={`auth-profile-option-${option.key}`}
+              accessibilityLabel={`auth-profile-option-${option.key}`}
+            >
+              <View style={[styles.roleIcon, selectedOption ? styles.roleIconSelected : null]}>
+                <View style={styles.leafGlyph} />
+              </View>
+              <View style={styles.roleTextWrap}>
+                <Text style={styles.roleTitle}>{option.title}</Text>
+                <Text style={styles.roleDescription}>{option.description}</Text>
+              </View>
+              {selectedOption ? (
+                <View style={styles.checkBadge}>
+                  <Text style={styles.checkBadgeText}>Selecionado</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       <ContinueButton
         onPress={handleContinue}
         disabled={!selected}
         text="Continuar"
+        testID="auth-profile-selection-continue-btn"
+        accessibilityLabel="auth-profile-selection-continue-btn"
+        style={styles.continueButton}
+        textStyle={styles.continueButtonText}
       />
-
-      {/* Back Button */}
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={onBack}
-      >
-        <Text style={styles.backButtonText}>Voltar</Text>
-      </TouchableOpacity>
     </View>
   );
 };
@@ -213,118 +128,135 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {} }) =
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingHorizontal: 32,
+    paddingTop: 66,
+    paddingBottom: 84,
+    backgroundColor: '#F6FAF6'
+  },
+  header: {
+    position: 'absolute',
+    top: 14,
+    left: 12,
+    minHeight: 44,
+    justifyContent: 'center',
+    marginBottom: 0,
+    opacity: 0
+  },
+  iconBackButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.panelSoft,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: BLACK,
-    textAlign: 'center',
-    marginBottom: 30,
-    fontFamily: fonts.regular,
+    color: '#102018',
+    fontSize: 18,
+    lineHeight: 24,
+    fontFamily: fonts.Medium,
+    textAlign: 'left',
+    letterSpacing: 0
   },
-  dropdownContainer: {
-    marginBottom: 30,
+  subtitle: {
+    marginTop: 7,
+    marginBottom: 66,
+    color: '#66756B',
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: fonts.Regular,
+    textAlign: 'left'
   },
-  dropdownButton: {
+  roleList: {
+    gap: 22,
+    marginBottom: 'auto'
+  },
+  roleCard: {
+    minHeight: 122,
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#DFE8E1',
+    backgroundColor: '#FFFFFF'
+  },
+  roleCardSelected: {
+    borderColor: '#1FA76F',
+    backgroundColor: '#FFFFFF',
+    shadowOpacity: 0,
+    elevation: 0
+  },
+  roleIcon: {
+    width: 18,
+    height: 28,
+    borderRadius: 0,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: WHITE,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: BORDER_COLOR,
-    shadowColor: BLACK,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    marginRight: 18,
+    marginTop: 4
   },
-  dropdownButtonActive: {
-    borderColor: LEAF_GREEN,
-    shadowOpacity: 0.2,
+  roleIconSelected: {
+    backgroundColor: 'transparent'
   },
-  dropdownButtonSelected: {
-    backgroundColor: LEAF_GREEN,
-    borderColor: LEAF_GREEN,
+  leafGlyph: {
+    width: 12,
+    height: 16,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
+    borderBottomLeftRadius: 3,
+    backgroundColor: '#0F3B16',
+    transform: [{ rotate: '-34deg' }]
   },
-  dropdownButtonText: {
-    fontSize: 16,
-    color: GRAY,
-    fontFamily: fonts.medium,
+  roleTextWrap: {
+    flex: 1
   },
-  dropdownButtonTextSelected: {
-    color: WHITE,
+  roleTitle: {
+    color: '#101C14',
+    fontSize: 18,
+    lineHeight: 24,
+    fontFamily: fonts.Medium
   },
-  arrowContainer: {
-    marginLeft: 10,
+  roleDescription: {
+    marginTop: 6,
+    color: '#66756B',
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: fonts.Regular
   },
-  dropdownOptions: {
-    backgroundColor: WHITE,
-    borderRadius: 12,
-    marginTop: 5,
-    shadowColor: BLACK,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    overflow: 'hidden',
-  },
-  optionItem: {
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: LIGHT_GRAY,
-  },
-  optionItemSelected: {
-    backgroundColor: LEAF_GREEN,
-  },
-  optionContent: {
-    flexDirection: 'row',
+  checkBadge: {
+    width: 86,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#EAF6EE',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10
   },
-  optionTextContainer: {
-    marginLeft: 15,
-    flex: 1,
+  checkBadgeText: {
+    color: '#0F3B16',
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15
   },
-  optionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: BLACK,
-    marginBottom: 4,
-    fontFamily: fonts.medium,
+  continueButton: {
+    minHeight: 46,
+    borderRadius: 23,
+    marginTop: 0,
+    marginBottom: 0,
+    shadowOpacity: 0,
+    elevation: 0
   },
-  optionTitleSelected: {
-    color: WHITE,
-  },
-  optionDescription: {
-    fontSize: 14,
-    color: GRAY,
-    fontFamily: fonts.regular,
-  },
-  optionDescriptionSelected: {
-    color: WHITE,
-    opacity: 0.9,
-  },
-
-  backButton: {
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  backButtonText: {
-    color: LEAF_GREEN,
-    fontSize: 16,
-    fontFamily: fonts.medium,
-  },
+  continueButtonText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: fonts.Medium
+  }
 });
 
 export default ProfileSelectionStep;

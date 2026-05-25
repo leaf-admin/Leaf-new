@@ -9,18 +9,96 @@ const { logger } = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
 
+const DEFAULT_RIO_DESTINATION_BOUNDS = Object.freeze({
+    south: -23.0823,
+    west: -43.7958,
+    north: -22.7423,
+    east: -43.0990
+});
+
+function coordinatesEqual(a, b) {
+    return (
+        Array.isArray(a) &&
+        Array.isArray(b) &&
+        Number(a[0]) === Number(b[0]) &&
+        Number(a[1]) === Number(b[1])
+    );
+}
+
+function normalizeRegionCoordinates(region) {
+    if (!Array.isArray(region) || region.length < 3) {
+        return null;
+    }
+
+    const normalized = [];
+
+    for (const point of region) {
+        let lng = null;
+        let lat = null;
+
+        if (Array.isArray(point) && point.length >= 2) {
+            lng = Number(point[0]);
+            lat = Number(point[1]);
+        } else if (point && typeof point === 'object') {
+            lng = Number(point.lng);
+            lat = Number(point.lat);
+        } else {
+            return null;
+        }
+
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+            return null;
+        }
+
+        normalized.push([lng, lat]);
+    }
+
+    if (normalized.length < 3) {
+        return null;
+    }
+
+    const first = normalized[0];
+    const last = normalized[normalized.length - 1];
+    if (!coordinatesEqual(first, last)) {
+        normalized.push([first[0], first[1]]);
+    }
+
+    return normalized.length >= 4 ? normalized : null;
+}
+
+const isGeofenceBypassEnabled = () => {
+    const reviewMode = String(process.env.APP_REVIEW || '').trim().toLowerCase() === 'true';
+    const reviewBypassEnabled = String(process.env.GEOFENCE_BYPASS_IN_REVIEW || '').trim().toLowerCase() === 'true';
+
+    return (
+        String(process.env.BYPASS_GEOFENCE || '').toLowerCase() === 'true' ||
+        String(process.env.GEOFENCE_RADIUS_KM || '') === '9999' ||
+        (reviewMode && reviewBypassEnabled)
+    );
+};
+
 class GeofenceService {
     constructor() {
-        // ✅ Região padrão: São Paulo (pode ser configurada via env)
-        // Formato: Array de coordenadas [lng, lat] formando polígono
+        // Região padrão vem do arquivo oficial do projeto (config/geofence.json).
+        // Sem configuração explícita, geofence fica inativo para evitar bloqueios surpresa.
         this.defaultRegion = this.getDefaultRegion();
-        
+
+        this.runtimeEnabled = true;
+        this.regionSource = 'none';
+
         // ✅ Carregar região do ambiente ou usar padrão
-        this.allowedRegion = this.loadRegionFromEnv() || this.defaultRegion;
-        
+        const envRegion = this.loadRegionFromEnv();
+        this.allowedRegion = envRegion || this.defaultRegion;
+        this.regionSource = envRegion ? 'env' : (this.defaultRegion ? 'default' : 'none');
+        this.destinationBounds =
+            this.loadDestinationBoundsFromEnv() || DEFAULT_RIO_DESTINATION_BOUNDS;
+
         logger.info('✅ GeofenceService inicializado', {
-            regionPoints: this.allowedRegion.length,
-            region: process.env.GEOFENCE_REGION || 'default'
+            regionPoints: Array.isArray(this.allowedRegion) ? this.allowedRegion.length : 0,
+            regionSource: this.regionSource,
+            destinationBounds: this.destinationBounds,
+            runtimeEnabled: this.runtimeEnabled,
+            bypassEnabled: isGeofenceBypassEnabled()
         });
     }
 
@@ -36,25 +114,18 @@ class GeofenceService {
             if (fs.existsSync(filePath)) {
                 const geojson = JSON.parse(fs.readFileSync(filePath, 'utf8'));
                 const coords = geojson?.features?.[0]?.geometry?.coordinates?.[0];
-                if (Array.isArray(coords) && coords.length >= 4) {
-                    return coords;
+                const normalized = normalizeRegionCoordinates(coords);
+                if (normalized) {
+                    return normalized;
                 }
             }
         } catch (error) {
-            logger.warn('⚠️ Falha ao carregar config/geofence.json no GeofenceService, usando fallback SP', {
+            logger.warn('⚠️ Falha ao carregar config/geofence.json no GeofenceService, mantendo geofence inativo', {
                 error: error.message
             });
         }
 
-        // Região de São Paulo (área metropolitana aproximada)
-        // Formato: [longitude, latitude] - GeoJSON format
-        return [
-            [-47.2, -23.8],  // Oeste
-            [-46.3, -23.8],  // Leste (inferior)
-            [-46.3, -23.4],  // Leste (superior)
-            [-47.2, -23.4],  // Oeste (superior)
-            [-47.2, -23.8]   // Fechar polígono
-        ];
+        return null;
     }
 
     /**
@@ -70,15 +141,60 @@ class GeofenceService {
             // Formato esperado: JSON array de coordenadas
             // Exemplo: GEOFENCE_REGION='[[-47.2,-23.8],[-46.3,-23.8],[-46.3,-23.4],[-47.2,-23.4],[-47.2,-23.8]]'
             const region = JSON.parse(process.env.GEOFENCE_REGION);
-            
-            if (Array.isArray(region) && region.length >= 3) {
-                return region;
+            const normalized = normalizeRegionCoordinates(region);
+
+            if (normalized) {
+                return normalized;
             }
-            
+
             logger.warn('⚠️ GEOFENCE_REGION inválido, usando região padrão');
             return null;
         } catch (error) {
             logger.error('❌ Erro ao carregar GEOFENCE_REGION:', error);
+            return null;
+        }
+    }
+
+    loadDestinationBoundsFromEnv() {
+        const raw =
+            process.env.GEOFENCE_DESTINATION_BOUNDS ||
+            process.env.RIDE_DESTINATION_BOUNDS ||
+            '';
+        if (!raw) return null;
+
+        try {
+            const parsed = JSON.parse(raw);
+            const bounds = Array.isArray(parsed)
+                ? {
+                    south: Number(parsed[0]),
+                    west: Number(parsed[1]),
+                    north: Number(parsed[2]),
+                    east: Number(parsed[3])
+                }
+                : {
+                    south: Number(parsed.south),
+                    west: Number(parsed.west),
+                    north: Number(parsed.north),
+                    east: Number(parsed.east)
+                };
+
+            if (
+                Number.isFinite(bounds.south) &&
+                Number.isFinite(bounds.west) &&
+                Number.isFinite(bounds.north) &&
+                Number.isFinite(bounds.east) &&
+                bounds.south < bounds.north &&
+                bounds.west < bounds.east
+            ) {
+                return bounds;
+            }
+
+            logger.warn('⚠️ GEOFENCE_DESTINATION_BOUNDS inválido, usando área padrão do Rio');
+            return null;
+        } catch (error) {
+            logger.warn('⚠️ Erro ao carregar GEOFENCE_DESTINATION_BOUNDS, usando área padrão do Rio', {
+                error: error.message
+            });
             return null;
         }
     }
@@ -119,13 +235,40 @@ class GeofenceService {
         return inside;
     }
 
+    isPointInDestinationBounds(lat, lng, bounds = null) {
+        const resolvedBounds = bounds || this.destinationBounds || DEFAULT_RIO_DESTINATION_BOUNDS;
+        const normalizedLat = Number(lat);
+        const normalizedLng = Number(lng);
+
+        if (!Number.isFinite(normalizedLat) || !Number.isFinite(normalizedLng)) {
+            return false;
+        }
+
+        return (
+            normalizedLat >= resolvedBounds.south &&
+            normalizedLat <= resolvedBounds.north &&
+            normalizedLng >= resolvedBounds.west &&
+            normalizedLng <= resolvedBounds.east
+        );
+    }
+
     /**
-     * Validar se origem e destino estão dentro da região permitida
+     * Validar se a origem inicia na geofence operacional e se o destino está no Rio.
      * @param {Object} pickupLocation - { lat, lng }
      * @param {Object} destinationLocation - { lat, lng }
      * @returns {{valid: boolean, error?: string, details?: Object}}
      */
     validateRideLocations(pickupLocation, destinationLocation) {
+        if (isGeofenceBypassEnabled()) {
+            return {
+                valid: true,
+                details: {
+                    bypass: true,
+                    reason: 'BYPASS_GEOFENCE habilitado'
+                }
+            };
+        }
+
         if (!pickupLocation || !pickupLocation.lat || !pickupLocation.lng) {
             return {
                 valid: false,
@@ -148,8 +291,11 @@ class GeofenceService {
             pickupLocation.lng
         );
 
-        // Verificar se destino está dentro da região
-        const destinationInside = this.isPointInPolygon(
+        const destinationInsideOperationalRegion = this.isPointInPolygon(
+            destinationLocation.lat,
+            destinationLocation.lng
+        );
+        const destinationInsideServiceArea = this.isPointInDestinationBounds(
             destinationLocation.lat,
             destinationLocation.lng
         );
@@ -166,14 +312,15 @@ class GeofenceService {
             };
         }
 
-        if (!destinationInside) {
+        if (!destinationInsideServiceArea) {
             return {
                 valid: false,
-                error: 'Destino fora da região de operação permitida',
-                code: 'DESTINATION_OUTSIDE_REGION',
+                error: 'Destino fora da área de destino permitida',
+                code: 'DESTINATION_OUTSIDE_SERVICE_AREA',
                 details: {
                     destination: { lat: destinationLocation.lat, lng: destinationLocation.lng },
-                    inside: false
+                    insideOperationalRegion: destinationInsideOperationalRegion,
+                    insideDestinationArea: false
                 }
             };
         }
@@ -182,7 +329,10 @@ class GeofenceService {
             valid: true,
             details: {
                 pickup: { inside: true },
-                destination: { inside: true }
+                destination: {
+                    insideOperationalRegion: destinationInsideOperationalRegion,
+                    insideDestinationArea: true
+                }
             }
         };
     }
@@ -192,7 +342,10 @@ class GeofenceService {
      * @returns {Array<Array<number>>} Região atual
      */
     getCurrentRegion() {
-        return this.allowedRegion;
+        if (!Array.isArray(this.allowedRegion)) {
+            return null;
+        }
+        return this.allowedRegion.map(([lng, lat]) => [lng, lat]);
     }
 
     /**
@@ -201,17 +354,50 @@ class GeofenceService {
      * @returns {boolean} true se atualizado com sucesso
      */
     updateRegion(newRegion) {
-        if (!Array.isArray(newRegion) || newRegion.length < 3) {
+        const normalized = normalizeRegionCoordinates(newRegion);
+        if (!normalized) {
             logger.error('❌ Região inválida para atualização');
             return false;
         }
 
-        this.allowedRegion = newRegion;
+        this.allowedRegion = normalized;
+        this.regionSource = 'runtime';
         logger.info('✅ Região de geofence atualizada', {
-            points: newRegion.length
+            points: normalized.length
         });
-        
+
         return true;
+    }
+
+    /**
+     * Ativar/desativar geofence em runtime sem reiniciar backend
+     * @param {boolean} enabled
+     * @returns {boolean}
+     */
+    setEnabled(enabled) {
+        if (typeof enabled !== 'boolean') {
+            logger.error('❌ Flag enabled inválida para geofence');
+            return false;
+        }
+        this.runtimeEnabled = enabled;
+        logger.info('✅ Geofence runtime atualizado', { enabled });
+        return true;
+    }
+
+    /**
+     * Flag administrativa de geofence (independente do bypass)
+     * @returns {boolean}
+     */
+    isEnabled() {
+        return this.runtimeEnabled !== false;
+    }
+
+    /**
+     * Retorna se bypass global está ativo
+     * @returns {boolean}
+     */
+    isBypassEnabled() {
+        return isGeofenceBypassEnabled();
     }
 
     /**
@@ -219,8 +405,14 @@ class GeofenceService {
      * @returns {boolean} true se geofence está ativo
      */
     isActive() {
+        if (isGeofenceBypassEnabled()) {
+            return false;
+        }
+        if (!this.isEnabled()) {
+            return false;
+        }
         // Geofence está ativo se há região definida
-        return this.allowedRegion && this.allowedRegion.length >= 3;
+        return !!(this.allowedRegion && this.allowedRegion.length >= 4);
     }
 }
 

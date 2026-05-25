@@ -153,7 +153,11 @@ class PersistentRideNotificationService {
                 customerName,
                 estimatedTime,
                 distance,
-                fare
+                fare,
+                customTitle,
+                customBody,
+                notificationCategoryId,
+                notificationDataType
             } = rideData;
 
             if (!bookingId || !status) {
@@ -185,10 +189,10 @@ class PersistentRideNotificationService {
             // Criar nova notificação persistente
             const notificationId = await Notifications.scheduleNotificationAsync({
                 content: {
-                    title,
-                    body,
+                    title: customTitle || title,
+                    body: customBody || body,
                     data: {
-                        type: 'ride_status',
+                        type: notificationDataType || 'ride_status',
                         bookingId,
                         status,
                         userType,
@@ -196,19 +200,11 @@ class PersistentRideNotificationService {
                     },
                     sound: false, // Sem som para atualizações
                     priority: Notifications.AndroidNotificationPriority.HIGH,
+                    categoryIdentifier: notificationCategoryId || undefined,
+                    sticky: Platform.OS === 'android',
+                    autoDismiss: Platform.OS === 'android' ? false : undefined,
                 },
-                trigger: null, // Mostrar imediatamente
-                ...(Platform.OS === 'android' && {
-                    android: {
-                        channelId: 'ride_status',
-                        priority: Notifications.AndroidNotificationPriority.HIGH,
-                        sticky: true, // ✅ PERSISTENTE - não pode ser removida
-                        ongoing: true, // ✅ ONGOING - sempre visível
-                        autoCancel: false, // Não cancela automaticamente
-                        onlyAlertOnce: false, // Permite atualizações
-                        categoryId: 'RIDE_STATUS',
-                    },
-                }),
+                trigger: Platform.OS === 'android' ? { channelId: 'ride_status' } : null,
             });
 
             this.currentNotificationId = notificationId;
@@ -246,7 +242,11 @@ class PersistentRideNotificationService {
                 customerName,
                 estimatedTime,
                 distance,
-                fare
+                fare,
+                customTitle,
+                customBody,
+                notificationCategoryId,
+                notificationDataType
             } = rideData;
 
             const { title, body } = this.generateNotificationContent({
@@ -266,10 +266,10 @@ class PersistentRideNotificationService {
 
             const notificationId = await Notifications.scheduleNotificationAsync({
                 content: {
-                    title,
-                    body,
+                    title: customTitle || title,
+                    body: customBody || body,
                     data: {
-                        type: 'ride_status',
+                        type: notificationDataType || 'ride_status',
                         bookingId,
                         status,
                         userType,
@@ -277,19 +277,11 @@ class PersistentRideNotificationService {
                     },
                     sound: false,
                     priority: Notifications.AndroidNotificationPriority.HIGH,
+                    categoryIdentifier: notificationCategoryId || undefined,
+                    sticky: Platform.OS === 'android',
+                    autoDismiss: Platform.OS === 'android' ? false : undefined,
                 },
-                trigger: null,
-                ...(Platform.OS === 'android' && {
-                    android: {
-                        channelId: 'ride_status',
-                        priority: Notifications.AndroidNotificationPriority.HIGH,
-                        sticky: true,
-                        ongoing: true,
-                        autoCancel: false,
-                        onlyAlertOnce: false,
-                        notificationId: this.currentNotificationId, // ✅ Usar mesmo ID para atualizar
-                    },
-                }),
+                trigger: Platform.OS === 'android' ? { channelId: 'ride_status' } : null,
             });
 
             this.currentNotificationId = notificationId;
@@ -454,4 +446,3 @@ class PersistentRideNotificationService {
 // Exportar instância singleton
 const persistentRideNotificationService = new PersistentRideNotificationService();
 export default persistentRideNotificationService;
-

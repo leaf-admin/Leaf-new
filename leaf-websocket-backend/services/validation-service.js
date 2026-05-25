@@ -308,6 +308,29 @@ class ValidationService {
           lat: parseFloat(value.lat),
           lng: parseFloat(value.lng)
         };
+
+        const sanitizedAddress = this.sanitizeString(
+          typeof value.address === 'string' ? value.address : '',
+          { trim: true, removeHtml: true, escapeHtml: true }
+        );
+        const sanitizedAdd = this.sanitizeString(
+          typeof value.add === 'string' ? value.add : '',
+          { trim: true, removeHtml: true, escapeHtml: true }
+        );
+        const sanitizedName = this.sanitizeString(
+          typeof value.name === 'string' ? value.name : '',
+          { trim: true, removeHtml: true, escapeHtml: true }
+        );
+
+        if (sanitizedAddress) {
+          sanitized[field].address = sanitizedAddress;
+        }
+        if (sanitizedAdd) {
+          sanitized[field].add = sanitizedAdd;
+        }
+        if (sanitizedName) {
+          sanitized[field].name = sanitizedName;
+        }
         continue;
       }
       
@@ -424,6 +447,36 @@ class ValidationService {
           max: this.limits.fare.max,
           label: 'Valor estimado'
         },
+        routeDistanceKm: {
+          type: 'number',
+          required: false,
+          min: this.limits.distance.min,
+          max: this.limits.distance.max,
+          label: 'Distância da rota em km'
+        },
+        routeDurationSecs: {
+          type: 'number',
+          required: false,
+          min: 0,
+          max: 60 * 60 * 24 * 3, // 72h (limite de segurança)
+          label: 'Duração da rota em segundos'
+        },
+        tollFee: {
+          type: 'number',
+          required: false,
+          min: 0,
+          max: this.limits.fare.max,
+          label: 'Valor de pedágio'
+        },
+        carType: {
+          type: 'string',
+          required: false,
+          min: 1,
+          max: 80,
+          pattern: 'alphanumericWithSpaces',
+          label: 'Categoria do veículo',
+          sanitize: { trim: true, removeHtml: true, escapeHtml: true }
+        },
         paymentMethod: {
           type: 'string',
           required: false,
@@ -432,6 +485,64 @@ class ValidationService {
           pattern: 'alphanumeric',
           label: 'Método de pagamento',
           sanitize: { trim: true, removeHtml: true, escapeHtml: true }
+        },
+        paymentStatus: {
+          type: 'string',
+          required: false,
+          min: 1,
+          max: 50,
+          label: 'Status do pagamento',
+          sanitize: { trim: true, removeHtml: true, escapeHtml: true }
+        },
+        paymentId: {
+          type: 'string',
+          required: false,
+          min: 1,
+          max: 200,
+          label: 'ID do pagamento'
+        },
+        paymentData: {
+          type: 'object',
+          required: false,
+          label: 'Metadados do pagamento',
+          schema: {
+            chargeId: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 200,
+              label: 'Charge ID'
+            },
+            rideId: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 200,
+              label: 'Ride ID do pagamento'
+            },
+            amountInCents: {
+              type: 'number',
+              required: false,
+              min: 0,
+              max: this.limits.fare.max * 100,
+              label: 'Valor do pagamento em centavos'
+            },
+            paymentStatus: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 50,
+              label: 'Status do pagamento',
+              sanitize: { trim: true, removeHtml: true, escapeHtml: true }
+            },
+            confirmedAt: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 80,
+              label: 'Timestamp de confirmação'
+            }
+          }
         }
       },
       
@@ -635,4 +746,3 @@ class ValidationService {
 }
 
 module.exports = new ValidationService();
-

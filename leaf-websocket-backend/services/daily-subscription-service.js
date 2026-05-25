@@ -1,52 +1,66 @@
 /**
  * DAILY SUBSCRIPTION SERVICE
  *
- * Cobrança pró-rata diária com ciclo semanal:
- * - Leaf Plus: R$ 49,90/semana
- * - Leaf Elite: R$ 99,90/semana
- *
- * Regras:
- * - Debita diariamente (pró-rata) para evitar cobrança pesada no fim da semana.
- * - Se não conseguir debitar, entra em GRACE PERIOD de 3 dias.
- * - Após o grace period sem regularização, motorista fica bloqueado para ficar online.
- * - Durante grace period, parte da dívida pode ser abatida via retenção de corridas (PaymentService).
+ * Modelo vigente:
+ * - Cobrança diária de R$ 9,90.
+ * - Valor acumula como pendência diária.
+ * - Liquidação da pendência ocorre no saque (PaymentService).
+ * - Suspensa por padrão até estabilização regional.
  */
 
 const { logger } = require('../utils/logger');
 const firebaseConfig = require('../firebase-config');
-const admin = require('firebase-admin');
+const subscriptionStateService = require('./subscription-state-service');
 
 class DailySubscriptionService {
   constructor() {
-    this.WEEKLY_FEE_PLUS_CENTS = 4990;
-    this.WEEKLY_FEE_ELITE_CENTS = 9990;
+    this.BILLING_CONFIG_PATH =
+      String(process.env.SUBSCRIPTION_BILLING_CONFIG_PATH || 'subscription_billing/config').trim();
+    this.COLLECTION_MODE = 'withdrawal';
+    this.DAILY_BILLING_ENABLED =
+      String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
 
-    this.DAILY_FEE_PLUS_CENTS = Math.round(this.WEEKLY_FEE_PLUS_CENTS / 7);
-    this.DAILY_FEE_ELITE_CENTS = Math.round(this.WEEKLY_FEE_ELITE_CENTS / 7);
-
-    this.GRACE_PERIOD_DAYS = 3;
+    this.DEFAULT_PLUS_WAVE_1_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_WAVE_1_DAILY_CENTS, 990);
+    this.DEFAULT_PLUS_WAVE_2_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_WAVE_2_DAILY_CENTS, 990);
+    this.DEFAULT_PLUS_WAVE_3_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_WAVE_3_DAILY_CENTS, 990);
+    this.DEFAULT_PLUS_DAILY_CENTS = this.parseCents(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS, 990);
+    this.DEFAULT_ELITE_DAILY_CENTS = this.parseCents(process.env.SUBSCRIPTION_ELITE_DAILY_CENTS, 0);
 
     logger.info('DailySubscriptionService inicializado', {
-      weeklyPlusCents: this.WEEKLY_FEE_PLUS_CENTS,
-      weeklyEliteCents: this.WEEKLY_FEE_ELITE_CENTS,
-      dailyPlusCents: this.DAILY_FEE_PLUS_CENTS,
-      dailyEliteCents: this.DAILY_FEE_ELITE_CENTS,
-      graceDays: this.GRACE_PERIOD_DAYS
+      billingConfigPath: this.BILLING_CONFIG_PATH,
+      collectionMode: this.COLLECTION_MODE,
+      dailyBillingEnabled: this.DAILY_BILLING_ENABLED,
+      defaults: {
+        plusWave1Cents: this.DEFAULT_PLUS_WAVE_1_CENTS,
+        plusWave2Cents: this.DEFAULT_PLUS_WAVE_2_CENTS,
+        plusWave3Cents: this.DEFAULT_PLUS_WAVE_3_CENTS,
+        plusDefaultCents: this.DEFAULT_PLUS_DAILY_CENTS,
+        eliteDefaultCents: this.DEFAULT_ELITE_DAILY_CENTS
+      }
     });
   }
 
+  parseCents(value, fallback = 0) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
   toReais(cents) {
-    return Number((cents / 100).toFixed(2));
+    return Number((Number(cents || 0) / 100).toFixed(2));
   }
 
   nowIso() {
     return new Date().toISOString();
   }
 
+  getDayKey(date = new Date()) {
+    return new Date(date).toISOString().slice(0, 10);
+  }
+
   getWeekStartSunday(date = new Date()) {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
-    const day = d.getDay(); // 0 = domingo
+    const day = d.getDay();
     d.setDate(d.getDate() - day);
     return d;
   }
@@ -59,8 +73,135 @@ class DailySubscriptionService {
     return `${y}-${m}-${d}`;
   }
 
-  resolvePlanType(driverData = {}) {
-    const explicit = String(driverData.planType || driverData.subscription?.planType || '').toLowerCase();
+  getDefaultBillingConfig() {
+    return {
+      collectionMode: this.COLLECTION_MODE,
+      plans: {
+        plus: {
+          defaultDailyFeeCents: this.DEFAULT_PLUS_DAILY_CENTS,
+          waves: {
+            wave_1: { dailyFeeCents: this.DEFAULT_PLUS_WAVE_1_CENTS },
+            wave_2: { dailyFeeCents: this.DEFAULT_PLUS_WAVE_2_CENTS },
+            wave_3: { dailyFeeCents: this.DEFAULT_PLUS_WAVE_3_CENTS }
+          }
+        },
+        elite: {
+          defaultDailyFeeCents: this.DEFAULT_ELITE_DAILY_CENTS,
+          waves: {}
+        }
+      }
+    };
+  }
+
+  normalizeWaveId(rawValue) {
+    if (!rawValue && rawValue !== 0) return null;
+    const raw = String(rawValue).trim().toLowerCase();
+    if (!raw) return null;
+
+    const digitsOnly = raw.match(/^\d+$/);
+    if (digitsOnly) {
+      return `wave_${digitsOnly[0]}`;
+    }
+
+    const normalized = raw
+      .replace(/-/g, '_')
+      .replace(/\s+/g, '_')
+      .replace(/^onda_/, 'wave_')
+      .replace(/^onda/, 'wave_')
+      .replace(/^wave/, 'wave_')
+      .replace(/__+/g, '_');
+
+    return normalized;
+  }
+
+  normalizeWaveConfigEntry(rawValue, fallbackDailyFeeCents) {
+    if (rawValue === null || rawValue === undefined) {
+      return { dailyFeeCents: fallbackDailyFeeCents };
+    }
+
+    if (typeof rawValue === 'number' || typeof rawValue === 'string') {
+      return { dailyFeeCents: this.parseCents(rawValue, fallbackDailyFeeCents) };
+    }
+
+    const entry = {};
+    entry.dailyFeeCents = this.parseCents(rawValue.dailyFeeCents, fallbackDailyFeeCents);
+    if (rawValue.feeExemptUntil) entry.feeExemptUntil = String(rawValue.feeExemptUntil);
+    if (rawValue.exemptUntil) entry.feeExemptUntil = String(rawValue.exemptUntil);
+    if (rawValue.isFeeExempt === true || rawValue.feeExempt === true) entry.isFeeExempt = true;
+    return entry;
+  }
+
+  mergeBillingConfig(rawConfig = {}) {
+    const defaults = this.getDefaultBillingConfig();
+    const merged = JSON.parse(JSON.stringify(defaults));
+
+    if (!rawConfig || typeof rawConfig !== 'object') {
+      return merged;
+    }
+
+    const configuredCollectionMode = String(rawConfig.collectionMode || rawConfig.billingCollectionMode || '').toLowerCase();
+    if (configuredCollectionMode === 'withdrawal' || configuredCollectionMode === 'balance') {
+      merged.collectionMode = configuredCollectionMode;
+    }
+
+    const sourcePlans = rawConfig.plans && typeof rawConfig.plans === 'object'
+      ? rawConfig.plans
+      : rawConfig;
+
+    for (const planType of ['plus', 'elite']) {
+      const sourcePlan = sourcePlans[planType];
+      if (!sourcePlan || typeof sourcePlan !== 'object') continue;
+
+      const fallbackPlan = merged.plans[planType];
+      fallbackPlan.defaultDailyFeeCents = this.parseCents(
+        sourcePlan.defaultDailyFeeCents ?? sourcePlan.dailyFeeCents,
+        fallbackPlan.defaultDailyFeeCents
+      );
+
+      const sourceWaves = sourcePlan.waves && typeof sourcePlan.waves === 'object'
+        ? sourcePlan.waves
+        : {};
+
+      for (const [waveKey, waveValue] of Object.entries(sourceWaves)) {
+        const normalizedWave = this.normalizeWaveId(waveKey);
+        if (!normalizedWave) continue;
+        fallbackPlan.waves[normalizedWave] = this.normalizeWaveConfigEntry(
+          waveValue,
+          fallbackPlan.defaultDailyFeeCents
+        );
+      }
+    }
+
+    return merged;
+  }
+
+  async loadBillingConfig(db) {
+    const fallback = this.getDefaultBillingConfig();
+    if (!db) {
+      return fallback;
+    }
+
+    try {
+      const configSnapshot = await db.ref(this.BILLING_CONFIG_PATH).once('value');
+      const config = configSnapshot.val() || {};
+      return this.mergeBillingConfig(config);
+    } catch (error) {
+      logger.warn('Falha ao carregar config de billing, usando padrão', {
+        error: error.message,
+        path: this.BILLING_CONFIG_PATH
+      });
+      return fallback;
+    }
+  }
+
+  resolvePlanType(driverData = {}, subscriptionData = {}) {
+    const explicit = String(
+      subscriptionData.planType ||
+      driverData.planType ||
+      driverData.subscription?.planType ||
+      ''
+    ).toLowerCase();
+
     if (explicit === 'elite') return 'elite';
     if (explicit === 'plus') return 'plus';
 
@@ -71,29 +212,66 @@ class DailySubscriptionService {
     return 'plus';
   }
 
-  getDailyFeeCents(planType) {
-    return planType === 'elite' ? this.DAILY_FEE_ELITE_CENTS : this.DAILY_FEE_PLUS_CENTS;
+  resolveWaveId(driverData = {}, subscriptionData = {}) {
+    const candidates = [
+      subscriptionData.waveId,
+      subscriptionData.waveTag,
+      subscriptionData.subscriptionWave,
+      subscriptionData.subscriptionWaveId,
+      subscriptionData.driverWave,
+      driverData.waveId,
+      driverData.waveTag,
+      driverData.subscriptionWave,
+      driverData.subscriptionWaveId,
+      driverData.driverWave
+    ];
+
+    for (const candidate of candidates) {
+      const normalized = this.normalizeWaveId(candidate);
+      if (normalized) return normalized;
+    }
+
+    return null;
   }
 
-  getWeeklyFeeCents(planType) {
-    return planType === 'elite' ? this.WEEKLY_FEE_ELITE_CENTS : this.WEEKLY_FEE_PLUS_CENTS;
+  resolveWaveConfig(planConfig = {}, waveId = null) {
+    if (!planConfig || !planConfig.waves) return null;
+    if (!waveId) return null;
+
+    const direct = planConfig.waves[waveId];
+    if (direct) return direct;
+
+    const compact = waveId.replace(/^wave_/, 'wave');
+    if (planConfig.waves[compact]) return planConfig.waves[compact];
+
+    const numeric = waveId.match(/^wave_(\d+)$/);
+    if (numeric) {
+      const n = numeric[1];
+      return planConfig.waves[`wave_${n}`] || planConfig.waves[`wave${n}`] || null;
+    }
+
+    return null;
   }
 
-  isInFreePeriod(driverData = {}) {
-    const now = new Date();
+  parseDate(value) {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
 
-    const freeTrialEnd = driverData.free_trial_end ? new Date(driverData.free_trial_end) : null;
+  isInFreePeriod(driverData = {}, now = new Date()) {
+    const freeTrialEnd = this.parseDate(driverData.free_trial_end);
     if (driverData.is_first_500 === true && freeTrialEnd && now < freeTrialEnd) {
       return true;
     }
 
-    const freeMonthsRemaining = driverData.free_months || 0;
-    const freeMonthsEnd = driverData.free_months_end ? new Date(driverData.free_months_end) : null;
+    const freeMonthsRemaining = Number(driverData.free_months || 0);
+    const freeMonthsEnd = this.parseDate(driverData.free_months_end);
     if (freeMonthsRemaining > 0 && freeMonthsEnd && now < freeMonthsEnd) {
       return true;
     }
 
-    const promotionFreeEnd = driverData.promotion_free_end ? new Date(driverData.promotion_free_end) : null;
+    const promotionFreeEnd = this.parseDate(driverData.promotion_free_end);
     if (promotionFreeEnd && now < promotionFreeEnd) {
       return true;
     }
@@ -101,252 +279,285 @@ class DailySubscriptionService {
     return false;
   }
 
-  async debitDriverBalanceCents(driverId, amountCents) {
-    try {
-      const firestore = firebaseConfig.getFirestore();
-      if (!firestore) {
-        return { success: false, error: 'Firestore não disponível' };
-      }
-
-      const balanceRef = firestore.collection('driver_balances').doc(driverId);
-
-      const txResult = await firestore.runTransaction(async (transaction) => {
-        const balanceDoc = await transaction.get(balanceRef);
-        const currentBalanceCents = Math.round(Number((balanceDoc.data()?.balance || 0) * 100));
-
-        if (currentBalanceCents < amountCents) {
-          return {
-            success: false,
-            error: 'Saldo insuficiente',
-            currentBalanceCents,
-            requiredAmountCents: amountCents,
-            shortfallCents: amountCents - currentBalanceCents
-          };
-        }
-
-        const newBalanceCents = currentBalanceCents - amountCents;
-        const newBalance = this.toReais(newBalanceCents);
-        const previousBalance = this.toReais(currentBalanceCents);
-
-        transaction.set(balanceRef, {
-          driverId,
-          balance: newBalance,
-          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-          lastDebitAmount: this.toReais(amountCents),
-          lastDebitType: 'daily_subscription_prorata'
-        }, { merge: true });
-
-        return {
-          success: true,
-          previousBalance,
-          newBalance,
-          previousBalanceCents: currentBalanceCents,
-          newBalanceCents
-        };
-      });
-
-      if (txResult.success) {
-        const historyRef = firestore
-          .collection('driver_balances')
-          .doc(driverId)
-          .collection('transactions')
-          .doc();
-
-        await historyRef.set({
-          type: 'debit',
-          amount: -this.toReais(amountCents),
-          amountInCents: -amountCents,
-          description: 'Cobrança diária pró-rata de assinatura',
-          subscriptionType: 'daily_prorata',
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          previousBalance: txResult.previousBalance,
-          newBalance: txResult.newBalance
-        });
-      }
-
-      return txResult;
-    } catch (error) {
-      logger.error(`Erro ao debitar saldo do motorista ${driverId}`, { error: error.message });
-      return { success: false, error: error.message || 'Erro interno do servidor' };
+  isInManualExemption(driverData = {}, subscriptionData = {}, waveConfig = {}, now = new Date()) {
+    if (subscriptionData.isFeeExempt === true || subscriptionData.feeExempt === true) {
+      return { active: true, reason: 'driver_manual_exempt' };
     }
+
+    if (driverData.subscription_fee_exempt === true || driverData.subscriptionFeeExempt === true) {
+      return { active: true, reason: 'driver_profile_exempt' };
+    }
+
+    if (waveConfig?.isFeeExempt === true) {
+      return { active: true, reason: 'wave_config_exempt' };
+    }
+
+    const exemptionCandidates = [
+      subscriptionData.feeExemptUntil,
+      subscriptionData.exemptUntil,
+      driverData.subscription_fee_exempt_until,
+      driverData.subscriptionFeeExemptUntil,
+      waveConfig?.feeExemptUntil
+    ];
+
+    for (const candidate of exemptionCandidates) {
+      const endAt = this.parseDate(candidate);
+      if (endAt && now < endAt) {
+        return { active: true, reason: 'exempt_until', endsAt: endAt.toISOString() };
+      }
+    }
+
+    return { active: false, reason: null, endsAt: null };
+  }
+
+  resolveDailyFeePolicy({
+    planType,
+    driverData = {},
+    subscriptionData = {},
+    billingConfig = null,
+    now = new Date()
+  }) {
+    const config = billingConfig || this.getDefaultBillingConfig();
+    const normalizedPlanType = planType === 'elite' ? 'elite' : 'plus';
+    const planConfig = config?.plans?.[normalizedPlanType] || this.getDefaultBillingConfig().plans[normalizedPlanType];
+    const waveId = this.resolveWaveId(driverData, subscriptionData) || (normalizedPlanType === 'plus' ? 'wave_3' : null);
+    const waveConfig = this.resolveWaveConfig(planConfig, waveId);
+
+    const overrideDailyFeeCents = this.parseCents(
+      subscriptionData.dailyFeeOverrideCents ??
+      subscriptionData.dailyFeeCentsOverride ??
+      driverData.daily_fee_override_cents ??
+      driverData.subscription_daily_fee_override_cents,
+      -1
+    );
+
+    const hasManualOverride = Number.isFinite(overrideDailyFeeCents) && overrideDailyFeeCents >= 0;
+
+    const dailyFeeCents = hasManualOverride
+      ? overrideDailyFeeCents
+      : this.parseCents(
+        waveConfig?.dailyFeeCents,
+        this.parseCents(planConfig?.defaultDailyFeeCents, 0)
+      );
+
+    const exemption = this.isInManualExemption(driverData, subscriptionData, waveConfig, now);
+
+    return {
+      planType: normalizedPlanType,
+      waveId,
+      dailyFeeCents,
+      weeklyFeeCents: dailyFeeCents * 7,
+      collectionMode: String(config?.collectionMode || this.COLLECTION_MODE).toLowerCase() === 'balance'
+        ? 'balance'
+        : this.COLLECTION_MODE,
+      isExempt: exemption.active,
+      exemptionReason: exemption.reason,
+      exemptionEndsAt: exemption.endsAt || null,
+      source: hasManualOverride
+        ? 'driver_override'
+        : (waveConfig ? 'wave_config' : 'plan_default')
+    };
   }
 
   async updateRealtimeSubscriptionAndBilling(driverId, updater) {
     const db = firebaseConfig.getRealtimeDB();
-    if (!db) {
-      return { success: false, error: 'Realtime DB não disponível' };
-    }
-
-    const subscriptionRef = db.ref(`subscriptions/${driverId}`);
-    const userRef = db.ref(`users/${driverId}`);
-
-    const result = await subscriptionRef.transaction((current) => {
-      const state = current || {};
-      const next = updater(state) || state;
-      return {
-        ...state,
-        ...next,
-        updatedAt: this.nowIso()
-      };
-    });
-
-    if (!result.committed) {
-      return { success: false, error: 'Falha ao atualizar assinatura' };
-    }
-
-    const subscription = result.snapshot.val() || {};
-    const status = subscription.status || 'active';
-    const billingStatus = status === 'blocked' ? 'suspended' : (status === 'grace_period' ? 'overdue' : 'active');
-
-    await userRef.update({
-      billing_status: billingStatus,
-      subscriptionStatus: status,
-      subscription_pending_fee_cents: Number(subscription.pendingFeeCents || 0),
-      subscription_grace_period_ends_at: subscription.gracePeriodEndsAt || null,
-      ...(billingStatus === 'suspended' ? { driverActiveStatus: false } : {})
-    });
-
-    return { success: true, subscription, billingStatus };
+    return subscriptionStateService.runTransaction(driverId, (state) => ({
+      ...state,
+      ...(updater({ ...(state || {}) }) || {}),
+      updatedAt: this.nowIso()
+    }), { db, syncReadModel: true });
   }
 
-  async processDailyCharge(driverId, driverData) {
+  async processDailyCharge(driverId, driverData, options = {}) {
     try {
-      const db = firebaseConfig.getRealtimeDB();
-      const currentSubscriptionSnapshot = db
-        ? await db.ref(`subscriptions/${driverId}`).once('value')
-        : { val: () => ({}) };
-      const currentSubscription = currentSubscriptionSnapshot.val() || {};
+      const db = options.db || firebaseConfig.getRealtimeDB();
+      const currentSubscription = options.currentSubscription || {};
+      const now = options.now || new Date();
+      const nowIso = now.toISOString();
 
       if (driverData.approved !== true) {
         return { success: true, skipped: true, reason: 'not_approved' };
       }
 
-      const planType = this.resolvePlanType(driverData);
-      const weeklyFeeCents = this.getWeeklyFeeCents(planType);
-      const dailyFeeCents = this.getDailyFeeCents(planType);
+      const billingConfig = options.billingConfig || await this.loadBillingConfig(db);
+      const planType = this.resolvePlanType(driverData, currentSubscription);
+      const policy = this.resolveDailyFeePolicy({
+        planType,
+        driverData,
+        subscriptionData: currentSubscription,
+        billingConfig,
+        now
+      });
 
-      if (this.isInFreePeriod(driverData)) {
-        await this.updateRealtimeSubscriptionAndBilling(driverId, (state) => ({
-          planType,
-          weeklyFeeCents,
-          dailyFeeCents,
-          weekKey: this.getWeekKey(),
-          status: 'active',
-          gracePeriodStartsAt: null,
-          gracePeriodEndsAt: null,
-          isInFreePeriod: true
-        }));
-
-        return { success: true, skipped: true, reason: 'free_period', planType };
-      }
-
-      const now = new Date();
-      const nowIso = this.nowIso();
-      const weekKey = this.getWeekKey(now);
-      const weekStartIso = this.getWeekStartSunday(now).toISOString();
-
-      const debitResult = await this.debitDriverBalanceCents(driverId, dailyFeeCents);
-
-      if (debitResult.success) {
-        let recoveredPendingCents = 0;
-        const currentPending = Number(currentSubscription.pendingFeeCents || 0);
-
-        // Se houver dívida pendente de assinatura, tenta regularizar imediatamente com saldo disponível.
-        if (currentPending > 0) {
-          const recoveryAttempt = await this.debitDriverBalanceCents(driverId, currentPending);
-          if (recoveryAttempt.success) {
-            recoveredPendingCents = currentPending;
-          } else if (String(recoveryAttempt.error || '').toLowerCase().includes('saldo insuficiente')) {
-            const available = Number(recoveryAttempt.currentBalanceCents || 0);
-            if (available > 0) {
-              const partialRecovery = await this.debitDriverBalanceCents(driverId, available);
-              if (partialRecovery.success) {
-                recoveredPendingCents = available;
-              }
-            }
-          }
-        }
-
+      if (!this.DAILY_BILLING_ENABLED) {
         const updateResult = await this.updateRealtimeSubscriptionAndBilling(driverId, (state) => {
-          const currentWeekKey = state.weekKey;
-          const resetCycle = currentWeekKey !== weekKey;
-
-          const cycleDebitedCents = Number(resetCycle ? 0 : (state.cycleDebitedCents || 0)) + dailyFeeCents;
-          const pendingFeeCents = Number(state.pendingFeeCents || 0);
-          const nextPending = Math.max(0, pendingFeeCents - recoveredPendingCents);
+          const pending = Number(state.pendingFeeCents || 0);
+          const existingStatus = String(state.status || '').toLowerCase();
+          const keepSuspended = ['blocked', 'cancelled', 'suspended'].includes(existingStatus);
+          const status = keepSuspended ? existingStatus : 'active';
+          const billingStatus = status === 'active'
+            ? (pending > 0 ? 'overdue' : 'active')
+            : 'suspended';
 
           return {
-            planType,
-            weeklyFeeCents,
-            dailyFeeCents,
-            weekKey,
-            weekStartAt: weekStartIso,
-            cycleDebitedCents,
-            status: nextPending > 0 ? (state.status === 'blocked' ? 'blocked' : 'grace_period') : 'active',
-            gracePeriodStartsAt: nextPending > 0 ? (state.gracePeriodStartsAt || nowIso) : null,
-            gracePeriodEndsAt: nextPending > 0 ? (state.gracePeriodEndsAt || new Date(now.getTime() + (this.GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000)).toISOString()) : null,
-            pendingFeeCents: nextPending,
+            planType: policy.planType,
+            waveId: policy.waveId || null,
+            weeklyFeeCents: policy.weeklyFeeCents,
+            dailyFeeCents: policy.dailyFeeCents,
+            collectionMode: policy.collectionMode,
+            status,
+            billingStatus,
+            dailyBillingEnabled: false,
+            subscriptionDailyBillingSuspended: true,
             isInFreePeriod: false,
+            isInManualExemption: false,
             lastChargeAt: nowIso,
-            lastChargeStatus: 'paid',
-            lastChargeAmountCents: dailyFeeCents
+            lastChargeStatus: 'skipped_daily_billing_suspended',
+            lastChargeAmountCents: 0
           };
         });
+
+        if (!updateResult.success) {
+          return {
+            success: false,
+            error: updateResult.error || 'Falha ao atualizar assinatura'
+          };
+        }
 
         return {
           success: true,
-            planType,
-            dailyFeeCents,
-            dailyFee: this.toReais(dailyFeeCents),
-            recoveredPendingCents,
-            previousBalance: debitResult.previousBalance,
-            newBalance: debitResult.newBalance,
-            subscription: updateResult.subscription
+          skipped: true,
+          reason: 'daily_billing_suspended',
+          planType: policy.planType,
+          waveId: policy.waveId,
+          dailyFeeCents: policy.dailyFeeCents,
+          pendingFeeCents: 0,
+          rawPendingFeeCents: updateResult.subscription?.pendingFeeCents || 0
         };
       }
 
-      if (String(debitResult.error || '').toLowerCase().includes('saldo insuficiente')) {
-        const updateResult = await this.updateRealtimeSubscriptionAndBilling(driverId, (state) => {
-          const graceStart = state.gracePeriodStartsAt ? new Date(state.gracePeriodStartsAt) : now;
-          const graceEnd = state.gracePeriodEndsAt
-            ? new Date(state.gracePeriodEndsAt)
-            : new Date(graceStart.getTime() + (this.GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000));
+      const isFreePeriod = this.isInFreePeriod(driverData, now);
+      if (isFreePeriod || policy.isExempt || policy.dailyFeeCents <= 0) {
+        const skippedReason = isFreePeriod
+          ? 'free_period'
+          : (policy.isExempt ? 'manual_exemption' : 'no_fee_configured');
 
-          const newPending = Number(state.pendingFeeCents || 0) + dailyFeeCents;
-          const isBlocked = now > graceEnd;
+        const updateResult = await this.updateRealtimeSubscriptionAndBilling(driverId, (state) => {
+          const pending = Number(state.pendingFeeCents || 0);
+          const existingStatus = String(state.status || '').toLowerCase();
+          const keepSuspended = ['blocked', 'cancelled', 'suspended'].includes(existingStatus);
+          const status = keepSuspended ? existingStatus : 'active';
+          const billingStatus = status === 'active'
+            ? (pending > 0 ? 'overdue' : 'active')
+            : 'suspended';
 
           return {
-            planType,
-            weeklyFeeCents,
-            dailyFeeCents,
-            weekKey,
-            weekStartAt: weekStartIso,
-            status: isBlocked ? 'blocked' : 'grace_period',
-            gracePeriodStartsAt: state.gracePeriodStartsAt || nowIso,
-            gracePeriodEndsAt: graceEnd.toISOString(),
-            pendingFeeCents: newPending,
-            isInFreePeriod: false,
+            planType: policy.planType,
+            waveId: policy.waveId || null,
+            weeklyFeeCents: policy.weeklyFeeCents,
+            dailyFeeCents: policy.dailyFeeCents,
+            collectionMode: policy.collectionMode,
+            status,
+            billingStatus,
+            isInFreePeriod: isFreePeriod,
+            isInManualExemption: policy.isExempt,
+            feeExemptReason: policy.exemptionReason || null,
+            feeExemptUntil: policy.exemptionEndsAt || state.feeExemptUntil || null,
             lastChargeAt: nowIso,
-            lastChargeStatus: 'failed_insufficient_balance',
-            lastChargeAmountCents: dailyFeeCents
+            lastChargeStatus: `skipped_${skippedReason}`,
+            lastChargeAmountCents: 0
           };
         });
 
+        if (!updateResult.success) {
+          return {
+            success: false,
+            error: updateResult.error || 'Falha ao atualizar assinatura'
+          };
+        }
+
+        return {
+          success: true,
+          skipped: true,
+          reason: skippedReason,
+          planType: policy.planType,
+          waveId: policy.waveId,
+          dailyFeeCents: policy.dailyFeeCents,
+          pendingFeeCents: updateResult.subscription?.pendingFeeCents || 0
+        };
+      }
+
+      const chargeDateKey = this.getDayKey(now);
+      let alreadyChargedToday = false;
+
+      const updateResult = await this.updateRealtimeSubscriptionAndBilling(driverId, (state) => {
+        if (String(state.lastChargeDateKey || '') === chargeDateKey) {
+          alreadyChargedToday = true;
+          return {
+            planType: policy.planType,
+            waveId: policy.waveId || null,
+            weeklyFeeCents: policy.weeklyFeeCents,
+            dailyFeeCents: policy.dailyFeeCents,
+            collectionMode: policy.collectionMode,
+            isInFreePeriod: false,
+            isInManualExemption: false
+          };
+        }
+
+        const pending = Number(state.pendingFeeCents || 0);
+        const nextPending = Math.max(0, pending + policy.dailyFeeCents);
+        const existingStatus = String(state.status || '').toLowerCase();
+        const keepSuspended = ['blocked', 'cancelled', 'suspended'].includes(existingStatus);
+        const status = keepSuspended ? existingStatus : 'active';
+        const billingStatus = status === 'active'
+          ? (nextPending > 0 ? 'overdue' : 'active')
+          : 'suspended';
+
+        return {
+          planType: policy.planType,
+          waveId: policy.waveId || null,
+          weeklyFeeCents: policy.weeklyFeeCents,
+          dailyFeeCents: policy.dailyFeeCents,
+          collectionMode: policy.collectionMode,
+          status,
+          billingStatus,
+          pendingFeeCents: nextPending,
+          isInFreePeriod: false,
+          isInManualExemption: false,
+          lastChargeAt: nowIso,
+          lastChargeStatus: 'accrued_pending_withdrawal',
+          lastChargeAmountCents: policy.dailyFeeCents,
+          lastChargeDateKey: chargeDateKey,
+          lastChargeSource: policy.source
+        };
+      });
+
+      if (!updateResult.success) {
         return {
           success: false,
-          error: 'Saldo insuficiente',
-          planType,
-          dailyFeeCents,
-          dailyFee: this.toReais(dailyFeeCents),
-          status: updateResult.subscription?.status,
-          pendingFeeCents: updateResult.subscription?.pendingFeeCents || 0,
-          gracePeriodEndsAt: updateResult.subscription?.gracePeriodEndsAt || null
+          error: updateResult.error || 'Falha ao atualizar assinatura'
+        };
+      }
+
+      if (alreadyChargedToday) {
+        return {
+          success: true,
+          skipped: true,
+          reason: 'already_charged_today',
+          planType: policy.planType,
+          waveId: policy.waveId,
+          pendingFeeCents: updateResult.subscription?.pendingFeeCents || 0
         };
       }
 
       return {
-        success: false,
-        error: debitResult.error || 'Erro ao debitar assinatura diária'
+        success: true,
+        planType: policy.planType,
+        waveId: policy.waveId,
+        dailyFeeCents: policy.dailyFeeCents,
+        dailyFee: this.toReais(policy.dailyFeeCents),
+        pendingFeeCents: updateResult.subscription?.pendingFeeCents || 0,
+        subscription: updateResult.subscription
       };
     } catch (error) {
       logger.error(`Erro ao processar cobrança diária para ${driverId}`, { error: error.message });
@@ -356,21 +567,43 @@ class DailySubscriptionService {
 
   async processAllDailyCharges() {
     try {
+      if (!this.DAILY_BILLING_ENABLED) {
+        logger.info('Cobrança diária de assinatura suspensa por configuração', {
+          service: 'daily-subscription',
+          reason: 'SUBSCRIPTION_DAILY_BILLING_ENABLED=false'
+        });
+        return {
+          success: true,
+          total: 0,
+          processed: 0,
+          skipped: 0,
+          failed: 0,
+          overdue: 0,
+          reason: 'daily_billing_suspended',
+          details: []
+        };
+      }
+
       const db = firebaseConfig.getRealtimeDB();
       if (!db) {
         return { success: false, error: 'Realtime DB não disponível' };
       }
 
-      const usersSnapshot = await db.ref('users').once('value');
+      const [usersSnapshot, subscriptionsSnapshot, billingConfig] = await Promise.all([
+        db.ref('users').once('value'),
+        db.ref('subscriptions').once('value'),
+        this.loadBillingConfig(db)
+      ]);
+
       const users = usersSnapshot.val() || {};
+      const subscriptions = subscriptionsSnapshot.val() || {};
 
       const results = {
         total: 0,
         processed: 0,
         skipped: 0,
         failed: 0,
-        blocked: 0,
-        gracePeriod: 0,
+        overdue: 0,
         details: []
       };
 
@@ -378,7 +611,11 @@ class DailySubscriptionService {
         if (driverData.usertype !== 'driver') continue;
 
         results.total += 1;
-        const chargeResult = await this.processDailyCharge(driverId, driverData);
+        const chargeResult = await this.processDailyCharge(driverId, driverData, {
+          db,
+          billingConfig,
+          currentSubscription: subscriptions[driverId] || {}
+        });
 
         if (chargeResult.success) {
           if (chargeResult.skipped) {
@@ -390,8 +627,9 @@ class DailySubscriptionService {
           results.failed += 1;
         }
 
-        if (chargeResult.status === 'blocked') results.blocked += 1;
-        if (chargeResult.status === 'grace_period') results.gracePeriod += 1;
+        if (Number(chargeResult.pendingFeeCents || 0) > 0) {
+          results.overdue += 1;
+        }
 
         results.details.push({ driverId, result: chargeResult });
       }
@@ -401,8 +639,7 @@ class DailySubscriptionService {
         processed: results.processed,
         skipped: results.skipped,
         failed: results.failed,
-        blocked: results.blocked,
-        gracePeriod: results.gracePeriod
+        overdue: results.overdue
       });
 
       return { success: true, ...results };

@@ -1,4 +1,5 @@
 import Logger from '../utils/Logger';
+import { getPilotFeatureFlagDefaults } from '../config/pilotLaunchProfile';
 /**
  * 🚩 Feature Flag Service
  * 
@@ -11,6 +12,9 @@ import Logger from '../utils/Logger';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const normalizeFlag = (value) => TRUTHY_VALUES.has(String(value ?? '').trim().toLowerCase());
+const forceLegacyMapUi = () => normalizeFlag(process.env.EXPO_PUBLIC_FORCE_LEGACY_MAP_UI);
 
 class FeatureFlagService {
   constructor() {
@@ -19,9 +23,16 @@ class FeatureFlagService {
     this.initialized = false;
     
     // 🚩 Feature Flags padrão
+    const pilotFeatureDefaults = getPilotFeatureFlagDefaults();
     this.defaultFlags = {
       // KYC (Know Your Customer)
       KYC_ENABLED: true,
+
+      // Protótipo UI/UX Robotaxi (agora é a interface principal do app)
+      PROTOTYPE_ROBOTAXI_UI_ENABLED: true,
+
+      // Perfil de lancamento do piloto controlado
+      ...pilotFeatureDefaults,
       
       // Adicione outras feature flags aqui conforme necessário
       // EXEMPLO:
@@ -48,7 +59,19 @@ class FeatureFlagService {
       
       if (storedFlags) {
         const parsedFlags = JSON.parse(storedFlags);
-        this.flags = new Map(Object.entries(parsedFlags));
+        const mergedFlags = {
+          ...this.defaultFlags,
+          ...parsedFlags
+        };
+
+        // A UI Robotaxi virou a trilha principal do app. Só permitimos cair na UI
+        // legada quando houver opt-out explícito de runtime.
+        if (!forceLegacyMapUi()) {
+          mergedFlags.PROTOTYPE_ROBOTAXI_UI_ENABLED = true;
+        }
+
+        this.flags = new Map(Object.entries(mergedFlags));
+        await this.saveFlags();
         Logger.log('✅ [FeatureFlags] Flags carregadas do cache:', Array.from(this.flags.entries()));
       } else {
         // Usar flags padrão
@@ -226,4 +249,3 @@ class FeatureFlagService {
 const featureFlagService = new FeatureFlagService();
 
 export default featureFlagService;
-

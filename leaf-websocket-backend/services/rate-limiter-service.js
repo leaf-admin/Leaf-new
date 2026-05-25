@@ -107,16 +107,16 @@ class RateLimiterService {
         }
       }
       
-      // Tentar conectar se não estiver conectado
-      try {
-        if (!redis.isOpen && redis.status !== 'ready' && redis.status !== 'connect') {
-          await redis.connect();
-        }
-        // Testar conexão com ping
-        await redis.ping();
-      } catch (connectError) {
+      // Caminho crítico de booking: não bloquear em handshake/ping de Redis.
+      // Se o cliente não estiver pronto, aplica fail-open imediatamente.
+      if (redis.status !== 'ready' && redis.status !== 'connect') {
         if (this.failOpen) {
-          logStructured('warn', 'Erro ao conectar Redis, permitindo requisição (fail-open)', { service: 'rate-limiter', endpoint, userId });
+          logStructured('warn', 'Redis não pronto no rate limiter, permitindo requisição (fail-open)', {
+            service: 'rate-limiter',
+            endpoint,
+            userId,
+            redisStatus: redis.status
+          });
           return {
             allowed: true,
             remaining: config.limit,
@@ -223,13 +223,7 @@ class RateLimiterService {
         };
       }
       
-      // Tentar conectar se não estiver conectado
-      try {
-        if (!redis.isOpen && redis.status !== 'ready' && redis.status !== 'connect') {
-          await redis.connect();
-        }
-        await redis.ping();
-      } catch (connectError) {
+      if (redis.status !== 'ready' && redis.status !== 'connect') {
         return {
           success: false,
           error: 'Redis não disponível'

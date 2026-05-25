@@ -2,21 +2,58 @@ import Logger from '../utils/Logger';
 import * as Location from 'expo-location';
 import { Platform, Alert, Linking, AppState } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
+import * as Device from 'expo-device';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Nome da task de background
 const LOCATION_TASK_NAME = 'background-location-task';
+const BACKGROUND_LOCATION_TIME_INTERVAL_MS = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_INTERVAL_MS || '2000', 10);
+const BACKGROUND_LOCATION_DISTANCE_INTERVAL_M = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_DISTANCE_M || '0', 10);
+const BACKGROUND_DISCLOSURE_ACCEPTED_KEY = 'has_shown_background_location_modal';
 
 // ✅ Registrar task de background (se ainda não estiver registrada)
 if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
-    TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }) => {
+    TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         if (error) {
-            Logger.error('❌ Erro na task de background:', error);
+            Logger.warn('⚠️ Erro na task de background:', error?.message || error);
             return;
         }
         if (data) {
             const { locations } = data;
-            // Logger.log('📍 Localização em background:', locations); // Desabilitado para reduzir spam
-            // Aqui você pode enviar para o servidor
+            if (!Array.isArray(locations) || locations.length === 0) {
+                return;
+            }
+
+            try {
+                const locationBufferService = require('./LocationBufferService').default;
+                const prototypeDriverTripAssistantService = require('./PrototypeDriverTripAssistantService').default;
+                for (const locationItem of locations) {
+                    const coords = locationItem?.coords || {};
+                    const lat = Number(coords.latitude);
+                    const lng = Number(coords.longitude);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                        continue;
+                    }
+
+                    await locationBufferService.addDriverLocationFromBackground({
+                        lat,
+                        lng,
+                        accuracy: Number.isFinite(Number(coords.accuracy)) ? Number(coords.accuracy) : null,
+                        heading: Number.isFinite(Number(coords.heading)) ? Number(coords.heading) : null,
+                        speed: Number.isFinite(Number(coords.speed)) ? Number(coords.speed) : null,
+                        timestamp: Number.isFinite(Number(locationItem?.timestamp))
+                            ? Number(locationItem.timestamp)
+                            : Date.now()
+                    });
+
+                    await prototypeDriverTripAssistantService.handleBackgroundLocationUpdate({
+                        lat,
+                        lng
+                    });
+                }
+            } catch (taskError) {
+                Logger.warn('⚠️ Falha ao bufferizar localização em background task:', taskError?.message || taskError);
+            }
         }
     });
 }
@@ -50,8 +87,19 @@ class BackgroundLocationService {
                 };
             }
 
-            // Solicitar permissão de background
+            // Solicitar permissão de background apenas após disclosure explícito no app
             let backgroundStatus = 'denied';
+            const hasAcceptedDisclosure =
+                (await AsyncStorage.getItem(BACKGROUND_DISCLOSURE_ACCEPTED_KEY)) === 'true';
+
+            if (!hasAcceptedDisclosure) {
+                Logger.warn('⚠️ Background location bloqueada até disclosure explícito do usuário');
+                return {
+                    foreground: foregroundStatus === 'granted',
+                    background: false
+                };
+            }
+
             if (Platform.OS === 'android') {
                 const { status } = await Location.requestBackgroundPermissionsAsync();
                 backgroundStatus = status;
@@ -115,6 +163,12 @@ class BackgroundLocationService {
                 return;
             }
 
+            if (Device.isDevice === false) {
+                Logger.log('📍 Emulador detectado, pulando tracking nativo de background');
+                this.isTracking = false;
+                return;
+            }
+
             const permissions = await this.checkPermissions();
             if (!permissions.foreground) {
                 throw new Error('Permissão de foreground não concedida');
@@ -128,8 +182,8 @@ class BackgroundLocationService {
             // Iniciar tracking de localização
             await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
                 accuracy: Location.Accuracy.Balanced,
-                timeInterval: 5000, // 5 segundos
-                distanceInterval: 10, // 10 metros
+                timeInterval: BACKGROUND_LOCATION_TIME_INTERVAL_MS,
+                distanceInterval: BACKGROUND_LOCATION_DISTANCE_INTERVAL_M,
                 foregroundService: {
                     notificationTitle: 'Leaf App',
                     notificationBody: 'Rastreando sua localização',
@@ -161,6 +215,11 @@ class BackgroundLocationService {
                 return;
             }
 
+            if (Device.isDevice === false) {
+                this.isTracking = false;
+                return;
+            }
+
             const isRunning = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
             if (isRunning) {
                 await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
@@ -169,6 +228,10 @@ class BackgroundLocationService {
             this.isTracking = false;
             Logger.log('✅ Tracking de background parado');
         } catch (error) {
+            this.isTracking = false;
+            if (Device.isDevice === false) {
+                return;
+            }
             Logger.error('❌ Erro ao parar tracking de background:', error);
         }
     }
@@ -259,4 +322,3 @@ class BackgroundLocationService {
 const instance = BackgroundLocationService.getInstance();
 export default instance;
 export { BackgroundLocationService };
-

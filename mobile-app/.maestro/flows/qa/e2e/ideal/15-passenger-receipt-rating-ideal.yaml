@@ -1,0 +1,57 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-trip-screen"
+    timeout: 240000
+
+- takeScreenshot: "ideal-passenger-08-trip-active"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-receipt-screen"
+    timeout: 240000
+
+- takeScreenshot: "ideal-passenger-09-receipt"
+
+- tapOn:
+    id: "passenger-receipt-rate-trip-button"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-rating-screen"
+    timeout: 30000
+
+- takeScreenshot: "ideal-passenger-10-rating"
+
+- tapOn:
+    id: "passenger-rating-air-conditioning-yes"
+- tapOn:
+    id: "passenger-rating-submit-button"
+
+- extendedWaitUntil:
+    visible: "Avaliação enviada"
+    timeout: 15000
+
+- tapOn: "OK"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-receipt-screen"
+    timeout: 60000
+
+- takeScreenshot: "ideal-passenger-11-rating-submitted"

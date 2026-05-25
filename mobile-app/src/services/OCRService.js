@@ -1,6 +1,6 @@
 import Logger from '../utils/Logger';
 import { getTextFromFrame } from 'expo-text-recognition';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { normalizeVehicleData } from './vehicle-catalog';
 
 

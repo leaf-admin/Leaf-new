@@ -8,9 +8,110 @@ import Logger from '../utils/Logger';
 import database from '@react-native-firebase/database';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiClient } from './httpClient';
 
 
 class UserAuthService {
+  static resolveNextActionFromPayload(data = {}) {
+    const rawNextAction = String(data?.nextAction || '').trim().toUpperCase();
+    const hasPasswordConfigured =
+      data?.hasPassword === true ||
+      String(data?.hasPassword || '').trim().toLowerCase() === 'true' ||
+      data?.passwordFallbackAvailable === true;
+
+    if (rawNextAction === 'PASSWORD_LOGIN') {
+      return hasPasswordConfigured ? 'PASSWORD_LOGIN' : 'OTP_REQUIRED';
+    }
+    if (rawNextAction === 'OTP_REQUIRED') {
+      return 'OTP_REQUIRED';
+    }
+
+    // Servidores legados podem responder `requiresPassword=true` sem senha configurada.
+    // Nessa situação forçamos OTP para evitar bloqueio indevido no login.
+    if (!hasPasswordConfigured) {
+      return 'OTP_REQUIRED';
+    }
+
+    // Compatibilidade com payload legado
+    if (Boolean(data?.requiresPassword)) {
+      return 'PASSWORD_LOGIN';
+    }
+    return 'OTP_REQUIRED';
+  }
+
+  static normalizePhone(phoneNumber) {
+    const digits = String(phoneNumber || '').replace(/\D/g, '');
+    if (!digits) return '';
+    return digits.startsWith('55') ? `+${digits}` : `+55${digits}`;
+  }
+
+  static async setupPassword(phoneNumber, password) {
+    const normalizedPhone = this.normalizePhone(phoneNumber);
+    const response = await apiClient.post('/api/auth/password/setup', {
+      phone: normalizedPhone,
+      password,
+      confirmPassword: password
+    });
+    return response?.data || { success: false };
+  }
+
+  static async postCustomOtpWithFallback(pathSuffix, payload) {
+    const endpoints = [
+      `/api/custom-otp/${pathSuffix}`,
+      `/custom-otp/${pathSuffix}`
+    ];
+
+    let lastError = null;
+
+    for (const endpoint of endpoints) {
+      try {
+        return await apiClient.post(endpoint, payload);
+      } catch (error) {
+        lastError = error;
+        if (error?.response?.status !== 404) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError || new Error(`Falha em ${pathSuffix}`);
+  }
+
+  static async resolvePhoneAuthFlow(phoneNumber) {
+    const normalizedPhone = this.normalizePhone(phoneNumber);
+    if (!normalizedPhone) {
+      throw new Error('Telefone inválido');
+    }
+
+    const response = await apiClient.post('/api/auth/password/resolve-phone', {
+      phone: normalizedPhone
+    });
+    const data = response?.data || {};
+    if (!data.success) {
+      throw new Error(data.error || 'Não foi possível validar o telefone');
+    }
+
+    const nextAction = this.resolveNextActionFromPayload(data);
+    const requiresPassword = nextAction === 'PASSWORD_LOGIN';
+    const passwordFallbackAvailable =
+      data.passwordFallbackAvailable === undefined
+        ? Boolean(data.hasPassword)
+        : Boolean(data.passwordFallbackAvailable);
+
+    return {
+      phoneNumber: normalizedPhone,
+      exists: Boolean(data.exists),
+      hasPassword: Boolean(data.hasPassword),
+      nextAction,
+      passwordFallbackAvailable,
+      requiresPassword,
+      requiresOtp: !requiresPassword,
+      uid: data.uid || null,
+      userType: data.userType || null,
+      source: data.source || null
+    };
+  }
+
   // ✅ Rate limiting: armazenar tentativas por telefone
   static async checkRateLimit(phoneNumber) {
     try {
@@ -87,47 +188,18 @@ class UserAuthService {
    */
   static async checkUserExistsByPhone(phoneNumber) {
     try {
-      Logger.log('🔍 Verificando se usuário existe:', phoneNumber);
-
-      // Normalizar número de telefone (remover espaços, caracteres especiais)
-      const normalizedPhone = phoneNumber.replace(/\D/g, '');
-
-      // Buscar no Realtime Database
-      // Estrutura: users/{uid}/mobile
-      const usersRef = database().ref('users');
-      const snapshot = await usersRef.once('value');
-
-      if (!snapshot.exists()) {
-        Logger.log('ℹ️ Nenhum usuário encontrado no banco');
+      Logger.log('🔍 Resolvendo existência de usuário via backend:', phoneNumber);
+      const resolution = await this.resolvePhoneAuthFlow(phoneNumber);
+      if (!resolution.exists) {
+        Logger.log('ℹ️ Usuário não encontrado para o telefone informado');
         return null;
       }
 
-      // Iterar sobre todos os usuários para encontrar pelo telefone
-      let foundUser = null;
-      snapshot.forEach((childSnapshot) => {
-        const userData = childSnapshot.val();
-        const userPhone = userData?.mobile || userData?.phoneNumber || '';
-        const userPhoneNormalized = userPhone.replace(/\D/g, '');
-
-        // Comparar números normalizados
-        if (userPhoneNormalized === normalizedPhone ||
-          userPhoneNormalized === normalizedPhone.replace(/^55/, '') ||
-          userPhoneNormalized.replace(/^55/, '') === normalizedPhone) {
-          foundUser = {
-            uid: childSnapshot.key,
-            ...userData
-          };
-          return true; // Parar iteração
-        }
-      });
-
-      if (foundUser) {
-        Logger.log('✅ Usuário encontrado:', foundUser.uid);
-        return foundUser;
-      }
-
-      Logger.log('ℹ️ Usuário não encontrado para o telefone:', phoneNumber);
-      return null;
+      return {
+        uid: resolution.uid,
+        userType: resolution.userType,
+        hasPassword: resolution.hasPassword
+      };
     } catch (error) {
       Logger.error('❌ Erro ao verificar usuário:', error);
       return null;
@@ -168,59 +240,29 @@ class UserAuthService {
       // Verificar rate limit
       await this.checkRateLimit(phoneNumber);
 
-      // Buscar usuário pelo telefone
-      const user = await this.checkUserExistsByPhone(phoneNumber);
-
-      if (!user) {
+      const response = await apiClient.post('/api/auth/password/login', {
+        phone: this.normalizePhone(phoneNumber),
+        password
+      });
+      const data = response?.data || {};
+      if (!data.success || !data.customToken) {
         await this.recordAttempt(phoneNumber, false);
-        throw new Error('Usuário não encontrado');
+        throw new Error(data.error || 'Senha incorreta');
       }
 
-      // Verificar se tem senha cadastrada
-      const hasPassword = await this.hasPassword(user.uid);
+      await auth().signInWithCustomToken(data.customToken);
+      await this.recordAttempt(phoneNumber, true);
 
-      if (!hasPassword) {
-        // Se não tem senha, tentar autenticar via Firebase Auth
-        // Usar email baseado no telefone: phone@leaf.com
-        const email = `${phoneNumber.replace(/\D/g, '')}@leaf.com`;
-
-        try {
-          await auth().signInWithEmailAndPassword(email, password);
-          await this.recordAttempt(phoneNumber, true);
-
-          // Obter dados atualizados do usuário
-          const currentUser = auth().currentUser;
-          return {
-            uid: currentUser.uid,
-            ...user,
-            phoneNumber: currentUser.phoneNumber || phoneNumber
-          };
-        } catch (authError) {
-          await this.recordAttempt(phoneNumber, false);
-          throw new Error('Senha incorreta');
-        }
-      } else {
-        // Se tem senha no banco, verificar hash (implementar se necessário)
-        // Por enquanto, usar Firebase Auth como fallback
-        const email = `${phoneNumber.replace(/\D/g, '')}@leaf.com`;
-
-        try {
-          await auth().signInWithEmailAndPassword(email, password);
-          await this.recordAttempt(phoneNumber, true);
-
-          const currentUser = auth().currentUser;
-          return {
-            uid: currentUser.uid,
-            ...user,
-            phoneNumber: currentUser.phoneNumber || phoneNumber
-          };
-        } catch (authError) {
-          await this.recordAttempt(phoneNumber, false);
-          throw new Error('Senha incorreta');
-        }
-      }
+      const currentUser = auth().currentUser;
+      return {
+        uid: currentUser?.uid || data.uid,
+        phoneNumber: currentUser?.phoneNumber || this.normalizePhone(phoneNumber),
+        usertype: data.userType || 'customer',
+        userType: data.userType || 'customer'
+      };
     } catch (error) {
       Logger.error('❌ Erro no login com senha:', error);
+      await this.recordAttempt(phoneNumber, false);
       throw error;
     }
   }
@@ -242,20 +284,8 @@ class UserAuthService {
         throw new Error('Usuário não encontrado');
       }
 
-      // Enviar OTP via API Customizada
-      const { api } = require('../common-local/api');
-      const response = await api.post('/custom-otp/request-otp', {
-        phone: phoneNumber
-      });
-
-      if (!response.data || !response.data.success) {
-        throw new Error('Falha ao enviar código OTP');
-      }
-
-      const confirmation = {
-        verificationId: response.data.verificationId,
-        isCustomOtp: true
-      };
+      // Fluxo principal via Firebase Phone Auth.
+      const confirmation = await auth().signInWithPhoneNumber(phoneNumber);
 
       // Registrar tentativa
       await this.recordAttempt(phoneNumber, false); // false porque ainda não resetou
@@ -280,32 +310,14 @@ class UserAuthService {
    */
   static async resetPassword(phoneNumber, verificationId, otp, newPassword) {
     try {
-      // Verificar OTP via API Customizada
-      const { api } = require('../common-local/api');
-      const response = await api.post('/custom-otp/verify-otp', {
-        phone: phoneNumber,
-        verificationId: verificationId,
-        otp: otp
-      });
-
-      if (!response.data || !response.data.success || !response.data.customToken) {
-        throw new Error('Código inválido ou expirado');
-      }
-
-      // Autenticar temporariamente via Custom Token
-      await auth().signInWithCustomToken(response.data.customToken);
+      // Verificar OTP via Firebase e autenticar temporariamente.
+      const credential = auth.PhoneAuthProvider.credential(verificationId, otp);
+      await auth().signInWithCredential(credential);
 
       // Atualizar senha
       const currentUser = auth().currentUser;
       if (currentUser) {
-        // Atualizar senha no Firebase Auth
-        await currentUser.updatePassword(newPassword);
-
-        // Marcar que tem senha no banco
-        await database().ref(`users/${currentUser.uid}`).update({
-          hasPassword: true,
-          passwordUpdatedAt: new Date().toISOString()
-        });
+        await this.setupPassword(phoneNumber, newPassword);
 
         // Registrar sucesso
         await this.recordAttempt(phoneNumber, true);
@@ -323,4 +335,3 @@ class UserAuthService {
 }
 
 export default UserAuthService;
-

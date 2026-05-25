@@ -13,7 +13,6 @@ import { GiftedChat, Bubble, InputToolbar, Composer, Send } from 'react-native-g
 import { Icon } from 'react-native-elements';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
 import WebSocketManager from '../services/WebSocketManager';
 
 
@@ -26,6 +25,7 @@ const ChatScreen = ({ navigation, route }) => {
   
   const auth = useSelector(state => state.auth);
   const currentUser = auth.profile;
+  const currentUserId = currentUser?.uid || currentUser?.id;
   const isDriver = currentUser?.userType === 'driver';
   const wsManager = WebSocketManager.getInstance();
 
@@ -45,6 +45,7 @@ const ChatScreen = ({ navigation, route }) => {
       
       // USAR NOVO EVENTO: createChat via WebSocket
       const chatData = await wsManager.createChat({
+        bookingId: tripId,
         tripId: tripId,
         participants: [driverInfo?.id, passengerInfo?.id],
         type: 'trip_chat'
@@ -70,17 +71,17 @@ const ChatScreen = ({ navigation, route }) => {
   };
 
   const setupChatListeners = (chatId) => {
-    // Listener para novas mensagens em tempo real
-    wsManager.on('messageSent', (data) => {
-      if (data.success && data.chatId === chatId) {
+    // Listener para novas mensagens em tempo real (mensagens do outro participante)
+    wsManager.on('newMessage', (data) => {
+      if (data.success && (data.chatId === chatId || data.bookingId === chatId)) {
         const newMessage = {
           _id: data.messageId,
-          text: data.text,
+          text: data.message || data.text || '',
           createdAt: new Date(data.timestamp),
           user: {
             _id: data.senderId,
-            name: data.senderId === currentUser.id ? 'Você' : (isDriver ? passengerInfo?.name : driverInfo?.name),
-            avatar: data.senderId === currentUser.id ? currentUser.avatar : (isDriver ? passengerInfo?.avatar : driverInfo?.avatar)
+            name: data.senderId === currentUserId ? 'Você' : (isDriver ? passengerInfo?.name : driverInfo?.name),
+            avatar: data.senderId === currentUserId ? currentUser?.avatar : (isDriver ? passengerInfo?.avatar : driverInfo?.avatar)
           }
         };
         
@@ -90,51 +91,27 @@ const ChatScreen = ({ navigation, route }) => {
     });
 
     // Listener para status de digitação
-    wsManager.on('typingStatus', (data) => {
-      if (data.chatId === chatId && data.userId !== currentUser.id) {
+    wsManager.on('typingStatusChanged', (data) => {
+      if ((data.chatId === chatId || data.bookingId === chatId) && data.userId !== currentUserId) {
         setIsTyping(data.isTyping);
       }
     });
   };
 
-  const createOrGetChat = async () => {
-    const chatId = `trip_${tripId}_${isDriver ? 'driver' : 'passenger'}`;
-    
-    try {
-      // Verificar se chat já existe
-      const existingChat = await api.getChat(chatId);
-      return existingChat;
-    } catch (error) {
-      // Criar novo chat
-      const newChat = {
-        chatId,
-        tripId,
-        driverId: driverInfo?.id || currentUser?.id,
-        passengerId: passengerInfo?.id || currentUser?.id,
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: []
-      };
-      
-      await api.createChat(newChat);
-      return newChat;
-    }
-  };
-
   const loadMessages = async (chatId) => {
     try {
-      const chatMessages = await api.getChatMessages(chatId);
+      const response = await wsManager.loadChatMessages(chatId, 0, 50);
+      const chatMessages = response?.messages || [];
       
       // Converter para formato do GiftedChat
       const formattedMessages = chatMessages.map(msg => ({
-        _id: msg._id,
-        text: msg.text,
-        createdAt: new Date(msg.createdAt),
+        _id: msg.messageId || msg.id,
+        text: msg.message || msg.text || '',
+        createdAt: new Date(msg.timestamp || msg.createdAt || Date.now()),
         user: {
-          _id: msg.user._id,
-          name: msg.user.name,
-          avatar: msg.user.avatar
+          _id: msg.senderId,
+          name: msg.senderId === currentUserId ? 'Você' : (isDriver ? passengerInfo?.name : driverInfo?.name),
+          avatar: msg.senderId === currentUserId ? currentUser?.avatar : (isDriver ? passengerInfo?.avatar : driverInfo?.avatar)
         },
         system: msg.system || false
       }));
@@ -143,12 +120,6 @@ const ChatScreen = ({ navigation, route }) => {
     } catch (error) {
       Logger.error('Erro ao carregar mensagens:', error);
     }
-  };
-
-  const connectWebSocket = (chatId) => {
-    // Implementar conexão WebSocket para mensagens em tempo real
-    // Esta é uma simulação - você implementaria com seu WebSocket backend
-    Logger.log('Conectando WebSocket para chat:', chatId);
   };
 
   const onSend = useCallback(async (newMessages = []) => {
@@ -171,11 +142,18 @@ const ChatScreen = ({ navigation, route }) => {
 
   const sendMessage = async (message) => {
     try {
+      if (!currentUserId) {
+        throw new Error('Usuário não autenticado');
+      }
       // USAR NOVO EVENTO: sendMessage via WebSocket
       const result = await wsManager.sendMessage({
-        chatId: chatId,
-        text: message.text,
-        senderId: currentUser.id,
+        chatId: chatId || tripId,
+        bookingId: tripId,
+        tripId: tripId,
+        message: message.text,
+        senderId: currentUserId,
+        receiverId: isDriver ? passengerInfo?.id : driverInfo?.id,
+        senderType: isDriver ? 'driver' : 'passenger',
         timestamp: new Date().toISOString(),
         messageType: 'text'
       });
@@ -186,27 +164,7 @@ const ChatScreen = ({ navigation, route }) => {
       
     } catch (error) {
       Logger.error('Erro ao enviar mensagem via WebSocket:', error);
-      
-      // Fallback para API REST
-      try {
-        const messageData = {
-          chatId,
-          text: message.text,
-          user: {
-            _id: currentUser.id,
-            name: currentUser.name,
-            avatar: currentUser.photo
-          },
-          createdAt: new Date().toISOString()
-        };
-        
-        await api.sendChatMessage(messageData);
-        Logger.log('✅ Fallback para API REST funcionou');
-        
-      } catch (fallbackError) {
-        Logger.error('Erro no fallback:', fallbackError);
-        throw fallbackError;
-      }
+      throw error;
     }
   };
 
@@ -324,9 +282,9 @@ const ChatScreen = ({ navigation, route }) => {
         messages={messages}
         onSend={onSend}
         user={{
-          _id: currentUser?.id,
+          _id: currentUserId,
           name: currentUser?.name,
-          avatar: currentUser?.photo
+          avatar: currentUser?.photo || currentUser?.avatar
         }}
         renderBubble={renderBubble}
         renderInputToolbar={renderInputToolbar}

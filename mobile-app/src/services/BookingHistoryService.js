@@ -2,12 +2,76 @@ import Logger from '../utils/Logger';
 import { createAxiosInstance, setupAxiosInterceptor } from '../utils/axiosInterceptor';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 
+function normalizeStatus(status) {
+    const raw = String(status || '').trim().toUpperCase();
+    if (!raw) return 'UNKNOWN';
+    if (raw === 'COMPLETED') return 'COMPLETE';
+    if (raw === 'CANCELED') return 'CANCELLED';
+    return raw;
+}
+
+function mapReceiptToBooking(receipt) {
+    const status = normalizeStatus(receipt?.status || receipt?.bookingStatus || 'COMPLETE');
+    const totalAmount = Number.parseFloat(
+        receipt?.totalAmountValue ??
+        receipt?.totalAmountRaw ??
+        receipt?.totalAmount
+    );
+    const distanceKm = Number.parseFloat(receipt?.distanceKm ?? receipt?.distance);
+    const durationMinutes = Number.parseFloat(receipt?.durationMinutes ?? receipt?.duration);
+
+    return {
+        id: receipt?.rideId || receipt?.bookingId || receipt?.receiptId,
+        receiptId: receipt?.receiptId || null,
+        pickup: {
+            add: receipt?.pickup || receipt?.pickupAddress || 'Origem indisponivel',
+            lat: receipt?.pickupLat ?? null,
+            lng: receipt?.pickupLng ?? null
+        },
+        drop: {
+            add: receipt?.dropoff || receipt?.destination || receipt?.dropoffAddress || 'Destino indisponivel',
+            lat: receipt?.dropoffLat ?? null,
+            lng: receipt?.dropoffLng ?? null
+        },
+        status,
+        trip_cost: Number.isFinite(totalAmount) ? totalAmount : receipt?.totalAmount,
+        estimate: Number.isFinite(totalAmount) ? totalAmount : receipt?.totalAmount,
+        distance: Number.isFinite(distanceKm) ? distanceKm : receipt?.distance,
+        duration: Number.isFinite(durationMinutes) ? durationMinutes : receipt?.duration,
+        startTime: receipt?.date || receipt?.completedAt || receipt?.createdAt || null,
+        tripdate: receipt?.date || receipt?.completedAt || receipt?.createdAt || null
+    };
+}
 
 class BookingHistoryService {
     constructor() {
         this.baseUrl = getSelfHostedApiUrl('/api');
         this.axiosInstance = createAxiosInstance({ baseURL: this.baseUrl });
         setupAxiosInterceptor(this.axiosInstance);
+    }
+
+    applyClientFilters(bookings, { status = null, dateRange = null } = {}) {
+        let filtered = Array.isArray(bookings) ? [...bookings] : [];
+
+        if (status) {
+            const expectedStatus = normalizeStatus(status);
+            filtered = filtered.filter((booking) => normalizeStatus(booking?.status) === expectedStatus);
+        }
+
+        if (dateRange?.start || dateRange?.end) {
+            const startMs = dateRange.start ? new Date(dateRange.start).getTime() : null;
+            const endMs = dateRange.end ? new Date(dateRange.end).getTime() : null;
+
+            filtered = filtered.filter((booking) => {
+                const bookingMs = new Date(booking?.tripdate || booking?.startTime || 0).getTime();
+                if (!Number.isFinite(bookingMs)) return false;
+                if (Number.isFinite(startMs) && bookingMs < startMs) return false;
+                if (Number.isFinite(endMs) && bookingMs > endMs) return false;
+                return true;
+            });
+        }
+
+        return filtered;
     }
 
     /**
@@ -26,100 +90,32 @@ class BookingHistoryService {
                 dateRange = null
             } = options;
 
-            // Usar GraphQL para buscar histórico
-            const query = `
-                query GetBookingHistory($userId: ID!, $userType: UserType!, $first: Int, $after: String, $status: BookingStatus, $dateRange: DateRangeInput) {
-                    bookingHistory(
-                        userId: $userId
-                        userType: $userType
-                        first: $first
-                        after: $after
-                        status: $status
-                        dateRange: $dateRange
-                    ) {
-                        edges {
-                            node {
-                                id
-                                passenger {
-                                    id
-                                }
-                                driver {
-                                    id
-                                }
-                                pickup {
-                                    latitude
-                                    longitude
-                                    address
-                                }
-                                destination {
-                                    latitude
-                                    longitude
-                                    address
-                                }
-                                status
-                                fare
-                                distance
-                                duration
-                                createdAt
-                                updatedAt
-                            }
-                            cursor
-                        }
-                        pageInfo {
-                            hasNextPage
-                            hasPreviousPage
-                            startCursor
-                            endCursor
-                        }
-                        totalCount
-                    }
+            const normalizedUserType = String(userType || 'CUSTOMER').toUpperCase();
+            const role = normalizedUserType === 'DRIVER' ? 'driver' : 'customer';
+            const offset = Number.isFinite(Number(after)) ? Number(after) : 0;
+
+            const response = await this.axiosInstance.get(`/receipts/user/${encodeURIComponent(userId)}`, {
+                params: {
+                    role,
+                    limit: first,
+                    offset
                 }
-            `;
-
-            const variables = {
-                userId,
-                userType: userType.toUpperCase(),
-                first,
-                after,
-                status,
-                dateRange
-            };
-
-            const response = await this.axiosInstance.post('/graphql', {
-                query,
-                variables
             });
 
-            if (response.data.errors) {
-                throw new Error(response.data.errors[0].message);
-            }
-
-            const bookings = response.data.data.bookingHistory.edges.map(edge => ({
-                id: edge.node.id,
-                pickup: {
-                    add: edge.node.pickup.address,
-                    lat: edge.node.pickup.latitude,
-                    lng: edge.node.pickup.longitude
-                },
-                drop: {
-                    add: edge.node.destination.address,
-                    lat: edge.node.destination.latitude,
-                    lng: edge.node.destination.longitude
-                },
-                status: edge.node.status,
-                trip_cost: edge.node.fare,
-                estimate: edge.node.fare,
-                distance: edge.node.distance,
-                duration: edge.node.duration,
-                startTime: edge.node.createdAt,
-                tripdate: edge.node.createdAt
-            }));
+            const receipts = Array.isArray(response?.data?.receipts) ? response.data.receipts : [];
+            const mappedBookings = receipts.map(mapReceiptToBooking);
+            const filteredBookings = this.applyClientFilters(mappedBookings, { status, dateRange });
 
             return {
                 success: true,
-                bookings,
-                pageInfo: response.data.data.bookingHistory.pageInfo,
-                totalCount: response.data.data.bookingHistory.totalCount
+                bookings: filteredBookings,
+                pageInfo: {
+                    hasNextPage: Boolean(response?.data?.hasMore),
+                    hasPreviousPage: offset > 0,
+                    startCursor: filteredBookings.length > 0 ? String(offset) : null,
+                    endCursor: filteredBookings.length > 0 ? String(offset + filteredBookings.length) : null
+                },
+                totalCount: Number(response?.data?.total || filteredBookings.length)
             };
         } catch (error) {
             Logger.error('❌ Erro ao buscar histórico de corridas:', error);
@@ -162,7 +158,7 @@ class BookingHistoryService {
                 }
             `;
 
-            const variables = userType === 'CUSTOMER' 
+            const variables = userType === 'CUSTOMER'
                 ? { passengerId: userId }
                 : { driverId: userId };
 
@@ -175,7 +171,7 @@ class BookingHistoryService {
                 throw new Error(response.data.errors[0].message);
             }
 
-            const bookings = response.data.data.activeBookings.map(booking => ({
+            const bookings = response.data.data.activeBookings.map((booking) => ({
                 id: booking.id,
                 pickup: { add: booking.pickup.address },
                 drop: { add: booking.destination.address },
@@ -192,5 +188,5 @@ class BookingHistoryService {
     }
 }
 
+export { mapReceiptToBooking };
 export default new BookingHistoryService();
-

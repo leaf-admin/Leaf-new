@@ -4,7 +4,7 @@ echo "🔧 CORRIGINDO CONFIGURAÇÃO DO REDIS"
 echo "===================================="
 
 # Conectar à VPS e corrigir configuração
-ssh root@147.93.66.253 << 'EOF'
+ssh root@147.182.204.181 << 'EOF'
 echo "🔧 Corrigindo configuração do Redis..."
 
 # Parar PM2
@@ -12,7 +12,7 @@ pm2 stop leaf-api
 
 # Corrigir configuração do Redis no server.js
 cd /opt/leaf-app
-sed -i 's/password: process.env.REDIS_PASSWORD || '\''leaf_redis_2024'\'',/password: null,/' server.js
+sed -E -i "s/password: process\\.env\\.REDIS_PASSWORD \\|\\| '[^']*',/password: process.env.REDIS_PASSWORD || null,/" server.js
 
 # Verificar se a correção foi aplicada
 echo "✅ Configuração corrigida:"
@@ -33,4 +33,4 @@ echo "✅ Correção concluída!"
 EOF
 
 echo "🎯 Correção aplicada com sucesso!"
-echo "🧪 Execute novamente: node test-self-hosted-api.cjs" 
+echo "🧪 Execute novamente: node test-self-hosted-api.cjs"

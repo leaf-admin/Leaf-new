@@ -6,7 +6,7 @@
 set -e
 
 # Configurações
-METRICS_URL="https://216.238.107.59/metrics"
+METRICS_URL="https://147.182.204.181/metrics"
 LOG_FILE="/var/log/leaf-autoscale.log"
 DOCKER_COMPOSE_FILE="/root/leaf-system/docker-compose-autoscaling.yml"
 

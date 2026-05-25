@@ -10,6 +10,24 @@ fi
 MIN_COMPLETED_RIDES="${MIN_COMPLETED_RIDES:-1}"
 MAX_ALLOWED_ERRORS="${MAX_ALLOWED_ERRORS:-20}"
 MAX_CRITICAL_LOGS="${MAX_CRITICAL_LOGS:-5}"
+NODE_BIN="${NODE_BIN:-$(command -v node || command -v nodejs || true)}"
+
+if [[ -z "$NODE_BIN" ]]; then
+  for candidate in \
+    $(ls -1d "$HOME/.nvm/versions/node"/*/bin/node 2>/dev/null | sort -Vr) \
+    "/opt/homebrew/bin/node" \
+    "/usr/local/bin/node"; do
+    if [[ -x "$candidate" ]]; then
+      NODE_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$NODE_BIN" ]]; then
+  echo "[qa][assert][error] Missing command: node (or nodejs)"
+  exit 1
+fi
 
 HEALTH_FILE="$ARTIFACTS_DIR/backend-health.json"
 HANDSHAKE_FILE="$ARTIFACTS_DIR/backend-socketio-handshake.json"
@@ -25,7 +43,7 @@ FAIL_REASONS=()
 
 health_ok="false"
 if [[ -f "$HEALTH_FILE" ]]; then
-  health_ok="$(node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));const s=String(j.status||'').toLowerCase();const ok=(s==='healthy'||s==='ok'||s==='warning'||j.success===true);process.stdout.write(ok?'true':'false')}catch{process.stdout.write('false')}" "$HEALTH_FILE")"
+  health_ok="$("$NODE_BIN" -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));const s=String(j.status||'').toLowerCase();const ok=(s==='healthy'||s==='ok'||s==='warning'||j.success===true);process.stdout.write(ok?'true':'false')}catch{process.stdout.write('false')}" "$HEALTH_FILE")"
 fi
 if [[ "$health_ok" != "true" ]]; then
   STATUS="FAIL"
@@ -34,7 +52,7 @@ fi
 
 handshake_ok="false"
 if [[ -f "$HANDSHAKE_FILE" ]]; then
-  handshake_ok="$(node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.ok?'true':'false')}catch{process.stdout.write('false')}" "$HANDSHAKE_FILE")"
+  handshake_ok="$("$NODE_BIN" -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.ok?'true':'false')}catch{process.stdout.write('false')}" "$HANDSHAKE_FILE")"
 fi
 if [[ "$handshake_ok" != "true" ]]; then
   STATUS="FAIL"
@@ -45,7 +63,7 @@ completed_rides=0
 total_errors=999999
 success_rate="0%"
 if [[ -f "$SIM_REPORT" ]]; then
-  sim_ok="$(node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.ok?'true':'false')}catch{process.stdout.write('false')}" "$SIM_REPORT")"
+  sim_ok="$("$NODE_BIN" -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.ok?'true':'false')}catch{process.stdout.write('false')}" "$SIM_REPORT")"
   if [[ "$sim_ok" == "true" ]]; then
     completed_rides=1
     total_errors=0
@@ -56,9 +74,9 @@ if [[ -f "$SIM_REPORT" ]]; then
     total_errors=1
   fi
 elif [[ -f "$LOADTEST_REPORT" ]]; then
-  completed_rides="$(node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(j.summary?.completedRides??0))}catch{process.stdout.write('0')}" "$LOADTEST_REPORT")"
-  total_errors="$(node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(j.summary?.totalErrors??999999))}catch{process.stdout.write('999999')}" "$LOADTEST_REPORT")"
-  success_rate="$(node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(j.summary?.successRate??'0%'))}catch{process.stdout.write('0%')}" "$LOADTEST_REPORT")"
+  completed_rides="$("$NODE_BIN" -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(j.summary?.completedRides??0))}catch{process.stdout.write('0')}" "$LOADTEST_REPORT")"
+  total_errors="$("$NODE_BIN" -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(j.summary?.totalErrors??999999))}catch{process.stdout.write('999999')}" "$LOADTEST_REPORT")"
+  success_rate="$("$NODE_BIN" -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(j.summary?.successRate??'0%'))}catch{process.stdout.write('0%')}" "$LOADTEST_REPORT")"
 else
   STATUS="FAIL"
   FAIL_REASONS+=("simulation_report_missing")
@@ -83,7 +101,7 @@ if (( critical_logs > MAX_CRITICAL_LOGS )); then
   FAIL_REASONS+=("too_many_critical_mobile_logs")
 fi
 
-node - "$RESULT_JSON" "$STATUS" "$health_ok" "$handshake_ok" "$completed_rides" "$total_errors" "$success_rate" "$critical_logs" "${FAIL_REASONS[*]:-}" <<'NODE'
+"$NODE_BIN" - "$RESULT_JSON" "$STATUS" "$health_ok" "$handshake_ok" "$completed_rides" "$total_errors" "$success_rate" "$critical_logs" "${FAIL_REASONS[*]:-}" <<'NODE'
 const fs = require('fs');
 const [,,out,status,healthOk,handshakeOk,completed,totalErrors,successRate,critical,reasons] = process.argv;
 const payload = {

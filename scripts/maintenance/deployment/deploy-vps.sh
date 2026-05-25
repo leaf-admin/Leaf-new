@@ -5,9 +5,9 @@
 
 set -e
 
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
-PROJECT_DIR="/root/leaf-websocket-backend"
+PROJECT_DIR="/opt/leaf-app"
 
 echo "🚀 INICIANDO DEPLOY AUTOMATIZADO PARA VPS"
 echo "=========================================="
@@ -136,7 +136,7 @@ http {
 
     server {
         listen 80;
-        server_name 216.238.107.59;
+        server_name 147.182.204.181;
 
         location / {
             proxy_pass http://leaf_backend;

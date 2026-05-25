@@ -1,13 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Image, TouchableOpacity, Alert, Dimensions, Modal, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Image, TouchableOpacity, Alert, Dimensions, Modal, ActivityIndicator, Platform } from 'react-native';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Callout, Circle } from 'react-native-maps';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useTheme } from '../common-local/theme';
+import { useTheme } from '../theme/runtimeTokens';
 import { Typography } from '../components/design-system/Typography';
 import { AnimatedButton } from '../components/design-system/AnimatedButton';
-import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
 import Logger from '../utils/Logger';
 
 import PassengerUI from '../components/map/PassengerUI';
@@ -20,8 +19,8 @@ import DriverOnTripUI from '../components/map/DriverOnTripUI';
 import PassengerOnTripUI from '../components/map/PassengerOnTripUI';
 import RatingUI from '../components/map/RatingUI';
 import WebSocketManager from '../services/WebSocketManager';
-import { darkTheme, lightTheme } from '../common-local/theme';
-import { clearBooking } from '../common-local/actions/bookingactions';
+import { darkTheme, lightTheme } from '../theme/runtimeTokens';
+import { clearBooking } from '../services/runtime/bookingStateBridge';
 import polyline from '@mapbox/polyline';
 import carIcon from '../../assets/images/track_Car.png';
 import { FareCalculator, getDistanceMatrix } from '../common/sharedFunctions';
@@ -29,6 +28,12 @@ import { fonts } from '../common/font';
 import { colors } from '../common/theme';
 
 const { width, height } = Dimensions.get('window');
+const DEFAULT_MAP_REGION = {
+    latitude: -22.9068,
+    longitude: -43.1729,
+    latitudeDelta: 0.08,
+    longitudeDelta: 0.08,
+};
 
 // Estilos de mapa para modo claro e escuro
 const lightMapStyle = [
@@ -226,6 +231,10 @@ const darkMapStyle = [
 export default function NewMapScreen(props) {
     const mapRef = useRef(null);
     const [routePolyline, setRoutePolyline] = useState(null);
+    const [mapLoaded, setMapLoaded] = useState(false);
+    const [mapProvider, setMapProvider] = useState(
+        Platform.OS === 'ios' || Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined
+    );
 
     // Log quando routePolyline muda
     useEffect(() => {
@@ -240,6 +249,7 @@ export default function NewMapScreen(props) {
     const [isDarkMode, setIsDarkMode] = useState(false);
     const [currentLocation, setCurrentLocation] = useState(null);
     const [pickupAddress, setPickupAddress] = useState('');
+    const [locationDenied, setLocationDenied] = useState(false);
 
     // Estados para cards de valores (baseado no MapScreen.js antigo)
     const [allCarTypes, setAllCarTypes] = useState([]);
@@ -298,8 +308,22 @@ export default function NewMapScreen(props) {
 
     // Obter localização atual e endereço
     useEffect(() => {
-        getCurrentLocation();
+        getCurrentLocation({ forcePrompt: false, silent: true });
     }, []);
+
+    // Keep Google Maps as the only provider on native mobile and surface tile issues in logs
+    // instead of silently swapping the map stack underneath the user.
+    useEffect(() => {
+        if (Platform.OS !== 'ios' || mapProvider !== PROVIDER_GOOGLE) return;
+
+        const fallbackTimer = setTimeout(() => {
+            if (!mapLoaded) {
+                Logger.warn('⚠️ Google Maps não carregou tiles no iOS dentro da janela esperada.');
+            }
+        }, 6000);
+
+        return () => clearTimeout(fallbackTimer);
+    }, [mapLoaded, mapProvider]);
 
     // Efeito para centralizar o mapa quando a localização mudar
     useEffect(() => {
@@ -314,14 +338,24 @@ export default function NewMapScreen(props) {
         }
     }, [currentLocation]);
 
-    const getCurrentLocation = async () => {
+    const getCurrentLocation = async ({ forcePrompt = false, silent = false } = {}) => {
         try {
-            // Verificar permissões
-            let { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permissão negada', 'Precisamos da sua localização para funcionar.');
-                return;
+            let permission = forcePrompt
+                ? await Location.requestForegroundPermissionsAsync()
+                : await Location.getForegroundPermissionsAsync();
+
+            if (permission.status !== 'granted' && !forcePrompt && permission.canAskAgain) {
+                permission = await Location.requestForegroundPermissionsAsync();
             }
+
+            if (permission.status !== 'granted') {
+                setLocationDenied(true);
+                if (!silent) {
+                    Alert.alert('Permissão negada', 'Precisamos da sua localização para funcionar.');
+                }
+                return null;
+            }
+            setLocationDenied(false);
 
             // Obter localização atual
             let location = await Location.getCurrentPositionAsync({
@@ -361,21 +395,36 @@ export default function NewMapScreen(props) {
                 Logger.log('⚠️ Usando coordenadas como fallback final');
                 setPickupAddress(`Localização(${latitude.toFixed(6)}, ${longitude.toFixed(6)})`);
             }
+            return newLocation;
 
         } catch (error) {
             Logger.error('❌ Erro ao obter localização:', error);
-            Alert.alert('Erro', 'Não foi possível obter sua localização.');
+            setLocationDenied(true);
+            if (!silent) {
+                Alert.alert('Erro', 'Não foi possível obter sua localização.');
+            }
+            return null;
         }
+    };
+
+    const handleRequestLocationPermission = () => {
+        getCurrentLocation({ forcePrompt: true, silent: false });
     };
 
     // Função para obter endereço mais preciso do Google Places
     const getAddressFromGooglePlaces = async (latitude, longitude) => {
         try {
+            const googleMapsApiKey = GoogleMapApiConfig?.android || GoogleMapApiConfig?.ios || '';
+            if (!googleMapsApiKey) {
+                Logger.log('⚠️ Google Places API key ausente no ambiente, pulando consulta externa');
+                return null;
+            }
+
             Logger.log('🔍 Google Places API - Fazendo requisição para:', { latitude, longitude });
 
             // Usar a API do Google Places para obter endereço mais preciso
             const response = await fetch(
-                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY&language=pt-BR`
+                `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleMapsApiKey}&language=pt-BR`
             );
 
             Logger.log('🔍 Google Places API - Status da resposta:', response.status);
@@ -755,6 +804,8 @@ export default function NewMapScreen(props) {
                     toggleTheme={toggleTheme}
                     pickupAddress={pickupAddress}
                     currentLocation={currentLocation}
+                    locationDenied={locationDenied}
+                    onRequestLocationPermission={handleRequestLocationPermission}
                     allCarTypes={allCarTypes}
                     {...props}
                 />
@@ -786,16 +837,16 @@ export default function NewMapScreen(props) {
         longitude: currentLocation.lng,
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
-    } : null;
+    } : DEFAULT_MAP_REGION;
 
     return (
         <View style={styles.container}>
             <MapView
                 ref={mapRef}
                 style={styles.map}
-                provider={PROVIDER_GOOGLE}
+                provider={mapProvider}
                 initialRegion={initialRegion}
-                showsUserLocation={true}
+                showsUserLocation={!locationDenied}
                 showsMyLocationButton={false}
                 showsCompass={true}
                 showsScale={true}
@@ -806,7 +857,11 @@ export default function NewMapScreen(props) {
                 loadingIndicatorColor={mapColors.primary}
                 loadingBackgroundColor={mapColors.background}
                 customMapStyle={isDarkMode ? darkMapStyle : lightMapStyle}
-                onMapReady={() => Logger.log('🗺️ MapView carregado e pronto')}
+                onMapReady={() => Logger.log(`🗺️ MapView pronto (provider: ${mapProvider || 'default'})`)}
+                onMapLoaded={() => {
+                    setMapLoaded(true);
+                    Logger.log(`✅ MapView tiles carregados (provider: ${mapProvider || 'default'})`);
+                }}
             >
                 {routePolyline && (
                     <Polyline
@@ -1003,22 +1058,21 @@ const styles = StyleSheet.create({
     },
     mapControls: {
         position: 'absolute',
-        top: '50%',
+        bottom: 250, // Keep clear of full-width docked trip card
         right: 20,
         zIndex: 1000,
-        transform: [{ translateY: -25 }], // Centralizar verticalmente o botão
     },
     controlButton: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 10,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
         elevation: 5,
     },
     // Estilos para cards de valores (baseado no MapScreen.js antigo)

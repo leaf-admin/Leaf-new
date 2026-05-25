@@ -144,8 +144,8 @@ log "4. Configurando variáveis de ambiente..."
 
 cat > .env.production << 'EOF'
 # API URLs
-API_BASE_URL=http://147.93.66.253:3000
-WEBSOCKET_URL=ws://147.93.66.253:3001
+API_BASE_URL=http://147.182.204.181:3000
+WEBSOCKET_URL=ws://147.182.204.181:3001
 FIREBASE_FALLBACK_URL=https://us-central1-leaf-app-91dfdce0.cloudfunctions.net
 
 # API Keys
@@ -296,8 +296,8 @@ Edite `.env.production` com suas chaves:
 - `MERCADOPAGO_PUBLIC_KEY`
 
 ### URLs de Produção
-- **API:** http://147.93.66.253:3000
-- **WebSocket:** ws://147.93.66.253:3001
+- **API:** http://147.182.204.181:3000
+- **WebSocket:** ws://147.182.204.181:3001
 - **Firebase:** https://us-central1-leaf-app-91dfdce0.cloudfunctions.net
 
 ## 📊 MONITORAMENTO
@@ -308,16 +308,16 @@ Edite `.env.production` com suas chaves:
 adb logcat | grep "Leaf"
 
 # Ver logs da API
-ssh root@147.93.66.253 "pm2 logs leaf-api"
+ssh root@147.182.204.181 "pm2 logs leaf-api"
 ```
 
 ### Status
 ```bash
 # Status da API
-curl http://147.93.66.253:3000/api/health
+curl http://147.182.204.181:3000/api/health
 
 # Status do Redis
-ssh root@147.93.66.253 "redis-cli ping"
+ssh root@147.182.204.181 "redis-cli ping"
 ```
 
 ## 🔄 ATUALIZAÇÕES
@@ -352,8 +352,8 @@ expo publish
    - Verificar se há espaço suficiente
 
 ## 📞 SUPORTE
-- **API Status:** http://147.93.66.253:3000/api/health
-- **VPS Status:** ssh root@147.93.66.253
+- **API Status:** http://147.182.204.181:3000/api/health
+- **VPS Status:** ssh root@147.182.204.181
 - **Logs:** pm2 logs leaf-api
 EOF
 

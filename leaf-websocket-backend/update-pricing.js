@@ -12,7 +12,7 @@ const db = admin.database();
 
 async function updateCarTypes() {
     try {
-        console.log("Configurando parâmetros Leaf Plus e Leaf Elite no banco de produção...");
+        console.log("Configurando parâmetros Leaf Plus, Leaf Elite e Leaf Moto no banco de produção...");
 
         const carTypesRef = db.ref('cartypes');
 
@@ -46,9 +46,25 @@ async function updateCarTypes() {
             image: "https://cdn.pixabay.com/photo/2022/01/23/18/20/car-6961567_640.png"
         };
 
+        // Leaf Moto configs
+        // Base: 2.18, Fixo: 0.86, perMin: 0.20 => perHour: 12.17, perKm: 1.19, MinFare: 6.90
+        const leafMoto = {
+            name: 'Leaf Moto',
+            base_fare: 2.18,
+            fixed_fee: 0.86,
+            rate_per_hour: 12.17, // 0.2028 * 60
+            rate_per_unit_distance: 1.19,
+            min_fare: 6.90,
+            convenience_fees: 0,
+            convenience_fee_type: 'flat',
+            extra_info: 'Capacity: 1, Moto',
+            image: "https://cdn.pixabay.com/photo/2013/07/13/12/46/motorcycle-160175_640.png"
+        };
+
         await carTypesRef.set({
             'plus': leafPlus,
-            'elite': leafElite
+            'elite': leafElite,
+            'moto': leafMoto
         });
 
         // Also make sure 'settings' has the required format to not crash the app

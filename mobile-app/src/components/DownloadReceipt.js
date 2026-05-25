@@ -53,7 +53,7 @@ const DownloadReceipt = ({ booking, settings }) => {
             <title>Ride Booking Receipt</title>
             <style>
               body {
-                font-family: Arial, sans-serif;
+                font-family: Poppins, Arial, sans-serif;
                 margin: 0;
                 padding: 20px;
               }

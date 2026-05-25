@@ -112,13 +112,13 @@ show_stats() {
 trap show_stats EXIT INT TERM
 
 # Monitorar logs do servidor na VPS
-echo -e "${BLUE}Conectando ao servidor na VPS (216.238.107.59)...${NC}"
+echo -e "${BLUE}Conectando ao servidor na VPS (147.182.204.181)...${NC}"
 echo ""
 
 # Função para monitorar logs com tratamento de erros
 monitor_logs() {
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=30 root@216.238.107.59 2>&1 << 'ENDSSH'
-        cd /home/leaf/leaf-websocket-backend 2>/dev/null || cd /root/leaf-websocket-backend 2>/dev/null || exit 1
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=30 root@147.182.204.181 2>&1 << 'ENDSSH'
+        cd /opt/leaf-app 2>/dev/null || cd /opt/leaf-app 2>/dev/null || exit 1
         
         # Método 1: Arquivo de log direto (mais confiável)
         if [ -f server.log ]; then

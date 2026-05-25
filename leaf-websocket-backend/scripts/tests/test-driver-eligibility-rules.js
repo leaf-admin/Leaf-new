@@ -1,5 +1,5 @@
 /**
- * Teste rápido das regras centrais de elegibilidade Plus/Elite.
+ * Teste rápido das regras centrais de elegibilidade Plus/Elite/Moto.
  * Executa contra Redis local usando cache de perfil (sem depender de Firebase).
  */
 
@@ -36,12 +36,14 @@ async function run() {
     const ids = {
         plus: `${base}plus`,
         elite: `${base}elite`,
+        moto: `${base}moto`,
         eliteBlocked: `${base}elite_blocked`
     };
 
     await Promise.all([
         redis.del(`driver_eligibility_profile:${ids.plus}`),
         redis.del(`driver_eligibility_profile:${ids.elite}`),
+        redis.del(`driver_eligibility_profile:${ids.moto}`),
         redis.del(`driver_eligibility_profile:${ids.eliteBlocked}`),
         redis.del(`driver_elite_recovery:${ids.eliteBlocked}`)
     ]);
@@ -66,6 +68,12 @@ async function run() {
         acceptsPlusWithElite: true
     });
 
+    await seedProfile(ids.moto, {
+        vehicleCategory: 'moto',
+        carType: 'Leaf Moto',
+        rating: 4.9
+    });
+
     const plusOnPlus = await driverEligibilityService.isDriverEligibleForRide(ids.plus, 'plus');
     assert(plusOnPlus.eligible, 'Plus deveria aceitar corrida Plus');
 
@@ -80,6 +88,12 @@ async function run() {
 
     const eliteBlockedOnElite = await driverEligibilityService.isDriverEligibleForRide(ids.eliteBlocked, 'elite');
     assert(!eliteBlockedOnElite.eligible && eliteBlockedOnElite.code === 'ELITE_RATING_BLOCKED', 'Elite bloqueado por nota deveria falhar em Elite');
+
+    const motoOnMoto = await driverEligibilityService.isDriverEligibleForRide(ids.moto, 'moto');
+    assert(motoOnMoto.eligible, 'Moto deveria aceitar corrida Moto');
+
+    const plusOnMoto = await driverEligibilityService.isDriverEligibleForRide(ids.plus, 'moto');
+    assert(!plusOnMoto.eligible && plusOnMoto.code === 'NOT_MOTO_VEHICLE', 'Plus não pode aceitar Moto');
 
     for (let i = 0; i < 10; i += 1) {
         await driverEligibilityService.recordEliteRecoveryRide(ids.eliteBlocked, 'plus', 5);

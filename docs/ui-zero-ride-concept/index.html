@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zero Ride UI Concept</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;600;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="ambient" aria-hidden="true"></div>
+
+    <header class="board-header">
+      <p class="eyebrow">Leaf x Zero Ride</p>
+      <h1>Telas UI - Ride Sharing Futurista</h1>
+      <p class="summary">
+        Evolução do conceito com mapa tático, dados mock em tempo real e hierarquia visual mais precisa para corrida,
+        tracking e pagamento.
+      </p>
+      <div class="legend">
+        <span class="legend-chip"><i class="dot dot-cyan"></i> Navegação rápida</span>
+        <span class="legend-chip"><i class="dot dot-lime"></i> Fluxo da corrida</span>
+        <span class="legend-chip"><i class="dot dot-amber"></i> Pagamento e confiança</span>
+      </div>
+      <div class="header-metrics">
+        <div class="metric-box">
+          <span>ETA médio</span>
+          <strong>3m 10s</strong>
+        </div>
+        <div class="metric-box">
+          <span>Conversão</span>
+          <strong>82.4%</strong>
+        </div>
+        <div class="metric-box">
+          <span>Tarifa dinâmica</span>
+          <strong>1.1x</strong>
+        </div>
+      </div>
+    </header>
+
+    <main class="screen-grid" id="screen-grid">
+      <article class="phone" data-screen>
+        <div class="phone-shell onboarding">
+          <div class="status-bar">
+            <span>09:41</span>
+            <span>5G ▰▰▰ 98%</span>
+          </div>
+          <div class="screen-content">
+            <div class="screen-head">
+              <p class="micro">NOVA GERAÇÃO DE MOBILIDADE</p>
+              <h2 class="display">ZERO</h2>
+              <p class="screen-sub">Experiência noturna com leitura instantânea e confirmação de rota em menos de 2 toques.</p>
+            </div>
+
+            <div class="scan-ring" aria-hidden="true"></div>
+
+            <div class="telemetry-grid compact">
+              <div><span>Match</span><strong>97%</strong></div>
+              <div><span>Segurança</span><strong>Nível A</strong></div>
+              <div><span>Tempo de setup</span><strong>00:31</strong></div>
+            </div>
+
+            <button class="primary-btn" type="button">Entrar no modo noturno</button>
+            <p class="hint">Deslize para explorar o fluxo completo.</p>
+          </div>
+        </div>
+        <p class="phone-title">01 - Onboarding</p>
+      </article>
+
+      <article class="phone phone-home" data-screen>
+        <div class="phone-shell home">
+          <div class="status-bar">
+            <span>09:41</span>
+            <span>Wi-Fi ▰▰▰ 94%</span>
+          </div>
+          <div class="screen-content home-layout">
+            <div class="home-map">
+              <div class="map-grid"></div>
+              <svg class="map-layers" viewBox="0 0 240 380" aria-hidden="true">
+                <path d="M10 315 L56 289 L110 300 L152 264 L232 278" class="road" />
+                <path d="M15 72 L76 118 L129 95 L176 126 L228 86" class="road" />
+                <path d="M28 202 L76 184 L114 196 L163 174 L212 156" class="road secondary" />
+                <path d="M40 348 L86 328 L132 336 L178 311 L218 290" class="road secondary" />
+                <path d="M18 258 L64 244 L108 252 L157 238 L214 222" class="road secondary" />
+                <path d="M24 168 L72 153 L118 163 L166 148 L214 133" class="road secondary" />
+                <path d="M46 244 L84 229 L120 237 L164 218 L206 198" class="route-line" />
+              </svg>
+
+              <div class="zone-glow zone-a"></div>
+              <div class="zone-glow zone-b"></div>
+
+              <div class="drivers-layer" aria-hidden="true">
+                <span class="driver-point p1"></span>
+                <span class="driver-point p2"></span>
+                <span class="driver-point p3"></span>
+                <span class="driver-point p4"></span>
+                <span class="driver-point p5"></span>
+                <span class="driver-point p6"></span>
+                <span class="driver-point p7"></span>
+                <span class="driver-point p8"></span>
+                <span class="driver-point p9"></span>
+                <span class="driver-point p10"></span>
+                <span class="driver-point p11"></span>
+                <span class="driver-point p12"></span>
+              </div>
+
+              <div class="map-headline">
+                <div class="headline-copy">
+                  <div class="top-row">
+                    <strong>Ola, username</strong>
+                    <span class="pill success pulse"><span data-active-drivers>24</span> ativos</span>
+                  </div>
+                  <p class="micro">AREA BELA VISTA • ZERO LIVE MAP</p>
+                </div>
+                <span class="pill neutral">24 motoristas online</span>
+              </div>
+
+              <div class="destination-sheet">
+                <label>Destino da corrida</label>
+                <div class="destination-field">
+                  <span class="field-dot"></span>
+                  <span>Aeroporto de Congonhas</span>
+                </div>
+
+                <div class="home-inline-metrics">
+                  <span>ETA 6 min</span>
+                  <span>Distancia 7.4 km</span>
+                  <span>Demanda moderada</span>
+                </div>
+
+                <button class="primary-btn" type="button">Confirmar destino</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="phone-title">02 - Home + Mapa</p>
+      </article>
+
+      <article class="phone" data-screen>
+        <div class="phone-shell options">
+          <div class="status-bar">
+            <span>09:42</span>
+            <span>5G ▰▰▱ 88%</span>
+          </div>
+          <div class="screen-content">
+            <div class="top-row">
+              <strong>Escolha a corrida</strong>
+              <span class="pill neutral">2.7 km</span>
+            </div>
+
+            <div class="screen-head tight">
+              <p class="micro">SUGESTÃO ZERO AI</p>
+              <p class="screen-sub">Melhor equilíbrio entre preço, tempo e emissão.</p>
+            </div>
+
+            <div class="option-card active">
+              <div>
+                <h3>Zero Eco</h3>
+                <p>2 min • elétrica</p>
+              </div>
+              <strong>R$ 24,90</strong>
+            </div>
+
+            <div class="option-card">
+              <div>
+                <h3>Zero Black</h3>
+                <p>4 min • premium</p>
+              </div>
+              <strong>R$ 36,40</strong>
+            </div>
+
+            <div class="option-card">
+              <div>
+                <h3>Zero Pool</h3>
+                <p>5 min • compartilhada</p>
+              </div>
+              <strong>R$ 18,30</strong>
+            </div>
+
+            <div class="fare-breakdown">
+              <div><span>Base</span><strong>R$ 17,10</strong></div>
+              <div><span>Tempo e distância</span><strong>R$ 7,80</strong></div>
+              <div><span>Bloqueio de preço</span><strong>Ativo</strong></div>
+            </div>
+
+            <button class="primary-btn" type="button">Confirmar Zero Eco</button>
+          </div>
+        </div>
+        <p class="phone-title">03 - Seleção de Corrida</p>
+      </article>
+
+      <article class="phone" data-screen>
+        <div class="phone-shell tracking">
+          <div class="status-bar">
+            <span>09:44</span>
+            <span>5G ▰▰▰ 90%</span>
+          </div>
+          <div class="screen-content">
+            <div class="screen-head tight">
+              <p class="micro">TRACKING AO VIVO</p>
+              <p class="screen-sub">Veículo em deslocamento pela Av. 23 de Maio.</p>
+            </div>
+
+            <div class="map-card tall">
+              <div class="map-grid"></div>
+              <svg class="map-layers" viewBox="0 0 240 250" aria-hidden="true">
+                <path d="M10 170 L56 154 L99 160 L141 134 L227 138" class="road" />
+                <path d="M16 57 L78 102 L122 84 L178 100 L229 72" class="road" />
+                <path d="M44 208 L82 189 L126 181 L176 162 L210 144" class="road secondary" />
+                <path d="M30 134 L73 152 L118 145 L164 150" class="road secondary" />
+                <path d="M56 184 L86 159 L120 160 L159 143 L188 128" class="route-line live" />
+              </svg>
+              <div class="map-pulse hotspot-a"></div>
+              <div class="map-pulse hotspot-c"></div>
+              <div class="map-pin pin-a"></div>
+              <div class="map-pin pin-b moving"></div>
+            </div>
+
+            <div class="telemetry-grid">
+              <div><span>ETA</span><strong class="live-value" data-seq="03:18|03:10|02:59|02:47">03:18</strong></div>
+              <div><span>Velocidade</span><strong class="live-value" data-seq="34 km/h|36 km/h|32 km/h|35 km/h">34 km/h</strong></div>
+              <div><span>Atraso</span><strong class="live-value" data-seq="-00:22|-00:18|-00:12|-00:09">-00:22</strong></div>
+            </div>
+
+            <div class="driver-card">
+              <div>
+                <p class="micro">MOTORISTA</p>
+                <h3>Larissa • BYD Dolphin</h3>
+                <p>Placa FZT-2J19 • 4.96 ★</p>
+              </div>
+              <span class="pill success pulse">A caminho</span>
+            </div>
+
+            <div class="actions-row">
+              <button class="ghost-btn" type="button">Chat</button>
+              <button class="ghost-btn" type="button">Ligar</button>
+              <button class="ghost-btn danger" type="button">Cancelar</button>
+            </div>
+          </div>
+        </div>
+        <p class="phone-title">04 - Driver Tracking</p>
+      </article>
+
+      <article class="phone" data-screen>
+        <div class="phone-shell trip">
+          <div class="status-bar">
+            <span>09:49</span>
+            <span>5G ▰▰▰ 87%</span>
+          </div>
+          <div class="screen-content">
+            <div class="screen-head tight">
+              <p class="micro">CORRIDA EM ANDAMENTO</p>
+              <h2 class="display small">15 min restantes</h2>
+              <p class="screen-sub">Rota otimizada para menor tempo e menor variação de tarifa.</p>
+            </div>
+
+            <div class="timeline">
+              <div class="step done">Embarque concluído</div>
+              <div class="step active">Marginal Pinheiros</div>
+              <div class="step">Chegada no terminal</div>
+            </div>
+
+            <div class="telemetry-grid">
+              <div><span>Waypoint</span><strong>2/5</strong></div>
+              <div><span>Clima</span><strong>23°C</strong></div>
+              <div><span>CO2 evitado</span><strong>0.42 kg</strong></div>
+            </div>
+
+            <div class="fare-card">
+              <p>Tarifa dinâmica congelada</p>
+              <strong>R$ 24,90</strong>
+            </div>
+
+            <button class="primary-btn" type="button">Compartilhar status da viagem</button>
+          </div>
+        </div>
+        <p class="phone-title">05 - Viagem</p>
+      </article>
+
+      <article class="phone" data-screen>
+        <div class="phone-shell payment">
+          <div class="status-bar">
+            <span>10:03</span>
+            <span>5G ▰▰▰ 85%</span>
+          </div>
+          <div class="screen-content">
+            <div class="screen-head tight">
+              <p class="micro">CHEGADA CONFIRMADA</p>
+              <h2 class="display small">Pagamento</h2>
+              <p class="screen-sub">Fechamento automático com recibo e avaliação rápida.</p>
+            </div>
+
+            <div class="payment-card">
+              <div>
+                <span>Total</span>
+                <strong class="live-value" data-seq="R$ 24,90|R$ 24,90|R$ 24,90">R$ 24,90</strong>
+              </div>
+              <div>
+                <span>Método</span>
+                <strong>PIX Wallet</strong>
+              </div>
+              <div>
+                <span>ID da corrida</span>
+                <strong class="live-value" data-seq="#ZR-44129|#ZR-44129|#ZR-44129">#ZR-44129</strong>
+              </div>
+            </div>
+
+            <div class="fare-breakdown">
+              <div><span>Início</span><strong>09:44</strong></div>
+              <div><span>Término</span><strong>10:03</strong></div>
+              <div><span>Tempo total</span><strong>19 min</strong></div>
+            </div>
+
+            <div class="rating" aria-label="Avaliação da corrida">
+              <button type="button">★</button>
+              <button type="button">★</button>
+              <button type="button">★</button>
+              <button type="button">★</button>
+              <button type="button">★</button>
+            </div>
+
+            <button class="primary-btn" type="button">Finalizar corrida</button>
+          </div>
+        </div>
+        <p class="phone-title">06 - Pagamento + Avaliação</p>
+      </article>
+    </main>
+
+    <footer class="board-footer">
+      <p>Concept board criado para exploração visual e validação rápida de UX antes da implementação nativa.</p>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,7 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://driver/earnings"
+
+- extendedWaitUntil:
+    visible: ".*(Ganhos|Saldo|Corridas|Taxa média|Taxa media|Realizar saque|Operação financeira|Operacao financeira).*"
+    timeout: 30000

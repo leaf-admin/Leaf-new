@@ -74,8 +74,27 @@ removeListener();
 
 ### KYC_ENABLED
 - **Descrição**: Habilita/desabilita verificação KYC antes de ficar online
-- **Valor padrão**: `false` (desabilitado)
+- **Valor padrão**: `true` (habilitado)
 - **Uso**: Controla se o motorista precisa passar pela verificação KYC
+
+### PROTOTYPE_ROBOTAXI_UI_ENABLED
+- **Descrição**: Alterna entre a UI nova do protótipo e o layout legado
+- **Valor padrão**: `true` (protótipo ativo)
+- **Uso**:
+  - `true`: abre fluxo `RobotaxiPrototype`
+  - `false`: volta para fluxo legado (`Splash/Map`)
+
+### PILOT_CONTROLLED_LAUNCH
+- **Descrição**: Identifica se o build foi preparado para piloto controlado
+- **Valor padrão**: derivado de `EXPO_PUBLIC_LEAF_LAUNCH_PROFILE`
+
+### PILOT_DRIVER_WITHDRAWALS_ENABLED
+- **Descrição**: Controla se saque do motorista fica disponivel no app
+- **Valor padrão**: `false` em `pilot_controlled`
+
+### PILOT_REFERRAL_PROGRAMS_ENABLED
+- **Descrição**: Controla convites e growth surfaces
+- **Valor padrão**: `false` em `pilot_controlled`
 
 ## ➕ Adicionar Nova Feature Flag
 
@@ -98,7 +117,7 @@ const minhaFlag = await featureFlagService.getFlag('MINHA_NOVA_FLAG', true);
 
 ## 🔄 Inicialização
 
-O FeatureFlagService é inicializado automaticamente no `AppCommon.js` quando o app inicia. Não é necessário inicializar manualmente.
+O `FeatureFlagService` é inicializado pelo fluxo de navegação principal antes de decidir entre a UI Robotaxi e o fallback legado. Não é necessário inicializar manualmente nos componentes.
 
 ## 💾 Cache
 
@@ -145,5 +164,3 @@ Para resetar todas as flags para valores padrão:
 ```javascript
 await featureFlagService.resetFlags();
 ```
-
-

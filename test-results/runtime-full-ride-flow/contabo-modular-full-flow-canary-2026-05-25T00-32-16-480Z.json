@@ -1,0 +1,469 @@
+{
+  "logPath": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-full-ride-flow/contabo-modular-full-flow-canary-1779668996.log",
+  "ok": true,
+  "reportPath": "/app/logs/runtime-full-ride-flow/runtime-full-ride-flow-existing-modular-contabo-canary-1779669136480.json",
+  "summary": {
+    "startedAt": "2026-05-25T00:32:09.566Z",
+    "completedAt": "2026-05-25T00:32:16.480Z",
+    "mode": "existing-runtime",
+    "targetUrl": "http://127.0.0.1:3001",
+    "redis": {
+      "host": "redis",
+      "port": "6379",
+      "db": "0",
+      "urlConfigured": true
+    },
+    "runtimes": [
+      {
+        "runtime": "modular-contabo-canary",
+        "socketUrl": "http://127.0.0.1:3001",
+        "readiness": {
+          "status": "healthy",
+          "timestamp": "2026-05-25T00:32:09.681Z",
+          "checks": {
+            "redis": {
+              "status": "healthy",
+              "source": "dedicated",
+              "responseTime": "0ms",
+              "latency": 0,
+              "minLatency": 0,
+              "maxLatency": 0,
+              "samples": [
+                0,
+                0,
+                0
+              ],
+              "thresholds": {
+                "warningMs": 300,
+                "unhealthyMs": 1500
+              },
+              "message": "Redis está saudável"
+            },
+            "socketRedisAdapter": {
+              "status": "healthy",
+              "state": "ready",
+              "enabled": true,
+              "required": true,
+              "runtimeRole": "gateway",
+              "updatedAt": "2026-05-25T00:32:07.987Z",
+              "error": null,
+              "message": "Socket.IO Redis Adapter pronto"
+            }
+          }
+        },
+        "flow": {
+          "runtime": "modular-contabo-canary",
+          "ok": true,
+          "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+          "passengerId": "runtime-full-passenger-modular-contabo-canary",
+          "driverId": "runtime-full-driver-modular-contabo-canary",
+          "timings": {
+            "authenticatedMs": 103,
+            "driverOnlineMs": 608,
+            "bookingCreatedMs": 2159,
+            "paymentConfirmedMs": 3625,
+            "driverNotifiedMs": 3745,
+            "rideAcceptedMs": 4574,
+            "arrivedAtPickupMs": 4598,
+            "tripStartedMs": 4923,
+            "locationUpdatesSentMs": 6177,
+            "tripCompletedMs": 6220
+          },
+          "events": {
+            "bookingCreated": true,
+            "paymentConfirmed": true,
+            "driverReceivedNewRideRequest": true,
+            "driverRideAccepted": true,
+            "passengerRideAccepted": true,
+            "driverArrivedAtPickup": true,
+            "passengerArrivedAtPickup": true,
+            "driverTripStarted": true,
+            "passengerTripStarted": true,
+            "passengerLocationEvent": true,
+            "driverTripCompleted": true,
+            "passengerTripCompleted": true,
+            "paymentDistributed": true
+          },
+          "redisAssertions": {
+            "status": "completed",
+            "paymentStatus": "in_holding",
+            "finalFare": "27.5",
+            "tollFee": "0",
+            "driverNetAmount": "25.51",
+            "activeBookingCleared": true,
+            "activeDriverTripCleared": true
+          },
+          "samples": {
+            "newRideRequest": {
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "estimatedFare": 16.53,
+              "pickupAddress": "Copacabana Palace, Rio de Janeiro, RJ",
+              "destinationAddress": "Leblon, Rio de Janeiro, RJ"
+            },
+            "tripCompleted": {
+              "passengerFare": "27.5",
+              "driverNetAmount": 25.51,
+              "tollFee": "0"
+            }
+          },
+          "eventLog": [
+            {
+              "at": 1779669129802,
+              "side": "passenger",
+              "eventName": "authenticated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669129804,
+              "side": "driver",
+              "eventName": "authenticated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669129834,
+              "side": "driver",
+              "eventName": "locationUpdated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669129839,
+              "side": "passenger",
+              "eventName": "map_h3_refresh",
+              "bookingId": null,
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669129839,
+              "side": "driver",
+              "eventName": "map_h3_refresh",
+              "bookingId": null,
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669131038,
+              "side": "driver",
+              "eventName": "locationUpdated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669131038,
+              "side": "driver",
+              "eventName": "map_h3_refresh",
+              "bookingId": null,
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669131039,
+              "side": "passenger",
+              "eventName": "map_h3_refresh",
+              "bookingId": null,
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669131860,
+              "side": "passenger",
+              "eventName": "bookingCreated",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669132235,
+              "side": "driver",
+              "eventName": "locationUpdated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669132236,
+              "side": "passenger",
+              "eventName": "map_h3_refresh",
+              "bookingId": null,
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669132236,
+              "side": "driver",
+              "eventName": "map_h3_refresh",
+              "bookingId": null,
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669133326,
+              "side": "passenger",
+              "eventName": "paymentConfirmed",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669133441,
+              "side": "driver",
+              "eventName": "locationUpdated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669133441,
+              "side": "passenger",
+              "eventName": "map_h3_refresh",
+              "bookingId": null,
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669133442,
+              "side": "driver",
+              "eventName": "map_h3_refresh",
+              "bookingId": null,
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669133446,
+              "side": "driver",
+              "eventName": "newRideRequest",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669134073,
+              "side": "driver",
+              "eventName": "rideAccepted",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134073,
+              "side": "passenger",
+              "eventName": "rideAccepted",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134293,
+              "side": "passenger",
+              "eventName": "arrivedAtPickup",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134294,
+              "side": "passenger",
+              "eventName": "driverArrived",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134299,
+              "side": "passenger",
+              "eventName": "activeRideSync",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134299,
+              "side": "driver",
+              "eventName": "arrivedAtPickup",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134299,
+              "side": "driver",
+              "eventName": "notificationActionSuccess",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134340,
+              "side": "passenger",
+              "eventName": "map_h3_refresh",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669134341,
+              "side": "driver",
+              "eventName": "map_h3_refresh",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669134343,
+              "side": "passenger",
+              "eventName": "rideAccepted",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134623,
+              "side": "driver",
+              "eventName": "tripStarted",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134625,
+              "side": "passenger",
+              "eventName": "tripStarted",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134633,
+              "side": "driver",
+              "eventName": "locationUpdated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134648,
+              "side": "passenger",
+              "eventName": "driverLocation",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669134648,
+              "side": "driver",
+              "eventName": "locationUpdated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669134891,
+              "side": "passenger",
+              "eventName": "driverLocation",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669134892,
+              "side": "driver",
+              "eventName": "locationUpdated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669135141,
+              "side": "passenger",
+              "eventName": "driverLocation",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669135141,
+              "side": "driver",
+              "eventName": "locationUpdated",
+              "bookingId": null,
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669135242,
+              "side": "passenger",
+              "eventName": "map_h3_refresh",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669135242,
+              "side": "driver",
+              "eventName": "map_h3_refresh",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669135919,
+              "side": "driver",
+              "eventName": "tripCompleted",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669135920,
+              "side": "passenger",
+              "eventName": "tripCompleted",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669135922,
+              "side": "driver",
+              "eventName": "paymentDistributed",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            },
+            {
+              "at": 1779669136140,
+              "side": "passenger",
+              "eventName": "map_h3_refresh",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669136140,
+              "side": "driver",
+              "eventName": "map_h3_refresh",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": null
+            },
+            {
+              "at": 1779669136345,
+              "side": "passenger",
+              "eventName": "tripStarted",
+              "bookingId": "booking_1779669131793_runtime-full-passenger-modular-contabo-canary",
+              "code": null,
+              "success": true
+            }
+          ]
+        }
+      }
+    ],
+    "artifactsDir": "/app/logs/runtime-full-ride-flow",
+    "socketClient": "raw-ws"
+  }
+}

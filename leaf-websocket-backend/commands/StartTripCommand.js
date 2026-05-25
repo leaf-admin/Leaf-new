@@ -7,7 +7,7 @@
  * - Validar que viagem pode ser iniciada
  * - Verificar pagamento confirmado
  * - Atualizar estado da corrida
- * - Publicar evento ride.started
+ * - Construir evento canônico ride.started (publicação ocorre no handler/EventBus)
  * 
  * NÃO faz:
  * - Notificar passageiro (isso é responsabilidade de listeners)
@@ -20,12 +20,16 @@ const RideStateManager = require('../services/ride-state-manager');
 const PaymentService = require('../services/payment-service');
 const redisPool = require('../utils/redis-pool');
 const { logger, logStructured } = require('../utils/logger');
-const eventSourcing = require('../services/event-sourcing');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { getTracer } = require('../utils/tracer');
 const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
+const { setActiveTripForDriver } = require('../utils/active-trip-index');
+const {
+    rehydratePrimaryBooking,
+    writeVisibleBookingSnapshot
+} = require('../services/booking-visibility-service');
 
 class StartTripCommand extends Command {
     constructor(data) {
@@ -84,7 +88,13 @@ class StartTripCommand extends Command {
             // Buscar dados da corrida
             span.addEvent('Fetching booking data');
             const bookingKey = `booking:${this.bookingId}`;
-            const bookingData = await redis.hgetall(bookingKey);
+            let bookingData = await redis.hgetall(bookingKey);
+
+            if (!bookingData || Object.keys(bookingData).length === 0) {
+                bookingData = await rehydratePrimaryBooking(redis, this.bookingId, {
+                    rehydratedFor: 'start_trip'
+                });
+            }
 
             if (!bookingData || Object.keys(bookingData).length === 0) {
                 span.setStatus({ code: SpanStatusCode.ERROR, message: 'Corrida não encontrada' });
@@ -101,12 +111,61 @@ class StartTripCommand extends Command {
                 return CommandResult.failure('Motorista não autorizado para iniciar esta corrida')
             }
 
+            if (bookingData.ownerDriverId && bookingData.ownerDriverId !== this.driverId) {
+                span.setStatus({ code: SpanStatusCode.ERROR, message: 'Ownership token inválido' });
+                span.end();
+                metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
+                return CommandResult.failure('Motorista não autorizado para iniciar esta corrida');
+            }
+
             // Verificar estado atual
             span.addEvent('Validating state transition');
             const currentState = await RideStateManager.getBookingState(redis, this.bookingId);
-            
+
+            if (currentState === RideStateManager.STATES.ACCEPTED) {
+                span.setStatus({ code: SpanStatusCode.ERROR, message: 'Chegada ao embarque obrigatória' });
+                span.setAttribute('state.current', currentState);
+                span.end();
+                metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
+                return CommandResult.failure(
+                    'A corrida só pode ser iniciada após registrar chegada ao embarque.'
+                );
+            }
+
+            const arrivalRegisteredAt =
+                bookingData.arrivalRegisteredAt ||
+                bookingData.driverArrivedAt ||
+                bookingData.arrivedAt ||
+                null;
+            if (!arrivalRegisteredAt) {
+                span.setStatus({ code: SpanStatusCode.ERROR, message: 'Chegada ao embarque não persistida' });
+                span.end();
+                metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
+                return CommandResult.failure(
+                    'A corrida só pode ser iniciada após registrar chegada ao embarque.'
+                );
+            }
+
+            let operationalContinuation = null;
+            try {
+                operationalContinuation = bookingData?.operationalContinuation
+                    ? JSON.parse(bookingData.operationalContinuation)
+                    : null;
+            } catch (_continuationError) {
+                operationalContinuation = null;
+            }
+
+            const targetState =
+                operationalContinuation &&
+                (
+                    operationalContinuation.status === 'REPLACEMENT_DRIVER_ACCEPTED' ||
+                    operationalContinuation.status === 'REASSIGNED_IN_PROGRESS'
+                )
+                    ? RideStateManager.STATES.REASSIGNED_IN_PROGRESS
+                    : RideStateManager.STATES.IN_PROGRESS;
+
             // Validar transição de estado
-            if (!RideStateManager.isValidTransition(currentState, RideStateManager.STATES.IN_PROGRESS)) {
+            if (!RideStateManager.isValidTransition(currentState, targetState)) {
                 span.setStatus({ code: SpanStatusCode.ERROR, message: 'Transição de estado inválida' });
                 span.setAttribute('state.current', currentState);
                 span.end();
@@ -116,12 +175,28 @@ class StartTripCommand extends Command {
                 )
             }
 
-            // Verificar status do pagamento
+            // Verificar status do pagamento (fast-path Redis -> fallback payment service)
             span.addEvent('Checking payment status');
-            const paymentService = new PaymentService();
-            const paymentStatus = await paymentService.getPaymentStatus(this.bookingId);
-            
-            if (!paymentStatus || (paymentStatus.status !== 'PAID' && paymentStatus.status !== 'in_holding')) {
+            const normalizePaymentStatus = (status) => String(status || '').trim().toLowerCase();
+            const validPaymentStatuses = new Set(['in_holding', 'paid', 'confirmed']);
+            let paymentStatus = {
+                success: false,
+                status: normalizePaymentStatus(
+                    bookingData.paymentStatus ||
+                    bookingData.payment_status ||
+                    bookingData.statusPagamento
+                )
+            };
+
+            if (!validPaymentStatuses.has(paymentStatus.status)) {
+                const paymentService = new PaymentService();
+                paymentStatus = await paymentService.getPaymentStatus(this.bookingId);
+                paymentStatus.status = normalizePaymentStatus(paymentStatus?.status);
+            } else {
+                paymentStatus.success = true;
+            }
+
+            if (!paymentStatus?.success || !validPaymentStatuses.has(paymentStatus.status)) {
                 span.setStatus({ code: SpanStatusCode.ERROR, message: 'Pagamento não confirmado' });
                 span.setAttribute('payment.status', paymentStatus?.status || 'unknown');
                 span.end();
@@ -132,12 +207,15 @@ class StartTripCommand extends Command {
             // Parsear dados da corrida
             const customerId = bookingData.customerId;
 
+            // Renovar índice de corrida ativa ao iniciar viagem
+            await setActiveTripForDriver(redis, this.driverId, this.bookingId, customerId);
+
             // Atualizar estado da corrida
             span.addEvent('Updating ride state');
             await RideStateManager.updateBookingState(
                 redis,
                 this.bookingId,
-                RideStateManager.STATES.IN_PROGRESS,
+                targetState,
                 {
                     driverId: this.driverId,
                     startLocation: this.startLocation,
@@ -147,11 +225,25 @@ class StartTripCommand extends Command {
 
             // Atualizar booking
             span.addEvent('Updating booking in Redis');
-            await redis.hset(bookingKey, {
-                status: 'IN_PROGRESS',
+            const bookingPatch = {
+                status: targetState,
                 startLocation: JSON.stringify(this.startLocation),
-                startedAt: new Date().toISOString()
-            });
+                startedAt: new Date().toISOString(),
+                arrivalRegisteredAt
+            };
+
+            if (targetState === RideStateManager.STATES.REASSIGNED_IN_PROGRESS && operationalContinuation) {
+                bookingPatch.operationalContinuation = JSON.stringify({
+                    ...operationalContinuation,
+                    status: 'REASSIGNED_IN_PROGRESS',
+                    reassignedStartedAt: bookingPatch.startedAt,
+                    currentLegStartedAt: bookingPatch.startedAt,
+                    replacementDriverId: this.driverId
+                });
+            }
+
+            await redis.hset(bookingKey, bookingPatch);
+            await writeVisibleBookingSnapshot(redis, this.bookingId, bookingPatch);
 
                 // Criar evento canônico
                 span.addEvent('Creating RideStartedEvent');
@@ -163,13 +255,6 @@ class StartTripCommand extends Command {
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
-
-                // Registrar evento no event sourcing
-                span.addEvent('Recording event in event sourcing');
-                await eventSourcing.recordEvent(
-                    eventSourcing.EVENT_TYPES.RIDE_STARTED,
-                    event.data
-                );
 
                 logStructured('info', 'StartTripCommand executado com sucesso', {
                     bookingId: this.bookingId,

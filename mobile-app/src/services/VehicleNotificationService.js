@@ -4,6 +4,7 @@ import database from '@react-native-firebase/database';
 import auth from '@react-native-firebase/auth';
 import { Alert, Platform } from 'react-native';
 import languageManager from '../locales';
+import { allowTestUserTools } from '../config/runtimeAccessPolicy';
 
 
 class VehicleNotificationService {
@@ -20,7 +21,11 @@ class VehicleNotificationService {
      * Verificar se é usuário de teste
      */
     isTestUser(userId) {
-        return userId && (userId.includes('test-user-dev') || userId.includes('test-customer-dev'));
+        return (
+            allowTestUserTools() &&
+            userId &&
+            (userId.includes('test-user-dev') || userId.includes('test-customer-dev'))
+        );
     }
 
     async initialize() {
@@ -433,7 +438,6 @@ class VehicleNotificationService {
 
 // Exportar instância singleton
 export default new VehicleNotificationService();
-
 
 
 

@@ -66,19 +66,33 @@ class WooviDriverService {
   async createSubaccount(subaccountData) {
     try {
       const masterApi = this.createMasterApi();
+      const pixKey = String(subaccountData.pixKey || '').trim();
+      if (!pixKey) {
+        return {
+          success: false,
+          error: 'pixKey é obrigatório para criar subconta Woovi'
+        };
+      }
+
       const payload = {
         name: subaccountData.name,
-        pixKey: subaccountData.pixKey,
+        pixKey,
         ...(subaccountData.taxID ? { taxID: subaccountData.taxID } : {}),
         ...(subaccountData.email ? { email: subaccountData.email } : {}),
         ...(subaccountData.phone ? { phone: subaccountData.phone } : {})
       };
       const response = await masterApi.post('/subaccount', payload);
       if (response.status >= 200 && response.status < 300) {
+        const subaccount =
+          response.data?.subaccount ||
+          response.data?.subAccount ||
+          response.data?.SubAccount ||
+          response.data;
         return {
           success: true,
           status: response.status,
-          subaccount: response.data?.subaccount || response.data
+          pixKey: subaccount?.pixKey || pixKey,
+          subaccount
         };
       }
       return {
@@ -97,12 +111,19 @@ class WooviDriverService {
   async getSubaccountDetails(pixKey) {
     try {
       const masterApi = this.createMasterApi();
-      const response = await masterApi.get(`/subaccount/${encodeURIComponent(pixKey)}`);
+      const normalizedPixKey = String(pixKey || '').trim();
+      const response = await masterApi.get(`/subaccount/${encodeURIComponent(normalizedPixKey)}`);
       if (response.status >= 200 && response.status < 300) {
+        const subaccount =
+          response.data?.subaccount ||
+          response.data?.subAccount ||
+          response.data?.SubAccount ||
+          response.data;
         return {
           success: true,
           status: response.status,
-          subaccount: response.data?.subaccount || response.data
+          pixKey: subaccount?.pixKey || normalizedPixKey,
+          subaccount
         };
       }
       return {
@@ -121,20 +142,25 @@ class WooviDriverService {
   async createChargeWithSplit(chargeData) {
     try {
       const masterApi = this.createMasterApi();
+      const { getNgrokWebhookUrl } = require('../config/load-ngrok-url');
+      const webhookUrl = chargeData.notificationUrl || getNgrokWebhookUrl();
       const payload = {
         value: chargeData.value,
         correlationID: chargeData.correlationID || `leaf_split_${Date.now()}`,
         comment: chargeData.comment || 'Cobrança Leaf com split',
         ...(chargeData.expiresIn ? { expiresIn: chargeData.expiresIn } : {}),
+        ...(webhookUrl ? { notificationUrl: webhookUrl } : {}),
         ...(Array.isArray(chargeData.additionalInfo) ? { additionalInfo: chargeData.additionalInfo } : {}),
         ...(chargeData.customer ? { customer: chargeData.customer } : {}),
         ...(Array.isArray(chargeData.splits) ? { splits: chargeData.splits } : {})
       };
       const response = await masterApi.post('/charge', payload);
       if (response.status >= 200 && response.status < 300) {
+        const charge = response.data?.charge || response.data;
         return {
           success: true,
           status: response.status,
+          charge,
           data: response.data
         };
       }
@@ -461,16 +487,9 @@ class WooviDriverService {
         };
       }
 
-      // Criar API client para requisições com MASTER
-      const masterApi = axios.create({
-        baseURL: WOOVI_CONFIG.baseUrl,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': WOOVI_CONFIG.masterApiToken,
-          'X-App-ID': WOOVI_CONFIG.masterAppId
-        },
-        timeout: 30000
-      });
+      // Criar API client para requisições com MASTER usando a mesma política de headers
+      // do restante da integração Woovi.
+      const masterApi = this.createMasterApi();
 
       // 1. Registrar nova conta BaaS usando /api/v1/account-register
       const accountRegisterData = {
@@ -546,15 +565,7 @@ class WooviDriverService {
         throw new Error('API MASTER não configurada');
       }
 
-      const masterApi = axios.create({
-        baseURL: WOOVI_CONFIG.baseUrl,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': WOOVI_CONFIG.masterApiToken,
-          'X-App-ID': WOOVI_CONFIG.masterAppId
-        },
-        timeout: 30000
-      });
+      const masterApi = this.createMasterApi();
 
       const applicationData = {
         accountId: accountId,
@@ -567,14 +578,16 @@ class WooviDriverService {
       logStructured('info', 'Criando API para conta BaaS', { service: 'woovi-driver-service', accountId });
       const response = await masterApi.post('/application', applicationData);
 
-      if (response.data && (response.data.clientId || response.data.appId)) {
-        const clientId = response.data.clientId || response.data.appId;
+      const application = response.data?.application || response.data;
+      if (application && (application.clientId || application.clientID || application.appID || application.appId)) {
+        const clientId = application.clientId || application.clientID || application.appID || application.appId;
         logStructured('info', 'API criada com sucesso', { service: 'woovi-driver-service', clientId, accountId });
         return {
           success: true,
           clientId: clientId,
-          clientSecret: response.data.clientSecret,
-          appId: clientId,
+          clientSecret: application.clientSecret,
+          appId: application.appID || application.appId || clientId,
+          application,
           data: response.data
         };
       } else {
@@ -621,12 +634,15 @@ class WooviDriverService {
       logStructured('info', 'Criando chave Pix para conta', { service: 'woovi-driver-service', appId });
       const response = await accountApi.post('/pix-keys', pixKeyData);
 
-      if (response.data && response.data.key) {
-        logStructured('info', 'Chave Pix criada com sucesso', { service: 'woovi-driver-service', key: response.data.key, appId });
+      const pixKeyDataResponse = response.data?.pixKey || response.data;
+      const createdPixKey = pixKeyDataResponse?.pixKey || pixKeyDataResponse?.key;
+      if (createdPixKey) {
+        logStructured('info', 'Chave Pix criada com sucesso', { service: 'woovi-driver-service', key: createdPixKey, appId });
         return {
           success: true,
-          pixKey: response.data.key,
-          pixKeyType: response.data.type || pixKeyType,
+          pixKey: createdPixKey,
+          pixKeyType: pixKeyDataResponse.type || pixKeyType,
+          pixKeyData: pixKeyDataResponse,
           data: response.data
         };
       } else {
@@ -791,6 +807,23 @@ class WooviDriverService {
     try {
       const response = await this.api.post(`/charge/${chargeId}/cancel`);
       if (response.status < 200 || response.status >= 300) {
+        const responseErrorText = String(
+          response.data?.error ||
+          response.data?.message ||
+          ''
+        ).toLowerCase();
+
+        // A Woovi pode responder 404 quando a cobrança já foi finalizada/expirada.
+        // Tratamos como cancelamento idempotente para o fluxo do app.
+        if (response.status === 404 || responseErrorText.includes('not found')) {
+          return {
+            success: true,
+            alreadyFinalized: true,
+            status: response.status,
+            data: response.data
+          };
+        }
+
         return {
           success: false,
           status: response.status,
@@ -918,7 +951,7 @@ class WooviDriverService {
    * @param {string} rideId - ID da corrida
    * @returns {Promise<Object>} - Resultado da transferência
    */
-  async transferDirectToDriver(wooviAccountId, value, description, rideId, driverPixKey = null, leafPixKey = null) {
+  async transferDirectToDriver(wooviAccountId, value, description, rideId, driverPixKey = null, leafPixKey = null, options = {}) {
     try {
       logStructured('info', 'Transferindo valor líquido para motorista', { service: 'woovi-driver-service',
         accountId: wooviAccountId,
@@ -929,7 +962,7 @@ class WooviDriverService {
       // Se não tiver chaves Pix, tentar usar accountId como fallback
       // Mas o endpoint /transfer requer chaves Pix
       if (!driverPixKey || !leafPixKey) {
-        logStructured('warn', 'Chaves Pix não fornecidas. Tentando buscar do banco de dados', { service: 'woovi-driver-service', driverId, rideId });
+        logStructured('warn', 'Chaves Pix não fornecidas. Tentando buscar do banco de dados', { service: 'woovi-driver-service', accountId: wooviAccountId, rideId });
         // ✅ Buscar chaves Pix do Firestore (implementado em driver-approval-service)
         // Por enquanto, retornar erro informativo
         return {
@@ -945,15 +978,16 @@ class WooviDriverService {
       const transferData = {
         value: value, // Valor em centavos
         fromPixKey: leafPixKey, // Chave Pix da conta Leaf (origem)
-        toPixKey: driverPixKey // Chave Pix da conta do motorista (destino)
+        toPixKey: driverPixKey, // Chave Pix da conta do motorista (destino)
+        correlationID: options.correlationID || options.idempotencyKey || `leaf_transfer_${rideId}`
       };
 
-      logStructured('info', 'Enviando transferência via /api/v1/transfer', { service: 'woovi-driver-service', driverId, rideId, value });
+      logStructured('info', 'Enviando transferência via /api/v1/transfer', { service: 'woovi-driver-service', accountId: wooviAccountId, rideId, value });
       const response = await this.api.post('/transfer', transferData);
 
       if (response.data && response.data.transaction) {
         const transaction = response.data.transaction;
-        logStructured('info', 'Transferência realizada com sucesso', { service: 'woovi-driver-service', transactionId: transaction.correlationID, value: (transaction.value / 100).toFixed(2), time: transaction.time, driverId, rideId });
+        logStructured('info', 'Transferência realizada com sucesso', { service: 'woovi-driver-service', transactionId: transaction.correlationID, value: (transaction.value / 100).toFixed(2), time: transaction.time, accountId: wooviAccountId, rideId });
         
         return {
           success: true,
@@ -970,11 +1004,52 @@ class WooviDriverService {
         throw new Error('Resposta inválida da API Woovi para transferência');
       }
     } catch (error) {
-      logError(error, 'Erro ao transferir para motorista', { service: 'woovi-driver-service', driverId, rideId, errorData: error.response?.data });
+      logError(error, 'Erro ao transferir para motorista', { service: 'woovi-driver-service', accountId: wooviAccountId, rideId, errorData: error.response?.data });
       return {
         success: false,
         error: error.response?.data || error.message,
         details: 'Verificar se as chaves Pix estão corretas e se a conta Leaf tem saldo suficiente'
+      };
+    }
+  }
+
+  /**
+   * Saca o saldo de uma subconta para a conta principal da plataforma.
+   * Endpoint oficial de subconta: POST /subaccount/:pixKey/withdraw.
+   * @param {string} pixKey - Chave Pix da subconta.
+   * @returns {Promise<Object>}
+   */
+  async withdrawFromSubaccount(pixKey) {
+    try {
+      const normalizedPixKey = String(pixKey || '').trim();
+      if (!normalizedPixKey) {
+        return {
+          success: false,
+          error: 'pixKey da subconta é obrigatória'
+        };
+      }
+
+      const masterApi = this.createMasterApi();
+      const response = await masterApi.post(`/subaccount/${encodeURIComponent(normalizedPixKey)}/withdraw`);
+
+      if (response.status >= 200 && response.status < 300) {
+        return {
+          success: true,
+          status: response.status,
+          data: response.data
+        };
+      }
+
+      return {
+        success: false,
+        status: response.status,
+        error: response.data || 'Falha ao sacar subconta'
+      };
+    } catch (error) {
+      logError(error, 'Erro ao sacar subconta Woovi', { service: 'woovi-driver-service', errorData: error.response?.data });
+      return {
+        success: false,
+        error: error.response?.data || error.message
       };
     }
   }
@@ -1033,7 +1108,7 @@ class WooviDriverService {
         charges: response.data.charges
       };
     } catch (error) {
-      logError(error, 'Erro ao listar cobranças do motorista', { service: 'woovi-driver-service', driverId, errorData: error.response?.data });
+      logError(error, 'Erro ao listar cobranças do motorista', { service: 'woovi-driver-service', wooviClientId, errorData: error.response?.data });
       return {
         success: false,
         error: error.response?.data || error.message
@@ -1069,7 +1144,7 @@ class WooviDriverService {
         throw new Error('Erro ao buscar cobranças');
       }
     } catch (error) {
-      logError(error, 'Erro ao verificar saldo do motorista', { service: 'woovi-driver-service', driverId, errorData: error.response?.data });
+      logError(error, 'Erro ao verificar saldo do motorista', { service: 'woovi-driver-service', wooviClientId, errorData: error.response?.data });
       return {
         success: false,
         error: error.response?.data || error.message
@@ -1091,7 +1166,7 @@ class WooviDriverService {
         customer: response.data.customer
       };
     } catch (error) {
-      logError(error, 'Erro ao atualizar cliente Woovi', { service: 'woovi-driver-service', driverId, errorData: error.response?.data });
+      logError(error, 'Erro ao atualizar cliente Woovi', { service: 'woovi-driver-service', wooviClientId, errorData: error.response?.data });
       return {
         success: false,
         error: error.response?.data || error.message

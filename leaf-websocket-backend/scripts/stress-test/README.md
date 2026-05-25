@@ -129,6 +129,45 @@ node scripts/stress-test/capacity-report.js --prometheus http://localhost:9090 -
 
 ---
 
+### 6. Sustained Active Rides (`sustained-active-rides-capacity.cjs`)
+
+Simula operação real por janelas de tempo, mantendo corridas **ativas** (em andamento) com ciclo completo:
+
+`createBooking -> confirmPayment -> newRideRequest -> acceptRide -> startTrip -> hold -> completeTrip`
+
+Inclui:
+- validação de motorista ativo/elegível na região (`/api/driver-status/:id`)
+- retry automático de `confirmPayment` quando bloqueado por indisponibilidade de parceiro
+- tentativa de limpeza de lock do motorista em falhas de fluxo
+- relatório final com capacidade sustentada por janela
+
+```bash
+# Perfil produção (janelas mais longas)
+node scripts/stress-test/sustained-active-rides-capacity.cjs \
+  --url https://api.62.169.31.231.sslip.io \
+  --drivers 120 \
+  --passengers 150 \
+  --profile production
+
+# Perfil rápido para validação técnica
+node scripts/stress-test/sustained-active-rides-capacity.cjs \
+  --url https://api.62.169.31.231.sslip.io \
+  --drivers 40 \
+  --passengers 50 \
+  --profile quick
+
+# Janelas customizadas (name:durationSec:targetActive:rideMinSec:rideMaxSec)
+node scripts/stress-test/sustained-active-rides-capacity.cjs \
+  --url https://api.62.169.31.231.sslip.io \
+  --drivers 80 \
+  --passengers 100 \
+  --windows "warmup:120:12:90:180,normal:240:24:180:360,peak:300:36:240:420,cooldown:120:12:90:180"
+```
+
+**Relatório:** `reports/sustained-active-rides-{timestamp}.json` (ou path custom via `--report-path`)
+
+---
+
 ## 🚀 Executar Todos os Testes
 
 ```bash
@@ -239,4 +278,3 @@ curl http://localhost:3001/metrics
 - [k6 Documentation](https://k6.io/docs/)
 - [Artillery Documentation](https://www.artillery.io/docs)
 - [Prometheus Querying](https://prometheus.io/docs/prometheus/latest/querying/basics/)
-

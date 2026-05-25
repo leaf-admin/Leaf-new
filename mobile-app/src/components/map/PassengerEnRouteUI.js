@@ -9,7 +9,7 @@ import {
   Alert
 } from 'react-native';
 import { useSelector } from 'react-redux';
-import { useTheme } from '../../common-local/theme';
+import { useTheme } from '../../theme/runtimeTokens';
 import Typography from '../design-system/Typography';
 import AnimatedButton from '../design-system/AnimatedButton';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,7 +56,11 @@ export default function PassengerEnRouteUI({ booking, onDriverLocationUpdate }) 
       <View style={styles.header}>
         <View style={styles.driverInfo}>
           <Image
-            source={booking?.driver_image ? { uri: booking.driver_image } : require('../../assets/images/default-avatar.png')}
+            source={
+              booking?.driver_image
+                ? { uri: booking.driver_image }
+                : require("../../../assets/images/profilePic.png")
+            }
             style={styles.driverAvatar}
           />
           <View style={styles.driverDetails}>

@@ -9,6 +9,30 @@ const fs = require('fs');
 const { logger } = require('./logger');
 
 class DockerDetector {
+    static parseRedisUrl() {
+        if (!process.env.REDIS_URL) {
+            return null;
+        }
+
+        try {
+            const url = new URL(process.env.REDIS_URL);
+            if (url.protocol !== 'redis:' && url.protocol !== 'rediss:') {
+                return null;
+            }
+
+            const dbFromPath = (url.pathname || '/0').replace('/', '') || '0';
+            return {
+                host: url.hostname || null,
+                port: url.port ? parseInt(url.port, 10) : null,
+                username: url.username ? decodeURIComponent(url.username) : null,
+                password: url.password ? decodeURIComponent(url.password) : null,
+                protocol: url.protocol.replace(':', ''),
+                db: Number.isNaN(parseInt(dbFromPath, 10)) ? 0 : parseInt(dbFromPath, 10)
+            };
+        } catch (_error) {
+            return null;
+        }
+    }
     /**
      * Verifica se está rodando dentro de um container Docker
      * @returns {boolean}
@@ -47,6 +71,11 @@ class DockerDetector {
             return process.env.REDIS_HOST;
         }
 
+        const parsed = this.parseRedisUrl();
+        if (parsed?.host) {
+            return parsed.host;
+        }
+
         // Se está em Docker, usar o nome do serviço
         if (this.isRunningInDocker()) {
             return 'redis'; // Nome do serviço no docker-compose
@@ -68,11 +97,16 @@ class DockerDetector {
 
         const host = this.getRedisHost();
         const port = process.env.REDIS_PORT || '6379';
-        const password = process.env.REDIS_PASSWORD || 'leaf_redis_2024';
+        const password = process.env.REDIS_PASSWORD;
         const db = process.env.REDIS_DB || '0';
 
-        // Formato: redis://:password@host:port/db
-        return `redis://:${password}@${host}:${port}/${db}`;
+        if (String(password || '').trim()) {
+            // Formato autenticado: redis://:password@host:port/db
+            return `redis://:${password}@${host}:${port}/${db}`;
+        }
+
+        // Formato sem autenticação
+        return `redis://${host}:${port}/${db}`;
     }
 
     /**
@@ -80,17 +114,31 @@ class DockerDetector {
      * @returns {Object}
      */
     static getRedisConfig() {
+        const parsed = this.parseRedisUrl();
         const host = this.getRedisHost();
-        const port = parseInt(process.env.REDIS_PORT || '6379');
-        const password = process.env.REDIS_PASSWORD || 'leaf_redis_2024';
-        const db = parseInt(process.env.REDIS_DB || '0');
+        const port = parsed?.port || parseInt(process.env.REDIS_PORT || '6379');
+        const password = parsed?.password || process.env.REDIS_PASSWORD || undefined;
+        const username = parsed?.username || process.env.REDIS_USERNAME || undefined;
+        const db = Number.isInteger(parsed?.db) ? parsed.db : parseInt(process.env.REDIS_DB || '0');
+        const protocol = parsed?.protocol || (String(process.env.REDIS_USE_TLS || '').toLowerCase() === 'true' ? 'rediss' : 'redis');
+        const tlsEnabled = protocol === 'rediss' || String(process.env.REDIS_USE_TLS || '').toLowerCase() === 'true';
+        const rejectUnauthorized = String(process.env.REDIS_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
 
-        return {
+        const config = {
             host,
             port,
+            username,
             password,
             db
         };
+
+        if (tlsEnabled) {
+            config.tls = {
+                rejectUnauthorized
+            };
+        }
+
+        return config;
     }
 
     /**
@@ -109,4 +157,3 @@ class DockerDetector {
 }
 
 module.exports = DockerDetector;
-

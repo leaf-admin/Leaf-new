@@ -3,7 +3,7 @@ const io = require('socket.io-client');
 console.log('🚀 INICIANDO TESTE WEBSOCKET COMPLETO...\n');
 
 // Conectar ao WebSocket
-const socket = io('http://216.238.107.59:3001', {
+const socket = io('http://147.182.204.181:3001', {
     transports: ['websocket'],
     timeout: 10000
 });

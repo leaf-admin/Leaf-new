@@ -1,40 +1,115 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+import { useAuth } from "@/src/contexts/AuthContext";
+import {
+  hasAnyRole,
+  isAdminMutationEnabled,
+  mutationBlockedMessage,
+  roleBlockedMessage,
+} from "@/src/utils/dashboard-access";
+
+function waitlistStatusClass(status) {
+  if (status === "approved") return "status-ok";
+  if (status === "rejected") return "status-bad";
+  return "status-warn";
+}
+
+function cityOperationalState(city) {
+  if (!city) return { enabled: true, label: "sem dado", className: "meta-badge" };
+  if (city.stateEnabled === false) return { enabled: false, label: "UF bloqueada", className: "status-bad" };
+  if (city.cityActive === false) return { enabled: false, label: "cidade inativa", className: "status-bad" };
+  if (city.waitlistEnabled === false) return { enabled: false, label: "waitlist off", className: "status-warn" };
+  return { enabled: true, label: "ativa", className: "status-ok" };
+}
 
 export default function WaitlistPage() {
+  const { user } = useAuth();
   const [drivers, setDrivers] = useState([]);
+  const [landingLeads, setLandingLeads] = useState([]);
+  const [landingStats, setLandingStats] = useState(null);
   const [stats, setStats] = useState(null);
   const [pagination, setPagination] = useState(null);
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
   const [status, setStatus] = useState("pending");
+  const [cityFilter, setCityFilter] = useState("");
+  const [driverSearch, setDriverSearch] = useState("");
   const [page, setPage] = useState(1);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [actionDriverId, setActionDriverId] = useState("");
+  const allowedRoles = useMemo(() => ["admin", "super-admin", "manager"], []);
+  const roleMessage = roleBlockedMessage(user, allowedRoles);
+  const mutationMessage = mutationBlockedMessage(runtimeFlags);
+  const canReadWaitlist = hasAnyRole(user, allowedRoles);
+  const globalWaitlistEnabled = stats?.config?.waitListEnabled !== false;
+  const canMutateWaitlist = canReadWaitlist && globalWaitlistEnabled && isAdminMutationEnabled(runtimeFlags);
+  const actionBlockedMessage =
+    roleMessage ||
+    mutationMessage ||
+    (!globalWaitlistEnabled ? "A waitlist está desabilitada na configuração do backend. Ações ficam bloqueadas." : "");
+  const cityStatusByKey = useMemo(() => {
+    const entries = (stats?.byCity || []).map((city) => [city.cityKey, cityOperationalState(city)]);
+    return new Map(entries);
+  }, [stats?.byCity]);
+  const filteredDrivers = useMemo(() => {
+    const term = driverSearch.trim().toLowerCase();
+    if (!term) return drivers;
+    return drivers.filter((item) =>
+      `${item?.id || ""} ${item?.cityLabel || item?.cityKey || ""} ${item?.driver?.firstName || ""} ${item?.driver?.lastName || ""} ${item?.driver?.email || ""} ${item?.status || ""}`
+        .toLowerCase()
+        .includes(term),
+    );
+  }, [drivers, driverSearch]);
+
+  const loadWaitlist = useCallback(async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setLoading(true);
+      setError("");
+      if (!silent) setNotice("");
+
+      const flags = await leafAPI.getRuntimeFlags().catch(() => null);
+      setRuntimeFlags(flags);
+
+      if (!hasAnyRole(user, allowedRoles)) {
+        setDrivers([]);
+        setLandingLeads([]);
+        setLandingStats(null);
+        setPagination(null);
+        setStats(null);
+        return;
+      }
+
+      const [listData, statsData, landingData] = await Promise.all([
+        leafAPI.getWaitlist(page, 20, status, cityFilter),
+        leafAPI.getWaitlistStats(),
+        leafAPI.getLandingWaitlist({ page: 1, limit: 50, status: "all" }).catch(() => ({ waitlist: [], stats: null })),
+      ]);
+      setDrivers(listData?.drivers || []);
+      setLandingLeads(landingData?.waitlist || []);
+      setLandingStats(landingData?.stats || null);
+      setPagination(listData?.pagination || null);
+      setStats(statsData);
+    } catch (err) {
+      setError(err?.message || "Falha ao carregar waitlist");
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [allowedRoles, cityFilter, page, status, user]);
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
-      try {
-        if (mounted) setLoading(true);
-        const [listData, statsData] = await Promise.all([
-          leafAPI.getWaitlist(page, 20, status),
-          leafAPI.getWaitlistStats(),
-        ]);
-        if (!mounted) return;
-        setDrivers(listData?.drivers || []);
-        setPagination(listData?.pagination || null);
-        setStats(statsData);
-      } catch (err) {
-        if (mounted) setError(err?.message || "Falha ao carregar waitlist");
-      } finally {
-        if (mounted) setLoading(false);
-      }
+      if (!mounted) return;
+      await loadWaitlist();
     };
     load();
     const timer = setInterval(load, 30000);
@@ -42,7 +117,55 @@ export default function WaitlistPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [page, status]);
+  }, [loadWaitlist]);
+
+  const runDriverAction = async (driverId, action) => {
+    const safeDriverId = String(driverId || "").trim();
+    if (!safeDriverId) return;
+    if (!canMutateWaitlist) {
+      setError(actionBlockedMessage || "Ação bloqueada para este perfil.");
+      return;
+    }
+
+    try {
+      setActionDriverId(safeDriverId);
+      setError("");
+      setNotice("");
+      if (action === "approve") {
+        await leafAPI.approveWaitlistDriver(safeDriverId, "Aprovado pelo dashboard Leaf");
+        setNotice("Motorista aprovado e liberado para ativação.");
+      } else if (action === "reject") {
+        const reason = window.prompt("Motivo da rejeição", "Perfil fora dos critérios atuais");
+        if (reason === null) return;
+        await leafAPI.rejectWaitlistDriver(safeDriverId, reason);
+        setNotice("Motorista rejeitado e removido da fila ativa.");
+      }
+      await loadWaitlist({ silent: true });
+    } catch (err) {
+      setError(err?.message || "Falha ao atualizar waitlist");
+    } finally {
+      setActionDriverId("");
+    }
+  };
+
+  const updateLandingLead = async (leadId, nextStatus) => {
+    if (!canMutateWaitlist) {
+      setError(actionBlockedMessage || "Ação bloqueada para este perfil.");
+      return;
+    }
+    try {
+      setActionDriverId(`landing:${leadId}`);
+      setError("");
+      setNotice("");
+      await leafAPI.updateLandingWaitlistStatus(leadId, nextStatus);
+      setNotice("Lead da landing atualizado com sucesso.");
+      await loadWaitlist({ silent: true });
+    } catch (err) {
+      setError(err?.message || "Falha ao atualizar lead da landing");
+    } finally {
+      setActionDriverId("");
+    }
+  };
 
   return (
     <ProtectedRoute>
@@ -61,52 +184,249 @@ export default function WaitlistPage() {
               <option value="approved">Aprovados</option>
               <option value="rejected">Rejeitados</option>
             </select>
+            <input
+              placeholder="Filtro por cidade (slug)"
+              value={cityFilter}
+              onChange={(e) => {
+                setPage(1);
+                setCityFilter(e.target.value);
+              }}
+            />
           </div>
         </header>
         <AppNav />
         {loading ? <LoadingState message="Carregando waitlist..." /> : null}
 
         <section className="grid grid-kpi">
-          <KpiCard title="Waitlist" value={stats?.waitlistCount || 0} />
+          <KpiCard title="Pendentes" value={stats?.stats?.pending || 0} />
+          <KpiCard title="Aprovados" value={stats?.stats?.approved || 0} />
+          <KpiCard title="Leads landing" value={landingStats?.total || 0} />
           <KpiCard title="Página atual" value={pagination?.page || page} />
-          <KpiCard title="Total páginas" value={pagination?.pages || 1} />
-          <KpiCard title="Status" value={status} />
+          <KpiCard
+            title="Slots disponíveis"
+            value={globalWaitlistEnabled ? (stats?.stats?.availableSlots || 0) : "bloqueado"}
+            tone={globalWaitlistEnabled ? "default" : "danger"}
+          />
         </section>
+        {roleMessage || mutationMessage || !globalWaitlistEnabled ? (
+          <ErrorText message={actionBlockedMessage} />
+        ) : null}
 
         <section className="grid">
-          <Panel title="Stats">
-            <pre>{JSON.stringify(stats || {}, null, 2)}</pre>
+          <Panel
+            title="Stats gerais"
+            subtitle="Painel resumido de capacidade, pendências e distribuição por cidade."
+          >
+            <KeyValueGrid
+              data={{
+                pending: stats?.stats?.pending || 0,
+                approved: stats?.stats?.approved || 0,
+                rejected: stats?.stats?.rejected || 0,
+                availableSlots: stats?.stats?.availableSlots || 0,
+                totalCities: (stats?.byCity || []).length,
+                currentPage: pagination?.page || page,
+                waitListEnabled: globalWaitlistEnabled ? "sim" : "não",
+              }}
+              labels={{
+                pending: "Pendentes",
+                approved: "Aprovados",
+                rejected: "Rejeitados",
+                availableSlots: "Slots disponiveis",
+                totalCities: "Cidades monitoradas",
+                currentPage: "Pagina atual",
+                waitListEnabled: "Waitlist global",
+              }}
+            />
+            <TechnicalDetails title="Ver payload técnico da waitlist" data={stats || {}} />
           </Panel>
-          <Panel title="Motoristas">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Posição</th>
-                  <th>Nome</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Prioridade</th>
-                </tr>
-              </thead>
-              <tbody>
-                {drivers.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.position ?? "-"}</td>
-                    <td>{`${item?.driver?.firstName || ""} ${item?.driver?.lastName || ""}`.trim() || "-"}</td>
-                    <td>{item?.driver?.email || "-"}</td>
-                    <td>{item.status || "-"}</td>
-                    <td>{item.priority || "normal"}</td>
+          <Panel title="Capacidade por Cidade" subtitle="Leitura de oferta por UF/cidade para gestão de abertura.">
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Cidade</th>
+                    <th>UF</th>
+                    <th>Pendentes</th>
+                    <th>Aprovados</th>
+                    <th>Rejeitados</th>
+                    <th>Capacidade</th>
+                    <th>Slots</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(stats?.byCity || []).map((city) => {
+                    const cityState = cityOperationalState(city);
+                    return (
+                      <tr key={city.cityKey}>
+                        <td>{city.cityLabel || city.cityKey}</td>
+                        <td>{city.stateCode || "-"}</td>
+                        <td>{city.pending || 0}</td>
+                        <td>{city.approved || 0}</td>
+                        <td>{city.rejected || 0}</td>
+                        <td>{city.maxActiveDrivers || 0}</td>
+                        <td>{cityState.enabled ? (city.availableSlots || 0) : "bloqueado"}</td>
+                        <td><span className={cityState.className}>{cityState.label}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+          <Panel title="Motoristas" subtitle="Fila operacional por cidade e prioridade de ativação.">
+            <div className="filters">
+              <input
+                placeholder="Filtrar por nome, e-mail ou cidade"
+                value={driverSearch}
+                onChange={(e) => setDriverSearch(e.target.value)}
+              />
+            </div>
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Posição</th>
+                    <th>Cidade</th>
+                    <th>Nome</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Prioridade</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredDrivers.length === 0 ? (
+                    <tr>
+                      <td colSpan={7}>Nenhum motorista na waitlist para este filtro.</td>
+                    </tr>
+                  ) : (
+                    filteredDrivers.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.position ?? "-"}</td>
+                        <td>{item.cityLabel || item.cityKey || "-"}</td>
+                        <td>
+                          {`${item?.driver?.firstName || ""} ${item?.driver?.lastName || ""}`.trim() || "-"}
+                        </td>
+                        <td>{item?.driver?.email || "-"}</td>
+                        <td>
+                          <span className={waitlistStatusClass(item.status)}>
+                            {item.status || "-"}
+                          </span>
+                        </td>
+                        <td>{item.priority || "normal"}</td>
+                        <td>
+                          {item.status === "pending" ? (
+                            <div className="row-actions">
+                              <button
+                                type="button"
+                                onClick={() => runDriverAction(item.driverId || item.id, "approve")}
+                                disabled={
+                                  !canMutateWaitlist ||
+                                  actionDriverId === (item.driverId || item.id) ||
+                                  cityStatusByKey.get(item.cityKey)?.enabled === false
+                                }
+                                title={!canMutateWaitlist ? actionBlockedMessage : cityStatusByKey.get(item.cityKey)?.label}
+                              >
+                                Aprovar
+                              </button>
+                              <button
+                                type="button"
+                                className="button-secondary"
+                                onClick={() => runDriverAction(item.driverId || item.id, "reject")}
+                                disabled={!canMutateWaitlist || actionDriverId === (item.driverId || item.id)}
+                                title={!canMutateWaitlist ? actionBlockedMessage : undefined}
+                              >
+                                Rejeitar
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="muted">Sem ação</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
             <div className="pager">
               <button onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
               <span>Página {pagination?.page || page}</span>
               <button onClick={() => setPage((p) => p + 1)}>Próxima</button>
             </div>
           </Panel>
+          <Panel title="Leads da landing" subtitle="Cadastros captados fora do app para contato e conversão.">
+            <KeyValueGrid
+              data={{
+                total: landingStats?.total || 0,
+                pending: landingStats?.pending || 0,
+                contacted: landingStats?.contacted || 0,
+                converted: landingStats?.converted || 0,
+                today: landingStats?.today || 0,
+              }}
+              labels={{
+                total: "Total",
+                pending: "Pendentes",
+                contacted: "Contatados",
+                converted: "Convertidos",
+                today: "Hoje",
+              }}
+              maxItems={5}
+            />
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Telefone</th>
+                    <th>Cidade</th>
+                    <th>Status</th>
+                    <th>Origem</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {landingLeads.length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>Nenhum lead da landing encontrado.</td>
+                    </tr>
+                  ) : (
+                    landingLeads.slice(0, 20).map((lead) => (
+                      <tr key={lead.id}>
+                        <td>{`${lead.nome || ""} ${lead.sobrenome || ""}`.trim() || "-"}</td>
+                        <td>{lead.celular || "-"}</td>
+                        <td>{lead.cidade || "-"}</td>
+                        <td><span className={waitlistStatusClass(lead.status)}>{lead.status || "pending"}</span></td>
+                        <td>{lead.origem || "landing"}</td>
+                        <td>
+                          <div className="row-actions">
+                            <button
+                              type="button"
+                              disabled={!canMutateWaitlist || actionDriverId === `landing:${lead.id}`}
+                              onClick={() => updateLandingLead(lead.id, "contacted")}
+                            >
+                              Contatado
+                            </button>
+                            <button
+                              type="button"
+                              className="button-secondary"
+                              disabled={!canMutateWaitlist || actionDriverId === `landing:${lead.id}`}
+                              onClick={() => updateLandingLead(lead.id, "converted")}
+                            >
+                              Convertido
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
         </section>
+        {notice ? <p className="success-text">{notice}</p> : null}
         <ErrorText message={error} />
       </main>
     </ProtectedRoute>

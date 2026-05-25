@@ -1,0 +1,1458 @@
+{
+  "generatedAt": "2026-05-24T22:02:36.826Z",
+  "root": "/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend",
+  "summary": {
+    "httpRoutes": 59,
+    "socketEvents": 114,
+    "httpRoutesByRuntime": {
+      "modular": 30,
+      "vps": 29
+    },
+    "socketEventsByRuntime": {
+      "modular": 65,
+      "vps": 49
+    }
+  },
+  "httpRoutes": [
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/admin/auth"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/alerts"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/app"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/auth"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/auth/password"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/campaign-center"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/custom-otp"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/demand"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/driver-status"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/geofence"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/help"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/kyc-analytics"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/kyc-proxy"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/kyc"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/notifications"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/ocr"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/ops"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/programs/referrals"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/api/support"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/auth"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-http-routes.js",
+      "method": "USE",
+      "path": "/cache"
+    },
+    {
+      "runtime": "modular",
+      "file": "server.js",
+      "method": "GET",
+      "path": "/health/liveness"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-runtime-endpoints.js",
+      "method": "GET",
+      "path": "/metrics-old"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-runtime-endpoints.js",
+      "method": "GET",
+      "path": "/metrics"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/http-middleware.js",
+      "method": "GET",
+      "path": "/otel/health"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/http-middleware.js",
+      "method": "POST",
+      "path": "/otel/v1/traces"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-runtime-endpoints.js",
+      "method": "POST",
+      "path": "/restart"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-runtime-endpoints.js",
+      "method": "GET",
+      "path": "/stats"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/admin/auth"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/alerts"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/app"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/auth"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/auth/password"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/campaign-center"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/custom-otp"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/driver-status"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/geofence"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/help"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/kyc-analytics"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/kyc-proxy"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/kyc"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/notifications"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/ocr"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/ops"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/programs/referrals"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/api/support"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/auth"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "USE",
+      "path": "/cache"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "GET",
+      "path": "/health/liveness"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "GET",
+      "path": "/metrics-old"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "GET",
+      "path": "/metrics"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "GET",
+      "path": "/otel/health"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "POST",
+      "path": "/otel/v1/traces"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "POST",
+      "path": "/restart"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "method": "GET",
+      "path": "/stats"
+    }
+  ],
+  "socketEvents": [
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-accept-ride-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "acceptRide"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "apply_promo"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-driver-control-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "arriveAtPickup"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "arriveAtPickup"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-authenticate-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "authenticate"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "calculatePartialPayment"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-cancel-driver-search-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "cancelDriverSearch"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-cancel-ride-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "cancelRide"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "changeDestination"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-search-drivers-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "checkRideAvailability"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-complete-trip-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "completeTrip"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-trip-integrity-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "confirmBoardingStatus"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-confirm-payment-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "confirmPayment"
+    },
+    {
+      "runtime": "modular",
+      "file": "server.js",
+      "target": "io",
+      "kind": "on",
+      "event": "connection"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-create-booking-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "createBooking"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-engagement-chat-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "createChat"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-safety-support-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "createSupportTicket"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-disconnect-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "disconnect"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-driver-heartbeat-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "driverHeartbeat"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-driver-response-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "driverResponse"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-safety-support-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "emergencyContact"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "endRideWithReview"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-end-trip-early-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "endTripEarlyByRider"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "findNewDriver"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "get_promo_by_code"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "get_promos"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "get_user_chats"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "get_user_promos"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "getTripRatings"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "getUserRatings"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "hasUserRatedTrip"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "interruptRideOperational"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "load_messages"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "mark_messages_read"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-driver-control-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "notificationAction"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-trip-integrity-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "passengerLocationUpdate"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-fcm-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "registerFCMToken"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-reject-ride-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "rejectRide"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-safety-support-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "reportIncident"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "reportProblem"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "requestRideExtension"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "respondOperationalContinuation"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "respondRideExtension"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-ride-cost-telemetry-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "rideCostTelemetry"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-search-drivers-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "searchDrivers"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-engagement-chat-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "sendMessage"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-notification-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "sendNotification"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-notification-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "sendNotificationToUser"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-notification-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "sendNotificationToUserType"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-driver-control-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "setDriverStatus"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "setDriverStatus"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-start-trip-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "startTrip"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-engagement-chat-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "submitFeedback"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "submitRating"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-safety-support-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "support:chat:message"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-active-ride-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "syncActiveRide"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-engagement-chat-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "trackUserAction"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "typing_start"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "typing_stop"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-fcm-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "unregisterFCMToken"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-update-location-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "updateDriverLocation"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-update-location-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "updateLocation"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-engagement-chat-handlers.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "updateNotificationPreferences"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-update-trip-location-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "updateTripLocation"
+    },
+    {
+      "runtime": "modular",
+      "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "validate_promo_code"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "acceptRide"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "authenticate"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "calculatePartialPayment"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "cancelDriverSearch"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "cancelRide"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "changeDestination"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "checkRideAvailability"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "completeTrip"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "confirmBoardingStatus"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "confirmPayment"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "io",
+      "kind": "on",
+      "event": "connection"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "createBooking"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "createChat"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "createSupportTicket"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "disconnect"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "driverHeartbeat"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "driverResponse"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "emergencyContact"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "endRideWithReview"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "endTripEarlyByRider"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "findNewDriver"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "interruptRideOperational"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "notificationAction"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "passengerLocationUpdate"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "registerFCMToken"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "rejectRide"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "reportIncident"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "reportProblem"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "requestRideExtension"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "respondOperationalContinuation"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "respondRideExtension"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "rideCostTelemetry"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "searchDrivers"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "sendMessage"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "sendNotification"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "sendNotificationToUser"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "sendNotificationToUserType"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "setDriverStatus"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "startTrip"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "submitFeedback"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "submitRating"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "support:chat:message"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "syncActiveRide"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "trackUserAction"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "unregisterFCMToken"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "updateDriverLocation"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "updateLocation"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "updateNotificationPreferences"
+    },
+    {
+      "runtime": "vps",
+      "file": "server.vps.js",
+      "target": "socket",
+      "kind": "on",
+      "event": "updateTripLocation"
+    }
+  ],
+  "parity": {
+    "httpRoutes": {
+      "sharedCount": 29,
+      "onlyVpsCount": 0,
+      "onlyModularCount": 1,
+      "shared": [
+        "GET:/health/liveness",
+        "GET:/metrics",
+        "GET:/metrics-old",
+        "GET:/otel/health",
+        "GET:/stats",
+        "POST:/otel/v1/traces",
+        "POST:/restart",
+        "USE:/",
+        "USE:/api",
+        "USE:/api/admin/auth",
+        "USE:/api/alerts",
+        "USE:/api/app",
+        "USE:/api/auth",
+        "USE:/api/auth/password",
+        "USE:/api/campaign-center",
+        "USE:/api/custom-otp",
+        "USE:/api/driver-status",
+        "USE:/api/geofence",
+        "USE:/api/help",
+        "USE:/api/kyc",
+        "USE:/api/kyc-analytics",
+        "USE:/api/kyc-proxy",
+        "USE:/api/notifications",
+        "USE:/api/ocr",
+        "USE:/api/ops",
+        "USE:/api/programs/referrals",
+        "USE:/api/support",
+        "USE:/auth",
+        "USE:/cache"
+      ],
+      "onlyVps": [],
+      "onlyModular": [
+        {
+          "key": "USE:/api/demand",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-http-routes.js",
+              "method": "USE",
+              "path": "/api/demand"
+            }
+          ]
+        }
+      ]
+    },
+    "socketEvents": {
+      "sharedCount": 49,
+      "onlyVpsCount": 0,
+      "onlyModularCount": 14,
+      "shared": [
+        "io:on:connection",
+        "socket:on:acceptRide",
+        "socket:on:authenticate",
+        "socket:on:calculatePartialPayment",
+        "socket:on:cancelDriverSearch",
+        "socket:on:cancelRide",
+        "socket:on:changeDestination",
+        "socket:on:checkRideAvailability",
+        "socket:on:completeTrip",
+        "socket:on:confirmBoardingStatus",
+        "socket:on:confirmPayment",
+        "socket:on:createBooking",
+        "socket:on:createChat",
+        "socket:on:createSupportTicket",
+        "socket:on:disconnect",
+        "socket:on:driverHeartbeat",
+        "socket:on:driverResponse",
+        "socket:on:emergencyContact",
+        "socket:on:endRideWithReview",
+        "socket:on:endTripEarlyByRider",
+        "socket:on:findNewDriver",
+        "socket:on:interruptRideOperational",
+        "socket:on:notificationAction",
+        "socket:on:passengerLocationUpdate",
+        "socket:on:registerFCMToken",
+        "socket:on:rejectRide",
+        "socket:on:reportIncident",
+        "socket:on:reportProblem",
+        "socket:on:requestRideExtension",
+        "socket:on:respondOperationalContinuation",
+        "socket:on:respondRideExtension",
+        "socket:on:rideCostTelemetry",
+        "socket:on:searchDrivers",
+        "socket:on:sendMessage",
+        "socket:on:sendNotification",
+        "socket:on:sendNotificationToUser",
+        "socket:on:sendNotificationToUserType",
+        "socket:on:setDriverStatus",
+        "socket:on:startTrip",
+        "socket:on:submitFeedback",
+        "socket:on:submitRating",
+        "socket:on:support:chat:message",
+        "socket:on:syncActiveRide",
+        "socket:on:trackUserAction",
+        "socket:on:unregisterFCMToken",
+        "socket:on:updateDriverLocation",
+        "socket:on:updateLocation",
+        "socket:on:updateNotificationPreferences",
+        "socket:on:updateTripLocation"
+      ],
+      "onlyVps": [],
+      "onlyModular": [
+        {
+          "key": "socket:on:apply_promo",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "apply_promo"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:arriveAtPickup",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-driver-control-handlers.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "arriveAtPickup"
+            },
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "arriveAtPickup"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:getTripRatings",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "getTripRatings"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:getUserRatings",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "getUserRatings"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:get_promo_by_code",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "get_promo_by_code"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:get_promos",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "get_promos"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:get_user_chats",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "get_user_chats"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:get_user_promos",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "get_user_promos"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:hasUserRatedTrip",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "hasUserRatedTrip"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:load_messages",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "load_messages"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:mark_messages_read",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "mark_messages_read"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:typing_start",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "typing_start"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:typing_stop",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "typing_stop"
+            }
+          ]
+        },
+        {
+          "key": "socket:on:validate_promo_code",
+          "items": [
+            {
+              "runtime": "modular",
+              "file": "bootstrap/register-socket-legacy-bridge-handler.js",
+              "target": "socket",
+              "kind": "on",
+              "event": "validate_promo_code"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

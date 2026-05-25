@@ -1,0 +1,9 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-offer-accept-button"
+    timeout: 60000
+
+- tapOn:
+    point: "50%,86%"

@@ -1,0 +1,296 @@
+appId: br.com.leaf.ride
+---
+- launchApp:
+    clearState: true
+
+- openLink: ${MAESTRO_METRO_URL_DRIVER}
+
+# Dismiss defensivo do Dev Menu (quando aparece sem árvore de acessibilidade)
+- tapOn:
+    point: "84%,58%"
+- tapOn:
+    point: "50%,87%"
+
+- runFlow:
+    when:
+      visible: "Abrir com \".*Leaf.*\"\\?"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+
+- runFlow:
+    when:
+      visible: "Fitness"
+    commands:
+      - tapOn: "Leaf"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Buscar"
+    commands:
+      - tapOn: "Leaf"
+      - waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible: ".*(DEVELOPMENT SERVERS|Sign in to view updates|No development servers found|Connected to:|auth-phone-input|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Ganhos do dia|META DIÁRIA|Ficar Online|Ficar online|Ficar Offline|Ficar offline|Ativação pendente).*"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible: ".*Deseja Enviar Notificações.*"
+    commands:
+      - tapOn: "Não Permitir"
+
+- runFlow:
+    when:
+      visible: "Sign in to view updates"
+    commands:
+      - tapOn: "Home"
+
+- runFlow:
+    when:
+      visible: "http://.*:8082"
+    commands:
+      - tapOn: "http://.*:8082"
+
+- runFlow:
+    when:
+      visible: "Enter URL manually"
+    commands:
+      - tapOn: "Enter URL manually"
+      - tapOn:
+          point: "50%,32%"
+      - tapOn: "http://.*"
+      - eraseText
+      - inputText: "http://${MAESTRO_METRO_HOST}:8082"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "No development servers found"
+    commands:
+      - tapOn: "Enter URL manually"
+      - tapOn:
+          point: "50%,32%"
+      - tapOn: "http://.*"
+      - eraseText
+      - inputText: "http://${MAESTRO_METRO_HOST}:8082"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- extendedWaitUntil:
+    visible: ".*(auth-phone-input|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Quero ser parceiro|Ganhos do dia|META DIÁRIA|Ficar Online|Ficar online|Ficar Offline|Ficar offline|Ativação pendente).*"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-phone-input"
+    commands:
+      - tapOn:
+          id: "auth-phone-input"
+      - eraseText
+      - inputText: "21123456789"
+      - runFlow:
+          when:
+            visible: "Done"
+          commands:
+            - tapOn: "Done"
+      - runFlow:
+          when:
+            visible: "Continuar"
+          commands:
+            - tapOn: "Continuar"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Bem-vindo(a) à Leaf"
+    commands:
+      - tapOn: "Número"
+      - eraseText
+      - inputText: "21123456789"
+      - runFlow:
+          when:
+            visible: "Done"
+          commands:
+            - tapOn: "Done"
+      - runFlow:
+          when:
+            visible: "Continuar"
+          commands:
+            - tapOn: "Continuar"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Verificação"
+    commands:
+      - tapOn:
+          point: "17%,47%"
+      - inputText: "9"
+      - tapOn:
+          point: "30%,47%"
+      - inputText: "9"
+      - tapOn:
+          point: "43%,47%"
+      - inputText: "2"
+      - tapOn:
+          point: "56%,47%"
+      - inputText: "0"
+      - tapOn:
+          point: "69%,47%"
+      - inputText: "0"
+      - tapOn:
+          point: "82%,47%"
+      - inputText: "0"
+      - runFlow:
+          when:
+            visible: "Verificar"
+          commands:
+            - tapOn: "Verificar"
+      - runFlow:
+          when:
+            visible: "Verify"
+          commands:
+            - tapOn: "Verify"
+      - extendedWaitUntil:
+          notVisible: "Verificação"
+          timeout: 45000
+
+- runFlow:
+    when:
+      visible: "Como você quer usar a Leaf?"
+    commands:
+      - tapOn: "Quero ser parceiro"
+      - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Quero ser parceiro"
+    commands:
+      - tapOn: "Quero ser parceiro"
+      - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Complete seu e-mail"
+    commands:
+      - tapOn: "Depois"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- extendedWaitUntil:
+    visible: ".*(Ganhos do dia|META DIÁRIA|Ficar Online|Ficar online|Ficar Offline|Ficar offline|Ativação pendente).*"
+    timeout: 90000
+
+- takeScreenshot: "e2e-driver-01-home"
+
+- runFlow:
+    when:
+      visible: ".*Ficar Online.*"
+    commands:
+      - tapOn: ".*Ficar Online.*"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: ".*Ficar online.*"
+    commands:
+      - tapOn: ".*Ficar online.*"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: ".*(Ficar Online|Ficar online).*"
+    commands:
+      - tapOn:
+          point: "50%,90%"
+      - waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible: ".*(Ficar Offline|Ficar offline|Ativação pendente|Ficar Online|Ficar online).*"
+    timeout: 45000
+
+- takeScreenshot: "e2e-driver-02-status"

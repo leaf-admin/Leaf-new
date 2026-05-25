@@ -7,13 +7,19 @@ module.exports = {
     GOOGLE_MAPS_API_KEY:
         process.env.GOOGLE_MAPS_API_KEY ||
         process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-        'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY',
+        '',
     
     // MapBox - R$ 0,0025 por request, 600 req/min
-    MAPBOX_API_KEY: 'pk.eyJ1IjoibGVhZi1hcHAiLCJhIjoiY205MHJxazByMGlybzJrcTIyZ25wdm1maSJ9.aX1wTUINIhk_nsQAACNnyA',
+    MAPBOX_API_KEY:
+        process.env.MAPBOX_API_KEY ||
+        process.env.EXPO_PUBLIC_MAPBOX_API_KEY ||
+        '',
     
     // LocationIQ - R$ 0,0025 por request, 2000 req/seg
-    LOCATIONIQ_API_KEY: 'pk.59262794905b7196e5a09bf1fd47911d',
+    LOCATIONIQ_API_KEY:
+        process.env.LOCATIONIQ_API_KEY ||
+        process.env.EXPO_PUBLIC_LOCATIONIQ_API_KEY ||
+        '',
     
     // Geocoding.io - R$ 0,00375 por request, 1000 req/seg (verificar site)
     GEOCODINGIO_API_KEY: null,

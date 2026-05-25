@@ -1,35 +1,78 @@
 const WooviDriverService = require('./woovi-driver-service');
 const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 const circuitBreakerService = require('./circuit-breaker-service');
+const subscriptionStateService = require('./subscription-state-service');
+const FinancialLedgerService = require('./financial-ledger-service');
+const { buildRideFinancialContract } = require('./ride-financial-contract');
 const { logStructured, logError } = require('../utils/logger');
 const traceContext = require('../utils/trace-context');
+const redisPool = require('../utils/redis-pool');
 
 class PaymentService {
   constructor() {
+    const appReviewMode = String(process.env.APP_REVIEW || '').toLowerCase() === 'true';
+    const productionRuntime = [
+      process.env.NODE_ENV,
+      process.env.APP_ENV,
+      process.env.LEAF_ENV,
+      process.env.ENVIRONMENT
+    ].some((value) => ['production', 'prod'].includes(String(value || '').toLowerCase()));
+    this.productionRuntime = productionRuntime;
     this.LEAF_ACCOUNT_ID = process.env.LEAF_WOOVI_ACCOUNT_ID || 'leaf-main-account';
     // Chave Pix da conta Leaf (origem das transferências)
     // ⚠️ ATENÇÃO: Configurar LEAF_PIX_KEY em produção via variável de ambiente
     this.LEAF_PIX_KEY = process.env.LEAF_PIX_KEY || 'test@leaf.app.br'; // ⚠️ Valor de teste - configurar em produção
     // Criar instância do WooviDriverService
     this.wooviDriverService = new WooviDriverService();
-    // Taxas operacionais por faixa de valor
+    this.financialLedgerService = new FinancialLedgerService();
+    // Taxas operacionais por faixa de valor (regra vigente)
     this.OPERATIONAL_FEE_UP_TO_10 = 79; // R$ 0,79 para corridas até R$ 10,00 (em centavos)
-    this.OPERATIONAL_FEE_10_TO_25 = 99; // R$ 0,99 para corridas acima de R$ 10,00 e abaixo de R$ 25,00 (em centavos)
-    this.OPERATIONAL_FEE_ABOVE_25 = 149; // R$ 1,49 para corridas acima de R$ 25,00 (em centavos)
+    this.OPERATIONAL_FEE_10_TO_25 = 99; // R$ 0,99 para corridas acima de R$ 10,00 até R$ 25,00 (em centavos)
+    this.OPERATIONAL_FEE_25_TO_50 = 149; // R$ 1,49 para corridas acima de R$ 25,00 até R$ 50,00 (em centavos)
+    this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE = 0.03; // 3% para corridas acima de R$ 50,00
     this.THRESHOLD_10 = 1000; // R$ 10,00 em centavos
     this.THRESHOLD_25 = 2500; // R$ 25,00 em centavos
+    this.THRESHOLD_50 = 5000; // R$ 50,00 em centavos
     this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
     this.WOOVI_FEE_MINIMUM = 50; // R$ 0,50 mínimo (em centavos)
     this.WITHDRAW_FEE_THRESHOLD_CENTS = 50000; // R$ 500,00
     this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS = 100; // R$ 1,00
+    this.SUBSCRIPTION_DAILY_BILLING_ENABLED =
+      String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
+    this.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS = Math.max(
+      0,
+      Number.parseInt(process.env.SUBSCRIPTION_DAILY_FEE_CENTS || '990', 10) || 990
+    );
+    this.SUBSCRIPTION_SETTLE_ON_WITHDRAW =
+      String(process.env.SUBSCRIPTION_SETTLE_ON_WITHDRAW || 'true').toLowerCase() !== 'false';
+    this.SUBSCRIPTION_SPLIT_RETENTION_ENABLED =
+      String(process.env.SUBSCRIPTION_SPLIT_RETENTION_ENABLED || 'false').toLowerCase() === 'true';
     this.PAYMENT_BYPASS_ON_WOOVI_FAILURE =
-      String(process.env.PAYMENT_BYPASS_ON_WOOVI_FAILURE || '').toLowerCase() === 'true' ||
-      String(process.env.APP_REVIEW || '').toLowerCase() === 'true';
+      appReviewMode ||
+      (!productionRuntime && String(process.env.PAYMENT_BYPASS_ON_WOOVI_FAILURE || '').toLowerCase() === 'true');
+    this.PAYMENT_FORCE_BYPASS =
+      appReviewMode ||
+      (!productionRuntime && String(process.env.PAYMENT_FORCE_BYPASS || '').toLowerCase() === 'true');
+    const bypassPassengersRaw =
+      process.env.PAYMENT_FORCE_BYPASS_PASSENGERS ||
+      process.env.PAYMENT_FORCE_BYPASS_USER_IDS ||
+      '';
+    this.PAYMENT_FORCE_BYPASS_PASSENGERS = new Set(
+      String(bypassPassengersRaw)
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    );
 
     // Configuração de retry
     this.maxRetries = 3;
     this.retryDelay = 1000; // 1 segundo
+    this.PAYMENT_STATUS_CACHE_TTL_SECONDS = Number.parseInt(
+      process.env.PAYMENT_STATUS_CACHE_TTL_SECONDS || '900',
+      10
+    );
 
     // Estados válidos de payment holding
     this.PAYMENT_STATES = {
@@ -47,6 +90,44 @@ class PaymentService {
       [this.PAYMENT_STATES.DISTRIBUTED]: [], // Estado final
       [this.PAYMENT_STATES.REFUNDED]: [], // Estado final
       [this.PAYMENT_STATES.CANCELLED]: [] // Estado final
+    };
+  }
+
+  isPassengerAllowedForForcedBypass(passengerId) {
+    if (this.PAYMENT_FORCE_BYPASS_PASSENGERS.size === 0) {
+      return true;
+    }
+
+    const normalizedPassengerId = String(passengerId || '').trim();
+    if (!normalizedPassengerId) {
+      return false;
+    }
+
+    return this.PAYMENT_FORCE_BYPASS_PASSENGERS.has(normalizedPassengerId);
+  }
+
+  shouldForceBypass(paymentData = {}) {
+    if (!this.PAYMENT_FORCE_BYPASS) {
+      return false;
+    }
+
+    return this.isPassengerAllowedForForcedBypass(paymentData.passengerId);
+  }
+
+  buildBypassAdvancePaymentResult(paymentData = {}, bypassReason = 'forced_bypass') {
+    const rideId = paymentData.rideId || `ride_${Date.now()}`;
+    const mockChargeId = `mock_review_${rideId}_${Date.now()}`;
+
+    return {
+      success: true,
+      bypass: true,
+      bypassReason,
+      message: 'Pagamento em modo review (bypass controlado)',
+      chargeId: mockChargeId,
+      qrCode: null,
+      paymentLink: 'leaf://payment/review-bypass',
+      rideId,
+      amount: paymentData.amount
     };
   }
 
@@ -83,6 +164,403 @@ class PaymentService {
       error: lastError.message
     });
     throw lastError;
+  }
+
+  normalizePixKey(value) {
+    return String(value || '').trim();
+  }
+
+  isWooviSubaccountSplitEnabled() {
+    return String(process.env.WOOVI_SUBACCOUNT_SPLIT_ENABLED || 'true').toLowerCase() !== 'false';
+  }
+
+  shouldRequireWooviSplitForDriverPayment() {
+    return String(process.env.WOOVI_REQUIRE_SUBACCOUNT_SPLIT || 'false').toLowerCase() === 'true';
+  }
+
+  isWooviDirectTransferOnRideCompletionEnabled() {
+    const requested =
+      String(process.env.WOOVI_DIRECT_TRANSFER_ON_RIDE_COMPLETION || 'false').toLowerCase() === 'true';
+    const legacyExplicitOptIn =
+      String(process.env.ENABLE_LEGACY_RIDE_COMPLETION_PIXOUT || 'false').toLowerCase() === 'true';
+    return requested && legacyExplicitOptIn;
+  }
+
+  normalizePaymentAmountCents(value) {
+    const amountCents = Math.round(Number(value));
+    return Number.isFinite(amountCents) ? amountCents : 0;
+  }
+
+  normalizeQuoteVersion(paymentData = {}) {
+    const raw =
+      paymentData.quoteVersion ||
+      paymentData.quote_version ||
+      paymentData.rideDetails?.quoteVersion ||
+      paymentData.rideDetails?.quote_version ||
+      paymentData.rideDetails?.pricingVersion ||
+      'v1';
+    const normalized = String(raw || '').trim();
+    return normalized || 'v1';
+  }
+
+  buildAdvancePaymentIntentId(rideId) {
+    const hash = crypto
+      .createHash('sha256')
+      .update(`advance_payment:${rideId || 'unknown-ride'}`)
+      .digest('hex')
+      .slice(0, 32);
+    return `advance_${hash}`;
+  }
+
+  buildAdvanceChargeCorrelationID(paymentData = {}) {
+    const rideId = String(paymentData.rideId || '').trim() || 'unknown-ride';
+    const quoteVersion = this.normalizeQuoteVersion(paymentData);
+    const hash = crypto
+      .createHash('sha256')
+      .update(`leaf_ride_charge:${rideId}:${quoteVersion}`)
+      .digest('hex')
+      .slice(0, 24);
+    return `leaf_ride_${hash}`;
+  }
+
+  buildAdvancePaymentIntentResponse(existing = {}) {
+    return {
+      success: true,
+      idempotentReplay: true,
+      message: 'Cobrança Pix já criada para esta corrida',
+      chargeId: existing.chargeId || existing.paymentId || null,
+      qrCode: existing.qrCode || null,
+      paymentLink: existing.paymentLink || null,
+      rideId: existing.rideId || null,
+      amount: existing.amountCents || existing.amount || null,
+      paymentIntentId: existing.paymentIntentId || null,
+      correlationID: existing.correlationID || null,
+      splitApplied: false,
+      splitDeferred: true,
+      settlementPolicy: 'post_ride_ledger',
+      splitTarget: null,
+      splitCalculation: null
+    };
+  }
+
+  async beginAdvancePaymentIntent(paymentData = {}) {
+    const firestore = firebaseConfig.getFirestore();
+    const rideId = String(paymentData.rideId || '').trim();
+    const passengerId = String(paymentData.passengerId || '').trim();
+    const amountCents = this.normalizePaymentAmountCents(paymentData.amount);
+    const quoteVersion = this.normalizeQuoteVersion(paymentData);
+    const paymentIntentId = this.buildAdvancePaymentIntentId(rideId);
+    const correlationID = this.buildAdvanceChargeCorrelationID(paymentData);
+    const nowIso = new Date().toISOString();
+    const inProgressTtlMs = Math.max(
+      15,
+      Number.parseInt(process.env.PAYMENT_INTENT_IN_PROGRESS_TTL_SECONDS || '120', 10) || 120
+    ) * 1000;
+
+    if (!firestore) {
+      if (this.productionRuntime) {
+        return {
+          success: false,
+          code: 'PAYMENT_INTENT_STORE_UNAVAILABLE',
+          error: 'Não foi possível registrar a intenção de pagamento com segurança',
+          paymentIntentId,
+          correlationID
+        };
+      }
+
+      return {
+        success: true,
+        firestoreAvailable: false,
+        paymentIntentId,
+        correlationID,
+        amountCents,
+        quoteVersion
+      };
+    }
+
+    const intentRef = firestore.collection('payment_intents').doc(paymentIntentId);
+
+    try {
+      return await firestore.runTransaction(async (transaction) => {
+        const intentDoc = await transaction.get(intentRef);
+        if (intentDoc.exists) {
+          const existing = intentDoc.data() || {};
+          const existingAmountCents = this.normalizePaymentAmountCents(existing.amountCents || existing.amount);
+          const existingPassengerId = String(existing.passengerId || '').trim();
+          const existingRideId = String(existing.rideId || '').trim();
+
+          if (
+            existingRideId !== rideId ||
+            existingAmountCents !== amountCents ||
+            (existingPassengerId && existingPassengerId !== passengerId)
+          ) {
+            return {
+              success: false,
+              code: 'PAYMENT_INTENT_CONFLICT',
+              error: 'Já existe uma cobrança para esta corrida com dados diferentes',
+              paymentIntentId,
+              existingAmountCents,
+              incomingAmountCents: amountCents
+            };
+          }
+
+          if (existing.status === 'charge_created' && existing.chargeId) {
+            return {
+              success: true,
+              firestoreAvailable: true,
+              idempotentReplay: true,
+              existing,
+              paymentIntentId,
+              correlationID: existing.correlationID || correlationID,
+              amountCents,
+              quoteVersion
+            };
+          }
+
+          const lastAttemptMs = Date.parse(existing.lastAttemptAtIso || existing.updatedAtIso || '');
+          const stillInProgress =
+            existing.status === 'creating_charge' &&
+            Number.isFinite(lastAttemptMs) &&
+            Date.now() - lastAttemptMs < inProgressTtlMs;
+
+          if (stillInProgress) {
+            return {
+              success: false,
+              code: 'PAYMENT_INTENT_IN_PROGRESS',
+              error: 'A cobrança Pix desta corrida ainda está sendo criada',
+              paymentIntentId
+            };
+          }
+        }
+
+        const intentPayload = {
+          paymentIntentId,
+          rideId,
+          passengerId,
+          amountCents,
+          quoteVersion,
+          correlationID,
+          status: 'creating_charge',
+          settlementPolicy: 'post_ride_ledger',
+          driverSettlement: 'deferred_until_ride_completed',
+          lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastAttemptAtIso: nowIso,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAtIso: nowIso
+        };
+
+        if (!intentDoc.exists) {
+          intentPayload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+          intentPayload.createdAtIso = nowIso;
+        }
+
+        transaction.set(intentRef, intentPayload, { merge: true });
+
+        return {
+          success: true,
+          firestoreAvailable: true,
+          paymentIntentId,
+          correlationID,
+          amountCents,
+          quoteVersion
+        };
+      });
+    } catch (error) {
+      if (this.productionRuntime) {
+        return {
+          success: false,
+          code: 'PAYMENT_INTENT_STORE_UNAVAILABLE',
+          error: 'Não foi possível registrar a intenção de pagamento com segurança',
+          paymentIntentId,
+          correlationID,
+          details: error.message
+        };
+      }
+
+      logStructured('warn', 'Falha ao iniciar payment intent; seguindo com correlationID determinístico', {
+        service: 'PaymentService',
+        rideId,
+        paymentIntentId,
+        error: error.message
+      });
+      return {
+        success: true,
+        firestoreAvailable: false,
+        paymentIntentId,
+        correlationID,
+        amountCents,
+        quoteVersion,
+        intentPersistenceError: error.message
+      };
+    }
+  }
+
+  async markAdvancePaymentIntentFailed(intent = {}, errorPayload = {}) {
+    if (!intent.firestoreAvailable || !intent.paymentIntentId) {
+      return false;
+    }
+
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) return false;
+      await firestore.collection('payment_intents').doc(intent.paymentIntentId).set({
+        status: 'charge_failed',
+        error: errorPayload?.message || errorPayload?.error || errorPayload || 'Falha ao criar cobrança',
+        errorPayload,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAtIso: new Date().toISOString()
+      }, { merge: true });
+      return true;
+    } catch (error) {
+      logStructured('warn', 'Falha ao persistir erro da payment intent', {
+        service: 'PaymentService',
+        paymentIntentId: intent.paymentIntentId,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  async completeAdvancePaymentIntent(intent = {}, chargeData = {}) {
+    if (!intent.firestoreAvailable || !intent.paymentIntentId) {
+      return false;
+    }
+
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) return false;
+      await this.retryOperation(
+        async () => {
+          await firestore.collection('payment_intents').doc(intent.paymentIntentId).set({
+            status: 'charge_created',
+            chargeId: chargeData.chargeId || null,
+            qrCode: chargeData.qrCode || null,
+            paymentLink: chargeData.paymentLink || null,
+            chargeCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            chargeCreatedAtIso: new Date().toISOString(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAtIso: new Date().toISOString()
+          }, { merge: true });
+        },
+        'completeAdvancePaymentIntent'
+      );
+      return true;
+    } catch (error) {
+      logStructured('error', 'Falha ao persistir cobrança criada na payment intent', {
+        service: 'PaymentService',
+        paymentIntentId: intent.paymentIntentId,
+        chargeId: chargeData.chargeId || null,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  async resolveDriverSplitTarget(paymentData = {}) {
+    const directPixKey = this.normalizePixKey(
+      paymentData.driverSubaccountPixKey ||
+      paymentData.wooviSubaccountPixKey ||
+      paymentData.subaccountPixKey ||
+      paymentData.driverPixKey
+    );
+
+    if (directPixKey) {
+      return {
+        success: true,
+        source: 'payment_payload',
+        driverId: paymentData.driverId || null,
+        pixKey: directPixKey
+      };
+    }
+
+    const driverId = this.normalizePixKey(paymentData.driverId);
+    if (!driverId) {
+      return {
+        success: false,
+        reason: 'driver_not_known'
+      };
+    }
+
+    try {
+      const DriverApprovalService = require('./driver-approval-service');
+      const driverApprovalService = new DriverApprovalService();
+      const accountData = await driverApprovalService.getDriverWooviAccountId(driverId);
+      const pixKey = this.normalizePixKey(
+        accountData?.wooviSubaccountPixKey ||
+        accountData?.subaccountPixKey ||
+        accountData?.pixKey ||
+        accountData?.driverPixKey
+      );
+
+      if (!pixKey) {
+        return {
+          success: false,
+          reason: 'driver_subaccount_pix_key_missing',
+          driverId
+        };
+      }
+
+      return {
+        success: true,
+        source: 'driver_account',
+        driverId,
+        pixKey,
+        accountData
+      };
+    } catch (error) {
+      logStructured('warn', 'Falha ao resolver subconta Woovi do motorista', {
+        service: 'PaymentService',
+        driverId,
+        error: error.message
+      });
+      return {
+        success: false,
+        reason: 'driver_account_lookup_failed',
+        driverId,
+        error: error.message
+      };
+    }
+  }
+
+  async buildWooviSubaccountSplitPlan(paymentData = {}, totalAmountCents = 0) {
+    if (!this.isWooviSubaccountSplitEnabled()) {
+      return {
+        success: false,
+        reason: 'split_disabled'
+      };
+    }
+
+    const target = await this.resolveDriverSplitTarget(paymentData);
+    if (!target.success) {
+      return target;
+    }
+
+    const tollFeeCents = Number.isFinite(Number(paymentData.tollFeeCents))
+      ? Math.max(0, Math.round(Number(paymentData.tollFeeCents)))
+      : this.toCents(paymentData.tollFee || paymentData.rideDetails?.tollFee || 0);
+    const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents);
+
+    if (!calculation.netAmount || calculation.netAmount <= 0) {
+      return {
+        success: false,
+        reason: 'driver_net_amount_not_positive',
+        driverId: target.driverId,
+        calculation
+      };
+    }
+
+    return {
+      success: true,
+      target,
+      calculation,
+      splits: [
+        {
+          pixKey: target.pixKey,
+          value: calculation.netAmount,
+          splitType: 'SPLIT_SUB_ACCOUNT'
+        }
+      ]
+    };
   }
 
   /**
@@ -204,6 +682,70 @@ class PaymentService {
     }
   }
 
+  async writePaymentStatusCache(reference, payload = {}) {
+    const normalizedReference = String(reference || '').trim();
+    if (!normalizedReference) {
+      return false;
+    }
+
+    try {
+      await redisPool.ensureConnection();
+      const redis = redisPool.getConnection();
+      const cacheKey = `payment_status_cache:${normalizedReference}`;
+      const cachePayload = {
+        ...payload,
+        updatedAt: new Date().toISOString()
+      };
+
+      await redis.set(
+        cacheKey,
+        JSON.stringify(cachePayload),
+        'EX',
+        this.PAYMENT_STATUS_CACHE_TTL_SECONDS
+      );
+      return true;
+    } catch (error) {
+      logStructured('debug', 'Falha ao gravar payment status cache', {
+        service: 'payment-service',
+        reference: normalizedReference,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  async readPaymentStatusCache(reference) {
+    const normalizedReference = String(reference || '').trim();
+    if (!normalizedReference) {
+      return null;
+    }
+
+    try {
+      await redisPool.ensureConnection();
+      const redis = redisPool.getConnection();
+      const cacheKey = `payment_status_cache:${normalizedReference}`;
+      const raw = await redis.get(cacheKey);
+
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') {
+        return null;
+      }
+
+      return parsed;
+    } catch (error) {
+      logStructured('debug', 'Falha ao ler payment status cache', {
+        service: 'payment-service',
+        reference: normalizedReference,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
   /**
    * Processa pagamento antecipado do passageiro
    * @param {Object} paymentData - Dados do pagamento
@@ -224,32 +766,89 @@ class PaymentService {
         passengerEmail: paymentData.passengerEmail
       });
 
+      if (this.shouldForceBypass(paymentData)) {
+        const bypassResult = this.buildBypassAdvancePaymentResult(paymentData, 'force_bypass_enabled');
+        logStructured('warn', 'Bypass de pagamento forçado por configuração', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          passengerId: paymentData.passengerId,
+          chargeId: bypassResult.chargeId
+        });
+        return bypassResult;
+      }
+
+      const paymentIntent = await this.beginAdvancePaymentIntent(paymentData);
+      if (!paymentIntent.success) {
+        logStructured('warn', 'Payment intent recusou criação de cobrança', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          passengerId: paymentData.passengerId,
+          paymentIntentId: paymentIntent.paymentIntentId || null,
+          code: paymentIntent.code || null
+        });
+        return {
+          success: false,
+          error: paymentIntent.error || 'Não foi possível criar a cobrança Pix',
+          code: paymentIntent.code || 'PAYMENT_INTENT_ERROR',
+          paymentIntentId: paymentIntent.paymentIntentId || null,
+          details: paymentIntent
+        };
+      }
+
+      if (paymentIntent.idempotentReplay) {
+        logStructured('info', 'Reutilizando cobrança Pix já criada para a corrida', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          paymentIntentId: paymentIntent.paymentIntentId,
+          chargeId: paymentIntent.existing?.chargeId || null
+        });
+        return this.buildAdvancePaymentIntentResponse({
+          ...paymentIntent.existing,
+          paymentIntentId: paymentIntent.paymentIntentId,
+          correlationID: paymentIntent.correlationID
+        });
+      }
+
       // 1. Criar cobrança PIX para o passageiro
       const commentRaw = `Corrida Leaf - ${paymentData.rideDetails.origin} para ${paymentData.rideDetails.destination}`;
       const comment =
         commentRaw.length > 140 ? `${commentRaw.slice(0, 137)}...` : commentRaw;
 
-      // ✅ Garantir correlationID único (inclui timestamp + random para evitar duplicatas)
-      const timestamp = Date.now();
-      const randomSuffix = Math.random().toString(36).substring(2, 9);
-      const uniqueCorrelationID = `ride_${paymentData.rideId}_${timestamp}_${randomSuffix}`;
+      const uniqueCorrelationID = paymentIntent.correlationID || this.buildAdvanceChargeCorrelationID(paymentData);
 
-      logStructured('debug', 'Gerando correlationID único', { service: 'PaymentService', correlationID: uniqueCorrelationID });
+      logStructured('debug', 'Usando correlationID determinístico para cobrança', {
+        service: 'PaymentService',
+        correlationID: uniqueCorrelationID,
+        paymentIntentId: paymentIntent.paymentIntentId || null
+      });
 
       const chargeData = {
-        value: paymentData.amount,
+        value: paymentIntent.amountCents || paymentData.amount,
         comment,
         correlationID: uniqueCorrelationID,
         additionalInfo: [
           { key: 'passenger_id', value: paymentData.passengerId },
           { key: 'ride_id', value: paymentData.rideId },
+          { key: 'payment_intent_id', value: paymentIntent.paymentIntentId || '' },
+          { key: 'quote_version', value: paymentIntent.quoteVersion || this.normalizeQuoteVersion(paymentData) },
           { key: 'payment_type', value: 'advance_payment' },
-          { key: 'service', value: 'ride_sharing' }
+          { key: 'service', value: 'ride_sharing' },
+          { key: 'settlement_model', value: 'post_ride_ledger' },
+          { key: 'driver_settlement', value: 'deferred_until_ride_completed' }
         ],
         customer: {
           name: paymentData.passengerName || 'Passageiro Leaf',
           email: paymentData.passengerEmail || 'passenger@leaf.com'
         }
+      };
+
+      // O pagamento da Leaf é antecipado: no momento da cobrança o motorista pode
+      // ainda não existir, pode trocar, cancelar ou ser reatribuído. Por isso a
+      // cobrança inicial nunca envia split Woovi. O direito financeiro do motorista
+      // nasce só na conclusão da corrida e é liquidado pelo worker de billing no ledger.
+      const splitPlan = {
+        success: false,
+        reason: 'driver_settlement_deferred_until_ride_completed'
       };
 
       logStructured('info', 'Enviando cobrança para Woovi', {
@@ -258,12 +857,15 @@ class PaymentService {
         comment: chargeData.comment,
         correlationID: chargeData.correlationID,
         customerName: chargeData.customer.name,
-        customerEmail: chargeData.customer.email
+        customerEmail: chargeData.customer.email,
+        splitEnabled: false,
+        splitReason: splitPlan.reason
       });
 
       const chargeResult = await this.wooviDriverService.createCharge(chargeData);
 
       if (!chargeResult.success) {
+        await this.markAdvancePaymentIntentFailed(paymentIntent, chargeResult.error || chargeResult.details || {});
         logStructured('warn', 'Erro ao criar cobrança na Woovi', {
           service: 'PaymentService',
           error: chargeResult.error,
@@ -286,25 +888,18 @@ class PaymentService {
           wooviMessage.includes('não estão habilitados');
 
         if (this.PAYMENT_BYPASS_ON_WOOVI_FAILURE) {
-          const mockChargeId = `mock_review_${paymentData.rideId}_${Date.now()}`;
+          const bypassResult = this.buildBypassAdvancePaymentResult(
+            paymentData,
+            'woovi_feature_or_auth_unavailable'
+          );
           logStructured('warn', 'Bypass de pagamento ativado para review', {
             service: 'PaymentService',
             rideId: paymentData.rideId,
-            mockChargeId,
+            mockChargeId: bypassResult.chargeId,
             wooviStatus,
             featureBlocked
           });
-          return {
-            success: true,
-            bypass: true,
-            bypassReason: 'woovi_feature_or_auth_unavailable',
-            message: 'Pagamento em modo review (bypass controlado)',
-            chargeId: mockChargeId,
-            qrCode: null,
-            paymentLink: 'leaf://payment/review-bypass',
-            rideId: paymentData.rideId,
-            amount: paymentData.amount
-          };
+          return bypassResult;
         }
         return {
           success: false,
@@ -313,23 +908,65 @@ class PaymentService {
         };
       }
 
+      const chargePayload = chargeResult?.charge || {};
+      const chargeId =
+        chargePayload.identifier ||
+        chargePayload.id ||
+        chargePayload.transactionID ||
+        chargePayload.correlationID ||
+        chargePayload?.paymentMethods?.pix?.identifier ||
+        chargePayload?.paymentMethods?.pix?.transactionID ||
+        null;
+      const qrCode =
+        chargePayload.qrCodeImage ||
+        chargePayload?.paymentMethods?.pix?.qrCodeImage ||
+        null;
+      const paymentLink = chargePayload.paymentLinkUrl || null;
+
       logStructured('info', 'Cobrança criada com sucesso', {
         service: 'PaymentService',
-        chargeId: chargeResult.charge?.id,
+        chargeId,
         correlationID: chargeData.correlationID
       });
 
-      // ✅ SIMPLIFICADO: Apenas criar cobrança, sem holding
-      // Quando pagamento for confirmado, creditar saldo diretamente no motorista
+      if (!chargeId) {
+        await this.markAdvancePaymentIntentFailed(paymentIntent, {
+          message: 'A Woovi retornou cobrança sem identificador',
+          correlationID: chargeData.correlationID
+        });
+        return {
+          success: false,
+          error: 'Falha ao identificar cobrança PIX',
+          details: {
+            message: 'A Woovi retornou cobrança sem identificador',
+            correlationID: chargeData.correlationID
+          }
+        };
+      }
+
+      // Apenas cria a cobrança. O webhook materializa o holding e o crédito do
+      // motorista acontece somente após ride.completed no worker de billing.
+      await this.completeAdvancePaymentIntent(paymentIntent, {
+        chargeId,
+        qrCode,
+        paymentLink
+      });
 
       return {
         success: true,
         message: 'Pagamento antecipado processado com sucesso',
-        chargeId: chargeResult.charge.id,
-        qrCode: chargeResult.charge.qrCodeImage,
-        paymentLink: chargeResult.charge.paymentLinkUrl,
+        chargeId,
+        qrCode,
+        paymentLink,
         rideId: paymentData.rideId,
-        amount: paymentData.amount
+        amount: paymentIntent.amountCents || paymentData.amount,
+        paymentIntentId: paymentIntent.paymentIntentId || null,
+        correlationID: chargeData.correlationID,
+        splitApplied: false,
+        splitDeferred: true,
+        settlementPolicy: 'post_ride_ledger',
+        splitTarget: null,
+        splitCalculation: null
       };
 
     } catch (error) {
@@ -467,6 +1104,27 @@ class PaymentService {
         paymentAmount: typeof amount === 'number' ? amount : existingData.amount || null,
         paymentConfirmedAt: now
       }, { merge: true });
+
+      const ledgerResult = await this.financialLedgerService.recordPaymentReceived({
+        rideId,
+        chargeId,
+        amountCents: typeof amount === 'number' ? amount : existingData.amount,
+        passengerId: passengerId || existingData.passengerId,
+        metadata: {
+          source: 'storeConfirmedPayment',
+          webhookEvent: metadata?.event || null,
+          correlationID: metadata?.correlationID || null
+        }
+      });
+
+      if (!ledgerResult.success) {
+        logStructured('warn', 'Pagamento confirmado sem ledger financeiro canônico', {
+          service: 'PaymentService',
+          rideId,
+          chargeId,
+          ledgerError: ledgerResult.error || ledgerResult.code
+        });
+      }
 
       logStructured('info', 'Pagamento confirmado armazenado', {
         service: 'PaymentService',
@@ -755,6 +1413,10 @@ class PaymentService {
       const status = refundData.status || 'REFUNDED';
       const refundAmount = refundData.refundAmount || 0;
       const cancellationFee = refundData.cancellationFee || 0;
+      const paymentRef = firestore.collection('ride_payments').doc(rideId);
+      const existingPaymentDoc = await paymentRef.get();
+      const existingPayment = existingPaymentDoc.exists ? existingPaymentDoc.data() : {};
+      const chargeId = refundData.chargeId || existingPayment.chargeId || existingPayment.paymentId || null;
 
       const updates = {
         status,
@@ -769,7 +1431,7 @@ class PaymentService {
         refundedAt: admin.firestore.FieldValue.serverTimestamp()
       };
 
-      await firestore.collection('ride_payments').doc(rideId).set(updates, { merge: true });
+      await paymentRef.set(updates, { merge: true });
 
       // ✅ NOVO: Atualizar payment_holdings também
       await this.updatePaymentHolding(rideId, {
@@ -783,6 +1445,27 @@ class PaymentService {
         refundReason: refundData.reason || null,
         refundedAt: admin.firestore.FieldValue.serverTimestamp()
       });
+
+      if (refundAmount > 0 && chargeId) {
+        const ledgerResult = await this.financialLedgerService.recordRefund({
+          rideId,
+          chargeId,
+          refundId: refundData.refundId || null,
+          amountCents: refundAmount,
+          passengerId: refundData.passengerId || existingPayment.passengerId || null,
+          reason: refundData.reason || null,
+          metadata: refundData.metadata || {}
+        });
+
+        if (!ledgerResult.success) {
+          logStructured('warn', 'Reembolso registrado sem ledger financeiro canônico', {
+            service: 'PaymentService',
+            rideId,
+            chargeId,
+            ledgerError: ledgerResult.error || ledgerResult.code
+          });
+        }
+      }
 
       logStructured('info', 'Pagamento marcado como reembolsado', {
         service: 'PaymentService',
@@ -817,6 +1500,32 @@ class PaymentService {
         return {
           success: false,
           error: 'chargeId e amount são obrigatórios'
+        };
+      }
+
+      if (String(chargeId || '').startsWith('mock_review_')) {
+        if (String(process.env.APP_REVIEW || '').toLowerCase() !== 'true') {
+          return {
+            success: false,
+            error: 'Cobrança mock permitida apenas em APP_REVIEW=true'
+          };
+        }
+
+        const mockRefundId = `mock_refund_${Date.now()}`;
+        logStructured('warn', 'Reembolso em modo review/bypass processado localmente', {
+          service: 'PaymentService',
+          chargeId,
+          amount,
+          reason,
+          refundId: mockRefundId
+        });
+
+        return {
+          success: true,
+          bypass: true,
+          message: 'Reembolso em modo review processado com sucesso',
+          refundId: mockRefundId,
+          amount
         };
       }
 
@@ -876,54 +1585,90 @@ class PaymentService {
   }
 
   /**
+   * Constroi o contrato financeiro canonico da corrida.
+   * O pedágio é passthrough do motorista e as taxas são calculadas sobre a corrida sem pedágio.
+   */
+  buildRideFinancialContract({ passengerPaidCents, tollFeeCents = 0, subscriptionRetainedFeeCents = 0 } = {}) {
+    return buildRideFinancialContract({
+      passengerPaidCents,
+      tollFeeCents,
+      subscriptionRetainedFeeCents,
+      policy: {
+        operationalFeeUpTo10Cents: this.OPERATIONAL_FEE_UP_TO_10,
+        operationalFee10To25Cents: this.OPERATIONAL_FEE_10_TO_25,
+        operationalFee25To50Cents: this.OPERATIONAL_FEE_25_TO_50,
+        operationalFeeAbove50Percentage: this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE,
+        threshold10Cents: this.THRESHOLD_10,
+        threshold25Cents: this.THRESHOLD_25,
+        threshold50Cents: this.THRESHOLD_50,
+        paymentIntermediationPercentage: this.WOOVI_FEE_PERCENTAGE,
+        paymentIntermediationMinimumCents: this.WOOVI_FEE_MINIMUM
+      }
+    });
+  }
+
+  /**
    * Calcula valor líquido para o motorista (Imunizando Pedágio)
    * @param {number} totalAmount - Valor total da corrida em centavos
    * @param {number} tollFee - Valor do pedágio em centavos (padrão 0)
    * @returns {Object} - Cálculo detalhado
    */
   calculateNetAmount(totalAmount, tollFee = 0) {
-    const grossFare = Math.max(0, totalAmount - tollFee);
-
-    // Calcular taxa operacional baseada no valor da corrida (sem o pedágio)
-    let operationalFee;
-    let operationalFeeType;
-
-    if (grossFare <= this.THRESHOLD_10) {
-      // Até R$ 10,00
-      operationalFee = this.OPERATIONAL_FEE_UP_TO_10;
-      operationalFeeType = 'up_to_10';
-    } else if (grossFare <= this.THRESHOLD_25) {
-      // Acima de R$ 10,00 e abaixo de R$ 25,00
-      operationalFee = this.OPERATIONAL_FEE_10_TO_25;
-      operationalFeeType = '10_to_25';
-    } else {
-      // Acima de R$ 25,00
-      operationalFee = this.OPERATIONAL_FEE_ABOVE_25;
-      operationalFeeType = 'above_25';
-    }
-
-    // Taxa Woovi: 0,8% com mínimo de R$ 0,50 (calculada livre de pedágio)
-    const wooviFeePercentage = Math.round(grossFare * this.WOOVI_FEE_PERCENTAGE);
-    const wooviFee = Math.max(wooviFeePercentage, this.WOOVI_FEE_MINIMUM);
-
-    // Retenho do lucro da plataforma, o pedágio volta 100% pro motorista
-    const netGross = grossFare - operationalFee - wooviFee;
-    const netAmount = Math.max(0, netGross) + tollFee;
+    const financialContract = this.buildRideFinancialContract({
+      passengerPaidCents: totalAmount,
+      tollFeeCents: tollFee
+    });
+    const totalAmountCents = financialContract.passengerPaidCents;
+    const operationalFee = financialContract.leafOperationalFeeCents;
+    const wooviFee = financialContract.paymentIntermediationFeeCents;
+    const netAmount = financialContract.driverNetAmountCents;
+    const tollFeeCents = financialContract.tollFeeCents;
 
     return {
-      totalAmount: totalAmount,
-      tollFee: tollFee,
+      totalAmount: totalAmountCents,
+      tollFee: tollFeeCents,
       operationalFee: operationalFee,
       wooviFee: wooviFee,
-      netAmount: Math.max(0, netAmount), // Não pode ser negativo
+      netAmount: netAmount, // Não pode ser negativo
+      financialContract,
       breakdown: {
-        total: (totalAmount / 100).toFixed(2),
-        tollFee: (tollFee / 100).toFixed(2),
-        operationalFeeType: operationalFeeType,
+        total: (totalAmountCents / 100).toFixed(2),
+        tollFee: (tollFeeCents / 100).toFixed(2),
+        operationalFeeType: financialContract.feePolicy.operationalFeeType,
         operationalFee: (operationalFee / 100).toFixed(2),
         wooviFee: (wooviFee / 100).toFixed(2),
-        net: (Math.max(0, netAmount) / 100).toFixed(2)
+        net: (netAmount / 100).toFixed(2)
       }
+    };
+  }
+
+  /**
+   * Constrói breakdown financeiro em reais a partir do valor total da corrida.
+   * Usa o cálculo central em centavos e devolve valores em reais para payload.
+   * @param {number} totalFareReais
+   * @param {number} tollFeeReais
+   */
+  calculateFareBreakdownFromReais(totalFareReais, tollFeeReais = 0) {
+    const normalizedFareReais = Number.isFinite(Number(totalFareReais)) ? Math.max(0, Number(totalFareReais)) : 0;
+    const normalizedTollReais = Number.isFinite(Number(tollFeeReais)) ? Math.max(0, Number(tollFeeReais)) : 0;
+    const totalAmountCents = this.toCents(normalizedFareReais);
+    const tollFeeCents = this.toCents(normalizedTollReais);
+    const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents);
+
+    const operationalFee = this.toReais(calculation.operationalFee);
+    const paymentIntermediationFee = this.toReais(calculation.wooviFee);
+    const totalFees = this.toReais(calculation.operationalFee + calculation.wooviFee);
+    const driverNetAmount = this.toReais(calculation.netAmount);
+    const tollFee = this.toReais(calculation.tollFee);
+
+    return {
+      totalFare: this.toReais(totalAmountCents),
+      tollFee,
+      operationalFee,
+      paymentIntermediationFee,
+      totalFees,
+      driverNetAmount,
+      calculation
     };
   }
 
@@ -984,58 +1729,66 @@ class PaymentService {
         };
       }
 
-      // 1.5. Lógica de Retenção Punitiva (Split de Carência - 50%)
-      // Fonte canônica: Realtime DB em subscriptions/{driverId}
+      // 1.5. Lógica de retenção em corridas (desabilitada por padrão).
+      // O modelo vigente prioriza liquidação de assinatura no saque.
       let retainedFees = 0;
-      if (rideData.driverId) {
+      if (this.SUBSCRIPTION_SPLIT_RETENTION_ENABLED && rideData.driverId) {
         try {
-          const db = firebaseConfig.getRealtimeDB();
-          if (db) {
-            const subscriptionRef = db.ref(`subscriptions/${rideData.driverId}`);
-            const userRef = db.ref(`users/${rideData.driverId}`);
-            const subscriptionSnapshot = await subscriptionRef.once('value');
-            const subscription = subscriptionSnapshot.val() || {};
+          const subscriptionBilling = await subscriptionStateService.getBillingData(rideData.driverId);
+          if (subscriptionBilling.subscriptionStatus === 'grace_period' && subscriptionBilling.pendingFeeCents > 0) {
+            // Retém até 50% do valor líquido ou total da dívida, o que for menor
+            const maxSplit = Math.floor(netCalculation.netAmount / 2);
+            retainedFees = Math.min(maxSplit, subscriptionBilling.pendingFeeCents);
 
-            const status = String(subscription.status || '').toLowerCase();
-            const pendingFeeCents = Number(subscription.pendingFeeCents || 0);
-
-            if (status === 'grace_period' && pendingFeeCents > 0) {
-              // Retém até 50% do valor líquido ou total da dívida, o que for menor
-              const maxSplit = Math.floor(netCalculation.netAmount / 2);
-              retainedFees = Math.min(maxSplit, pendingFeeCents);
-
-              const remainingDebt = Math.max(0, pendingFeeCents - retainedFees);
+            const retentionResult = await subscriptionStateService.runTransaction(rideData.driverId, (current) => {
+              const pendingFeeCents = Math.max(0, Number(current.pendingFeeCents || 0));
+              const debit = Math.min(pendingFeeCents, retainedFees);
+              const remainingDebt = Math.max(0, pendingFeeCents - debit);
               const nextStatus = remainingDebt === 0 ? 'active' : 'grace_period';
               const nextBillingStatus = remainingDebt === 0 ? 'active' : 'overdue';
+              const nowIso = new Date().toISOString();
 
-              await subscriptionRef.update({
+              return {
                 pendingFeeCents: remainingDebt,
                 status: nextStatus,
-                updatedAt: new Date().toISOString(),
-                lastRetentionAt: new Date().toISOString(),
-                lastRetentionAmountCents: retainedFees
-              });
+                billingStatus: nextBillingStatus,
+                lastRetentionAt: nowIso,
+                lastRetentionAmountCents: debit,
+                updatedAt: nowIso
+              };
+            });
 
-              await userRef.update({
-                billing_status: nextBillingStatus,
-                subscriptionStatus: nextStatus,
-                subscription_pending_fee_cents: remainingDebt
-              });
-
-              netCalculation.netAmount -= retainedFees; // Atualiza o valor que vai pro motorista
-
-              logStructured('info', 'Retenção de Carência Aplicada', {
-                service: 'PaymentService',
-                driverId: rideData.driverId,
-                retainedAmount: retainedFees,
-                remainingDebt,
-                newNetAmount: netCalculation.netAmount
-              });
+            if (!retentionResult.success) {
+              throw new Error(retentionResult.error || 'Falha ao registrar retenção de assinatura');
             }
+
+            retainedFees = Math.max(0, Number(retentionResult.subscription?.lastRetentionAmountCents || retainedFees) || 0);
+            netCalculation.netAmount -= retainedFees; // Atualiza o valor que vai pro motorista
+
+            logStructured('info', 'Retenção de Carência Aplicada', {
+              service: 'PaymentService',
+              driverId: rideData.driverId,
+              retainedAmount: retainedFees,
+              remainingDebt: Number(retentionResult.subscription?.pendingFeeCents || 0),
+              newNetAmount: netCalculation.netAmount
+            });
           }
         } catch (err) {
           logStructured('warn', 'Falha ao processar Split Punitivo', { service: 'PaymentService', error: err.message });
         }
+      }
+
+      if (retainedFees > 0) {
+        const finalContract = this.buildRideFinancialContract({
+          passengerPaidCents: netCalculation.totalAmount,
+          tollFeeCents: netCalculation.tollFee,
+          subscriptionRetainedFeeCents: retainedFees
+        });
+        netCalculation.operationalFee = finalContract.leafOperationalFeeCents;
+        netCalculation.wooviFee = finalContract.paymentIntermediationFeeCents;
+        netCalculation.netAmount = finalContract.driverNetAmountCents;
+        netCalculation.financialContract = finalContract;
+        netCalculation.breakdown.net = (finalContract.driverNetAmountCents / 100).toFixed(2);
       }
 
       // 2. Buscar chave Pix do motorista (necessária para transferência)
@@ -1068,7 +1821,12 @@ class PaymentService {
 
       // Tentar transferência BaaS apenas se chaves Pix estiverem disponíveis
       // Se não estiver, usar apenas crédito no Firestore
-      if (driverPixKey && this.LEAF_PIX_KEY && this.LEAF_PIX_KEY !== 'test@leaf.app.br') {
+      if (
+        this.isWooviDirectTransferOnRideCompletionEnabled() &&
+        driverPixKey &&
+        this.LEAF_PIX_KEY &&
+        this.LEAF_PIX_KEY !== 'test@leaf.app.br'
+      ) {
         logStructured('info', 'Tentando transferência BaaS (se disponível)', { service: 'PaymentService' });
 
         // Transferência BaaS com circuit breaker
@@ -1081,7 +1839,10 @@ class PaymentService {
               `Ganhos da corrida ${rideData.rideId}`,
               rideData.rideId,
               driverPixKey,
-              this.LEAF_PIX_KEY
+              this.LEAF_PIX_KEY,
+              {
+                correlationID: `leaf_ride_completion_${rideData.rideId}_${rideData.driverId}`
+              }
             );
           },
           async () => {
@@ -1105,7 +1866,11 @@ class PaymentService {
           logStructured('warn', 'Transferência BaaS não disponível, usando apenas crédito no Firestore', { service: 'PaymentService' });
         }
       } else {
-        logStructured('info', 'Usando sistema de saldo no Firestore (BaaS não configurado)', { service: 'PaymentService' });
+        logStructured('info', 'Usando sistema de saldo no Firestore/subconta Woovi sem Pix Out por corrida', {
+          service: 'PaymentService',
+          directTransferEnabled: this.isWooviDirectTransferOnRideCompletionEnabled(),
+          hasDriverPixKey: Boolean(driverPixKey)
+        });
       }
 
       // 3. ✅ NOVO: Creditar saldo diretamente no Firestore (substitui BaaS temporariamente)
@@ -1116,11 +1881,20 @@ class PaymentService {
       );
 
       if (!creditResult.success) {
-        logError(new Error(creditResult.error), 'Erro ao creditar saldo do motorista', { service: 'PaymentService' });
-        // Continuar mesmo se falhar (não bloquear distribuição)
-      } else {
-        logStructured('info', 'Saldo creditado com sucesso', { service: 'PaymentService', balance: creditResult.balance });
+        logError(new Error(creditResult.error), 'Erro ao creditar saldo do motorista', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          driverId: rideData.driverId
+        });
+        return {
+          success: false,
+          error: 'Falha ao creditar saldo do motorista',
+          details: creditResult.error || 'Crédito no ledger interno não confirmado',
+          retryable: true
+        };
       }
+
+      logStructured('info', 'Saldo creditado com sucesso', { service: 'PaymentService', balance: creditResult.balance });
 
       // 4. Atualizar status do holding para distribuído
       const distributionData = {
@@ -1129,7 +1903,7 @@ class PaymentService {
         status: 'distributed',
         distributedAt: new Date().toISOString(),
         netAmount: netCalculation.netAmount,
-        retainedFees: retainedFees,
+        subscriptionRetainedFee: retainedFees,
         transferId: transferId || null, // ID da transferência (se BaaS estiver disponível)
         balanceCreditId: creditResult.balanceId || null, // ID do crédito no Firestore
         calculation: netCalculation,
@@ -1137,9 +1911,41 @@ class PaymentService {
         retainedFees: {
           operationalFee: netCalculation.operationalFee,
           wooviFee: netCalculation.wooviFee,
-          totalRetained: netCalculation.operationalFee + netCalculation.wooviFee
+          subscriptionRetainedFee: retainedFees,
+          totalRetained: netCalculation.operationalFee + netCalculation.wooviFee + retainedFees
         }
       };
+
+      const ledgerResult = await this.financialLedgerService.recordRideSettlement({
+        rideId: rideData.rideId,
+        driverId: rideData.driverId,
+        totalAmountCents: netCalculation.totalAmount,
+        netAmountCents: netCalculation.netAmount,
+        operationalFeeCents: netCalculation.operationalFee,
+        wooviFeeCents: netCalculation.wooviFee,
+        retainedFeeCents: retainedFees,
+        metadata: {
+          transferId: transferId || null,
+          balanceCreditId: creditResult.balanceId || null,
+          refundAmountCents: passengerRefundAmount || 0,
+          refundId: passengerRefundResult?.refundId || null
+        }
+      });
+
+      if (!ledgerResult.success) {
+        logStructured('error', 'Falha ao registrar ledger financeiro do settlement', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          driverId: rideData.driverId,
+          ledgerError: ledgerResult.error || ledgerResult.code
+        });
+        return {
+          success: false,
+          error: 'Falha ao registrar ledger financeiro do settlement',
+          details: ledgerResult.error || ledgerResult.code,
+          retryable: true
+        };
+      }
 
       // ✅ Salvar distribuição no Firestore
       await this.saveDistributionToFirestore(distributionData);
@@ -1152,9 +1958,19 @@ class PaymentService {
           netAmount: netCalculation.netAmount,
           transferId: transferId,
           balanceCreditId: creditResult.balanceId,
+          ledgerEventId: ledgerResult.eventId || null,
           retainedFees: distributionData.retainedFees
         }
       });
+
+      this.financialLedgerService.reconcileRideFinancials({ rideId: rideData.rideId })
+        .catch((reconciliationError) => {
+          logStructured('warn', 'Falha ao reconciliar corrida após settlement', {
+            service: 'PaymentService',
+            rideId: rideData.rideId,
+            error: reconciliationError.message
+          });
+        });
 
       logStructured('info', 'Distribuição líquida processada', {
         service: 'payment-service',
@@ -1246,6 +2062,32 @@ class PaymentService {
         }
       };
 
+      const ledgerResult = await this.financialLedgerService.recordCancellationSettlement({
+        rideId: rideData.rideId,
+        driverId: rideData.driverId,
+        cancellationFeeCents: rideData.cancellationFee,
+        netAmountCents: netAmount,
+        wooviFeeCents: this.WOOVI_FEE_MINIMUM,
+        metadata: {
+          balanceCreditId: creditResult.balanceId || null
+        }
+      });
+
+      if (!ledgerResult.success) {
+        logStructured('error', 'Falha ao registrar ledger financeiro do cancelamento', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          driverId: rideData.driverId,
+          ledgerError: ledgerResult.error || ledgerResult.code
+        });
+        return {
+          success: false,
+          error: 'Falha ao registrar ledger financeiro do cancelamento',
+          details: ledgerResult.error || ledgerResult.code,
+          retryable: true
+        };
+      }
+
       await this.saveDistributionToFirestore(distributionData);
 
       logStructured('info', 'Distribuição de multa processada com sucesso', {
@@ -1269,6 +2111,26 @@ class PaymentService {
         details: error.message
       };
     }
+  }
+
+  buildDriverBalanceCreditId(driverId, rideId, amountInCents) {
+    const source = `${driverId || 'unknown-driver'}:${rideId || 'unknown-ride'}:${amountInCents || 0}`;
+    const hash = crypto.createHash('sha256').update(source).digest('hex').slice(0, 32);
+    return `ride_credit_${hash}`;
+  }
+
+  buildWithdrawalIdempotencyKey(driverId, requestId) {
+    return crypto
+      .createHash('sha256')
+      .update(`${driverId || 'unknown-driver'}:${requestId || 'unknown-request'}`)
+      .digest('hex');
+  }
+
+  buildWithdrawalPixKeyHash(pixKey) {
+    return crypto
+      .createHash('sha256')
+      .update(String(pixKey || '').trim().toLowerCase())
+      .digest('hex');
   }
 
   /**
@@ -1297,11 +2159,43 @@ class PaymentService {
         };
       }
 
+      if (!rideId) {
+        return {
+          success: false,
+          error: 'rideId obrigatório para crédito idempotente'
+        };
+      }
+
+      const amountInCents = Math.round(Number(amount));
+      if (!Number.isFinite(amountInCents) || amountInCents <= 0) {
+        return {
+          success: false,
+          error: 'Valor inválido para crédito'
+        };
+      }
+
       const balanceRef = firestore.collection('driver_balances').doc(driverId);
-      const amountInReais = amount / 100; // Converter centavos para reais
+      const amountInReais = amountInCents / 100; // Converter centavos para reais
+      const creditTransactionId = this.buildDriverBalanceCreditId(driverId, rideId, amountInCents);
+      const creditTransactionRef = balanceRef.collection('transactions').doc(creditTransactionId);
 
       // Usar transação para garantir consistência
       const result = await firestore.runTransaction(async (transaction) => {
+        const creditTransactionDoc = await transaction.get(creditTransactionRef);
+
+        if (creditTransactionDoc.exists) {
+          const creditData = creditTransactionDoc.data() || {};
+          return {
+            success: true,
+            duplicate: true,
+            previousBalance: creditData.previousBalance ?? null,
+            newBalance: creditData.newBalance ?? null,
+            creditAmount: amountInReais,
+            balanceId: driverId,
+            transactionId: creditTransactionId
+          };
+        }
+
         const balanceDoc = await transaction.get(balanceRef);
 
         let currentBalance = 0;
@@ -1326,41 +2220,44 @@ class PaymentService {
           lastCreditAmount: amountInReais
         }, { merge: true });
 
+        transaction.set(creditTransactionRef, {
+          type: 'credit',
+          amount: amountInReais,
+          amountInCents,
+          rideId,
+          previousBalance: currentBalance,
+          newBalance,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          description: `Ganhos da corrida ${rideId}`,
+          idempotencyKey: creditTransactionId
+        });
+
         return {
           success: true,
           previousBalance: currentBalance,
           newBalance: newBalance,
           creditAmount: amountInReais,
-          balanceId: driverId
+          balanceId: driverId,
+          transactionId: creditTransactionId
         };
       });
 
-      // Salvar histórico da transação
       if (result.success) {
-        const historyRef = firestore
-          .collection('driver_balances')
-          .doc(driverId)
-          .collection('transactions')
-          .doc();
-
-        await historyRef.set({
-          type: 'credit',
-          amount: amountInReais,
-          amountInCents: amount,
-          rideId: rideId,
-          previousBalance: result.previousBalance,
-          newBalance: result.newBalance,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          description: `Ganhos da corrida ${rideId}`
-        });
-
-        logStructured('info', 'Saldo creditado para motorista', {
+        logStructured('info', result.duplicate ? 'Crédito de saldo idempotente já aplicado' : 'Saldo creditado para motorista', {
           service: 'payment-service',
           driverId,
           rideId,
           amount: amountInReais.toFixed(2),
-          previousBalance: result.previousBalance.toFixed(2),
-          newBalance: result.newBalance.toFixed(2)
+          previousBalance:
+            typeof result.previousBalance === 'number'
+              ? result.previousBalance.toFixed(2)
+              : null,
+          newBalance:
+            typeof result.newBalance === 'number'
+              ? result.newBalance.toFixed(2)
+              : null,
+          duplicate: Boolean(result.duplicate),
+          transactionId: result.transactionId
         });
       }
 
@@ -1424,24 +2321,77 @@ class PaymentService {
 
       const balanceRef = firestore.collection('driver_balances').doc(driverId);
       const balanceDoc = await balanceRef.get();
+      const subscriptionBilling = await this.getDriverSubscriptionBillingData(driverId);
+      const subscriptionDailyFeeSuspended = !this.SUBSCRIPTION_DAILY_BILLING_ENABLED;
+      const rawPendingFeeCents = Math.max(0, Number(subscriptionBilling.pendingFeeCents || 0));
+      const effectivePendingFeeCents = subscriptionDailyFeeSuspended
+        ? 0
+        : Math.max(0, rawPendingFeeCents);
+      const rawDailyFeeCents = Math.max(0, Number(subscriptionBilling.dailyFeeCents || 0));
+      const nominalDailyFeeCents = this.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS;
+      const effectiveDailyFeeCents = subscriptionDailyFeeSuspended
+        ? 0
+        : Math.max(0, rawDailyFeeCents || nominalDailyFeeCents);
 
       if (!balanceDoc.exists) {
+        const availableAfterSubscriptionCents = Math.max(0, 0 - effectivePendingFeeCents);
         return {
           success: true,
           balance: 0,
+          balanceCents: 0,
           totalEarnings: 0,
+          subscriptionPendingFeeCents: effectivePendingFeeCents,
+          subscriptionPendingFee: this.toReais(effectivePendingFeeCents),
+          subscriptionPendingFeeRawCents: Math.max(0, rawPendingFeeCents),
+          subscriptionPendingFeeRaw: this.toReais(rawPendingFeeCents),
+          subscriptionStatus: subscriptionBilling.subscriptionStatus || 'active',
+          billingStatus: subscriptionBilling.billingStatus || 'active',
+          subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+          subscriptionDailyFeeCents: effectiveDailyFeeCents,
+          subscriptionDailyFee: this.toReais(effectiveDailyFeeCents),
+          subscriptionDailyFeeNominalCents: nominalDailyFeeCents,
+          subscriptionDailyFeeNominal: this.toReais(nominalDailyFeeCents),
+          subscriptionDailyFeeEffectiveCents: effectiveDailyFeeCents,
+          subscriptionDailyFeeEffective: this.toReais(effectiveDailyFeeCents),
+          subscriptionDailyFeeSuspended,
+          subscriptionDailyBillingEnabled: this.SUBSCRIPTION_DAILY_BILLING_ENABLED,
+          subscriptionWaveId: subscriptionBilling.waveId || null,
+          availableAfterSubscriptionCents,
+          availableAfterSubscription: this.toReais(availableAfterSubscriptionCents),
           message: 'Motorista ainda não possui saldo'
         };
       }
 
       const data = balanceDoc.data();
+      const balanceCents = this.toCents(data.balance || 0);
+      const pendingFeeCents = effectivePendingFeeCents;
+      const availableAfterSubscriptionCents = Math.max(0, balanceCents - pendingFeeCents);
 
       return {
         success: true,
         balance: data.balance || 0,
+        balanceCents,
         totalEarnings: data.totalEarnings || 0,
         lastUpdated: data.lastUpdated?.toDate?.() || null,
-        lastRideId: data.lastRideId || null
+        lastRideId: data.lastRideId || null,
+        subscriptionPendingFeeCents: pendingFeeCents,
+        subscriptionPendingFee: this.toReais(pendingFeeCents),
+        subscriptionPendingFeeRawCents: Math.max(0, rawPendingFeeCents),
+        subscriptionPendingFeeRaw: this.toReais(rawPendingFeeCents),
+        subscriptionStatus: subscriptionBilling.subscriptionStatus || 'active',
+        billingStatus: subscriptionBilling.billingStatus || 'active',
+        subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+        subscriptionDailyFeeCents: effectiveDailyFeeCents,
+        subscriptionDailyFee: this.toReais(effectiveDailyFeeCents),
+        subscriptionDailyFeeNominalCents: nominalDailyFeeCents,
+        subscriptionDailyFeeNominal: this.toReais(nominalDailyFeeCents),
+        subscriptionDailyFeeEffectiveCents: effectiveDailyFeeCents,
+        subscriptionDailyFeeEffective: this.toReais(effectiveDailyFeeCents),
+        subscriptionDailyFeeSuspended,
+        subscriptionDailyBillingEnabled: this.SUBSCRIPTION_DAILY_BILLING_ENABLED,
+        subscriptionWaveId: subscriptionBilling.waveId || null,
+        availableAfterSubscriptionCents,
+        availableAfterSubscription: this.toReais(availableAfterSubscriptionCents)
       };
 
     } catch (error) {
@@ -1468,6 +2418,22 @@ class PaymentService {
     return 0;
   }
 
+  toReais(cents) {
+    return Number((Number(cents || 0) / 100).toFixed(2));
+  }
+
+  toCents(valueInReais) {
+    return Math.round(Number(valueInReais || 0) * 100);
+  }
+
+  async getDriverSubscriptionBillingData(driverId) {
+    return subscriptionStateService.getBillingData(driverId);
+  }
+
+  async settleSubscriptionPendingOnWithdrawal(driverId, settlementCents) {
+    return subscriptionStateService.settlePendingOnWithdrawal(driverId, settlementCents);
+  }
+
   /**
    * Solicita saque do saldo do motorista.
    * Debita imediatamente do saldo e registra pedido para processamento.
@@ -1485,31 +2451,91 @@ class PaymentService {
     const driverId = data?.driverId;
     const amountCents = Number.parseInt(data?.amountCents, 10);
     const pixKey = String(data?.pixKey || '').trim();
+    const requestId = String(data?.requestId || '').trim();
 
-    if (!driverId || !Number.isFinite(amountCents) || amountCents <= 0 || !pixKey) {
+    if (!driverId || !Number.isFinite(amountCents) || amountCents <= 0 || !pixKey || !requestId) {
       return { success: false, error: 'Dados inválidos para saque' };
     }
 
+    const subscriptionBilling = await this.getDriverSubscriptionBillingData(driverId);
+    const shouldSettleSubscriptionNow =
+      this.SUBSCRIPTION_DAILY_BILLING_ENABLED &&
+      this.SUBSCRIPTION_SETTLE_ON_WITHDRAW &&
+      String(subscriptionBilling.collectionMode || 'withdrawal') === 'withdrawal';
+
     const withdrawFeeCents = this.calculateWithdrawFee(amountCents);
-    const totalDebitCents = amountCents + withdrawFeeCents;
-    const amountInReais = amountCents / 100;
-    const feeInReais = withdrawFeeCents / 100;
-    const totalDebitInReais = totalDebitCents / 100;
+    const subscriptionSettlementCents = shouldSettleSubscriptionNow
+      ? Math.max(0, Number(subscriptionBilling.pendingFeeCents || 0))
+      : 0;
+    const totalDebitCents = amountCents + withdrawFeeCents + subscriptionSettlementCents;
+    const amountInReais = this.toReais(amountCents);
+    const feeInReais = this.toReais(withdrawFeeCents);
+    const subscriptionSettlementInReais = this.toReais(subscriptionSettlementCents);
+    const totalDebitInReais = this.toReais(totalDebitCents);
 
     const balanceRef = firestore.collection('driver_balances').doc(driverId);
     const withdrawalRef = firestore.collection('driver_withdrawals').doc();
+    const pixKeyHash = this.buildWithdrawalPixKeyHash(pixKey);
+    const idempotencyKey = this.buildWithdrawalIdempotencyKey(driverId, requestId);
+    const idempotencyRef = firestore.collection('driver_withdrawal_idempotency').doc(idempotencyKey);
 
     try {
       const transactionResult = await firestore.runTransaction(async (transaction) => {
-        const balanceDoc = await transaction.get(balanceRef);
-        const balanceData = balanceDoc.exists ? balanceDoc.data() : {};
-        const currentBalance = Number.parseFloat(balanceData.balance || 0);
+        const idempotencyDoc = await transaction.get(idempotencyRef);
+        if (idempotencyDoc.exists) {
+          const existing = idempotencyDoc.data() || {};
+          const existingAmountCents = Number(existing.amountCents || 0);
+          const existingPixKeyHash = String(existing.pixKeyHash || '');
+          if (
+            existingAmountCents !== amountCents ||
+            (existingPixKeyHash && existingPixKeyHash !== pixKeyHash)
+          ) {
+            return {
+              idempotentReplay: true,
+              parameterConflict: true,
+              withdrawalId: existing.withdrawalId || null,
+              status: existing.status || 'pending',
+              existingAmountCents,
+              incomingAmountCents: amountCents
+            };
+          }
 
-        if (currentBalance < totalDebitInReais) {
-          throw new Error('Saldo insuficiente para saque + taxa');
+          return {
+            idempotentReplay: true,
+            withdrawalId: existing.withdrawalId || null,
+            previousBalance: existing.previousBalance || null,
+            newBalance: existing.newBalance || null,
+            withdrawFeeCents: Number(existing.withdrawFeeCents || 0),
+            subscriptionSettlementCents: Number(existing.subscriptionSettlementCents || 0),
+            totalDebitCents: Number(existing.totalDebitCents || 0),
+            status: existing.status || 'pending'
+          };
         }
 
-        const newBalance = currentBalance - totalDebitInReais;
+        const balanceDoc = await transaction.get(balanceRef);
+        const balanceData = balanceDoc.exists ? balanceDoc.data() : {};
+        const currentBalanceCents = this.toCents(balanceData.balance || 0);
+        const currentBalance = this.toReais(currentBalanceCents);
+
+        if (currentBalanceCents < totalDebitCents) {
+          const maxWithdrawableCents = Math.max(0, currentBalanceCents - withdrawFeeCents - subscriptionSettlementCents);
+          const error = new Error('Saldo insuficiente para saque + taxa + assinatura pendente');
+          error.code = 'WITHDRAWAL_INSUFFICIENT_BALANCE';
+          error.details = {
+            currentBalanceCents,
+            amountCents,
+            withdrawFeeCents,
+            subscriptionSettlementCents,
+            totalDebitCents,
+            shortfallCents: totalDebitCents - currentBalanceCents,
+            maxWithdrawableCents,
+            maxWithdrawableInReais: this.toReais(maxWithdrawableCents).toFixed(2)
+          };
+          throw error;
+        }
+
+        const newBalanceCents = currentBalanceCents - totalDebitCents;
+        const newBalance = this.toReais(newBalanceCents);
 
         transaction.set(balanceRef, {
           driverId,
@@ -1517,13 +2543,17 @@ class PaymentService {
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           lastWithdrawalAt: admin.firestore.FieldValue.serverTimestamp(),
           lastWithdrawalAmount: amountInReais,
-          lastWithdrawalFee: feeInReais
+          lastWithdrawalFee: feeInReais,
+          lastWithdrawalSubscriptionSettlement: subscriptionSettlementInReais
         }, { merge: true });
 
         const baseTransactionData = {
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           withdrawalId: withdrawalRef.id,
-          pixKey
+          requestId,
+          idempotencyKey,
+          pixKey,
+          pixKeyHash
         };
 
         const txCollection = balanceRef.collection('transactions');
@@ -1545,61 +2575,229 @@ class PaymentService {
             type: 'withdrawal_fee',
             amount: -feeInReais,
             amountInCents: -withdrawFeeCents,
-            previousBalance: currentBalance - amountInReais,
+            previousBalance: this.toReais(currentBalanceCents - amountCents),
             newBalance: newBalance,
             description: 'Taxa de saque abaixo de R$ 500,00'
           });
         }
 
+        if (subscriptionSettlementCents > 0) {
+          const settlementTxRef = txCollection.doc();
+          transaction.set(settlementTxRef, {
+            ...baseTransactionData,
+            type: 'subscription_settlement',
+            amount: -subscriptionSettlementInReais,
+            amountInCents: -subscriptionSettlementCents,
+            previousBalance: this.toReais(currentBalanceCents - amountCents - withdrawFeeCents),
+            newBalance,
+            description: 'Liquidação de assinatura diária pendente no saque'
+          });
+        }
+
         transaction.set(withdrawalRef, {
           driverId,
+          requestId,
+          idempotencyKey,
           pixKey,
           amountCents,
           amountInReais,
           feeCents: withdrawFeeCents,
           feeInReais,
+          subscriptionSettlementCents,
+          subscriptionSettlementInReais,
           totalDebitCents,
           totalDebitInReais,
           status: 'pending',
           source: 'mobile_app',
+          subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        transaction.set(idempotencyRef, {
+          driverId,
+          requestId,
+          amountCents,
+          pixKey,
+          pixKeyHash,
+          withdrawalId: withdrawalRef.id,
+          withdrawFeeCents,
+          subscriptionSettlementCents,
+          totalDebitCents,
+          previousBalance: currentBalance,
+          newBalance,
+          status: 'pending',
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
         return {
+          idempotentReplay: false,
+          withdrawalId: withdrawalRef.id,
           previousBalance: currentBalance,
           newBalance,
           withdrawFeeCents,
+          subscriptionSettlementCents,
           totalDebitCents
         };
+      });
+
+      if (transactionResult.idempotentReplay) {
+        if (transactionResult.parameterConflict) {
+          return {
+            success: false,
+            error: 'Esta solicitação de saque já foi usada com outros dados. Revise e tente novamente.',
+            code: 'WITHDRAWAL_IDEMPOTENCY_CONFLICT',
+            withdrawalId: transactionResult.withdrawalId || null,
+            status: transactionResult.status || null,
+            details: {
+              existingAmountCents: transactionResult.existingAmountCents,
+              incomingAmountCents: transactionResult.incomingAmountCents
+            }
+          };
+        }
+
+        return {
+          success: true,
+          idempotentReplay: true,
+          withdrawalId: transactionResult.withdrawalId,
+          requestId,
+          amountCents,
+          withdrawFeeCents: transactionResult.withdrawFeeCents || 0,
+          subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
+          totalDebitCents: transactionResult.totalDebitCents || amountCents,
+          amountInReais: amountInReais.toFixed(2),
+          withdrawFeeInReais: this.toReais(transactionResult.withdrawFeeCents || 0).toFixed(2),
+          subscriptionSettlementInReais: this.toReais(transactionResult.subscriptionSettlementCents || 0).toFixed(2),
+          totalDebitInReais: this.toReais(transactionResult.totalDebitCents || amountCents).toFixed(2),
+          previousBalance: transactionResult.previousBalance,
+          newBalance: transactionResult.newBalance,
+          subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+          settlementSyncStatus: 'unchanged'
+        };
+      }
+
+      const withdrawalLedgerResult = await this.financialLedgerService.recordWithdrawalRequested({
+        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+        driverId,
+        amountCents,
+        withdrawFeeCents,
+        subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
+        requestId,
+        metadata: {
+          totalDebitCents,
+          source: 'requestDriverWithdrawal'
+        }
+      });
+
+      if (!withdrawalLedgerResult.success) {
+        logStructured('warn', 'Saque solicitado sem ledger financeiro canônico', {
+          service: 'payment-service',
+          driverId,
+          withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+          ledgerError: withdrawalLedgerResult.error || withdrawalLedgerResult.code
+        });
+      }
+
+      let settlementSync = {
+        success: true,
+        settledCents: 0,
+        remainingCents: 0
+      };
+
+      if (transactionResult.subscriptionSettlementCents > 0) {
+        try {
+          settlementSync = await this.settleSubscriptionPendingOnWithdrawal(
+            driverId,
+            transactionResult.subscriptionSettlementCents
+          );
+        } catch (syncError) {
+          settlementSync = {
+            success: false,
+            error: syncError.message || 'Erro ao sincronizar assinatura'
+          };
+        }
+
+        try {
+          if (!settlementSync.success) {
+            await withdrawalRef.set({
+              settlementSyncStatus: 'pending_retry',
+              settlementSyncError: settlementSync.error || 'Erro ao sincronizar assinatura',
+              settlementSyncUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          } else {
+            await withdrawalRef.set({
+              settlementSyncStatus: 'synced',
+              subscriptionPendingRemainingCents: settlementSync.remainingCents,
+              settlementSyncUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          }
+        } catch (syncPersistError) {
+          logStructured('warn', 'Falha ao persistir status de sincronização da assinatura no saque', {
+            service: 'payment-service',
+            driverId,
+            withdrawalId: withdrawalRef.id,
+            error: syncPersistError.message
+          });
+        }
+      }
+
+      await idempotencyRef.set({
+        status: 'pending',
+        settlementSyncStatus: settlementSync.success ? 'synced' : 'pending_retry',
+        subscriptionPendingRemainingCents: settlementSync.remainingCents || 0,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).catch((syncPersistError) => {
+        logStructured('warn', 'Falha ao persistir status da idempotencia do saque', {
+          service: 'payment-service',
+          driverId,
+          withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+          error: syncPersistError.message
+        });
       });
 
       logStructured('info', 'Saque solicitado com sucesso', {
         service: 'payment-service',
         driverId,
-        withdrawalId: withdrawalRef.id,
+        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+        requestId,
         amountCents,
         withdrawFeeCents,
+        subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
         totalDebitCents
       });
 
       return {
         success: true,
-        withdrawalId: withdrawalRef.id,
+        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+        requestId,
         amountCents,
         withdrawFeeCents,
+        subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
         totalDebitCents,
         amountInReais: amountInReais.toFixed(2),
         withdrawFeeInReais: feeInReais.toFixed(2),
+        subscriptionSettlementInReais: this.toReais(transactionResult.subscriptionSettlementCents || 0).toFixed(2),
         totalDebitInReais: totalDebitInReais.toFixed(2),
         previousBalance: transactionResult.previousBalance,
-        newBalance: transactionResult.newBalance
+        newBalance: transactionResult.newBalance,
+        subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+        settlementSyncStatus: settlementSync.success ? 'synced' : 'pending_retry'
       };
     } catch (error) {
       logError(error, 'Erro ao solicitar saque', { service: 'payment-service', driverId });
+      if (error?.code === 'WITHDRAWAL_INSUFFICIENT_BALANCE') {
+        return {
+          success: false,
+          error: error.message || 'Saldo insuficiente para saque',
+          code: error.code,
+          details: error.details || null
+        };
+      }
       return {
         success: false,
-        error: error.message || 'Erro ao solicitar saque'
+        error: error.message || 'Erro ao solicitar saque',
+        code: error?.code || null
       };
     }
   }
@@ -1658,21 +2856,47 @@ class PaymentService {
     }
 
     const withdrawalRef = firestore.collection('driver_withdrawals').doc(withdrawalId);
-    const withdrawalDoc = await withdrawalRef.get();
-    if (!withdrawalDoc.exists) {
-      return { success: false, error: 'Saque não encontrado' };
-    }
+    const claimResult = await firestore.runTransaction(async (transaction) => {
+      const withdrawalDoc = await transaction.get(withdrawalRef);
+      if (!withdrawalDoc.exists) {
+        return { success: false, error: 'Saque não encontrado' };
+      }
 
-    const withdrawal = withdrawalDoc.data();
-    if (withdrawal.status !== 'pending') {
+      const withdrawal = withdrawalDoc.data() || {};
+      if (withdrawal.status !== 'pending') {
+        return {
+          success: true,
+          alreadyProcessed: true,
+          status: withdrawal.status
+        };
+      }
+
+      transaction.set(withdrawalRef, {
+        status: 'processing',
+        processingStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+        processingBy: actorId,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
       return {
         success: true,
-        alreadyProcessed: true,
-        status: withdrawal.status
+        claimed: true,
+        withdrawal
       };
+    });
+
+    if (!claimResult.success || !claimResult.claimed) {
+      return claimResult;
     }
 
+    const withdrawal = claimResult.withdrawal;
+
     if (!this.LEAF_PIX_KEY || this.LEAF_PIX_KEY === 'test@leaf.app.br') {
+      await withdrawalRef.set({
+        status: 'pending',
+        lastError: 'LEAF_PIX_KEY não configurada para processamento automático',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
       return {
         success: false,
         error: 'LEAF_PIX_KEY não configurada para processamento automático'
@@ -1691,11 +2915,15 @@ class PaymentService {
       `Saque motorista ${withdrawal.driverId} - ${withdrawalId}`,
       withdrawal.rideId || `withdraw_${withdrawalId}`,
       driverPixKey,
-      this.LEAF_PIX_KEY
+      this.LEAF_PIX_KEY,
+      {
+        correlationID: `leaf_withdrawal_${withdrawalId}`
+      }
     );
 
     if (!transferResult.success) {
       await withdrawalRef.set({
+        status: 'pending',
         lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
         attempts: admin.firestore.FieldValue.increment(1),
         lastError: transferResult.error || transferResult.details || 'Falha na transferência Woovi',
@@ -1723,6 +2951,26 @@ class PaymentService {
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
+    const processedLedgerResult = await this.financialLedgerService.recordWithdrawalProcessed({
+      withdrawalId,
+      driverId: withdrawal.driverId,
+      amountCents,
+      transferId: transferResult.transferId || transferResult.transactionId || null,
+      metadata: {
+        actorId,
+        source: 'processDriverWithdrawal'
+      }
+    });
+
+    if (!processedLedgerResult.success) {
+      logStructured('warn', 'Saque processado sem ledger financeiro canônico', {
+        service: 'payment-service',
+        withdrawalId,
+        driverId: withdrawal.driverId,
+        ledgerError: processedLedgerResult.error || processedLedgerResult.code
+      });
+    }
+
     logStructured('info', 'Saque processado com sucesso', {
       service: 'payment-service',
       withdrawalId,
@@ -1745,6 +2993,15 @@ class PaymentService {
   async getPaymentStatus(chargeId) {
     try {
       if (String(chargeId || '').startsWith('mock_review_')) {
+        if (String(process.env.APP_REVIEW || '').toLowerCase() !== 'true') {
+          return {
+            success: false,
+            error: 'Cobrança mock permitida apenas em APP_REVIEW=true',
+            status: null,
+            chargeId
+          };
+        }
+
         return {
           success: true,
           status: 'in_holding',
@@ -1763,6 +3020,74 @@ class PaymentService {
         };
       }
 
+      const cachedPaymentStatus = await this.readPaymentStatusCache(chargeId);
+      if (cachedPaymentStatus) {
+        const cachedAmountInCents = Number.isFinite(Number(cachedPaymentStatus.amount))
+          ? Math.round(Number(cachedPaymentStatus.amount))
+          : 0;
+
+        return {
+          success: true,
+          status: String(cachedPaymentStatus.status || 'in_holding').trim().toLowerCase(),
+          amount: cachedAmountInCents,
+          amountInReais: cachedAmountInCents > 0 ? (cachedAmountInCents / 100) : 0,
+          chargeId,
+          paidAt:
+            cachedPaymentStatus.paidAt ||
+            cachedPaymentStatus.confirmedAt ||
+            cachedPaymentStatus.updatedAt ||
+            null,
+          source: 'payment_status_cache'
+        };
+      }
+
+      // Fallback rápido: booking já marcado como pago no Redis.
+      // Útil para a janela logo após pagamento confirmado e antes do Firestore.
+      try {
+        await redisPool.ensureConnection();
+        const redis = redisPool.getConnection();
+        const bookingHash = await redis.hgetall(`booking:${chargeId}`);
+        if (bookingHash && Object.keys(bookingHash).length > 0) {
+          const bookingPaymentStatus = String(bookingHash.paymentStatus || '').toLowerCase();
+          const amountInCents = Number.parseInt(bookingHash.paymentAmountInCents || '0', 10);
+
+          if (['confirmed', 'paid', 'in_holding'].includes(bookingPaymentStatus)) {
+            return {
+              success: true,
+              status: 'in_holding',
+              amount: Number.isFinite(amountInCents) ? amountInCents : 0,
+              amountInReais: Number.isFinite(amountInCents) ? (amountInCents / 100) : 0,
+              chargeId,
+              paidAt: bookingHash.paymentConfirmedAt || bookingHash.updatedAt || null,
+              source: 'booking_cache'
+            };
+          }
+        }
+      } catch (redisLookupError) {
+        logStructured('debug', 'Falha ao consultar status de pagamento no cache Redis', {
+          service: 'payment-service',
+          chargeId,
+          error: redisLookupError.message
+        });
+      }
+
+      const buildPaymentStatusResponseFromRecord = (record = {}, source = null) => {
+        const normalizedStatus = String(record.status || '').trim().toLowerCase();
+        const amountInCents = Number.isFinite(Number(record.amount))
+          ? Math.round(Number(record.amount))
+          : 0;
+
+        return {
+          success: true,
+          status: normalizedStatus || 'in_holding',
+          amount: amountInCents,
+          amountInReais: amountInCents > 0 ? (amountInCents / 100) : 0,
+          chargeId: chargeId,
+          paidAt: record.paidAt || record.confirmedAt || record.updatedAt || null,
+          ...(source ? { source } : {})
+        };
+      };
+
       // ✅ NOVO: Primeiro verificar se existe payment holding no Firestore (para testes)
       try {
         const firestore = firebaseConfig.getFirestore();
@@ -1773,23 +3098,62 @@ class PaymentService {
           if (holdingDoc.exists) {
             const holdingData = holdingDoc.data();
             logStructured('info', 'Payment holding encontrado no Firestore', { service: 'payment-service', chargeId, status: holdingData.status });
-            return {
-              success: true,
-              status: holdingData.status, // in_holding, distributed, etc
-              amount: holdingData.amount || 0,
-              amountInReais: holdingData.amount ? (holdingData.amount / 100) : 0,
-              chargeId: chargeId,
-              paidAt: holdingData.paidAt || null
-            };
+            return buildPaymentStatusResponseFromRecord(holdingData, 'payment_holding_doc');
           } else {
-            // ✅ NOVO: Se não encontrou no Firestore, retornar "não encontrado" explicitamente
+            const [holdingByPaymentIdSnapshot, holdingByChargeIdSnapshot] = await Promise.all([
+              firestore
+                .collection('payment_holdings')
+                .where('paymentId', '==', chargeId)
+                .limit(1)
+                .get(),
+              firestore
+                .collection('payment_holdings')
+                .where('chargeId', '==', chargeId)
+                .limit(1)
+                .get()
+            ]);
+
+            const holdingByFieldDoc = !holdingByPaymentIdSnapshot.empty
+              ? holdingByPaymentIdSnapshot.docs[0]
+              : (!holdingByChargeIdSnapshot.empty ? holdingByChargeIdSnapshot.docs[0] : null);
+
+            if (holdingByFieldDoc) {
+              const holdingData = holdingByFieldDoc.data();
+              logStructured('info', 'Payment holding encontrado no Firestore por campo', {
+                service: 'payment-service',
+                chargeId,
+                rideId: holdingData.rideId || holdingByFieldDoc.id,
+                status: holdingData.status
+              });
+              return buildPaymentStatusResponseFromRecord(holdingData, 'payment_holding_query');
+            }
+
+            const ridePaymentSnapshot = await firestore
+              .collection('ride_payments')
+              .where('chargeId', '==', chargeId)
+              .limit(1)
+              .get();
+
+            if (!ridePaymentSnapshot.empty) {
+              const ridePaymentData = ridePaymentSnapshot.docs[0].data();
+              const normalizedRidePaymentStatus = String(ridePaymentData.status || '').trim().toUpperCase();
+              if (['CONFIRMED', 'CREDITED', 'DISTRIBUTED', 'IN_HOLDING'].includes(normalizedRidePaymentStatus)) {
+                logStructured('info', 'Pagamento confirmado encontrado em ride_payments', {
+                  service: 'payment-service',
+                  chargeId,
+                  rideId: ridePaymentData.rideId || ridePaymentSnapshot.docs[0].id,
+                  status: normalizedRidePaymentStatus
+                });
+                return buildPaymentStatusResponseFromRecord({
+                  ...ridePaymentData,
+                  status: normalizedRidePaymentStatus === 'CONFIRMED' ? 'in_holding' : normalizedRidePaymentStatus.toLowerCase(),
+                  paidAt: ridePaymentData.confirmedAt || ridePaymentData.updatedAt || null
+                }, 'ride_payments_query');
+              }
+            }
+
+            // Sem holding local: continua para consulta direta na Woovi.
             logStructured('warn', 'Payment holding não encontrado no Firestore', { service: 'payment-service', chargeId });
-            return {
-              success: false,
-              error: 'Pagamento não encontrado',
-              status: null,
-              code: 'PAYMENT_NOT_FOUND'
-            };
           }
         }
       } catch (firestoreError) {
@@ -1874,6 +3238,28 @@ class PaymentService {
    */
   async savePaymentHolding(rideId, holdingData) {
     try {
+      const cachePayload = {
+        status: holdingData.status || this.PAYMENT_STATES.PENDING,
+        amount: Number.isFinite(Number(holdingData.amount))
+          ? Math.round(Number(holdingData.amount))
+          : 0,
+        paymentId: holdingData.paymentId || null,
+        chargeId: holdingData.chargeId || holdingData.paymentId || null,
+        paidAt: holdingData.paidAt || null,
+        confirmedAt: holdingData.confirmedAt || null,
+        rideId
+      };
+
+      await Promise.allSettled([
+        this.writePaymentStatusCache(rideId, cachePayload),
+        cachePayload.chargeId
+          ? this.writePaymentStatusCache(cachePayload.chargeId, cachePayload)
+          : Promise.resolve(false),
+        cachePayload.paymentId && cachePayload.paymentId !== cachePayload.chargeId
+          ? this.writePaymentStatusCache(cachePayload.paymentId, cachePayload)
+          : Promise.resolve(false)
+      ]);
+
       const firestore = firebaseConfig.getFirestore();
 
       if (!firestore) {

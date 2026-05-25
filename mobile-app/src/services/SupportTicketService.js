@@ -1,17 +1,7 @@
 import Logger from '../utils/Logger';
-import { api } from '../common-local';
-import { firebase } from '../common-local/configureFirebase';
 import AuthService from './AuthService';
 
-
 class SupportTicketService {
-    constructor() {
-        this.ticketsRef = firebase.database.ref('support_tickets');
-        this.messagesRef = firebase.database.ref('support_messages');
-        this.agentsRef = firebase.database.ref('support_agents');
-        this.baseURL = 'http://147.182.204.181:3001/api/support'; // URL do backend VPS
-    }
-
     // ===== CRIAÇÃO E GESTÃO DE TICKETS =====
 
     /**
@@ -69,26 +59,15 @@ class SupportTicketService {
      */
     async assignTicket(ticketId, agentId, agentName) {
         try {
-            const now = new Date().toISOString();
-            
-            await this.ticketsRef.child(ticketId).update({
-                assignedAgent: agentId,
-                assignedAt: now,
-                status: 'assigned',
-                updatedAt: now
+            const response = await AuthService.supportRequest(`/admin/tickets/${ticketId}/assign`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    agentId,
+                    agentName
+                })
             });
 
-            // Adicionar mensagem de sistema
-            await this.addMessage(ticketId, {
-                senderId: agentId,
-                senderType: 'agent',
-                message: `Ticket atribuído ao agente ${agentName}`,
-                messageType: 'system',
-                isInternal: true
-            });
-
-            // Notificar usuário
-            await this.notifyUser(ticketId, 'Ticket atribuído a um agente');
+            await AuthService.handleApiResponse(response);
 
             Logger.log('✅ Ticket atribuído:', ticketId, 'para agente:', agentId);
             return true;
@@ -108,45 +87,16 @@ class SupportTicketService {
      */
     async escalateTicket(ticketId, reason, escalatedBy) {
         try {
-            const ticketSnapshot = await this.ticketsRef.child(ticketId).once('value');
-            const ticket = ticketSnapshot.val();
-            
-            if (!ticket) {
-                throw new Error('Ticket não encontrado');
-            }
-
-            const newLevel = Math.min(ticket.escalationLevel + 1, 3);
-            const now = new Date().toISOString();
-            
-            const escalationEntry = {
-                level: newLevel,
-                reason,
-                escalatedBy,
-                escalatedAt: now
-            };
-
-            await this.ticketsRef.child(ticketId).update({
-                escalationLevel: newLevel,
-                status: 'escalated',
-                assignedAgent: null, // Desatribuir para reatribuição
-                assignedAt: null,
-                updatedAt: now,
-                escalationHistory: [...(ticket.escalationHistory || []), escalationEntry]
+            const response = await AuthService.supportRequest(`/admin/tickets/${ticketId}/escalate`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    reason,
+                    escalatedBy
+                })
             });
+            const result = await AuthService.handleApiResponse(response);
 
-            // Adicionar mensagem de sistema
-            await this.addMessage(ticketId, {
-                senderId: escalatedBy,
-                senderType: 'agent',
-                message: `Ticket escalado para nível ${newLevel}. Motivo: ${reason}`,
-                messageType: 'system',
-                isInternal: true
-            });
-
-            // Notificar supervisores
-            await this.notifySupervisors(ticketId, newLevel);
-
-            Logger.log('✅ Ticket escalado:', ticketId, 'para nível:', newLevel);
+            Logger.log('✅ Ticket escalado:', ticketId, 'para nível:', result.escalationLevel);
             return true;
 
         } catch (error) {
@@ -229,15 +179,7 @@ class SupportTicketService {
      */
     async markMessageAsRead(ticketId, messageId, userId) {
         try {
-            const now = new Date().toISOString();
-            
-            await this.messagesRef
-                .child(ticketId)
-                .child(messageId)
-                .child('readBy')
-                .child(userId)
-                .set(now);
-
+            Logger.log('ℹ️ markMessageAsRead sem-op via API atual:', { ticketId, messageId, userId });
             return true;
 
         } catch (error) {
@@ -282,41 +224,18 @@ class SupportTicketService {
      */
     async getAgentTickets(filters = {}) {
         try {
-            const snapshot = await this.ticketsRef.once('value');
-            let tickets = [];
-            
-            if (snapshot.val()) {
-                tickets = Object.values(snapshot.val());
-            }
+            const queryParams = new URLSearchParams();
+            if (filters.assignedAgent) queryParams.append('agent', filters.assignedAgent);
+            if (filters.status) queryParams.append('status', filters.status);
+            if (filters.priority) queryParams.append('priority', filters.priority);
+            if (filters.limit) queryParams.append('limit', filters.limit);
+            if (filters.offset) queryParams.append('offset', filters.offset);
 
-            // Aplicar filtros
-            if (filters.assignedAgent) {
-                tickets = tickets.filter(ticket => ticket.assignedAgent === filters.assignedAgent);
-            }
-            if (filters.status) {
-                tickets = tickets.filter(ticket => ticket.status === filters.status);
-            }
-            if (filters.priority) {
-                tickets = tickets.filter(ticket => ticket.priority === filters.priority);
-            }
-            if (filters.escalationLevel) {
-                tickets = tickets.filter(ticket => ticket.escalationLevel === filters.escalationLevel);
-            }
-
-            // Ordenar por prioridade e data
-            tickets.sort((a, b) => {
-                const priorityOrder = { 'N1': 3, 'N2': 2, 'N3': 1 };
-                const aPriority = priorityOrder[a.priority] || 0;
-                const bPriority = priorityOrder[b.priority] || 0;
-                
-                if (aPriority !== bPriority) {
-                    return bPriority - aPriority;
-                }
-                
-                return new Date(b.createdAt) - new Date(a.createdAt);
+            const response = await AuthService.supportRequest(`/admin/tickets?${queryParams}`, {
+                method: 'GET'
             });
-
-            return tickets;
+            const result = await AuthService.handleApiResponse(response);
+            return result.tickets || [];
 
         } catch (error) {
             Logger.error('❌ Erro ao buscar tickets para agentes:', error);
@@ -429,46 +348,15 @@ class SupportTicketService {
      */
     async getTicketStats(filters = {}) {
         try {
-            const snapshot = await this.ticketsRef.once('value');
-            let tickets = [];
-            
-            if (snapshot.val()) {
-                tickets = Object.values(snapshot.val());
-            }
+            const queryParams = new URLSearchParams();
+            if (filters.startDate) queryParams.append('startDate', filters.startDate);
+            if (filters.endDate) queryParams.append('endDate', filters.endDate);
 
-            // Aplicar filtro de data se fornecido
-            if (filters.startDate && filters.endDate) {
-                const start = new Date(filters.startDate);
-                const end = new Date(filters.endDate);
-                tickets = tickets.filter(ticket => {
-                    const ticketDate = new Date(ticket.createdAt);
-                    return ticketDate >= start && ticketDate <= end;
-                });
-            }
-
-            const stats = {
-                total: tickets.length,
-                open: tickets.filter(t => t.status === 'open').length,
-                assigned: tickets.filter(t => t.status === 'assigned').length,
-                inProgress: tickets.filter(t => t.status === 'in_progress').length,
-                resolved: tickets.filter(t => t.status === 'resolved').length,
-                closed: tickets.filter(t => t.status === 'closed').length,
-                escalated: tickets.filter(t => t.status === 'escalated').length,
-                byPriority: {
-                    N1: tickets.filter(t => t.priority === 'N1').length,
-                    N2: tickets.filter(t => t.priority === 'N2').length,
-                    N3: tickets.filter(t => t.priority === 'N3').length
-                },
-                byCategory: {
-                    technical: tickets.filter(t => t.category === 'technical').length,
-                    payment: tickets.filter(t => t.category === 'payment').length,
-                    account: tickets.filter(t => t.category === 'account').length,
-                    general: tickets.filter(t => t.category === 'general').length
-                },
-                averageResolutionTime: this.calculateAverageResolutionTime(tickets)
-            };
-
-            return stats;
+            const response = await AuthService.supportRequest(`/admin/stats?${queryParams}`, {
+                method: 'GET'
+            });
+            const result = await AuthService.handleApiResponse(response);
+            return result.stats || {};
 
         } catch (error) {
             Logger.error('❌ Erro ao obter estatísticas:', error);

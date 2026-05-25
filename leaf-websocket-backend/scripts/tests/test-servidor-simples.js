@@ -16,7 +16,7 @@ async function testarServidor() {
         console.log('\n2️⃣ Testando Login...');
         try {
             const login = await axios.post(`${BASE_URL}/auth/login`, {
-                phone: '+5511999999999',
+                phone: '+5521102938475',
                 password: 'password123'
             });
             console.log('✅ Login:', login.data.success ? 'Sucesso' : 'Falhou');
@@ -50,7 +50,6 @@ async function testarServidor() {
 }
 
 testarServidor();
-
 
 
 

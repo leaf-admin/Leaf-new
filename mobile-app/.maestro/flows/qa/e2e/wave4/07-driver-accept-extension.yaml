@@ -1,0 +1,9 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-extension-accept-button"
+    timeout: 120000
+
+- tapOn:
+    id: "driver-live-extension-accept-button"

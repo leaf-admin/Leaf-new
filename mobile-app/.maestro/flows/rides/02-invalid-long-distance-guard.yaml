@@ -1,0 +1,124 @@
+# Teste de guarda operacional: rota impossível deve ser bloqueada (sem tarifa válida)
+appId: br.com.leaf.ride
+---
+- launchApp:
+    clearState: false
+    stopApp: false
+
+- runFlow:
+    when:
+      visible: "http://10.0.2.2:8081"
+    commands:
+      - tapOn: "http://10.0.2.2:8081"
+      - runFlow:
+          when:
+            visible: "Go home"
+          commands:
+            - tapOn: "Go home"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+      - runFlow:
+          when:
+            visible: "This is the developer menu"
+          commands:
+            - tapOn: "Continue"
+      - waitForAnimationToEnd
+
+- assertNotVisible:
+    id: "auth-phone-input"
+
+# Limpeza de possíveis overlays ao voltar para home
+- runFlow:
+    when:
+      visible: "Avalie a viagem"
+    commands:
+      - pressKey: Back
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Suporte"
+    commands:
+      - pressKey: Back
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      notVisible:
+        id: "passenger-home-destination-input"
+    commands:
+      - runFlow:
+          when:
+            notVisible: "Para onde vamos\\?"
+          commands:
+            - tapOn:
+                point: "50%,93%"
+            - waitForAnimationToEnd
+
+# Caminho principal antigo (campo com testID)
+- runFlow:
+    when:
+      visible:
+        id: "passenger-home-destination-input"
+    commands:
+      - tapOn:
+          id: "passenger-home-destination-input"
+      - extendedWaitUntil:
+          visible:
+            id: "passenger-destination-search-input"
+          timeout: 45000
+      - tapOn:
+          id: "passenger-destination-search-input"
+      - eraseText
+      - inputText: "Aeroporto de Guarulhos Sao Paulo"
+      - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible:
+              id: "passenger-destination-result-0"
+          commands:
+            - tapOn:
+                id: "passenger-destination-result-0"
+      - extendedWaitUntil:
+          visible:
+            id: "passenger-destination-confirm-button"
+          timeout: 45000
+      - tapOn:
+          id: "passenger-destination-confirm-button"
+      - waitForAnimationToEnd
+
+# Caminho UI atual (texto)
+- runFlow:
+    when:
+      visible: "Para onde vamos\\?"
+    commands:
+      - tapOn: "Para onde vamos?"
+      - extendedWaitUntil:
+          visible: "Para onde você quer ir\\?"
+          timeout: 45000
+      - tapOn: "Para onde você quer ir?"
+      - eraseText
+      - inputText: "Aeroporto de Guarulhos Sao Paulo"
+      - waitForAnimationToEnd
+      - tapOn:
+          point: "50%,73%"
+      - waitForAnimationToEnd
+
+- takeScreenshot: "invalid-long-distance-guard-result"
+
+- assertVisible:
+    id: "passenger-destination-plan-unavailable-message-plus"
+
+- assertVisible:
+    id: "passenger-destination-plan-unavailable-label-plus"
+
+- assertNotVisible: "Origem e destino inconsistentes para a área de operação da Leaf"
+
+- assertNotVisible: "Região indisponível"
+
+- assertNotVisible: "Regiao indisponivel"
+
+- assertNotVisible: "R\\$"

@@ -5,9 +5,9 @@
 
 set -e
 
-VPS_IP="147.93.66.253"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
-VPS_HOST="srv710490.hstgr.cloud"
+VPS_HOST="147.182.204.181"
 APP_DIR="/opt/leaf-kyc-service"
 SERVICE_USER="leaf-kyc"
 
@@ -234,4 +234,3 @@ echo "   - Ver logs: journalctl -u leaf-kyc -f"
 echo "   - Reiniciar: systemctl restart leaf-kyc"
 echo "   - Status: systemctl status leaf-kyc"
 echo ""
-

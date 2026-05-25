@@ -63,7 +63,7 @@ case "$1" in
         
         # Backup da aplicação
         log "📦 Backup da aplicação..."
-        tar -czf $BACKUP_DIR/app/app-$(date +%Y%m%d-%H%M%S).tar.gz /home/leaf/leaf-websocket-backend/
+        tar -czf $BACKUP_DIR/app/app-$(date +%Y%m%d-%H%M%S).tar.gz /opt/leaf-app/
         
         # Backup de configurações
         log "📦 Backup de configurações..."

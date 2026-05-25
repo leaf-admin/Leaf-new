@@ -10,6 +10,9 @@ Workers dedicados para processar listeners pesados, desacoplando do processo pri
 workers/
 ├── WorkerManager.js        # Gerenciador de workers com Consumer Groups
 ├── listener-worker.js      # Worker para processar listeners pesados
+├── worker-trip-location.js # Worker para consolidar trilha de localização
+├── pricing-baseline-worker.js # Worker de baseline operacional de pricing por H3
+├── ride-health-monitor-worker.js # Worker de monitoramento operacional de rides
 └── README.md              # Esta documentação
 ```
 
@@ -23,6 +26,9 @@ workers/
 ### Listeners Pesados (Workers)
 - `notifyDrivers` - Busca motoristas próximos, cálculos de score
 - `sendPush` - Chamadas externas FCM, busca de tokens
+- `trip.location.v1` - Persistência de rota da corrida em chunks
+- `pricing-baseline-worker` - Materialização de baseline e histórico curto de pricing por célula H3
+- `ride-health-monitor-worker` - Monitor de `REASSIGNMENT_PENDING` preso e volume de `EARLY_ENDED_REVIEW`
 
 ## 🚀 Como Usar
 
@@ -47,6 +53,60 @@ pm2 stop listener-worker
 # Reiniciar
 pm2 restart listener-worker
 ```
+
+### 2.1 Worker de Localização da Corrida
+
+```bash
+# Iniciar worker dedicado de localização
+pm2 start workers/worker-trip-location.js --name trip-location-worker
+
+# Logs
+pm2 logs trip-location-worker
+```
+
+### 2.2 Worker de Baseline de Pricing
+
+```bash
+# Execução única manual
+ENABLE_PRICING_BASELINE_WORKER=true node workers/pricing-baseline-worker.js --once
+
+# Execução contínua com PM2 (fallback fora do runtime Docker canônico)
+pm2 start workers/pm2.pricing-baseline.config.js
+
+# Logs
+pm2 logs pricing-baseline-worker
+```
+
+### 2.3 Worker de Ride Health
+
+```bash
+# Execução única manual
+ENABLE_RIDE_HEALTH_MONITOR_WORKER=true node workers/ride-health-monitor-worker.js --once
+
+# Execução contínua com PM2 (fallback fora do runtime Docker canônico)
+pm2 start workers/pm2.ride-health-monitor.config.js
+
+# Logs
+pm2 logs ride-health-monitor-worker
+```
+
+### 2.4 Runtime canônico na VPS
+
+No runtime oficial `VPS + Redis + Firestore + mobile prototype`, os workers abaixo rodam em containers Docker dedicados:
+
+- `pricing-baseline-worker`
+- `ride-health-monitor-worker`
+
+Deploy canônico:
+
+```bash
+bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh
+```
+
+Compose do runtime:
+
+- base: `docker-compose.hostinger.yml`
+- overlay operacional: `docker-compose.ops-workers.yml`
 
 ### 3. Executar Múltiplos Workers
 
@@ -76,6 +136,33 @@ WORKER_GROUP_NAME=listener-workers
 WORKER_BATCH_SIZE=10
 WORKER_BLOCK_TIME=1000
 WORKER_MAX_RETRIES=3
+
+# Trip Location Worker
+ENABLE_TRIP_LOCATION_PERSISTENCE_WORKER=true
+ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE=true
+TRIP_LOCATION_WORKER_GROUP=trip-location-workers
+TRIP_LOCATION_WORKER_BATCH_SIZE=40
+TRIP_LOCATION_WORKER_BLOCK_TIME=1000
+TRIP_LOCATION_WORKER_MAX_RETRIES=4
+TRIP_LOCATION_CHUNK_SIZE=30
+TRIP_LOCATION_PERIODIC_FLUSH_MS=15000
+TRIP_LOCATION_CHUNK_RETENTION_DAYS=30
+TRIP_LOCATION_OUT_OF_ORDER_WINDOW=15
+TRIP_LOCATION_DEDUP_TTL_SECONDS=21600
+
+# Pricing Baseline Worker
+ENABLE_PRICING_BASELINE_WORKER=true
+PRICING_BASELINE_WORKER_INTERVAL_MS=300000
+PRICING_BASELINE_WORKER_RUN_ON_BOOT=true
+PRICING_BASELINE_MAX_CELLS=250
+
+# Ride Health Monitor Worker
+ENABLE_RIDE_HEALTH_MONITOR_WORKER=true
+RIDE_HEALTH_MONITOR_INTERVAL_MS=60000
+RIDE_HEALTH_MONITOR_RUN_ON_BOOT=true
+RIDE_HEALTH_REASSIGNMENT_STUCK_THRESHOLD_MS=300000
+RIDE_HEALTH_EARLY_REVIEW_WARNING_COUNT=3
+RIDE_HEALTH_EARLY_REVIEW_CRITICAL_COUNT=6
 ```
 
 ### Consumer Groups
@@ -145,6 +232,9 @@ for (const [id, fields] of events) {
 - `leaf_listener_total{listener_name, status}` - Total de listeners processados
 - `leaf_listener_duration_seconds{listener_name, status}` - Latência dos listeners
 - `leaf_event_backlog{event_type="dlq"}` - Tamanho da DLQ
+- `leaf_ride_health_state_total{state}` - Corridas monitoradas por estado operacional
+- `leaf_ride_health_stuck_total{state}` - Corridas presas em estados operacionais
+- `leaf_ride_health_recent_total{state}` - Volume recente de estados operacionais sensíveis
 
 ### Estatísticas do Worker
 
@@ -205,4 +295,3 @@ const stats = workerManager.getStats();
 - [ ] Implementar auto-scaling baseado em lag
 - [ ] Adicionar dashboard para monitorar workers
 - [ ] Implementar reprocessamento automático de DLQ
-

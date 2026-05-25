@@ -88,7 +88,7 @@ sleep 15
 log "Verificando saúde dos serviços..."
 
 # Redis
-if docker-compose -f docker-compose.local.yml exec -T redis redis-cli -a leaf_redis_2024 ping > /dev/null 2>&1; then
+if docker-compose -f docker-compose.local.yml exec -T redis env REDISCLI_AUTH=leaf_redis_2024 redis-cli ping > /dev/null 2>&1; then
     log "Redis: OK"
 else
     error "Redis: FALHOU"
@@ -115,8 +115,7 @@ echo -e "${CYAN}📋 Comandos úteis:${NC}"
 echo -e "  Ver logs: ${BLUE}docker-compose -f docker-compose.local.yml logs -f${NC}"
 echo -e "  Parar: ${BLUE}docker-compose -f docker-compose.local.yml down${NC}"
 echo -e "  Reiniciar: ${BLUE}docker-compose -f docker-compose.local.yml restart${NC}"
-echo -e "  Testar Redis: ${BLUE}docker-compose -f docker-compose.local.yml exec redis redis-cli -a leaf_redis_2024 ping${NC}"
+echo -e "  Testar Redis: ${BLUE}docker-compose -f docker-compose.local.yml exec redis env REDISCLI_AUTH=leaf_redis_2024 redis-cli ping${NC}"
 echo ""
 
 echo -e "${GREEN}🎉 Setup concluído!${NC}"
-

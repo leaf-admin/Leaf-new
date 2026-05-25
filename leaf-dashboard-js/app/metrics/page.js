@@ -7,6 +7,9 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { KeyValueGrid } from "@/src/components/ui/DataViews";
+
+const DASHBOARD_REFRESH_MS = 60000;
 
 export default function MetricsPage() {
   const [data, setData] = useState(null);
@@ -16,6 +19,10 @@ export default function MetricsPage() {
   useEffect(() => {
     let mounted = true;
     const load = async () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+
       try {
         if (mounted) setLoading(true);
         const [overview, ridesDaily, financial] = await Promise.all([
@@ -31,7 +38,7 @@ export default function MetricsPage() {
       }
     };
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(load, DASHBOARD_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -69,13 +76,59 @@ export default function MetricsPage() {
 
         <section className="grid">
           <Panel title="Visão geral">
-            <pre>{JSON.stringify(data?.overview || {}, null, 2)}</pre>
+            <KeyValueGrid
+              data={data?.overview || {}}
+              labels={{
+                waitlistCount: "Entradas na waitlist",
+                calculatorSimulations: "Simulações do cálculo",
+                totalUsers: "Usuários totais",
+                totalDrivers: "Motoristas totais",
+                totalCustomers: "Passageiros totais",
+              }}
+            />
           </Panel>
           <Panel title="Corridas diárias">
-            <pre>{JSON.stringify(data?.ridesDaily || {}, null, 2)}</pre>
+            <KeyValueGrid
+              data={data?.ridesDaily || {}}
+              labels={{
+                totalToday: "Corridas hoje",
+                completedToday: "Concluídas hoje",
+                cancelledAfterAcceptance: "Canceladas após aceite",
+                cancellationRate: "Taxa de cancelamento (%)",
+                averagePickupMinutes: "Pickup médio (min)",
+                averageWaitMinutes: "Espera média (min)",
+                averagePaymentApprovalToPickupMinutes: "Pagamento -> embarque (min)",
+              }}
+              valueFormatter={(key, value) => {
+                if (key === "cancellationRate") return `${Number(value || 0).toFixed(1)}%`;
+                if (
+                  key === "averagePickupMinutes" ||
+                  key === "averageWaitMinutes" ||
+                  key === "averagePaymentApprovalToPickupMinutes"
+                ) {
+                  return `${Number(value || 0).toFixed(1)} min`;
+                }
+                return value;
+              }}
+            />
           </Panel>
           <Panel title="Financeiro">
-            <pre>{JSON.stringify(data?.financial || {}, null, 2)}</pre>
+            <KeyValueGrid
+              data={data?.financial || {}}
+              labels={{
+                totalRevenue: "Receita total",
+                averageTicket: "Ticket médio",
+                totalRides: "Corridas contabilizadas",
+                subscriptionRevenue: "Receita de assinatura",
+                operationalCosts: "Custos operacionais",
+              }}
+              valueFormatter={(_, value) =>
+                `R$ ${Number(value || 0).toLocaleString("pt-BR", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}`
+              }
+            />
           </Panel>
           <Panel title="Distribuição de corridas (visual)">
             <div className="bar-list">

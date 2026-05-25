@@ -30,7 +30,7 @@ function getNgrokWebhookUrl() {
   
   // 2. Em produção, usar URL do servidor (sem ngrok)
   if (process.env.NODE_ENV === 'production') {
-    const serverUrl = process.env.SERVER_URL || process.env.WOOVI_WEBHOOK_BASE_URL || 'http://147.93.66.253';
+    const serverUrl = process.env.SERVER_URL || process.env.WOOVI_WEBHOOK_BASE_URL || 'http://147.182.204.181';
     return `${serverUrl}/api/woovi/webhook`;
   }
   
@@ -48,4 +48,3 @@ module.exports = {
   loadNgrokUrl,
   getNgrokWebhookUrl
 };
-

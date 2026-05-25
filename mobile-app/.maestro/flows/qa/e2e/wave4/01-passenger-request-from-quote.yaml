@@ -1,0 +1,14 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "passenger-destination-confirm-button"
+    timeout: 120000
+
+- tapOn:
+    id: "passenger-destination-confirm-button"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-driver-search-elapsed"
+    timeout: 180000

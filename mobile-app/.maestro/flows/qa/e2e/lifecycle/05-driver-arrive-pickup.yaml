@@ -1,0 +1,8 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/home?qaAutomation=1&qaDriverAction=arrive_pickup&qaNonce=lifecycle-driver-arrive-pickup"
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-primary-action-start-button"
+    timeout: 120000

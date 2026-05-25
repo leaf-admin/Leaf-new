@@ -17,6 +17,47 @@ class FCMService {
         this.redis = redis;
     }
 
+    async getRedisClient(operation = 'unknown') {
+        if (!this.redis) {
+            logStructured('warn', 'Redis não configurado no FCM Service', {
+                service: 'fcm',
+                operation
+            });
+            return null;
+        }
+
+        // Em testes unitários/mocks o client pode não expor `status`.
+        if (typeof this.redis.status === 'undefined') {
+            return this.redis;
+        }
+
+        if (this.redis.status !== 'ready' && this.redis.status !== 'connect') {
+            if (typeof this.redis.connect !== 'function') {
+                logStructured('warn', 'Redis client sem metodo connect no FCM Service', {
+                    service: 'fcm',
+                    operation,
+                    status: this.redis.status
+                });
+                return null;
+            }
+            try {
+                await this.redis.connect();
+            } catch (connectError) {
+                const message = String(connectError?.message || '');
+                if (!message.includes('already connecting') && !message.includes('already connected')) {
+                    logStructured('error', 'Erro ao conectar Redis no FCM Service', {
+                        service: 'fcm',
+                        operation,
+                        error: message
+                    });
+                    return null;
+                }
+            }
+        }
+
+        return this.redis;
+    }
+
     // Inicializar o serviço FCM
     async initialize() {
         const startTime = Date.now();
@@ -53,9 +94,38 @@ class FCMService {
         return this.isInitialized && admin.apps.length > 0;
     }
 
+    async scanKeys(redis, pattern, count = 100) {
+        if (!redis) return [];
+
+        if (typeof redis.scan === 'function') {
+            const keys = [];
+            let cursor = '0';
+            do {
+                const reply = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', count);
+                cursor = String(reply?.[0] || '0');
+                keys.push(...(reply?.[1] || []));
+            } while (cursor !== '0');
+            return keys;
+        }
+
+        if (typeof redis.keys === 'function') {
+            logStructured('warn', 'Redis SCAN indisponível; usando KEYS como fallback em mock/cliente legado', {
+                service: 'fcm',
+                operation: 'scanKeys',
+                pattern
+            });
+            return redis.keys(pattern);
+        }
+
+        return [];
+    }
+
     // Salvar token FCM de um usuário
     async saveUserFCMToken(userId, userType, fcmToken, deviceInfo = {}) {
         try {
+            const redis = await this.getRedisClient('saveUserFCMToken');
+            if (!redis) return false;
+
             if (!fcmToken) {
                 logStructured('warn', 'Token FCM vazio', {
                     service: 'fcm',
@@ -80,17 +150,23 @@ class FCMService {
             };
 
             // Salvar no Redis
-            await this.redis.hset(
+            await redis.hset(
                 `fcm_tokens:${userId}`,
                 fcmToken,
                 JSON.stringify(tokenData)
             );
 
             // Adicionar à lista de tokens ativos
-            await this.redis.sadd('active_fcm_tokens', fcmToken);
+            await redis.sadd('active_fcm_tokens', fcmToken);
+            if (typeof redis.sadd === 'function') {
+                await redis.sadd(`fcm_token_users:${fcmToken}`, userId);
+                if (typeof redis.expire === 'function') {
+                    await redis.expire(`fcm_token_users:${fcmToken}`, 2592000);
+                }
+            }
 
             // Definir TTL para o token (30 dias)
-            await this.redis.expire(`fcm_tokens:${userId}`, 2592000);
+            await redis.expire(`fcm_tokens:${userId}`, 2592000);
 
             logStructured('info', 'Token FCM salvo', {
                 service: 'fcm',
@@ -114,7 +190,10 @@ class FCMService {
     // Obter tokens FCM de um usuário
     async getUserFCMTokens(userId) {
         try {
-            const tokens = await this.redis.hgetall(`fcm_tokens:${userId}`);
+            const redis = await this.getRedisClient('getUserFCMTokens');
+            if (!redis) return [];
+
+            const tokens = await redis.hgetall(`fcm_tokens:${userId}`);
             const activeTokens = [];
 
             for (const [token, data] of Object.entries(tokens)) {
@@ -136,14 +215,78 @@ class FCMService {
         }
     }
 
+    /**
+     * Resolve tokens FCM ativos para um usuário.
+     * 1) Fonte primária: fcm_tokens:{userId}
+     * 2) Fallback legado: user:{userId}/driver:{userId} -> campo fcmToken
+     */
+    async resolveUserTokens(userId) {
+        const normalizedUserId = String(userId || '').trim();
+        if (!normalizedUserId) return [];
+
+        const activeTokens = await this.getUserFCMTokens(normalizedUserId);
+        const dedupe = new Set();
+        const resolved = [];
+
+        for (const tokenData of activeTokens) {
+            const token = String(tokenData?.fcmToken || '').trim();
+            if (!token || dedupe.has(token)) continue;
+            dedupe.add(token);
+            resolved.push(tokenData);
+        }
+
+        const redis = await this.getRedisClient('resolveUserTokens');
+        if (!redis) return resolved;
+
+        const legacySources = [
+            { key: `user:${normalizedUserId}`, userType: 'customer' },
+            { key: `driver:${normalizedUserId}`, userType: 'driver' }
+        ];
+
+        for (const source of legacySources) {
+            const legacyToken = String(await redis.hget(source.key, 'fcmToken') || '').trim();
+            if (!legacyToken || dedupe.has(legacyToken)) continue;
+
+            dedupe.add(legacyToken);
+            resolved.push({
+                userId: normalizedUserId,
+                userType: source.userType,
+                fcmToken: legacyToken,
+                isActive: true,
+                migratedFromLegacy: true
+            });
+
+            // Backfill no hash canônico para evitar misses recorrentes.
+            await this.saveUserFCMToken(normalizedUserId, source.userType, legacyToken, {
+                migratedFromLegacy: true
+            });
+        }
+
+        return resolved;
+    }
+
     // Remover token FCM de um usuário
     async removeUserFCMToken(userId, fcmToken) {
         try {
-            // Remover do hash do usuário
-            await this.redis.hdel(`fcm_tokens:${userId}`, fcmToken);
+            const redis = await this.getRedisClient('removeUserFCMToken');
+            if (!redis) return false;
 
-            // Remover da lista de tokens ativos
-            await this.redis.srem('active_fcm_tokens', fcmToken);
+            // Remover do hash do usuário
+            await redis.hdel(`fcm_tokens:${userId}`, fcmToken);
+
+            let shouldRemoveActiveToken = true;
+            if (typeof redis.srem === 'function') {
+                await redis.srem(`fcm_token_users:${fcmToken}`, userId);
+                if (typeof redis.smembers === 'function') {
+                    const remainingUsers = await redis.smembers(`fcm_token_users:${fcmToken}`);
+                    shouldRemoveActiveToken = remainingUsers.length === 0;
+                }
+            }
+
+            // Remover da lista de tokens ativos somente se nenhum usuário ainda usa o token.
+            if (shouldRemoveActiveToken) {
+                await redis.srem('active_fcm_tokens', fcmToken);
+            }
 
             logStructured('info', 'Token FCM removido', {
                 service: 'fcm',
@@ -185,8 +328,8 @@ class FCMService {
                 return { success: false, error: 'Rate limit excedido' };
             }
 
-            // Obter tokens FCM do usuário
-            const userTokens = await this.getUserFCMTokens(userId);
+            // Obter tokens FCM do usuário (com fallback legado)
+            const userTokens = await this.resolveUserTokens(userId);
 
             if (userTokens.length === 0) {
                 logStructured('warn', 'Usuário não possui tokens FCM ativos', {
@@ -519,17 +662,13 @@ class FCMService {
         try {
             if (!this.isServiceAvailable()) return { success: false, error: 'FCM indisponível' };
 
-            // Buscar tokens
-            const fcmTokensObj = await this.redis.hgetall(`fcm_tokens:${userId}`);
-            let fcmTokens = Object.keys(fcmTokensObj);
+            const redis = await this.getRedisClient('sendRideStatusUpdate');
+            if (!redis) return { success: false, error: 'Redis indisponível' };
 
-            if (fcmTokens.length === 0) {
-                let tokenStr = await this.redis.get(`user:${userId}`) || await this.redis.get(`driver:${userId}`);
-                if (tokenStr) {
-                    const userData = JSON.parse(tokenStr);
-                    if (userData && userData.fcmToken) fcmTokens = [userData.fcmToken];
-                }
-            }
+            const resolvedTokens = await this.resolveUserTokens(userId);
+            const fcmTokens = resolvedTokens
+                .map((tokenData) => String(tokenData?.fcmToken || '').trim())
+                .filter(Boolean);
 
             if (fcmTokens.length === 0) {
                 logger.warn(`⚠️ [FCMService] sendRideStatusUpdate ignorado: Sem token para ${userId}`);
@@ -577,7 +716,11 @@ class FCMService {
                 }
             }
             logger.info(`✅ [FCMService] sendRideStatusUpdate enviado para ${userId} (Status: ${rideData.status})`);
-            return { success: true, count: successCount };
+            return {
+                success: successCount > 0,
+                count: successCount,
+                ...(successCount > 0 ? {} : { error: 'Nenhum push FCM entregue' })
+            };
 
         } catch (error) {
             logger.error(`❌ [FCMService] Erro em sendRideStatusUpdate param ${userId}:`, error);
@@ -715,17 +858,37 @@ class FCMService {
     // Remover token inválido
     async removeInvalidToken(fcmToken) {
         try {
-            // Remover da lista de tokens ativos
-            await this.redis.srem('active_fcm_tokens', fcmToken);
+            const redis = await this.getRedisClient('removeInvalidToken');
+            if (!redis) return;
 
-            // Encontrar e remover de todos os usuários
-            const keys = await this.redis.keys('fcm_tokens:*');
+            // Remover da lista de tokens ativos
+            await redis.srem('active_fcm_tokens', fcmToken);
+
+            const indexedUserIds = typeof redis.smembers === 'function'
+                ? await redis.smembers(`fcm_token_users:${fcmToken}`)
+                : [];
+
+            for (const userId of indexedUserIds) {
+                await redis.hdel(`fcm_tokens:${userId}`, fcmToken);
+                logger.info(`Token inválido removido de fcm_tokens:${userId}`);
+            }
+
+            if (typeof redis.del === 'function') {
+                await redis.del(`fcm_token_users:${fcmToken}`);
+            }
+
+            if (indexedUserIds.length > 0) {
+                return;
+            }
+
+            // Fallback para tokens antigos que ainda não têm índice.
+            const keys = await this.scanKeys(redis, 'fcm_tokens:*');
 
             for (const key of keys) {
-                const tokens = await this.redis.hgetall(key);
+                const tokens = await redis.hgetall(key);
                 for (const [token, data] of Object.entries(tokens)) {
                     if (token === fcmToken) {
-                        await this.redis.hdel(key, token);
+                        await redis.hdel(key, token);
                         logger.info(`Token inválido removido de ${key}`);
                         break;
                     }
@@ -740,8 +903,18 @@ class FCMService {
     // Obter estatísticas do serviço
     async getServiceStats() {
         try {
-            const activeTokensCount = await this.redis.scard('active_fcm_tokens');
-            const totalUsers = await this.redis.keys('fcm_tokens:*').length;
+            const redis = await this.getRedisClient('getServiceStats');
+            if (!redis) {
+                return {
+                    activeTokens: 0,
+                    totalUsers: 0,
+                    isServiceAvailable: this.isServiceAvailable(),
+                    error: 'Redis não configurado'
+                };
+            }
+
+            const activeTokensCount = await redis.scard('active_fcm_tokens');
+            const totalUsers = (await this.scanKeys(redis, 'fcm_tokens:*')).length;
 
             return {
                 activeTokens: activeTokensCount,
@@ -764,13 +937,16 @@ class FCMService {
     // Limpar dados antigos
     async cleanupOldData() {
         try {
+            const redis = await this.getRedisClient('cleanupOldData');
+            if (!redis) return;
+
             const now = Date.now();
             const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
 
-            const keys = await this.redis.keys('fcm_tokens:*');
+            const keys = await this.scanKeys(redis, 'fcm_tokens:*');
 
             for (const key of keys) {
-                const tokens = await this.redis.hgetall(key);
+                const tokens = await redis.hgetall(key);
                 const updatedTokens = {};
 
                 for (const [token, data] of Object.entries(tokens)) {
@@ -789,10 +965,10 @@ class FCMService {
 
                 // Atualizar hash com tokens válidos
                 if (Object.keys(updatedTokens).length > 0) {
-                    await this.redis.del(key);
-                    await this.redis.hset(key, updatedTokens);
+                    await redis.del(key);
+                    await redis.hset(key, updatedTokens);
                 } else {
-                    await this.redis.del(key);
+                    await redis.del(key);
                 }
             }
 
@@ -806,7 +982,9 @@ class FCMService {
     // Destruir serviço
     destroy() {
         try {
-            this.redis.disconnect();
+            if (this.redis && typeof this.redis.disconnect === 'function') {
+                this.redis.disconnect();
+            }
             this.isInitialized = false;
             logger.info('✅ FCM Service destruído');
         } catch (error) {

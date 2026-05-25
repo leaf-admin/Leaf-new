@@ -20,6 +20,29 @@ const WEBSOCKET_WINDOW_SEC = toPositiveInt(process.env.RATE_LIMIT_HTTP_WEBSOCKET
 const WEBSOCKET_LIMIT = toPositiveInt(process.env.RATE_LIMIT_HTTP_WEBSOCKET, 220);
 const PAYMENT_WINDOW_SEC = toPositiveInt(process.env.RATE_LIMIT_HTTP_PAYMENT_WINDOW_SECONDS, 60);
 const PAYMENT_LIMIT = toPositiveInt(process.env.RATE_LIMIT_HTTP_PAYMENT, 80);
+const DRIVER_STATUS_WINDOW_SEC = toPositiveInt(process.env.RATE_LIMIT_HTTP_DRIVER_STATUS_WINDOW_SECONDS, 60);
+const DRIVER_STATUS_LIMIT = toPositiveInt(process.env.RATE_LIMIT_HTTP_DRIVER_STATUS, 1200);
+const RATE_LIMIT_LOG_COOLDOWN_MS = toPositiveInt(process.env.RATE_LIMIT_HTTP_LOG_COOLDOWN_MS, 30000);
+const rateLimitLogCache = new Map();
+
+const logRateLimitWithCooldown = (scope, req) => {
+  const ip = req.ip || 'unknown';
+  const url = req.url || req.originalUrl || 'unknown';
+  const key = `${scope}:${ip}:${url}`;
+  const now = Date.now();
+  const last = rateLimitLogCache.get(key) || 0;
+
+  if (now - last < RATE_LIMIT_LOG_COOLDOWN_MS) {
+    return;
+  }
+
+  rateLimitLogCache.set(key, now);
+  logSecurity('warn', `Rate limit excedido - ${scope}`, {
+    ip,
+    url,
+    userAgent: req.headers['user-agent']
+  });
+};
 
 // Rate limiters específicos
 const generalLimiter = rateLimit({
@@ -32,11 +55,7 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
-    logSecurity('warn', 'Rate limit excedido - Geral', {
-      ip: req.ip,
-      url: req.url,
-      userAgent: req.headers['user-agent']
-    });
+    logRateLimitWithCooldown('Geral', req);
     res.status(429).json({
       error: 'Muitas requisições. Tente novamente em 1 minuto.',
       retryAfter: 60
@@ -47,6 +66,7 @@ const generalLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: AUTH_WINDOW_SEC * 1000,
   max: AUTH_LIMIT,
+  skipSuccessfulRequests: true,
   message: {
     error: 'Muitas tentativas de login. Tente novamente em 15 minutos.',
     retryAfter: 900
@@ -54,10 +74,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
-    logSecurity('warn', 'Rate limit excedido - Autenticação', {
-      ip: req.ip,
-      url: req.url
-    });
+    logRateLimitWithCooldown('Autenticação', req);
     res.status(429).json({
       error: 'Muitas tentativas de login. Tente novamente em 15 minutos.',
       retryAfter: 900
@@ -75,10 +92,7 @@ const locationLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
-    logSecurity('warn', 'Rate limit excedido - Localização', {
-      ip: req.ip,
-      url: req.url
-    });
+    logRateLimitWithCooldown('Localização', req);
     res.status(429).json({
       error: 'Muitas atualizações de localização. Aguarde um momento.',
       retryAfter: 60
@@ -96,10 +110,7 @@ const websocketLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
-    logSecurity('warn', 'Rate limit excedido - WebSocket', {
-      ip: req.ip,
-      url: req.url
-    });
+    logRateLimitWithCooldown('WebSocket', req);
     res.status(429).json({
       error: 'Muitas conexões WebSocket. Tente novamente em 1 minuto.',
       retryAfter: 60
@@ -117,13 +128,28 @@ const paymentLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
-    logSecurity('warn', 'Rate limit excedido - Pagamento', {
-      ip: req.ip,
-      url: req.url
-    });
+    logRateLimitWithCooldown('Pagamento', req);
     res.status(429).json({
       error: 'Muitas tentativas de pagamento. Aguarde um momento.',
       retryAfter: 60
+    });
+  }
+});
+
+const driverStatusLimiter = rateLimit({
+  windowMs: DRIVER_STATUS_WINDOW_SEC * 1000,
+  max: DRIVER_STATUS_LIMIT,
+  message: {
+    error: 'Muitas consultas de status de motorista. Aguarde um momento.',
+    retryAfter: DRIVER_STATUS_WINDOW_SEC
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    logRateLimitWithCooldown('DriverStatus', req);
+    res.status(429).json({
+      error: 'Muitas consultas de status de motorista. Aguarde um momento.',
+      retryAfter: DRIVER_STATUS_WINDOW_SEC
     });
   }
 });
@@ -138,12 +164,24 @@ const applyRateLimit = (req, res, next) => {
   }
   
   // Rate limiting específico por rota
-  if (url.includes('/auth') || url.includes('/login') || url.includes('/register')) {
+  const isAuthSensitiveEndpoint =
+    url.includes('/auth/login') ||
+    url.includes('/auth/register') ||
+    url.includes('/auth/forgot') ||
+    url.includes('/auth/reset-password') ||
+    url.includes('/login') ||
+    url.includes('/register');
+
+  if (isAuthSensitiveEndpoint) {
     return authLimiter(req, res, next);
   }
   
   if (url.includes('/location') || url.includes('/update_location')) {
     return locationLimiter(req, res, next);
+  }
+
+  if (url.includes('/api/driver-status')) {
+    return driverStatusLimiter(req, res, next);
   }
   
   if (url.includes('/websocket') || url.includes('/socket.io')) {
@@ -164,5 +202,6 @@ module.exports = {
   authLimiter,
   locationLimiter,
   websocketLimiter,
-  paymentLimiter
+  paymentLimiter,
+  driverStatusLimiter
 };

@@ -15,8 +15,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Configurações
-PRIMARY_IP="216.238.107.59"  # Vultr
-BACKUP_IP="147.93.66.253"    # Hostinger
+PRIMARY_IP="147.182.204.181"  # Vultr
+BACKUP_IP="147.182.204.181"    # Hostinger
 PRIMARY_PORT="443"
 BACKUP_PORT="80"
 HEALTH_CHECK_INTERVAL="30s"
@@ -83,7 +83,7 @@ server {
     # Load Balancer Status Page
     location /lb-status {
         access_log off;
-        allow 216.238.107.59;
+        allow 147.182.204.181;
         allow $PRIMARY_IP;
         deny all;
         
@@ -245,23 +245,23 @@ send_alert() {
 log "🔍 Verificando status dos upstreams..."
 
 # Verificar primary (Vultr)
-if curl -s --connect-timeout 5 https://216.238.107.59/health > /dev/null; then
+if curl -s --connect-timeout 5 https://147.182.204.181/health > /dev/null; then
     log "✅ Primary (Vultr) - OK"
     PRIMARY_STATUS="OK"
 else
     log "❌ Primary (Vultr) - OFFLINE"
     PRIMARY_STATUS="OFFLINE"
-    send_alert "ALERTA: Primary Offline" "Vultr (216.238.107.59) está offline em $(date)"
+    send_alert "ALERTA: Primary Offline" "Vultr (147.182.204.181) está offline em $(date)"
 fi
 
 # Verificar backup (Hostinger)
-if curl -s --connect-timeout 5 http://147.93.66.253/health > /dev/null; then
+if curl -s --connect-timeout 5 http://147.182.204.181/health > /dev/null; then
     log "✅ Backup (Hostinger) - OK"
     BACKUP_STATUS="OK"
 else
     log "❌ Backup (Hostinger) - OFFLINE"
     BACKUP_STATUS="OFFLINE"
-    send_alert "ALERTA: Backup Offline" "Hostinger (147.93.66.253) está offline em $(date)"
+    send_alert "ALERTA: Backup Offline" "Hostinger (147.182.204.181) está offline em $(date)"
 fi
 
 # Verificar load balancer

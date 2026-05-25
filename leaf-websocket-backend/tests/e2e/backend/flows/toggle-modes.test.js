@@ -5,10 +5,12 @@
  */
 
 const WebSocketTestClient = require('../__helpers__/websocket-test-client');
+const RedisDriverSimulator = require('../__helpers__/redis-driver-simulator');
 const testData = require('../__fixtures__/test-data');
 
 describe('Toggle entre Modos', () => {
   let client;
+  const driverSim = new RedisDriverSimulator();
   
   const WS_URL = process.env.WS_URL || 'http://localhost:3001';
   
@@ -68,34 +70,44 @@ describe('Toggle entre Modos', () => {
   }, 20000);
   
   test('deve limpar estado ao alternar modos', async () => {
+    const supportDriverId = `toggle_driver_${Date.now()}`;
+    await driverSim.setDriverOnline(
+      supportDriverId,
+      testData.locations.pickup.lat,
+      testData.locations.pickup.lng
+    );
+
     // Autenticar como passageiro e criar booking
-    await client.authenticate(
-      testData.users.customer.uid,
-      testData.users.customer.userType
-    );
-    
-    const bookingData = testData.booking.createBookingData();
-    const bookingResponse = await client.createBooking(bookingData);
-    
-    expect(bookingResponse.success).toBe(true);
-    expect(client.hasReceivedEvent('bookingCreated')).toBe(true);
-    
-    // Limpar eventos
-    client.clearEvents();
-    
-    // Alternar para motorista
-    client.disconnect();
-    await client.connect();
-    
-    await client.authenticate(
-      testData.users.driver.uid,
-      testData.users.driver.userType
-    );
-    
-    // Verificar que eventos anteriores foram limpos
-    expect(client.hasReceivedEvent('bookingCreated')).toBe(false);
+    try {
+      await client.authenticate(
+        testData.users.customer.uid,
+        testData.users.customer.userType
+      );
+
+      const bookingData = testData.booking.createBookingData();
+      const bookingResponse = await client.createBooking(bookingData);
+
+      expect(bookingResponse.success).toBe(true);
+      expect(client.hasReceivedEvent('bookingCreated')).toBe(true);
+
+      // Limpar eventos
+      client.clearEvents();
+
+      // Alternar para motorista
+      client.disconnect();
+      await client.connect();
+
+      await client.authenticate(
+        testData.users.driver.uid,
+        testData.users.driver.userType
+      );
+
+      // Verificar que eventos anteriores foram limpos
+      expect(client.hasReceivedEvent('bookingCreated')).toBe(false);
+    } finally {
+      await driverSim.removeDriver(supportDriverId).catch(() => {});
+    }
   }, 20000);
 });
-
 
 

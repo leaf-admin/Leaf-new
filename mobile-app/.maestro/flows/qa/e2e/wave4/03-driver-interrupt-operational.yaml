@@ -1,0 +1,15 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "driver-live-trip-interrupt-button"
+    timeout: 60000
+
+- tapOn:
+    id: "driver-live-trip-interrupt-button"
+
+- extendedWaitUntil:
+    visible: "Interromper agora"
+    timeout: 15000
+
+- tapOn: "Interromper agora"

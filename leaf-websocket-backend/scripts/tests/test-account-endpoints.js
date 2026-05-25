@@ -127,7 +127,7 @@ async function testAccountDelete(token) {
     try {
       const response = await axios.post(`${BASE_URL}/api/account/delete`, {
         reason: 'nao-uso-mais',
-        phone: '11999999999',
+        phone: '21102938475',
         password: 'senha123'
       });
       log(`❌ FALHA: Deveria retornar 401, mas retornou ${response.status}`, 'red');
@@ -174,7 +174,7 @@ async function testAccountDelete(token) {
       });
 
       if (verifyResponse.data.authenticated) {
-        const userPhone = verifyResponse.data.user?.phone || '11999999999'; // Fallback
+        const userPhone = verifyResponse.data.user?.phone || '21102938475'; // Fallback
         
         log(`\n📋 Tentando exclusão com telefone: ${userPhone}`, 'blue');
         
@@ -253,7 +253,6 @@ if (require.main === module) {
 }
 
 module.exports = { runTests, testAuthVerify, testAccountDelete };
-
 
 
 

@@ -9,10 +9,11 @@ import {
     Alert
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
 import WooviService from '../services/WooviService';
 import { useTranslation } from './i18n/LanguageProvider';
+import SecurePaymentBadge from './payment/SecurePaymentBadge';
 
 const PixPayment = ({ amount, description, onPaymentComplete, onCancel }) => {
     const { t } = useTranslation();
@@ -107,6 +108,7 @@ const PixPayment = ({ amount, description, onPaymentComplete, onCancel }) => {
     return (
         <View style={styles.container}>
             <Text style={styles.title}>{t('pix_payment')}</Text>
+            <SecurePaymentBadge style={styles.securePaymentBadge} color="#666" />
             <Text style={styles.amount}>{t('amount')}: R$ {amount.toFixed(2)}</Text>
             
             {qrCode && (
@@ -154,6 +156,10 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Regular,
         color: colors.text,
         marginBottom: 30,
+    },
+    securePaymentBadge: {
+        marginTop: -12,
+        marginBottom: 18,
     },
     qrContainer: {
         padding: 20,
@@ -219,4 +225,4 @@ const styles = StyleSheet.create({
     },
 });
 
-export default PixPayment; 
+export default PixPayment;

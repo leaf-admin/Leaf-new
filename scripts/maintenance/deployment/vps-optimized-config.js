@@ -111,7 +111,7 @@ console.log('================================');
 console.log('');
 
 console.log('1. CONECTAR NA VPS:');
-console.log('ssh root@216.238.107.59');
+console.log('ssh root@147.182.204.181');
 console.log('');
 
 console.log('2. INSTALAR DEPENDÊNCIAS OTIMIZADAS:');
@@ -173,7 +173,7 @@ console.log('    }');
 console.log('');
 console.log('    server {');
 console.log('        listen 80;');
-console.log('        server_name 216.238.107.59;');
+console.log('        server_name 147.182.204.181;');
 console.log('');
 console.log('        location / {');
 console.log('            proxy_pass http://leaf_backend;');
@@ -198,11 +198,11 @@ console.log('systemctl enable redis-server postgresql nginx');
 console.log('');
 
 console.log('7. UPLOAD DO CÓDIGO:');
-console.log('scp -r leaf-websocket-backend/ root@216.238.107.59:/root/');
+console.log('scp -r leaf-websocket-backend/ root@147.182.204.181:/root/');
 console.log('');
 
 console.log('8. CONFIGURAR PROJETO:');
-console.log('cd /root/leaf-websocket-backend');
+console.log('cd /opt/leaf-app');
 console.log('npm install --production');
 console.log('');
 
@@ -251,9 +251,9 @@ console.log('🔍 MONITORAMENTO:');
 console.log('================');
 console.log('');
 
-console.log('Health Check: http://216.238.107.59/health');
-console.log('GraphQL: http://216.238.107.59/graphql');
-console.log('WebSocket: ws://216.238.107.59');
+console.log('Health Check: http://147.182.204.181/health');
+console.log('GraphQL: http://147.182.204.181/graphql');
+console.log('WebSocket: ws://147.182.204.181');
 console.log('');
 
 console.log('📈 COMANDOS DE MONITORAMENTO:');
@@ -277,7 +277,7 @@ console.log('nginx -t && systemctl status nginx');
 console.log('');
 
 console.log('# Verificar logs do servidor');
-console.log('tail -f /root/leaf-websocket-backend/logs/server.log');
+console.log('tail -f /opt/leaf-app/logs/server.log');
 console.log('');
 
 console.log('🚀 SISTEMA OTIMIZADO PARA VPS!');

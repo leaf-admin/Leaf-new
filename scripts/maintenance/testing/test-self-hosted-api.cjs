@@ -1,7 +1,7 @@
 // 🧪 TESTE SELF-HOSTED API - LEAF APP
 const axios = require('axios');
 
-const BASE_URL = 'http://147.93.66.253:3000';
+const BASE_URL = 'http://147.182.204.181:3000';
 
 // 🎨 Cores para output
 const colors = {

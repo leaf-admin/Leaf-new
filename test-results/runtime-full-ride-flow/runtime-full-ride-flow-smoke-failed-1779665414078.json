@@ -1,0 +1,10 @@
+{
+  "startedAt": "2026-05-24T23:30:10.626Z",
+  "completedAt": "2026-05-24T23:30:14.078Z",
+  "redis": {
+    "port": 64167
+  },
+  "runtimes": [],
+  "artifactsDir": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-full-ride-flow",
+  "error": "Corrida não encontrada"
+}

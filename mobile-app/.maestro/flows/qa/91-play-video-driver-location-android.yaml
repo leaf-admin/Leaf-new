@@ -1,0 +1,60 @@
+appId: br.com.leaf.ride
+env:
+  DRIVER_PHONE: "21123456789"
+  TEST_OTP: "992000"
+---
+- launchApp:
+    clearState: true
+
+- extendedWaitUntil:
+    visible: "Bem-vindo\\(a\\) à Leaf"
+    timeout: 90000
+
+- tapOn: "Número"
+- eraseText
+- inputText: ${DRIVER_PHONE}
+- tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Verificação"
+    commands:
+      - inputText: ${TEST_OTP}
+
+- runFlow:
+    when:
+      visible: "Código"
+    commands:
+      - inputText: ${TEST_OTP}
+
+- runFlow:
+    when:
+      visible: "Verificar"
+    commands:
+      - tapOn: "Verificar"
+
+- runFlow:
+    when:
+      visible: "Complete seu e-mail"
+    commands:
+      - tapOn: "Depois"
+
+- runFlow:
+    when:
+      visible: "Permitir"
+    commands:
+      - tapOn: "Permitir"
+
+- runFlow:
+    when:
+      visible: "Ao usar o app"
+    commands:
+      - tapOn: "Ao usar o app"
+
+- extendedWaitUntil:
+    visible: "Ficar Online"
+    timeout: 120000
+
+- tapOn: "Ficar Online"
+- waitForAnimationToEnd
+- takeScreenshot: "android-driver-online-final"

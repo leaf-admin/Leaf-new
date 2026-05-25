@@ -7,6 +7,7 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const today = new Date().toISOString().split("T")[0];
 const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
@@ -14,6 +15,7 @@ const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().spl
 export default function MetricsHistoryPage() {
   const [startDate, setStartDate] = useState(weekAgo);
   const [endDate, setEndDate] = useState(today);
+  const [seriesFilter, setSeriesFilter] = useState("");
   const [history, setHistory] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -46,6 +48,15 @@ export default function MetricsHistoryPage() {
     [rows],
   );
   const completionRate = totalRequests > 0 ? ((totalCompleted / totalRequests) * 100).toFixed(1) : "0.0";
+  const filteredRows = useMemo(() => {
+    const term = seriesFilter.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((row) =>
+      `${row?.timestamp || row?.date || ""} ${row?.totalRequests || row?.total || ""} ${row?.completed || row?.completedTrips || ""}`
+        .toLowerCase()
+        .includes(term),
+    );
+  }, [rows, seriesFilter]);
 
   return (
     <ProtectedRoute>
@@ -73,57 +84,88 @@ export default function MetricsHistoryPage() {
 
         <section className="grid">
           <Panel title="Resumo">
-            <table className="table">
-              <tbody>
-                <tr>
-                  <td>Periodo inicio</td>
-                  <td>{history?.period?.start || startDate}</td>
-                </tr>
-                <tr>
-                  <td>Periodo fim</td>
-                  <td>{history?.period?.end || endDate}</td>
-                </tr>
-                <tr>
-                  <td>Granularidade</td>
-                  <td>{history?.granularity || "hour"}</td>
-                </tr>
-                <tr>
-                  <td>Total de registros</td>
-                  <td>{history?.count || rows.length}</td>
-                </tr>
-              </tbody>
-            </table>
+            <div className="table-shell table-shell-tight">
+              <table className="table table-compact">
+                <tbody>
+                  <tr>
+                    <td>Periodo inicio</td>
+                    <td>{history?.period?.start || startDate}</td>
+                  </tr>
+                  <tr>
+                    <td>Periodo fim</td>
+                    <td>{history?.period?.end || endDate}</td>
+                  </tr>
+                  <tr>
+                    <td>Granularidade</td>
+                    <td>{history?.granularity || "hour"}</td>
+                  </tr>
+                  <tr>
+                    <td>Total de registros</td>
+                    <td>{history?.count || rows.length}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </Panel>
 
           <Panel title="Serie temporal (ultimos 30)">
-            {rows.length === 0 ? (
+            <div className="filters">
+              <input
+                placeholder="Filtrar por data ou valor"
+                value={seriesFilter}
+                onChange={(e) => setSeriesFilter(e.target.value)}
+              />
+            </div>
+            {filteredRows.length === 0 ? (
               <p className="text-muted">Sem registros no periodo.</p>
             ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Timestamp</th>
-                    <th>Total</th>
-                    <th>Completadas</th>
-                    <th>Canceladas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.slice(-30).map((row, idx) => (
-                    <tr key={`${row?.timestamp || row?.date || idx}`}>
-                      <td>{row?.timestamp || row?.date || "-"}</td>
-                      <td>{row?.totalRequests || row?.total || 0}</td>
-                      <td>{row?.completed || row?.completedTrips || 0}</td>
-                      <td>{row?.cancelled || row?.cancelledAfterAcceptance || 0}</td>
+              <div className="table-shell">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Total</th>
+                      <th>Completadas</th>
+                      <th>Canceladas</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredRows.slice(-120).map((row, idx) => (
+                      <tr key={`${row?.timestamp || row?.date || idx}`}>
+                        <td>{row?.timestamp || row?.date || "-"}</td>
+                        <td>{row?.totalRequests || row?.total || 0}</td>
+                        <td>{row?.completed || row?.completedTrips || 0}</td>
+                        <td>{row?.cancelled || row?.cancelledAfterAcceptance || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Panel>
 
-          <Panel title="Payload bruto">
-            <pre>{JSON.stringify(history || {}, null, 2)}</pre>
+          <Panel title="Indicadores do período">
+            <KeyValueGrid
+              data={{
+                inicio: history?.period?.start || startDate,
+                fim: history?.period?.end || endDate,
+                granularidade: history?.granularity || "hour",
+                registros: history?.count || rows.length,
+                totalRequests,
+                totalCompleted,
+                completionRate: `${completionRate}%`,
+              }}
+              labels={{
+                inicio: "Início",
+                fim: "Fim",
+                granularidade: "Granularidade",
+                registros: "Registros",
+                totalRequests: "Total de solicitações",
+                totalCompleted: "Total concluídas",
+                completionRate: "Taxa de conclusão",
+              }}
+            />
+            <TechnicalDetails title="Ver payload técnico do histórico" data={history || {}} />
           </Panel>
         </section>
 

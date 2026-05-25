@@ -1,0 +1,31 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "passenger-receipt-screen"
+    timeout: 240000
+
+- tapOn:
+    id: "passenger-receipt-rate-trip-button"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-rating-screen"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-rating-air-conditioning-yes"
+
+- tapOn:
+    id: "passenger-rating-submit-button"
+
+- extendedWaitUntil:
+    visible: "Avaliação enviada"
+    timeout: 15000
+
+- tapOn: "OK"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-receipt-screen"
+    timeout: 60000

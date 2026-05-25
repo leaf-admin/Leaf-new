@@ -77,7 +77,7 @@ setTimeout(async () => {
     // Teste 2: Login
     setTimeout(() => {
         const loginData = JSON.stringify({
-            phone: '+5511999999999',
+            phone: '+5521102938475',
             password: '123456',
             userType: 'CUSTOMER'
         });
@@ -156,7 +156,6 @@ setTimeout(async () => {
     }, 1000);
     
 }, 3000);
-
 
 
 

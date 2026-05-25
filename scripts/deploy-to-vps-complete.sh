@@ -35,7 +35,7 @@ highlight() {
 }
 
 # Configurações da VPS
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_PORT="3001"
 VPS_USER="root"  # Ajuste conforme necessário
 VPS_PATH="/root/leaf-backend"  # Ajuste conforme necessário
@@ -106,10 +106,10 @@ cat > deploy-package/README-DEPLOY.md << 'EOF'
 ### Opção 1: Upload manual
 ```bash
 # 1. Fazer upload dos arquivos para VPS
-scp -r deploy-package/* root@216.238.107.59:/root/leaf-backend/
+scp -r deploy-package/* root@147.182.204.181:/root/leaf-backend/
 
 # 2. Conectar na VPS
-ssh root@216.238.107.59
+ssh root@147.182.204.181
 
 # 3. Executar instalação
 cd /root/leaf-backend
@@ -126,7 +126,7 @@ chmod +x install-on-vps.sh
 ## 🧪 Testar após deploy:
 ```bash
 # Health check
-curl http://216.238.107.59:3001/health
+curl http://147.182.204.181:3001/health
 
 # Teste de eventos
 node test-vps-connection.js
@@ -160,7 +160,7 @@ cat > deploy-to-vps-auto.sh << 'EOF'
 
 echo "🚀 DEPLOY AUTOMÁTICO PARA VPS..."
 
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
 VPS_PATH="/root/leaf-backend"
 
@@ -195,7 +195,7 @@ cat > test-vps-post-deploy.js << 'EOF'
 
 const io = require('socket.io-client');
 
-const VPS_URL = 'http://216.238.107.59:3001';
+const VPS_URL = 'http://147.182.204.181:3001';
 const TEST_DRIVER_ID = 'test-post-deploy-' + Date.now();
 
 const log = {

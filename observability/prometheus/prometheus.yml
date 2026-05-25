@@ -10,6 +10,12 @@ global:
 rule_files:
   - '/etc/prometheus/alert-rules.yml'
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'alertmanager:9093'
+
 scrape_configs:
   # Leaf Backend - Métricas Prometheus
   - job_name: 'leaf-backend'
@@ -22,4 +28,3 @@ scrape_configs:
           service: 'leaf-websocket-backend'
           environment: 'development'
     metrics_path: '/api/metrics/prometheus'
-

@@ -5,7 +5,7 @@ const path = require('path');
 
 class AppMetrics {
     constructor() {
-        this.baseUrl = 'http://147.93.66.253:3000';
+        this.baseUrl = 'http://147.182.204.181:3000';
         this.metrics = {
             performance: {},
             errors: {},
@@ -48,7 +48,7 @@ class AppMetrics {
     async testWebSocket() {
         try {
             const WebSocket = require('ws');
-            const ws = new WebSocket('ws://147.93.66.253:3001');
+            const ws = new WebSocket('ws://147.182.204.181:3001');
             
             return new Promise((resolve) => {
                 const start = Date.now();
@@ -140,13 +140,13 @@ class AppMetrics {
 
         try {
             // CPU e RAM da VPS
-            const { stdout: cpuRam } = await execAsync('ssh root@147.93.66.253 "top -bn1 | grep -E \'(Cpu|Mem)\'"');
+            const { stdout: cpuRam } = await execAsync('ssh root@147.182.204.181 "top -bn1 | grep -E \'(Cpu|Mem)\'"');
             
             // Redis info
-            const { stdout: redisInfo } = await execAsync('ssh root@147.93.66.253 "redis-cli info"');
+            const { stdout: redisInfo } = await execAsync('ssh root@147.182.204.181 "redis-cli info"');
             
             // PM2 status
-            const { stdout: pm2Status } = await execAsync('ssh root@147.93.66.253 "pm2 status"');
+            const { stdout: pm2Status } = await execAsync('ssh root@147.182.204.181 "pm2 status"');
 
             return {
                 cpuRam,

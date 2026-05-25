@@ -8,14 +8,67 @@
 const WebSocketTestClient = require('../__helpers__/websocket-test-client');
 const testData = require('../__fixtures__/test-data');
 const RedisDriverSimulator = require('../__helpers__/redis-driver-simulator');
+const GeoHashUtils = require('../../../../utils/geohash-utils');
+
+jest.setTimeout(180000);
+
+const RUN_TAG = String(process.env.E2E_RUN_ID || Date.now()).replace(/[^a-zA-Z0-9]/g, '');
+const TEST_CUSTOMER_UID = `test_customer_${RUN_TAG}`;
+const TEST_DRIVER_UID = `test_driver_${RUN_TAG}`;
+const DEFAULT_REGION_HASH = GeoHashUtils.getRegionHashFromLocation(testData.locations.pickup, 5);
+const DEFAULT_PENDING_QUEUE_KEY = `ride_queue:${DEFAULT_REGION_HASH}:pending`;
+const DEFAULT_ACTIVE_QUEUE_KEY = `ride_queue:${DEFAULT_REGION_HASH}:active`;
 
 describe('Fluxo Motorista Completo', () => {
   let driverClient;
   let passengerClient;
   let bookingId;
   let driverSimulator;
+  const createdBookingIds = new Set();
   
   const WS_URL = process.env.WS_URL || 'http://localhost:3001';
+
+  async function cleanupBookingArtifacts(bookingIds = []) {
+    const normalizedBookingIds = Array.from(new Set((bookingIds || []).filter(Boolean)));
+    if (normalizedBookingIds.length === 0) return;
+
+    await Promise.allSettled(
+      normalizedBookingIds.map((targetBookingId) =>
+        driverSimulator.del(
+          `booking:${targetBookingId}`,
+          `booking_search:${targetBookingId}`,
+          `ride_notifications:${targetBookingId}`,
+          `ride_excluded_drivers:${targetBookingId}`
+        )
+      )
+    );
+
+    if (driverSimulator.useRemoteRedis) {
+      await Promise.allSettled(
+        normalizedBookingIds.map((targetBookingId) =>
+          Promise.allSettled([
+            driverSimulator.zrem(DEFAULT_PENDING_QUEUE_KEY, targetBookingId),
+            driverSimulator.hdel(DEFAULT_ACTIVE_QUEUE_KEY, targetBookingId)
+          ])
+        )
+      );
+      return;
+    }
+
+    const [pendingQueues, activeQueues] = await Promise.all([
+      driverSimulator.keys('ride_queue:*:pending'),
+      driverSimulator.keys('ride_queue:*:active')
+    ]);
+
+    await Promise.allSettled(
+      normalizedBookingIds.map(async (targetBookingId) => {
+        await Promise.allSettled([
+          ...pendingQueues.map((queueKey) => driverSimulator.zrem(queueKey, targetBookingId)),
+          ...activeQueues.map((queueKey) => driverSimulator.hdel(queueKey, targetBookingId))
+        ]);
+      })
+    );
+  }
   
   beforeAll(async () => {
     // Aguardar um pouco para garantir que servidor está pronto
@@ -37,12 +90,12 @@ describe('Fluxo Motorista Completo', () => {
     
     // Autenticar
     await driverClient.authenticate(
-      testData.users.driver.uid,
+      TEST_DRIVER_UID,
       testData.users.driver.userType
     );
     
     await passengerClient.authenticate(
-      testData.users.customer.uid,
+      TEST_CUSTOMER_UID,
       testData.users.customer.userType
     );
     
@@ -51,7 +104,7 @@ describe('Fluxo Motorista Completo', () => {
     
     // ✅ SIMULAR MOTORISTA ONLINE NO REDIS (como comportamento real)
     await driverSimulator.setDriverOnline(
-      testData.users.driver.uid,
+      TEST_DRIVER_UID,
       testData.locations.pickup.lat,
       testData.locations.pickup.lng,
       0, // heading
@@ -64,15 +117,17 @@ describe('Fluxo Motorista Completo', () => {
     await testData.helpers.sleep(500);
     
     // Verificar se motorista está realmente online
-    const driverStatus = await driverSimulator.isDriverOnline(testData.users.driver.uid);
+    const driverStatus = await driverSimulator.isDriverOnline(TEST_DRIVER_UID);
     console.log(`✅ [Test] Motorista online no Redis:`, driverStatus);
   });
   
   afterAll(async () => {
+    await cleanupBookingArtifacts(Array.from(createdBookingIds));
+
     // Limpar motorista do Redis
-    if (driverSimulator && testData.users.driver.uid) {
+    if (driverSimulator && TEST_DRIVER_UID) {
       try {
-        await driverSimulator.removeDriver(testData.users.driver.uid);
+        await driverSimulator.removeDriver(TEST_DRIVER_UID);
       } catch (error) {
         console.warn('⚠️ Erro ao limpar motorista do Redis:', error.message);
       }
@@ -86,22 +141,72 @@ describe('Fluxo Motorista Completo', () => {
     await testData.helpers.sleep(1000);
   });
   
-  beforeEach(() => {
+  beforeEach(async () => {
     // Limpar eventos antes de cada teste
     driverClient.clearEvents();
     passengerClient.clearEvents();
-  });
+
+    if (driverSimulator.useRemoteRedis) {
+      await cleanupBookingArtifacts(Array.from(createdBookingIds));
+      createdBookingIds.clear();
+    } else {
+      const [bookingKeys, searchKeys, notificationKeys, excludedDriverKeys, pendingQueues, activeQueues] = await Promise.all([
+        driverSimulator.keys('booking:*'),
+        driverSimulator.keys('booking_search:*'),
+        driverSimulator.keys('ride_notifications:*'),
+        driverSimulator.keys('ride_excluded_drivers:*'),
+        driverSimulator.keys('ride_queue:*:pending'),
+        driverSimulator.keys('ride_queue:*:active')
+      ]);
+
+      await Promise.allSettled([
+        bookingKeys.length ? driverSimulator.del(...bookingKeys) : Promise.resolve(),
+        searchKeys.length ? driverSimulator.del(...searchKeys) : Promise.resolve(),
+        notificationKeys.length ? driverSimulator.del(...notificationKeys) : Promise.resolve(),
+        excludedDriverKeys.length ? driverSimulator.del(...excludedDriverKeys) : Promise.resolve(),
+        pendingQueues.length ? driverSimulator.del(...pendingQueues) : Promise.resolve(),
+        activeQueues.length ? driverSimulator.del(...activeQueues) : Promise.resolve()
+      ]);
+    }
+
+    await driverSimulator.del(
+      `driver_lock:${TEST_DRIVER_UID}`,
+      `driver_active_notification:${TEST_DRIVER_UID}`,
+      `active_trip_by_driver:${TEST_DRIVER_UID}`,
+      `active_trip_customer_by_driver:${TEST_DRIVER_UID}`,
+      'bookings:active',
+      'activeRides'
+    );
+
+    await driverSimulator.setDriverOnline(
+      TEST_DRIVER_UID,
+      testData.locations.pickup.lat,
+      testData.locations.pickup.lng,
+      0,
+      0,
+      true,
+      false
+    );
+    await testData.helpers.sleep(150);
+  }, 90000);
+
+  afterEach(async () => {
+    await cleanupBookingArtifacts(Array.from(createdBookingIds));
+    createdBookingIds.clear();
+    bookingId = null;
+  }, 120000);
   
   test('deve completar fluxo completo do motorista', async () => {
     // ========== ETAPA 1: PASSAGEIRO SOLICITA CORRIDA ==========
     console.log('\n📋 ETAPA 1: Passageiro solicita corrida');
     
-    const bookingData = testData.booking.createBookingData();
+    const bookingData = testData.booking.createBookingData(null, null, TEST_CUSTOMER_UID);
     const bookingResponse = await passengerClient.createBooking(bookingData);
     
     expect(bookingResponse.success).toBe(true);
     expect(bookingResponse.bookingId).toBeDefined();
     bookingId = bookingResponse.bookingId;
+    createdBookingIds.add(bookingId);
     
     console.log(`✅ Corrida criada: ${bookingId}`);
     
@@ -119,7 +224,11 @@ describe('Fluxo Motorista Completo', () => {
     console.log('\n🔔 ETAPA 3: Motorista recebe notificação');
     
     // Aguardar notificação de nova corrida
-    const notification = await driverClient.waitForEvent('newRideRequest', 20000);
+    const notification = await driverClient.waitForEvent(
+      'newRideRequest',
+      30000,
+      (event) => (event?.bookingId || event?.rideId) === bookingId
+    );
     
     expect(notification).toBeDefined();
     expect(notification.bookingId || notification.rideId).toBe(bookingId);
@@ -149,6 +258,8 @@ describe('Fluxo Motorista Completo', () => {
       testData.locations.pickup
     );
     
+    await driverClient.arrivedAtPickup(bookingId);
+    await testData.helpers.sleep(300);
     const startResponse = await driverClient.startTrip(startTripData);
     
     expect(startResponse).toBeDefined();
@@ -171,8 +282,8 @@ describe('Fluxo Motorista Completo', () => {
         lng: testData.locations.pickup.lng + (i * 0.001)
       };
       
-      driverClient.socket.emit('updateDriverLocation', {
-        driverId: testData.users.driver.uid,
+      driverClient.socket.emit('updateLocation', {
+        driverId: TEST_DRIVER_UID,
         lat: intermediateLocation.lat,
         lng: intermediateLocation.lng,
         heading: 90,
@@ -218,6 +329,5 @@ describe('Fluxo Motorista Completo', () => {
     
     console.log('✅ Todos os eventos esperados foram recebidos');
     console.log(`✅ Fluxo completo do motorista concluído com sucesso!`);
-  }, 60000); // Timeout de 60 segundos para teste completo
+  }, 120000); // Timeout ampliado para execução remota/VPS
 });
-

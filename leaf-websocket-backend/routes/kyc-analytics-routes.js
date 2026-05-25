@@ -8,6 +8,9 @@
 const express = require('express');
 const IntegratedKYCService = require('../services/IntegratedKYCService');
 const { logStructured, logError } = require('../utils/logger');
+const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
+
+const KYC_ANALYTICS_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 
 class KYCAnalyticsRoutes {
   constructor() {
@@ -17,6 +20,8 @@ class KYCAnalyticsRoutes {
   }
 
   initializeRoutes() {
+    this.router.use(authenticateJWT, requireRole(KYC_ANALYTICS_ROLES));
+
     // Middleware para verificar se o serviço está inicializado
     this.router.use(async (req, res, next) => {
       if (!this.kycService.initialized) {

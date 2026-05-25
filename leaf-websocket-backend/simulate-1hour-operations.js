@@ -103,7 +103,7 @@ function processRide(ride) {
         let estimatedSubTotal = cat.base_fare + cat.fixed_fee + distCost + timeCost;
         if (estimatedSubTotal < cat.min_fare) estimatedSubTotal = cat.min_fare;
 
-        let assumedWooviFee = estimatedSubTotal * 0.0008;
+        let assumedWooviFee = estimatedSubTotal * 0.008;
         if (assumedWooviFee < 0.50) assumedWooviFee = 0.50; // Mínimo de 50 centavos
 
         report.preAcceptanceCancellationCosts += assumedWooviFee;
@@ -140,10 +140,11 @@ function processRide(ride) {
     let opFee = 0;
     if (rawFare <= 10.00) opFee = 0.79;
     else if (rawFare <= 25.00) opFee = 0.99;
-    else opFee = 1.49;
+    else if (rawFare <= 50.00) opFee = 1.49;
+    else opFee = rawFare * 0.03;
 
-    // Calculo Woovi PIX (0.08% via regra anterior)
-    let wooviFee = grandTotal * 0.0008;
+    // Calculo Woovi PIX (0.8%)
+    let wooviFee = grandTotal * 0.008;
     if (wooviFee < 0.50) wooviFee = 0.50; // Woovi min fee assumido
 
     let driverShare = grandTotal - opFee - wooviFee;

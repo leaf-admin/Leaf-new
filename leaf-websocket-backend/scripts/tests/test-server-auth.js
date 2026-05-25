@@ -42,7 +42,7 @@ setTimeout(async () => {
     
     const http = require('http');
     const postData = JSON.stringify({
-        phone: '+5511999999999',
+        phone: '+5521102938475',
         password: '123456',
         userType: 'CUSTOMER'
     });
@@ -76,7 +76,6 @@ setTimeout(async () => {
     req.end();
     
 }, 2000);
-
 
 
 

@@ -15,12 +15,12 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import QRCode from 'react-native-qrcode-svg';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 import Typography from '../components/design-system/Typography';
 import AnimatedButton from '../components/design-system/AnimatedButton';
-import { useTheme } from '../common-local/theme';
+import { useTheme } from '../theme/runtimeTokens';
 
 
 const { width, height } = Dimensions.get('window');
@@ -55,7 +55,7 @@ const DriverBalanceScreen = ({ navigation, route }) => {
       setIsLoading(true);
 
       // Verificar status online do motorista
-      const response = await api.post('/api/baas/check-driver-online-status', {
+      const response = await apiClient.post('/api/baas/check-driver-online-status', {
         driverId: currentUser.id
       });
 
@@ -78,7 +78,7 @@ const DriverBalanceScreen = ({ navigation, route }) => {
     try {
       setGeneratingQR(true);
 
-      const response = await api.post('/api/baas/generate-balance-qr-code', {
+      const response = await apiClient.post('/api/baas/generate-balance-qr-code', {
         driverId: currentUser.id,
         amount: balanceData.qrCodeAmount
       });

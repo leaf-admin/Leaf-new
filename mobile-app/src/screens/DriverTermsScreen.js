@@ -6,21 +6,14 @@ import {
   StyleSheet, 
   TouchableOpacity, 
   Alert, 
-  ScrollView,
-  Dimensions
+  ScrollView
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fonts } from '../theme/runtimeTokens';
+import onboardingTheme from '../components/auth/common/onboardingTheme';
 
-
-const { width, height } = Dimensions.get('window');
-
-const LEAF_GREEN = '#1A330E';
-const WHITE = '#FFFFFF';
-const BLACK = '#000000';
-const GRAY = '#666666';
-const LIGHT_GRAY = '#F5F5F5';
-const DARK_GRAY = '#333333';
+const { color, radius, spacing, elevation } = onboardingTheme;
 
 export default function DriverTermsScreen() {
   const navigation = useNavigation();
@@ -30,7 +23,7 @@ export default function DriverTermsScreen() {
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [serviceAccepted, setServiceAccepted] = useState(false);
   
-  const { userData } = route.params;
+  const userData = route?.params?.userData || {};
 
   const handleAcceptAll = () => {
     setTermsAccepted(true);
@@ -82,7 +75,7 @@ export default function DriverTermsScreen() {
           <Text style={styles.sectionTitle}>Bem-vindo ao programa de motoristas parceiros!</Text>
           
           <Text style={styles.termsText}>
-            Para se tornar um motorista parceiro da 99, você precisa aceitar os seguintes termos e condições:
+            Para se tornar um motorista parceiro da Leaf, você precisa aceitar os seguintes termos e condições:
           </Text>
 
           {/* Termos de Uso */}
@@ -96,7 +89,7 @@ export default function DriverTermsScreen() {
             <View style={styles.termContent}>
               <Text style={styles.termTitle}>Termos de Uso</Text>
               <Text style={styles.termDescription}>
-                Li e aceito os Termos de Uso da plataforma 99, que regem o uso do aplicativo e os serviços prestados.
+                Li e aceito os Termos de Uso da plataforma Leaf, que regem o uso do aplicativo e os serviços prestados.
               </Text>
             </View>
           </View>
@@ -140,7 +133,7 @@ export default function DriverTermsScreen() {
               • Deve seguir todas as leis de trânsito e regulamentações locais{'\n'}
               • A comissão será de acordo com a política vigente da plataforma{'\n'}
               • Pode cancelar sua participação a qualquer momento{'\n'}
-              • A 99 pode suspender ou encerrar sua conta por violação dos termos
+              • A Leaf pode suspender ou encerrar sua conta por violação dos termos
             </Text>
           </View>
 
@@ -172,155 +165,174 @@ export default function DriverTermsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: WHITE,
+    backgroundColor: color.background
   },
   
   header: {
-    paddingTop: 60,
-    paddingHorizontal: 30,
-    paddingBottom: 30,
-    backgroundColor: LEAF_GREEN,
+    paddingTop: 58,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.lg,
+    backgroundColor: color.panel,
+    borderBottomWidth: 1,
+    borderBottomColor: color.borderStrong
   },
   
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: WHITE,
+    fontSize: 26,
+    fontFamily: fonts.Bold,
+    color: color.textPrimary,
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 8
   },
   
   subtitle: {
-    fontSize: 16,
-    color: WHITE,
+    fontSize: 15,
+    color: color.textSecondary,
+    fontFamily: fonts.Medium,
     textAlign: 'center',
-    opacity: 0.8,
+    opacity: 0.92
   },
   
   content: {
-    flex: 1,
+    flex: 1
   },
   
   termsContainer: {
-    padding: 30,
+    margin: spacing.xl,
+    marginTop: spacing.lg,
+    padding: spacing.lg,
+    backgroundColor: color.panel,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
+    shadowColor: '#0E1522',
+    ...elevation.soft
   },
   
   sectionTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: BLACK,
+    fontFamily: fonts.Bold,
+    color: color.textPrimary,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.sm
   },
   
   termsText: {
-    fontSize: 16,
-    color: GRAY,
-    lineHeight: 24,
-    marginBottom: 30,
-    textAlign: 'center',
+    fontSize: 15,
+    color: color.textSecondary,
+    lineHeight: 22,
+    marginBottom: spacing.md,
+    textAlign: 'center'
   },
   
   termItem: {
     flexDirection: 'row',
-    marginBottom: 25,
+    marginBottom: spacing.md,
     alignItems: 'flex-start',
+    paddingBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: color.border
   },
   
   checkbox: {
     width: 24,
     height: 24,
     borderRadius: 4,
-    borderWidth: 2,
-    borderColor: GRAY,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
     marginRight: 15,
     marginTop: 2,
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'center'
   },
   
   checkboxChecked: {
-    backgroundColor: LEAF_GREEN,
-    borderColor: LEAF_GREEN,
+    backgroundColor: color.accent,
+    borderColor: color.accent
   },
   
   checkmark: {
-    color: WHITE,
+    color: color.accentText,
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: 'bold'
   },
   
   termContent: {
-    flex: 1,
+    flex: 1
   },
   
   termTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: BLACK,
-    marginBottom: 8,
+    fontSize: 16,
+    fontFamily: fonts.SemiBold,
+    color: color.textPrimary,
+    marginBottom: 6
   },
   
   termDescription: {
     fontSize: 14,
-    color: GRAY,
-    lineHeight: 20,
+    color: color.textSecondary,
+    lineHeight: 20
   },
   
   importantNote: {
-    backgroundColor: '#FFF8E1',
+    backgroundColor: color.surface,
     borderWidth: 1,
-    borderColor: '#FFE082',
-    borderRadius: 8,
-    padding: 20,
-    marginTop: 20,
-    marginBottom: 30,
+    borderColor: color.borderStrong,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.lg
   },
   
   importantTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#E65100',
-    marginBottom: 10,
+    fontFamily: fonts.SemiBold,
+    color: color.textPrimary,
+    marginBottom: 8
   },
   
   importantText: {
     fontSize: 14,
-    color: '#E65100',
-    lineHeight: 20,
+    color: color.textSecondary,
+    lineHeight: 20
   },
   
   buttonsContainer: {
-    gap: 15,
+    gap: 12
   },
   
   acceptAllButton: {
-    backgroundColor: LIGHT_GRAY,
+    backgroundColor: color.surfaceMuted,
+    borderWidth: 1,
+    borderColor: color.border,
     paddingVertical: 15,
-    borderRadius: 25,
-    alignItems: 'center',
+    borderRadius: radius.md,
+    alignItems: 'center'
   },
   
   acceptAllButtonText: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: BLACK,
+    fontFamily: fonts.SemiBold,
+    color: color.textPrimary
   },
   
   continueButton: {
-    backgroundColor: LEAF_GREEN,
+    backgroundColor: color.accent,
+    borderWidth: 1,
+    borderColor: color.borderStrong,
     paddingVertical: 15,
-    borderRadius: 25,
-    alignItems: 'center',
+    borderRadius: radius.md,
+    alignItems: 'center'
   },
   
   continueButtonDisabled: {
-    backgroundColor: LIGHT_GRAY,
+    backgroundColor: color.accentSoft,
+    borderColor: color.border
   },
   
   continueButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: WHITE,
-  },
-}); 
+    fontSize: 16,
+    fontFamily: fonts.SemiBold,
+    color: color.accentText
+  }
+});

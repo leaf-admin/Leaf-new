@@ -31,6 +31,10 @@ import AccessKey from '../other/AccessKey';
 import { getUserId, getUserData, saveUserId, saveUserData, clearAuthData } from '../utils/authUtils';
 import { configureAuthPersistence, checkPersistedAuth, saveAuthSession, clearAuthSession } from './authPersistence';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  buildIncompleteOnboardingProfile,
+  persistPhoneValidatedOnboardingSession
+} from '../utils/onboardingSessionState';
 
 // Constante para a chave do AsyncStorage
 const AUTH_UID_KEY = '@auth_uid';
@@ -274,13 +278,19 @@ export const fetchUser = () => async (dispatch) => {
         userLoaded = true;
         return;
       } else {
-        // Se não existe no banco, fazer logout e bloquear acesso
-        await auth.signOut();
-        await AsyncStorage.removeItem('@user_data');
+        // Auth existe, mas o perfil ainda não foi criado. Esse é o primeiro acesso
+        // pós-OTP e deve continuar no onboarding em vez de encerrar a sessão.
+        const onboardingProfile = buildIncompleteOnboardingProfile(currentUser);
+        await persistPhoneValidatedOnboardingSession(onboardingProfile);
+        await AsyncStorage.multiSet([
+          ['@auth_uid', currentUser.uid],
+          ['@user_data', JSON.stringify(onboardingProfile)]
+        ]);
         dispatch({
-          type: FETCH_USER_FAILED,
-          payload: { code: 'auth/user-not-in-db', message: 'Usuário não encontrado no banco de dados. Faça o cadastro novamente.' }
+          type: FETCH_USER_SUCCESS,
+          payload: onboardingProfile
         });
+        userLoaded = true;
         return;
       }
     } catch (error) {
@@ -307,7 +317,7 @@ const getSafeConfig = () => {
         appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
         databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
         storageBucket: "leaf-reactnative.firebasestorage.app",
-        apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+        apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
         authDomain: "leaf-reactnative.firebaseapp.com",
         messagingSenderId: "106504629884",
         measurementId: "G-22368DBCY9"

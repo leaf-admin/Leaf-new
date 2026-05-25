@@ -11,6 +11,7 @@ const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
+const supportTicketService = require('./support-ticket-service');
 
 class SupportChatService {
     constructor() {
@@ -207,6 +208,82 @@ class SupportChatService {
         } catch (error) {
             logger.error('❌ Erro ao encerrar chat:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Reabrir chat de suporte para um usuário.
+     * @param {string} userId
+     * @param {string} reason
+     * @param {object} metadata
+     * @returns {Promise<object>}
+     */
+    async reopenChat(userId, reason = 'manual_reopen', metadata = {}) {
+        try {
+            const now = new Date().toISOString();
+            const currentStatusJson = await this.redis.hget(this.chatStatusKey, userId);
+            const currentStatus = currentStatusJson ? JSON.parse(currentStatusJson) : {};
+
+            const nextStatus = {
+                userId,
+                status: 'active',
+                createdAt: currentStatus.createdAt || now,
+                updatedAt: now,
+                reopenedAt: now,
+                reopenReason: reason,
+                ...metadata
+            };
+
+            await this.redis.hset(this.chatStatusKey, userId, JSON.stringify(nextStatus));
+
+            logger.info(`✅ Chat reaberto para usuário ${userId} (${reason})`);
+            return {
+                success: true,
+                reopened: true,
+                status: nextStatus
+            };
+        } catch (error) {
+            logger.error('❌ Erro ao reabrir chat:', error);
+            return {
+                success: false,
+                reopened: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Reabre chat automaticamente se o usuário possuir ticket aberto.
+     * @param {string} userId
+     * @param {string} reason
+     * @returns {Promise<object>}
+     */
+    async reopenChatForOpenTicket(userId, reason = 'incoming_message') {
+        try {
+            const openTicket = await supportTicketService.findLatestOpenTicketForUser(String(userId));
+            if (!openTicket) {
+                return {
+                    reopened: false,
+                    reason: 'no_open_ticket'
+                };
+            }
+
+            const reopenResult = await this.reopenChat(userId, reason, {
+                ticketId: openTicket.id || null,
+                ticketStatus: openTicket.status || 'open'
+            });
+
+            return {
+                ...reopenResult,
+                reopened: Boolean(reopenResult.reopened)
+            };
+        } catch (error) {
+            logger.error('❌ Erro ao reabrir chat por ticket aberto:', error);
+            return {
+                reopened: false,
+                reason: 'exception',
+                error: error.message
+            };
         }
     }
 
@@ -412,4 +489,3 @@ class SupportChatService {
 const supportChatService = new SupportChatService();
 
 module.exports = supportChatService;
-

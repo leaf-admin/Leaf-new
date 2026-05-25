@@ -14,7 +14,7 @@ import {
 import { Icon } from 'react-native-elements';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline, UrlTile } from 'react-native-maps';
 import BottomSheetWrapper from '../components/BottomSheetWrapper';
-import { colors } from '../common-local/theme';
+import { colors } from '../theme/runtimeTokens';
 import WebSocketManager from '../services/WebSocketManager';
 import useWebSocketListeners from '../hooks/useWebSocketListeners';
 import { useSelector } from 'react-redux';

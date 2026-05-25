@@ -4,7 +4,7 @@ echo "🧪 TESTANDO VERSÕES SIMPLIFICADAS DAS APIS"
 echo "============================================"
 
 # Conectar à VPS e testar APIs simplificadas
-ssh root@147.93.66.253 << 'EOF'
+ssh root@147.182.204.181 << 'EOF'
 echo "🧪 Testando APIs simplificadas..."
 
 # Parar PM2
@@ -214,4 +214,4 @@ echo "✅ Versão simplificada iniciada!"
 EOF
 
 echo "🎯 Versão simplificada aplicada!"
-echo "🧪 Teste agora: curl -X POST http://147.93.66.253:3000/api/update_user_location -H \"Content-Type: application/json\" -d '{\"userId\":\"test\",\"lat\":-23.5505,\"lng\":-46.6333}'" 
+echo "🧪 Teste agora: curl -X POST http://147.182.204.181:3000/api/update_user_location -H \"Content-Type: application/json\" -d '{\"userId\":\"test\",\"lat\":-23.5505,\"lng\":-46.6333}'"

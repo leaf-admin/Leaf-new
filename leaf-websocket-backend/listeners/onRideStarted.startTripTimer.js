@@ -11,25 +11,41 @@ const { getTracer } = require('../utils/tracer');
 const { createListenerSpan, runInSpan, endSpanSuccess, endSpanError } = require('../utils/span-helpers');
 const { metrics } = require('../utils/prometheus-metrics');
 
+function normalizeStartedPayload(event) {
+    const rawData = event?.data && typeof event.data === 'object' ? event.data : {};
+    const nestedData = rawData?.data && typeof rawData.data === 'object' ? rawData.data : null;
+    const payload = (rawData?.bookingId || rawData?.customerId || rawData?.driverId)
+        ? rawData
+        : (nestedData || rawData);
+
+    return {
+        payload,
+        traceId: payload?.traceId || rawData?.traceId || null,
+        spanContext: payload?._otelSpanContext || rawData?._otelSpanContext || null
+    };
+}
+
 /**
  * Iniciar timer de viagem
  */
 async function startTripTimer(event, io) {
     const startTime = Date.now();
     const eventType = event.eventType || 'ride.started';
+    const normalized = normalizeStartedPayload(event);
+    const payload = normalized.payload || {};
     // ✅ OBSERVABILIDADE: Extrair traceId do evento
-    const traceId = event.data?.traceId || traceContext.getCurrentTraceId();
+    const traceId = normalized.traceId || traceContext.getCurrentTraceId();
     return await traceContext.runWithTraceId(traceId, async () => {
         // ✅ FASE 1.3: Criar span para Listener (linkado ao evento)
         const tracer = getTracer();
-        const eventSpanContext = event.data?._otelSpanContext;
+        const eventSpanContext = normalized.spanContext;
         const listenerSpan = createListenerSpan(tracer, 'start_trip_timer', eventSpanContext, {
-            'listener.booking_id': event.data?.bookingId
+            'listener.booking_id': payload?.bookingId
         });
 
         try {
             return await runInSpan(listenerSpan, async () => {
-                const { bookingId, driverId, customerId } = event.data;
+                const { bookingId, driverId, customerId } = payload;
 
                 metrics.recordListener('onRideStarted.startTripTimer', (Date.now() - startTime) / 1000, true);
 
@@ -45,7 +61,13 @@ async function startTripTimer(event, io) {
                 });
 
                 if (!bookingId || !driverId || !customerId) {
-                    logger.warn('⚠️ [startTripTimer] Dados incompletos no evento');
+                    logStructured('debug', 'startTripTimer ignorou evento incompleto', {
+                        listener: 'startTripTimer',
+                        eventType,
+                        hasBookingId: Boolean(bookingId),
+                        hasDriverId: Boolean(driverId),
+                        hasCustomerId: Boolean(customerId)
+                    });
                     return;
                 }
 
@@ -74,7 +96,7 @@ async function startTripTimer(event, io) {
         } catch (error) {
             endSpanError(listenerSpan, error);
             logStructured('error', 'startTripTimer falhou', {
-                bookingId: event.data?.bookingId,
+                bookingId: payload?.bookingId,
                 listener: 'startTripTimer',
                 error: error.message
             });

@@ -1,11 +1,39 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const multer = require('multer');
+const admin = require('firebase-admin');
+const jwt = require('jsonwebtoken');
 const { logStructured, logError } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
+const RedisScan = require('../utils/redis-scan');
 const kycDriverStatusService = require('../services/kyc-driver-status-service');
+const { getDashboardLiveData } = require('../services/dashboard-live-data-service');
+const {
+  listUsers,
+  getUserStats,
+  getUserDetails,
+  updateUserProfile
+} = require('../services/dashboard-user-service');
+const supportTicketService = require('../services/support-ticket-service');
+const driverApplicationService = require('../services/driver-application-service');
+const driverSubscriptionService = require('../services/driver-subscription-service');
+const subscriptionStateService = require('../services/subscription-state-service');
+const modernMetricsService = require('../services/modern-metrics-service');
+const h3MapService = require('../services/h3-map-service');
+const financialReconciliationDashboardService = require('../services/financial-reconciliation-dashboard-service');
+const FinancialLedgerService = require('../services/financial-ledger-service');
+const { resolveDriverReactivationState } = require('../services/dashboard-user-management-service');
+const {
+  recomputeDriverActivationStatus
+} = require('../services/driver-document-analysis-queue');
+const { buildRecentRideActivities } = require('../services/dashboard-ride-monitoring-service');
+const os = require('os');
 
 // ✅ Importar middlewares de autenticação
 const { authenticateJWT, requireRole, requirePermission } = require('../middleware/jwt-auth');
+const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
+const { getAdminUser } = require('../utils/admin-user-cache');
 
 // Firebase integration
 let firebaseConfig = null;
@@ -15,89 +43,430 @@ try {
   logStructured('warn', '⚠️ Firebase config não encontrado', { service: 'dashboard-routes' });
 }
 
+const legacyPromotionsRoutesEnabled =
+  String(process.env.ENABLE_LEGACY_PROMOTIONS_ROUTES || 'false').toLowerCase() === 'true';
+const legacyDashboardUsersMirrorEnabled =
+  String(process.env.ENABLE_LEGACY_DASHBOARD_USERS_RTDB_MIRROR || 'false').toLowerCase() === 'true';
+const DASHBOARD_OPERATION_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
+const DASHBOARD_SUPPORT_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
+const DASHBOARD_FINANCIAL_ROLES = ['admin', 'super-admin', 'manager'];
+const DASHBOARD_MONITORING_ROLES = ['admin', 'super-admin', 'manager', 'development'];
+const DASHBOARD_JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
+  context: 'dashboard-routes'
+});
+
+function emitDriverActivationUnlockedEvent(req, driverId, payload = {}) {
+  const io = req?.app?.get?.('io') || req?.app?.locals?.io || null;
+  if (!io || !driverId) return;
+  io.to(`driver_${driverId}`).emit('driverDocumentStatusUpdated', {
+    driverId,
+    documentType: 'activation_status',
+    status: 'approved',
+    updatedAt: new Date().toISOString(),
+    canGoOnline: true,
+    ...payload
+  });
+}
+
+function createRouteMiddlewareLayer(handle, name) {
+  // Express route stacks use internal Layer instances. Creating the same shape
+  // lets us harden legacy route declarations without rewriting thousands of
+  // lines of dashboard handlers in one risky pass.
+  const Layer = require('express/lib/router/layer');
+  const layer = new Layer('/', {}, handle);
+  layer.method = undefined;
+  layer.name = name || handle.name || '<anonymous>';
+  return layer;
+}
+
+function getDashboardRoutePath(layer) {
+  const pathValue = layer?.route?.path;
+  return typeof pathValue === 'string' ? pathValue : '';
+}
+
+function getDashboardRouteMethods(layer) {
+  return Object.entries(layer?.route?.methods || {})
+    .filter(([, enabled]) => Boolean(enabled))
+    .map(([method]) => String(method).toUpperCase());
+}
+
+function dashboardRouteHasMiddleware(layer, handleRef, name) {
+  return (layer?.route?.stack || []).some((stackLayer) => (
+    stackLayer.handle === handleRef ||
+    stackLayer.handle?._dashboardAutoMiddleware === name ||
+    stackLayer.name === name ||
+    stackLayer.handle?.name === name
+  ));
+}
+
+function resolveDashboardHardeningRoles(methods, routePath) {
+  const normalizedPath = String(routePath || '').toLowerCase();
+  const hasMutation = methods.some((method) => !['GET', 'HEAD', 'OPTIONS'].includes(method));
+
+  if (normalizedPath.includes('/support')) {
+    return DASHBOARD_SUPPORT_ROLES;
+  }
+
+  if (
+    normalizedPath.includes('/subscriptions') ||
+    normalizedPath.includes('/promotions') ||
+    normalizedPath.includes('/revenue') ||
+    normalizedPath.includes('/financial') ||
+    normalizedPath.includes('/costs')
+  ) {
+    return DASHBOARD_FINANCIAL_ROLES;
+  }
+
+  if (
+    normalizedPath.includes('/monitoring') ||
+    normalizedPath.includes('/system/status') ||
+    normalizedPath.includes('/metrics/services')
+  ) {
+    return DASHBOARD_MONITORING_ROLES;
+  }
+
+  if (hasMutation) {
+    return DASHBOARD_OPERATION_ROLES;
+  }
+
+  return DASHBOARD_OPERATION_ROLES;
+}
+
+function hardenDashboardApiRoutes() {
+  let hardenedRoutes = 0;
+
+  for (const layer of router.stack || []) {
+    if (!layer?.route) continue;
+
+    const routePath = getDashboardRoutePath(layer);
+    if (!routePath.startsWith('/api/')) continue;
+
+    if (dashboardRouteHasMiddleware(layer, authenticateJWT, 'authenticateJWT')) {
+      continue;
+    }
+
+    if (dashboardRouteHasMiddleware(layer, authenticateLegacyDashboardSupportJWTOrSkip, 'authenticateLegacyDashboardSupportJWTOrSkip')) {
+      continue;
+    }
+
+    const methods = getDashboardRouteMethods(layer);
+    const roles = resolveDashboardHardeningRoles(methods, routePath);
+    const roleMiddleware = requireRole(roles);
+    roleMiddleware._dashboardAutoMiddleware = 'dashboardAutoRequireRole';
+
+    layer.route.stack.unshift(
+      createRouteMiddlewareLayer(roleMiddleware, 'dashboardAutoRequireRole')
+    );
+    layer.route.stack.unshift(
+      createRouteMiddlewareLayer(authenticateJWT, 'authenticateJWT')
+    );
+    hardenedRoutes += 1;
+  }
+
+  logStructured('info', 'Dashboard API routes hardening aplicado', {
+    service: 'dashboard-routes',
+    hardenedRoutes
+  });
+}
+
+function rejectDashboardMockEndpointInProduction(req, res, routeName) {
+  const productionRuntime = [
+    process.env.NODE_ENV,
+    process.env.APP_ENV,
+    process.env.LEAF_ENV,
+    process.env.ENVIRONMENT
+  ].some((value) => ['production', 'prod'].includes(String(value || '').toLowerCase()));
+  const mockEndpointsEnabled =
+    String(process.env.ENABLE_DASHBOARD_MOCK_ENDPOINTS || 'false').toLowerCase() === 'true';
+
+  if (!productionRuntime || mockEndpointsEnabled) {
+    return false;
+  }
+
+  res.status(410).json({
+    success: false,
+    error: 'Endpoint mock desabilitado em produção',
+    routeName
+  });
+  return true;
+}
+
+const adminDocumentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf' || file.mimetype.startsWith('image/')) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error('Formato inválido. Envie PDF ou imagem.'));
+  }
+});
+
+async function authenticateLegacyDashboardSupportJWTOrSkip(req, res, next) {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '').trim();
+    if (!token) {
+      return next('route');
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, DASHBOARD_JWT_SECRET);
+    } catch {
+      return next('route');
+    }
+
+    const adminUser = await getAdminUser(decoded.userId, {
+      source: 'dashboard-routes.support-legacy-gate',
+      maxAgeMs: 15 * 1000
+    });
+
+    if (!adminUser.exists || adminUser.data?.active === false) {
+      return res.status(403).json({
+        success: false,
+        error: 'Usuário não encontrado ou inativo'
+      });
+    }
+
+    const userData = adminUser.data || {};
+    req.user = {
+      id: decoded.userId,
+      email: decoded.email || userData.email,
+      role: decoded.role || userData.role || 'viewer',
+      permissions: decoded.permissions || userData.permissions || []
+    };
+
+    return next();
+  } catch (error) {
+    logError(error, 'Erro ao validar JWT legado de suporte do dashboard', {
+      service: 'dashboard-routes',
+      operation: 'authenticateLegacyDashboardSupportJWTOrSkip'
+    });
+    return res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor'
+    });
+  }
+}
+
+function parseRatingValue(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeId(value) {
+  return String(value || '').trim();
+}
+
+function flattenTripRatings(tripRatingsRaw = {}) {
+  const flattened = [];
+  if (!tripRatingsRaw || typeof tripRatingsRaw !== 'object') {
+    return flattened;
+  }
+
+  for (const [tripId, tripNode] of Object.entries(tripRatingsRaw)) {
+    if (!tripNode || typeof tripNode !== 'object') continue;
+
+    // Formato 1: trip_ratings/{tripId}/{ratingId}
+    for (const [ratingId, ratingData] of Object.entries(tripNode)) {
+      if (!ratingData || typeof ratingData !== 'object') continue;
+      if (parseRatingValue(ratingData.rating) == null) continue;
+      flattened.push({
+        id: ratingData.id || ratingId,
+        tripId: ratingData.tripId || tripId,
+        ...ratingData
+      });
+    }
+  }
+
+  return flattened;
+}
+
+function computeAverageRatingForUser(userId, userType, bookingArray = [], tripRatings = []) {
+  const safeUserId = normalizeId(userId);
+  if (!safeUserId) return 0;
+
+  // Fonte principal: trip_ratings (mais confiável e recente).
+  const tripRatingsForUser = tripRatings
+    .filter((rating) => normalizeId(rating.targetUserId || rating.targetUser || rating.target_uid) === safeUserId)
+    .map((rating) => parseRatingValue(rating.rating))
+    .filter((value) => value != null);
+
+  if (tripRatingsForUser.length > 0) {
+    return tripRatingsForUser.reduce((sum, value) => sum + value, 0) / tripRatingsForUser.length;
+  }
+
+  // Fallback legado: campos no booking.
+  if (userType === 'driver') {
+    const legacyRatings = bookingArray
+      .filter((booking) => normalizeId(booking.driver || booking.driverId || booking.driver_id) === safeUserId)
+      .map((booking) => parseRatingValue(booking.rating))
+      .filter((value) => value != null);
+
+    if (legacyRatings.length > 0) {
+      return legacyRatings.reduce((sum, value) => sum + value, 0) / legacyRatings.length;
+    }
+  }
+
+  if (userType === 'customer') {
+    const legacyRatings = bookingArray
+      .filter((booking) => normalizeId(booking.customer || booking.customerId || booking.customer_id) === safeUserId)
+      .map((booking) => parseRatingValue(booking.driver_rating))
+      .filter((value) => value != null);
+
+    if (legacyRatings.length > 0) {
+      return legacyRatings.reduce((sum, value) => sum + value, 0) / legacyRatings.length;
+    }
+  }
+
+  return 0;
+}
+
+function normalizeBirthDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const ddmmyyyy = raw.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
+  if (ddmmyyyy) {
+    const [, dd, mm, yyyy] = ddmmyyyy;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  const yyyymmdd = raw.match(/^(\d{4})[\/\-](\d{2})[\/\-](\d{2})$/);
+  if (yyyymmdd) {
+    const [, yyyy, mm, dd] = yyyymmdd;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeSupportDashboardTicket(ticket = {}) {
+  return {
+    id: ticket.id,
+    type: ticket.type || ticket.metadata?.type || 'ticket',
+    title: ticket.title || ticket.subject || 'Ticket de suporte',
+    description: ticket.description || '',
+    userId: ticket.userId || '',
+    userType: ticket.userType || 'customer',
+    status: ticket.status || 'open',
+    priority: ticket.priority || 'N3',
+    category: ticket.category || 'general',
+    location: ticket.location || null,
+    createdAt: ticket.createdAt || new Date().toISOString(),
+    updatedAt: ticket.updatedAt || ticket.createdAt || new Date().toISOString(),
+    assignedTo: ticket.assignedTo || ticket.assignedAgent || null,
+    resolution: ticket.resolution || null,
+    bookingId: ticket.bookingId || ticket.metadata?.bookingId || null,
+    rating: ticket.rating || null,
+    escalationLevel: ticket.escalationLevel || 1,
+    source: ticket.source || 'firestore',
+    user: ticket.user || (
+      ticket.userInfo && typeof ticket.userInfo === 'object'
+        ? {
+            name: ticket.userInfo.name || '',
+            email: ticket.userInfo.email || '',
+            phone: ticket.userInfo.phone || ticket.userInfo.mobile || ''
+          }
+        : null
+    )
+  };
+}
+
+function normalizeMotherName(value) {
+  const name = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return name || null;
+}
+
+function normalizeGenderCode(value) {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+
+  if (!normalized) return null;
+  if (['F', 'FEMININO', 'FEMALE', 'MULHER'].includes(normalized)) return 'F';
+  if (['M', 'MASCULINO', 'MALE', 'HOMEM'].includes(normalized)) return 'M';
+  if (['X', 'OUTRO', 'OTHER', 'N', 'NB', 'NAO BINARIO', 'NAO-BINARIO', 'NON BINARY'].includes(normalized)) {
+    return 'X';
+  }
+  return null;
+}
+
+function genderCodeToLabel(code) {
+  if (code === 'F') return 'Feminino';
+  if (code === 'M') return 'Masculino';
+  if (code === 'X') return 'Outro';
+  return null;
+}
+
+function resolveDriverIdentityData(userData = {}, documents = {}) {
+  const cnhExtracted = documents?.cnh?.extractedData || {};
+  const cnhIdentity = documents?.cnh?.extractedIdentity || {};
+
+  const birthDate = normalizeBirthDate(
+    userData?.birthDate ||
+      userData?.dateOfBirth ||
+      userData?.dob ||
+      userData?.dataNascimento ||
+      cnhExtracted?.dataNascimento ||
+      cnhExtracted?.birthDate ||
+      cnhExtracted?.dateOfBirth ||
+      cnhIdentity?.birthDate ||
+      null
+  );
+
+  const motherName = normalizeMotherName(
+    userData?.motherName ||
+      userData?.nomeMae ||
+      userData?.nomeDaMae ||
+      cnhExtracted?.nomeMae ||
+      cnhExtracted?.nome_da_mae ||
+      cnhExtracted?.nomeDaMae ||
+      cnhExtracted?.mae ||
+      cnhExtracted?.motherName ||
+      cnhExtracted?.filiacaoMae ||
+      cnhExtracted?.filiacao?.mae ||
+      cnhIdentity?.motherName ||
+      null
+  );
+
+  const gender = normalizeGenderCode(
+    userData?.gender ||
+      userData?.genero ||
+      cnhExtracted?.genero ||
+      cnhExtracted?.sexo ||
+      cnhExtracted?.gender ||
+      cnhExtracted?.sex ||
+      cnhIdentity?.gender ||
+      null
+  );
+
+  return {
+    birthDate,
+    motherName,
+    gender,
+    genderLabel: genderCodeToLabel(gender)
+  };
+}
+
 // 📊 DASHBOARD APIs
 // Estas APIs serão implementadas para fornecer dados para o dashboard
 
 // 👥 User Management - DADOS REAIS (Firebase + Redis)
 router.get('/api/users/stats', async (req, res) => {
   try {
-    let stats = {
-      total: 0,
-      customers: 0,
-      drivers: 0,
-      newToday: 0,
-      newThisWeek: 0,
-      newThisMonth: 0,
-      activeToday: 0,
-      growthRate: 0,
-      conversionRate: 0
-    };
-
-    try {
-      // Buscar dados do Firebase se disponível
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-
-        // Buscar usuários do Firebase
-        const usersSnapshot = await db.ref('users').once('value');
-        const users = usersSnapshot.val() || {};
-
-        const userArray = Object.keys(users).map(key => ({ id: key, ...users[key] }));
-        const customers = userArray.filter(user => user.usertype === 'customer');
-        const drivers = userArray.filter(user => user.usertype === 'driver');
-
-        // Calcular datas
-        const today = new Date();
-        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-        const weekStart = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-
-        // Novos usuários por período
-        const newToday = userArray.filter(user => {
-          const createdAt = new Date(user.createdAt || 0);
-          return createdAt >= todayStart;
-        }).length;
-
-        const newThisWeek = userArray.filter(user => {
-          const createdAt = new Date(user.createdAt || 0);
-          return createdAt >= weekStart;
-        }).length;
-
-        const newThisMonth = userArray.filter(user => {
-          const createdAt = new Date(user.createdAt || 0);
-          return createdAt >= monthStart;
-        }).length;
-
-        stats = {
-          total: userArray.length,
-          customers: customers.length,
-          drivers: drivers.length,
-          newToday,
-          newThisWeek,
-          newThisMonth,
-          activeToday: 0, // Será preenchido pelo Redis
-          growthRate: newThisMonth > 0 ? ((newThisMonth / Math.max(userArray.length - newThisMonth, 1)) * 100).toFixed(1) : 0,
-          conversionRate: 0 // Será calculado com dados de corridas
-        };
-      }
-
-      // Complementar com dados do Redis
-      const redis = redisPool.getConnection();
-      const RedisScan = require('../utils/redis-scan');
-
-      const onlineUsers = await redis.scard('online_users') || 0;
-      // ✅ CORRIGIDO: Usar SCAN ao invés de KEYS() (não bloqueante)
-      const totalBookings = await RedisScan.countKeys(redis, 'bookings:*') || 0;
-
-      stats.activeToday = onlineUsers;
-      stats.conversionRate = totalBookings > 0 && onlineUsers > 0 ?
-        ((totalBookings / onlineUsers) * 100).toFixed(1) : 0;
-
-    } catch (error) {
-      logStructured('warn', '⚠️ Erro ao buscar dados reais:', error.message, { service: 'dashboard-routes' });
-      // Manter stats zerados em caso de erro
-    }
-
+    const redis = redisPool.getConnection();
+    const stats = await getUserStats(redis, req.query || {});
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de usuários:', { service: 'dashboard-routes' });
@@ -108,316 +477,76 @@ router.get('/api/users/stats', async (req, res) => {
 // 👥 Enhanced User Management - GESTÃO AVANÇADA
 router.get('/api/users', async (req, res) => {
   try {
-    const {
-      type,
-      status,
-      dateRange,
-      searchTerm,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-      page = 1,
-      limit = 50
-    } = req.query;
-
-    let users = [];
-    let totalCount = 0;
-
-    try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-
-        // Buscar usuários do Firebase
-        const usersSnapshot = await db.ref('users').once('value');
-        const usersData = usersSnapshot.val() || {};
-
-        // Buscar corridas para estatísticas de usuários
-        const bookingsSnapshot = await db.ref('bookings').once('value');
-        const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
-
-        // Converter para array e enriquecer com dados
-        users = Object.keys(usersData).map(userId => {
-          const user = usersData[userId];
-
-          // Calcular estatísticas do usuário
-          const userBookings = bookingArray.filter(booking =>
-            booking.customer === userId || booking.driver === userId
-          );
-
-          const completedBookings = userBookings.filter(booking =>
-            booking.status === 'COMPLETE' || booking.status === 'PAID'
-          );
-
-          const totalSpent = user.usertype === 'customer'
-            ? completedBookings.reduce((sum, booking) => sum + parseFloat(booking.customer_paid || 0), 0)
-            : 0;
-
-          const totalEarned = user.usertype === 'driver'
-            ? completedBookings.reduce((sum, booking) => sum + parseFloat(booking.driver_share || 0), 0)
-            : 0;
-
-          // Calcular rating médio
-          const ratingsAsDriver = bookingArray.filter(b => b.driver === userId && b.rating);
-          const ratingsAsCustomer = bookingArray.filter(b => b.customer === userId && b.driver_rating);
-
-          let averageRating = 0;
-          if (user.usertype === 'driver' && ratingsAsDriver.length > 0) {
-            averageRating = ratingsAsDriver.reduce((sum, b) => sum + parseFloat(b.rating), 0) / ratingsAsDriver.length;
-          } else if (user.usertype === 'customer' && ratingsAsCustomer.length > 0) {
-            averageRating = ratingsAsCustomer.reduce((sum, b) => sum + parseFloat(b.driver_rating), 0) / ratingsAsCustomer.length;
-          }
-
-          return {
-            id: userId,
-            name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-            email: user.email || '',
-            phone: user.mobile || '',
-            type: user.usertype || 'customer',
-            status: user.approved ? 'active' : user.usertype === 'driver' ? 'pending' : 'active',
-            registrationDate: user.createdAt ? new Date(user.createdAt).toISOString().split('T')[0] : '',
-            lastActivity: user.lastLogin ? new Date(user.lastLogin).toISOString().split('T')[0] : '',
-            totalTrips: userBookings.length,
-            completedTrips: completedBookings.length,
-            totalSpent: totalSpent.toFixed(2),
-            totalEarned: totalEarned.toFixed(2),
-            rating: averageRating.toFixed(1),
-            location: {
-              city: user.city || '',
-              state: user.state || ''
-            },
-            profileImage: user.profile_image || '',
-            documents: {
-              verified: user.licenseImage ? true : false,
-              licenseStatus: user.approved ? 'approved' : user.licenseImage ? 'pending' : 'missing'
-            },
-            walletBalance: parseFloat(user.walletBalance || 0).toFixed(2),
-            referralCode: user.referralId || '',
-            vehicleInfo: user.carType || ''
-          };
-        });
-
-        // Aplicar filtros
-        if (type && type !== 'all') {
-          users = users.filter(user => user.type === type);
-        }
-
-        if (status && status !== 'all') {
-          users = users.filter(user => user.status === status);
-        }
-
-        if (searchTerm) {
-          const search = searchTerm.toLowerCase();
-          users = users.filter(user =>
-            user.name.toLowerCase().includes(search) ||
-            user.email.toLowerCase().includes(search) ||
-            user.phone.includes(search) ||
-            user.id.toLowerCase().includes(search)
-          );
-        }
-
-        if (dateRange) {
-          const [startDate, endDate] = dateRange.split(',');
-          if (startDate && endDate) {
-            users = users.filter(user => {
-              const regDate = new Date(user.registrationDate);
-              return regDate >= new Date(startDate) && regDate <= new Date(endDate);
-            });
-          }
-        }
-
-        // Aplicar ordenação
-        users.sort((a, b) => {
-          let aVal = a[sortBy];
-          let bVal = b[sortBy];
-
-          // Converter para números se necessário
-          if (sortBy === 'totalTrips' || sortBy === 'totalSpent' || sortBy === 'rating') {
-            aVal = parseFloat(aVal) || 0;
-            bVal = parseFloat(bVal) || 0;
-          }
-
-          // Converter para datas se necessário
-          if (sortBy === 'registrationDate' || sortBy === 'lastActivity') {
-            aVal = new Date(aVal);
-            bVal = new Date(bVal);
-          }
-
-          if (sortOrder === 'desc') {
-            return bVal > aVal ? 1 : -1;
-          } else {
-            return aVal > bVal ? 1 : -1;
-          }
-        });
-
-        totalCount = users.length;
-
-        // Aplicar paginação
-        const startIndex = (parseInt(page) - 1) * parseInt(limit);
-        const endIndex = startIndex + parseInt(limit);
-        users = users.slice(startIndex, endIndex);
-      }
-    } catch (error) {
-      logStructured('warn', '⚠️ Erro ao buscar usuários do Firebase:', error.message, { service: 'dashboard-routes' });
-    }
-
-    res.json({
-      users,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: totalCount,
-        pages: Math.ceil(totalCount / parseInt(limit))
-      }
-    });
+    const response = await listUsers(req.query || {});
+    res.json(response);
   } catch (error) {
     logError(error, 'Erro ao buscar usuários:', { service: 'dashboard-routes' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// 🚗 Driver Applications - SISTEMA COMPLETO DE APROVAÇÃO
-router.get('/api/drivers/applications', async (req, res) => {
+router.get('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
-    const {
-      status,
-      dateRange,
-      sortBy = 'submissionDate',
-      sortOrder = 'desc',
-      page = 1,
-      limit = 20
-    } = req.query;
-
-    let applications = [];
-    let totalCount = 0;
-
-    try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-
-        // Buscar motoristas pendentes de aprovação
-        const usersSnapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
-        const users = usersSnapshot.val() || {};
-
-        // Buscar carros (para informações do veículo)
-        const carsSnapshot = await db.ref('cars').once('value');
-        const cars = carsSnapshot.val() || {};
-
-        // Buscar documentos de todos os usuários de uma vez
-        const allDocumentsSnapshot = await db.ref('users').once('value');
-        const allUsersData = allDocumentsSnapshot.val() || {};
-
-        applications = []; // Temporário para teste
-        // applications = await Promise.all(Object.keys(users).map(async userId => {
-        const user = users[userId];
-
-        // Buscar carro do motorista
-        const userCar = Object.values(cars).find(car => car.driver === userId);
-
-        // Buscar documentos na nova estrutura: users/{uid}/documents/{documentType}
-        let userDocuments = {};
-        if (allUsersData[userId] && allUsersData[userId].documents) {
-          userDocuments = allUsersData[userId].documents;
-        }
-
-        // Determinar status baseado nos documentos e aprovação
-        let applicationStatus = 'pending';
-        if (user.approved === true) {
-          applicationStatus = 'approved';
-        } else if (user.approved === false) {
-          applicationStatus = 'rejected';
-        } else if (userDocuments.cnh || userDocuments.comprovante_residencia || user.licenseImage || user.verifyIdImage) {
-          applicationStatus = 'in_review';
-        }
-
-        // Analisar documentos - NOVA ESTRUTURA + COMPATIBILIDADE COM ANTIGA
-        const documents = {
-          license: {
-            // Nova estrutura
-            front: userDocuments.cnh?.fileUrl || user.licenseImage || null,
-            back: userDocuments.cnh_verso?.fileUrl || user.licenseImageBack || null,
-            status: userDocuments.cnh ? userDocuments.cnh.status : (user.licenseImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
-            uploadedAt: userDocuments.cnh?.uploadedAt || null,
-            type: userDocuments.cnh?.fileType || null
-          },
-          identity: {
-            // Nova estrutura  
-            front: userDocuments.comprovante_residencia?.fileUrl || user.verifyIdImage || null,
-            back: userDocuments.identidade_verso?.fileUrl || user.verifyIdImageBack || null,
-            status: userDocuments.comprovante_residencia ? userDocuments.comprovante_residencia.status : (user.verifyIdImage ? (user.approved ? 'approved' : 'pending') : 'missing'),
-            uploadedAt: userDocuments.comprovante_residencia?.uploadedAt || null,
-            type: userDocuments.comprovante_residencia?.fileType || null
-          },
-          vehicle: {
-            // Nova estrutura
-            registration: userDocuments.crlv?.fileUrl || userCar?.vehicleRegistration || null,
-            insurance: userDocuments.seguro?.fileUrl || userCar?.vehicleInsurance || null,
-            photos: userCar?.carImage || null,
-            status: userDocuments.crlv ? userDocuments.crlv.status : (userCar ? (user.approved ? 'approved' : 'pending') : 'missing'),
-            uploadedAt: userDocuments.crlv?.uploadedAt || null,
-            type: userDocuments.crlv?.fileType || null
-          },
-          // Adicionar todos os documentos enviados pelo usuário
-          all_documents: Object.keys(userDocuments).map(docType => ({
-            type: docType,
-            fileUrl: userDocuments[docType].fileUrl,
-            status: userDocuments[docType].status,
-            uploadedAt: userDocuments[docType].uploadedAt,
-            fileType: userDocuments[docType].fileType
-          }))
-        };
-
-        return {
-          id: userId,
-          driver: {
-            id: userId,
-            name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-            email: user.email || '',
-            phone: user.mobile || '',
-            city: user.city || '',
-            state: user.state || ''
-          },
-          vehicle: userCar ? {
-            make: userCar.carMake || '',
-            model: userCar.carModel || '',
-            year: userCar.carYear || '',
-            plate: userCar.carNumber || '',
-            color: userCar.carColor || ''
-          } : null,
-          documents,
-          status: applicationStatus,
-          submissionDate: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
-          reviewDate: user.approvedAt ? new Date(user.approvedAt).toISOString() : null,
-          reviewedBy: user.approvedBy || null,
-          rejectionReason: user.rejectionReason || null,
-          notes: user.adminNotes || ''
-        };
-        // });
-
-        // Aplicar filtros
-        if (status && status !== 'all') {
-          applications = applications.filter(app => app.status === status);
-        }
-
-        totalCount = applications.length;
-
-        // Aplicar paginação
-        const startIndex = (parseInt(page) - 1) * parseInt(limit);
-        const endIndex = startIndex + parseInt(limit);
-        applications = applications.slice(startIndex, endIndex);
-      }
-    } catch (error) {
-      logStructured('warn', '⚠️ Erro ao buscar aplicações do Firebase:', error.message, { service: 'dashboard-routes' });
+    const user = await getUserDetails(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
     }
 
-    res.json({
-      applications,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: totalCount,
-        pages: Math.ceil(totalCount / parseInt(limit))
+    return res.json(user);
+  } catch (error) {
+    logError(error, 'Erro ao buscar detalhes do usuário', { service: 'dashboard-routes' });
+    return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// 👤 Atualizar dados cadastrais de usuário via dashboard (admin)
+router.patch('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const safeUserId = normalizeId(userId);
+    if (!safeUserId) {
+      return res.status(400).json({ error: 'userId inválido' });
+    }
+    const legacyDb = firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
+    const updatedUser = await updateUserProfile(safeUserId, req.body || {}, {
+      mirrorToLegacyRtdb: legacyDashboardUsersMirrorEnabled,
+      legacyDb
+    });
+
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    if (updatedUser.skipped) {
+      return res.status(400).json({ error: 'Nenhum campo válido para atualização' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Dados cadastrais atualizados com sucesso',
+      user: {
+        id: safeUserId,
+        firstName: updatedUser.raw?.firstName || '',
+        lastName: updatedUser.raw?.lastName || '',
+        email: updatedUser.email || '',
+        mobile: updatedUser.mobile || '',
+        city: updatedUser.city || '',
+        state: updatedUser.state || '',
+        approved: Boolean(updatedUser.approved),
+        updatedAt: updatedUser.raw?.updatedAt || null
       }
     });
+  } catch (error) {
+    logError(error, 'Erro ao atualizar dados cadastrais de usuário', { service: 'dashboard-routes' });
+    return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// 🚗 Driver Applications - SISTEMA COMPLETO DE APROVAÇÃO
+router.get('/api/drivers/applications', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+  try {
+    const response = await driverApplicationService.listApplications(req.query || {});
+    res.json(response);
   } catch (error) {
     logError(error, 'Erro ao buscar aplicações:', { service: 'dashboard-routes' });
     res.status(500).json({ error: 'Erro interno do servidor' });
@@ -426,11 +555,12 @@ router.get('/api/drivers/applications', async (req, res) => {
 
 // 📋 Aprovar/Rejeitar Documento Específico - NOVO SISTEMA
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/:driverId/documents/:documentType/review', authenticateJWT, requireRole(['admin', 'super-admin', 'manager']), async (req, res) => {
+router.post('/api/drivers/:driverId/documents/:documentType/review', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { driverId, documentType } = req.params;
     const { action, rejectionReason } = req.body; // action: 'approve' | 'reject'
     const reviewedBy = req.user.id; // ✅ ID do admin logado
+    const normalizedDocumentType = sanitizeDocumentType(documentType);
 
     if (!['approve', 'reject'].includes(action)) {
       return res.status(400).json({
@@ -451,7 +581,7 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
         const db = firebaseConfig.getRealtimeDB();
 
         // Verificar se o documento existe
-        const documentRef = db.ref(`users/${driverId}/documents/${documentType}`);
+        const documentRef = db.ref(`users/${driverId}/documents/${normalizedDocumentType}`);
         const documentSnapshot = await documentRef.once('value');
 
         if (!documentSnapshot.exists()) {
@@ -461,13 +591,17 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
           });
         }
 
+        const existingDocument = documentSnapshot.val() || {};
+        const nextStatus = action === 'approve' ? 'approved' : 'rejected';
+        const reviewAtIso = new Date().toISOString();
+
         // ✅ Atualizar status do documento no Firebase Realtime Database
         const reviewData = {
-          status: action === 'approve' ? 'approved' : 'rejected',
-          reviewedAt: new Date().toISOString(),
+          status: nextStatus,
+          reviewedAt: reviewAtIso,
           reviewedBy: reviewedBy, // ✅ ID do admin logado
           reviewedByEmail: req.user.email, // ✅ Email do admin para auditoria
-          updatedAt: new Date().toISOString()
+          updatedAt: reviewAtIso
         };
 
         if (action === 'reject') {
@@ -476,6 +610,31 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
 
         // ✅ Salvar alteração no Firebase Realtime Database
         await documentRef.update(reviewData);
+
+        // Índice denormalizado para consultas rápidas por tipo/status.
+        const statusIndexPath = `driver_documents_index/${normalizedDocumentType}`;
+        const statusBuckets = ['pending', 'approved', 'rejected'];
+        const indexUpdates = {};
+        statusBuckets.forEach((bucket) => {
+          indexUpdates[`${statusIndexPath}/${bucket}/${driverId}`] = null;
+        });
+        indexUpdates[`${statusIndexPath}/${nextStatus}/${driverId}`] = {
+          driverId,
+          documentType: normalizedDocumentType,
+          status: nextStatus,
+          uploadedAt: existingDocument.uploadedAt || null,
+          reviewedAt: reviewAtIso,
+          updatedAt: reviewAtIso,
+          fileName: existingDocument.fileName || null,
+          fileType: existingDocument.fileType || null
+        };
+        await db.ref().update(indexUpdates);
+        await adjustDocumentIndexCounters(
+          db,
+          normalizedDocumentType,
+          existingDocument.status || null,
+          nextStatus
+        );
 
         // ✅ Atualizar também o status geral do motorista se todos os documentos estiverem aprovados
         if (action === 'approve') {
@@ -492,14 +651,27 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
           }
         }
 
-        logStructured('info', `✅ Documento ${documentType} do motorista ${driverId} ${action === 'approve' ? 'aprovado' : 'rejeitado'} por ${req.user.email} (${reviewedBy})`, { service: 'dashboard-routes' });
+        try {
+          await driverApplicationService.syncDriverApplication(driverId, {
+            db,
+            includeRatings: false
+          });
+        } catch (syncError) {
+          logStructured('warn', 'Falha ao sincronizar espelho Firestore da aplicação do motorista', {
+            service: 'dashboard-routes',
+            driverId,
+            error: syncError.message
+          });
+        }
+
+        logStructured('info', `✅ Documento ${normalizedDocumentType} do motorista ${driverId} ${action === 'approve' ? 'aprovado' : 'rejeitado'} por ${req.user.email} (${reviewedBy})`, { service: 'dashboard-routes' });
 
         res.json({
           success: true,
           message: `Documento ${action === 'approve' ? 'aprovado' : 'rejeitado'} com sucesso!`,
           data: {
             driverId,
-            documentType,
+            documentType: normalizedDocumentType,
             action,
             reviewedAt: reviewData.reviewedAt
           }
@@ -525,123 +697,38 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
 
 // 📋 Buscar Documentos de um Motorista Específico - NOVA API
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['admin', 'super-admin', 'manager']), async (req, res) => {
+router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
-
-    try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-
-        // Buscar documentos do motorista
-        const documentsRef = db.ref(`users/${driverId}/documents`);
-        const documentsSnapshot = await documentsRef.once('value');
-
-        const documents = {};
-        if (documentsSnapshot.exists()) {
-          const rawDocuments = documentsSnapshot.val();
-
-          // Organizar documentos
-          Object.keys(rawDocuments).forEach(docType => {
-            documents[docType] = {
-              type: docType,
-              ...rawDocuments[docType]
-            };
-          });
-        }
-
-        // Buscar dados básicos do motorista
-        const userRef = db.ref(`users/${driverId}`);
-        const userSnapshot = await userRef.once('value');
-        const userData = userSnapshot.val() || {};
-
-        // Buscar estrutura de veículos do motorista (legado + atual)
-        const userVehiclesRef = db.ref(`user_vehicles/${driverId}`);
-        const userVehiclesSnapshot = await userVehiclesRef.once('value');
-        const userVehiclesRaw = userVehiclesSnapshot.val() || {};
-
-        const vehiclesRef = db.ref('vehicles');
-        const vehiclesSnapshot = await vehiclesRef.once('value');
-        const vehiclesRaw = vehiclesSnapshot.val() || {};
-
-        const userVehicleEntries = Object.keys(userVehiclesRaw).map((userVehicleId) => {
-          const userVehicle = userVehiclesRaw[userVehicleId] || {};
-          const linkedVehicle = userVehicle.vehicleId ? (vehiclesRaw[userVehicle.vehicleId] || {}) : {};
-
-          const category = linkedVehicle.manualCategory ||
-            linkedVehicle.carType ||
-            linkedVehicle.category ||
-            userVehicle.manualCategory ||
-            userData.carType ||
-            null;
-
-          return {
-            userVehicleId,
-            vehicleId: userVehicle.vehicleId || null,
-            isActive: userVehicle.isActive === true,
-            status: userVehicle.status || (userVehicle.approved === true ? 'approved' : 'pending'),
-            approved: userVehicle.approved === true || userVehicle.status === 'approved',
-            category,
-            plate: linkedVehicle.plate || linkedVehicle.vehicleNumber || linkedVehicle.vehiclePlate || null,
-            brand: linkedVehicle.brand || linkedVehicle.vehicleMake || null,
-            model: linkedVehicle.model || linkedVehicle.vehicleModel || null,
-            year: linkedVehicle.year || linkedVehicle.manufactureYear || null,
-            raw: {
-              userVehicle,
-              vehicle: linkedVehicle
-            }
-          };
-        });
-
-        const activeUserVehicle = userVehicleEntries.find((v) => v.isActive) || null;
-        const normalizedKycStatus = userData.kycStatus ||
-          userData.kycOnboarding?.status ||
-          (userData.kycBlocked === true ? 'blocked' : null) ||
-          'not_started';
-        const kycPayload = userData.kycOnboarding || {};
-
-        res.json({
-          success: true,
-          data: {
-            driverId,
-            driver: {
-              name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
-              email: userData.email || '',
-              phone: userData.mobile || '',
-              approved: userData.approved === true,
-              status: userData.status || (userData.approved === true ? 'approved' : 'pending')
-            },
-            kyc: {
-              status: normalizedKycStatus,
-              blocked: userData.kycBlocked === true || kycPayload.blocked === true,
-              approved: normalizedKycStatus === 'approved' || kycPayload.approved === true,
-              needsReview: normalizedKycStatus === 'pending_review' || kycPayload.needsReview === true,
-              similarity: typeof kycPayload.similarity === 'number' ? kycPayload.similarity : null,
-              message: kycPayload.message || null,
-              updatedAt: userData.kycUpdatedAt || kycPayload.updatedAt || null
-            },
-            documents,
-            totalDocuments: Object.keys(documents).length,
-            vehicleConfig: {
-              activeUserVehicleId: activeUserVehicle?.userVehicleId || null,
-              activeVehicleId: activeUserVehicle?.vehicleId || null,
-              activeVehiclePlate: activeUserVehicle?.plate || userData.vehicleNumber || userData.carPlate || null,
-              category: activeUserVehicle?.category || userData.carType || null,
-              acceptPlusWithElite: userData.acceptPlusWithElite === true || userData.acceptPlusRides === true || userData.receivePlusRides === true,
-              vehicles: userVehicleEntries
-            }
-          }
-        });
-      } else {
-        throw new Error('Firebase não configurado');
-      }
-    } catch (error) {
-      logError(error, '❌ Erro ao buscar documentos:', { service: 'dashboard-routes' });
-      res.status(500).json({
+    const application = await driverApplicationService.getDriverApplication(driverId, {
+      refresh: true,
+      includeRatings: true
+    });
+    if (!application) {
+      return res.status(404).json({
         success: false,
-        message: `Erro ao buscar documentos: ${error.message}`
+        message: 'Motorista não encontrado.'
       });
     }
+
+    res.json({
+      success: true,
+      data: {
+        driverId,
+        driver: application.driver,
+        ratingInsights: application.ratingInsights || {
+          averageRating: null,
+          totalRatings: 0,
+          latestNegativeReviews: []
+        },
+        kyc: application.kyc || {},
+        documents: application.documents || {},
+        totalDocuments: application.totalDocuments || 0,
+        vehicleConfig: application.vehicleConfig || {
+          vehicles: []
+        }
+      }
+    });
   } catch (error) {
     logError(error, '❌ Erro na API de documentos:', { service: 'dashboard-routes' });
     res.status(500).json({
@@ -651,9 +738,277 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(['ad
   }
 });
 
+function sanitizeDocumentType(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-]/g, '_')
+    .replace(/_+/g, '_');
+}
+
+function sanitizeFilename(value) {
+  return String(value || 'documento')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_');
+}
+
+const MEI_DOCUMENTS_ENABLED =
+  String(process.env.ENABLE_DRIVER_MEI_DOCUMENTS || 'false').toLowerCase() === 'true';
+const REVIEWABLE_DOCUMENT_TYPES = [
+  'cnh',
+  'crlv',
+  'antecedentes_criminais',
+  ...(MEI_DOCUMENTS_ENABLED ? ['mei'] : [])
+];
+const REVIEWABLE_DOCUMENT_STATUSES = ['pending', 'approved', 'rejected'];
+const REVIEWABLE_DOCUMENT_SORT_FIELDS = ['uploadedAt', 'updatedAt', 'reviewedAt'];
+
+function normalizeQueueStatus(value) {
+  const normalized = String(value || 'pending').trim().toLowerCase();
+  if (normalized === 'all') return 'all';
+  return REVIEWABLE_DOCUMENT_STATUSES.includes(normalized) ? normalized : 'pending';
+}
+
+function normalizeQueueSortField(value) {
+  const normalized = String(value || 'uploadedAt').trim();
+  return REVIEWABLE_DOCUMENT_SORT_FIELDS.includes(normalized) ? normalized : 'uploadedAt';
+}
+
+function normalizeQueueSortOrder(value) {
+  const normalized = String(value || 'desc').trim().toLowerCase();
+  return normalized === 'asc' ? 'asc' : 'desc';
+}
+
+function parseTimestampValue(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeIndexStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return REVIEWABLE_DOCUMENT_STATUSES.includes(normalized) ? normalized : null;
+}
+
+async function adjustDocumentIndexCounters(db, documentType, previousStatus, nextStatus) {
+  const safeDocumentType = sanitizeDocumentType(documentType);
+  if (!safeDocumentType) return;
+
+  const fromStatus = normalizeIndexStatus(previousStatus);
+  const toStatus = normalizeIndexStatus(nextStatus);
+
+  if (!fromStatus && !toStatus) return;
+  if (fromStatus === toStatus) return;
+
+  const deltas = {};
+  if (fromStatus) deltas[fromStatus] = (deltas[fromStatus] || 0) - 1;
+  if (toStatus) deltas[toStatus] = (deltas[toStatus] || 0) + 1;
+
+  await Promise.all(
+    Object.entries(deltas).map(([status, delta]) =>
+      db.ref(`driver_documents_index_stats/${safeDocumentType}/${status}`).transaction((current) => {
+        const currentNumber = Number.parseInt(current, 10);
+        const safeCurrent = Number.isFinite(currentNumber) ? currentNumber : 0;
+        const nextValue = safeCurrent + delta;
+        return nextValue > 0 ? nextValue : 0;
+      })
+    )
+  );
+}
+
+// 📚 Fila de revisão de documentos usando índice denormalizado
+router.get(
+  '/api/drivers/documents/review-queue',
+  authenticateJWT,
+  requireRole(DASHBOARD_OPERATION_ROLES),
+  async (req, res) => {
+    try {
+      const data = await driverApplicationService.listReviewQueue(req.query || {});
+      return res.json({
+        success: true,
+        data
+      });
+    } catch (error) {
+      logError(error, 'Erro ao buscar fila de revisão de documentos', { service: 'dashboard-routes' });
+      return res.status(500).json({
+        success: false,
+        message: `Erro ao buscar fila de revisão: ${error.message}`
+      });
+    }
+  }
+);
+
+// 📎 Upload de documento pelo dashboard (ex.: certidão de antecedentes)
+router.post(
+  '/api/drivers/:driverId/documents/:documentType/upload',
+  authenticateJWT,
+  requireRole(DASHBOARD_OPERATION_ROLES),
+  (req, res, next) => {
+    adminDocumentUpload.single('file')(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: err.message || 'Falha ao receber arquivo'
+        });
+      }
+      return next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const { driverId } = req.params;
+      const documentType = sanitizeDocumentType(req.params.documentType);
+
+      if (!driverId || !documentType) {
+        return res.status(400).json({
+          success: false,
+          message: 'driverId e documentType são obrigatórios.'
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'Arquivo é obrigatório.'
+        });
+      }
+
+      if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+        return res.status(503).json({
+          success: false,
+          message: 'Firebase não configurado.'
+        });
+      }
+
+      const db = firebaseConfig.getRealtimeDB();
+      const userSnapshot = await db.ref(`users/${driverId}`).once('value');
+      if (!userSnapshot.exists()) {
+        return res.status(404).json({
+          success: false,
+          message: 'Motorista não encontrado.'
+        });
+      }
+
+      const requestedMime = String(req.file.mimetype || '').toLowerCase();
+      if (documentType === 'antecedentes_criminais' && requestedMime !== 'application/pdf') {
+        return res.status(400).json({
+          success: false,
+          message: 'A certidão de antecedentes deve ser enviada em PDF.'
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      const bucketName = process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app';
+      const bucket = admin.storage().bucket(bucketName);
+      const fileName = sanitizeFilename(req.file.originalname || `${documentType}.pdf`);
+      const extension = path.extname(fileName) || (requestedMime === 'application/pdf' ? '.pdf' : '');
+      const objectPath = `documents/${driverId}/${documentType}/${Date.now()}_${fileName.replace(extension, '')}${extension}`;
+      const storageFile = bucket.file(objectPath);
+
+      await storageFile.save(req.file.buffer, {
+        resumable: false,
+        metadata: {
+          contentType: req.file.mimetype,
+          metadata: {
+            uploadedBy: String(req.user?.id || ''),
+            uploadedByEmail: String(req.user?.email || ''),
+            documentType,
+            driverId
+          }
+        }
+      });
+
+      const [signedUrl] = await storageFile.getSignedUrl({
+        action: 'read',
+        expires: '2035-01-01'
+      });
+
+      const documentPayload = {
+        type: documentType,
+        status: 'pending',
+        fileUrl: signedUrl,
+        filePath: objectPath,
+        fileType: req.file.mimetype,
+        fileName,
+        fileSize: Number(req.file.size || 0),
+        uploadedAt: nowIso,
+        uploadedBy: String(req.user?.id || ''),
+        uploadedByEmail: String(req.user?.email || ''),
+        updatedAt: nowIso
+      };
+
+      const documentPath = `users/${driverId}/documents/${documentType}`;
+      const previousDocumentSnapshot = await db.ref(documentPath).once('value');
+      const previousDocument = previousDocumentSnapshot.val() || {};
+      const previousStatus = previousDocument?.status || null;
+      const statusIndexPath = `driver_documents_index/${documentType}`;
+      const indexPayload = {
+        driverId,
+        documentType,
+        status: 'pending',
+        uploadedAt: nowIso,
+        reviewedAt: null,
+        updatedAt: nowIso,
+        fileName,
+        fileType: req.file.mimetype
+      };
+
+      await db.ref().update({
+        [documentPath]: documentPayload,
+        [`${statusIndexPath}/pending/${driverId}`]: indexPayload,
+        [`${statusIndexPath}/approved/${driverId}`]: null,
+        [`${statusIndexPath}/rejected/${driverId}`]: null
+      });
+      await adjustDocumentIndexCounters(db, documentType, previousStatus, 'pending');
+
+      try {
+        await driverApplicationService.syncDriverApplication(driverId, {
+          db,
+          includeRatings: false
+        });
+      } catch (syncError) {
+        logStructured('warn', 'Falha ao sincronizar espelho Firestore após upload de documento no dashboard', {
+          service: 'dashboard-routes',
+          driverId,
+          documentType,
+          error: syncError.message
+        });
+      }
+
+      logStructured('info', 'Documento enviado via dashboard', {
+        service: 'dashboard-routes',
+        driverId,
+        documentType,
+        uploadedBy: req.user?.email || req.user?.id || 'admin',
+        fileSize: documentPayload.fileSize
+      });
+
+      return res.json({
+        success: true,
+        message: 'Documento enviado com sucesso.',
+        data: {
+          driverId,
+          documentType,
+          fileUrl: signedUrl,
+          status: 'pending'
+        }
+      });
+    } catch (error) {
+      logError(error, 'Erro ao fazer upload de documento no dashboard', { service: 'dashboard-routes' });
+      return res.status(500).json({
+        success: false,
+        message: `Erro ao enviar documento: ${error.message}`
+      });
+    }
+  }
+);
+
 // 🚗 Atualizar configuração manual de veículo/categoria do motorista
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRole(['admin', 'super-admin', 'manager']), async (req, res) => {
+router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
     const {
@@ -672,10 +1027,10 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
     }
 
     const normalizedCategory = category ? String(category).trim().toLowerCase() : null;
-    if (normalizedCategory && !['plus', 'elite'].includes(normalizedCategory)) {
+    if (normalizedCategory && !['plus', 'elite', 'moto'].includes(normalizedCategory)) {
       return res.status(400).json({
         success: false,
-        message: 'Categoria inválida. Use plus ou elite.'
+        message: 'Categoria inválida. Use plus, elite ou moto.'
       });
     }
 
@@ -712,38 +1067,152 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
       });
     }
 
+    const selectedVehicleId = selected.vehicleId || null;
+    const nowIso = new Date().toISOString();
+    if (setActive !== false && !selectedVehicleId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Não é possível ativar vínculo sem vehicleId associado.'
+      });
+    }
+
+    const releaseVehicleLockForDriver = async (vehicleId) => {
+      if (!vehicleId) return;
+      const lockRef = db.ref(`vehicle_active_assignment/${vehicleId}`);
+      await lockRef.transaction((current) => {
+        if (!current) return current;
+        const currentUserId = String(current.userId || current.driverId || '');
+        if (currentUserId !== String(driverId)) return current;
+        return null;
+      });
+    };
+
+    const acquireVehicleLockForDriver = async (vehicleId) => {
+      if (!vehicleId) return { ok: false, conflict: null };
+      const lockRef = db.ref(`vehicle_active_assignment/${vehicleId}`);
+      const lockPayload = {
+        userId: driverId,
+        driverId,
+        vehicleId,
+        userVehicleId,
+        source: 'dashboard_admin',
+        assignedAt: nowIso,
+        updatedAt: nowIso
+      };
+
+      const tx = await lockRef.transaction((current) => {
+        if (!current) return lockPayload;
+        const currentUserId = String(current.userId || current.driverId || '');
+        if (currentUserId === String(driverId)) {
+          return {
+            ...current,
+            ...lockPayload,
+            assignedAt: current.assignedAt || nowIso
+          };
+        }
+        return;
+      });
+
+      if (!tx.committed) {
+        return {
+          ok: false,
+          conflict: tx?.snapshot?.val() || null
+        };
+      }
+
+      return {
+        ok: true,
+        conflict: null
+      };
+    };
+
+    const lockAffectedVehicleIds = new Set();
+    const currentlyActiveVehicleIds = [...new Set(
+      Object.values(userVehicles)
+        .filter((item) => item?.isActive === true && item?.vehicleId)
+        .map((item) => String(item.vehicleId))
+    )];
+
+    for (const activeVehicleId of currentlyActiveVehicleIds) {
+      if (setActive !== false && selectedVehicleId && String(activeVehicleId) === String(selectedVehicleId)) {
+        continue;
+      }
+      lockAffectedVehicleIds.add(String(activeVehicleId));
+      await releaseVehicleLockForDriver(String(activeVehicleId));
+    }
+
+    if (selectedVehicleId) {
+      lockAffectedVehicleIds.add(String(selectedVehicleId));
+      if (setActive !== false) {
+        const acquireResult = await acquireVehicleLockForDriver(String(selectedVehicleId));
+        if (!acquireResult.ok) {
+          const conflictUserId = acquireResult?.conflict?.userId || acquireResult?.conflict?.driverId || null;
+          return res.status(409).json({
+            success: false,
+            code: 'VEHICLE_ALREADY_ACTIVE',
+            message: conflictUserId
+              ? `Este veículo já está ativo no perfil ${conflictUserId}.`
+              : 'Este veículo já está ativo em outro perfil.',
+            data: {
+              vehicleId: selectedVehicleId,
+              conflict: acquireResult?.conflict || null
+            }
+          });
+        }
+      } else {
+        await releaseVehicleLockForDriver(String(selectedVehicleId));
+      }
+    }
+
     const updates = {};
     Object.keys(userVehicles).forEach((id) => {
       updates[`user_vehicles/${driverId}/${id}/isActive`] = false;
-      updates[`user_vehicles/${driverId}/${id}/updatedAt`] = new Date().toISOString();
+      updates[`user_vehicles/${driverId}/${id}/updatedAt`] = nowIso;
     });
 
     updates[`user_vehicles/${driverId}/${userVehicleId}/isActive`] = setActive !== false;
-    updates[`user_vehicles/${driverId}/${userVehicleId}/updatedAt`] = new Date().toISOString();
+    updates[`user_vehicles/${driverId}/${userVehicleId}/updatedAt`] = nowIso;
+    updates[`users/${driverId}/activeVehicleId`] = setActive !== false ? (selectedVehicleId || '') : '';
+    updates[`users/${driverId}/updatedAt`] = nowIso;
 
     if (vehicleStatus) {
       const nextStatus = String(vehicleStatus).toLowerCase();
       updates[`user_vehicles/${driverId}/${userVehicleId}/status`] = nextStatus;
       updates[`user_vehicles/${driverId}/${userVehicleId}/approved`] = ['approved', 'active'].includes(nextStatus);
-      updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedAt`] = new Date().toISOString();
+      updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedAt`] = nowIso;
       updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedBy`] = req.user.id;
     }
 
     if (normalizedCategory) {
-      const categoryLabel = normalizedCategory === 'elite' ? 'Leaf Elite' : 'Leaf Plus';
+      const categoryLabel = normalizedCategory === 'elite'
+        ? 'Leaf Elite'
+        : normalizedCategory === 'moto'
+          ? 'Leaf Moto'
+          : 'Leaf Plus';
       if (selected.vehicleId) {
         updates[`vehicles/${selected.vehicleId}/manualCategory`] = normalizedCategory;
         updates[`vehicles/${selected.vehicleId}/carType`] = categoryLabel;
         updates[`vehicles/${selected.vehicleId}/category`] = normalizedCategory;
-        updates[`vehicles/${selected.vehicleId}/updatedAt`] = new Date().toISOString();
+        updates[`vehicles/${selected.vehicleId}/updatedAt`] = nowIso;
       }
       updates[`users/${driverId}/carType`] = categoryLabel;
-      updates[`users/${driverId}/updatedAt`] = new Date().toISOString();
+      updates[`users/${driverId}/updatedAt`] = nowIso;
     }
 
     if (typeof acceptPlusWithElite === 'boolean') {
       updates[`users/${driverId}/acceptPlusWithElite`] = acceptPlusWithElite;
-      updates[`users/${driverId}/updatedAt`] = new Date().toISOString();
+      updates[`users/${driverId}/updatedAt`] = nowIso;
+    }
+
+    const lockIds = [...lockAffectedVehicleIds];
+    for (const lockVehicleId of lockIds) {
+      const assignmentSnapshot = await db.ref(`vehicle_active_assignment/${lockVehicleId}`).once('value');
+      const assignment = assignmentSnapshot.val() || null;
+      const assignedUserId = assignment ? (assignment.userId || assignment.driverId || null) : null;
+      updates[`vehicles/${lockVehicleId}/activeDriverId`] = assignedUserId;
+      updates[`vehicles/${lockVehicleId}/activeUserVehicleId`] = assignment?.userVehicleId || null;
+      updates[`vehicles/${lockVehicleId}/isInUseByDriver`] = Boolean(assignedUserId);
+      updates[`vehicles/${lockVehicleId}/updatedAt`] = nowIso;
     }
 
     await db.ref().update(updates);
@@ -759,17 +1228,23 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
       const resolvedCategory = normalizedCategory ||
         selectedVehicleData.manualCategory ||
         selectedVehicleData.category ||
-        (String(userData.carType || '').toLowerCase().includes('elite') ? 'elite' : 'plus');
+        (
+          String(userData.carType || '').toLowerCase().includes('elite')
+            ? 'elite'
+            : String(userData.carType || '').toLowerCase().includes('moto')
+              ? 'moto'
+              : 'plus'
+        );
 
       await redis.hset(`driver:${driverId}`, {
-        carType: resolvedCategory === 'elite' ? 'Leaf Elite' : 'Leaf Plus',
+        carType: resolvedCategory === 'elite' ? 'Leaf Elite' : resolvedCategory === 'moto' ? 'Leaf Moto' : 'Leaf Plus',
         vehicleCategory: resolvedCategory,
         vehicleNumber: plate,
         acceptsPlusWithElite: String(userData.acceptPlusWithElite === true || acceptPlusWithElite === true),
-        activeVehicleId: selected.vehicleId || '',
+        activeVehicleId: setActive !== false ? (selected.vehicleId || '') : '',
         driverApproved: String(userData.approved === true),
         vehicleApproved: String((selected.status || '') === 'approved' || selected.approved === true),
-        lastVehicleConfigUpdate: new Date().toISOString()
+        lastVehicleConfigUpdate: nowIso
       });
       await redis.del(`driver_eligibility_profile:${driverId}`);
     } catch (redisSyncError) {
@@ -803,7 +1278,7 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
 
 // 🚗 Aprovar Aplicação de Motorista
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRole(['admin', 'super-admin', 'manager']), async (req, res) => {
+router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { id } = req.params;
     const { notes } = req.body;
@@ -845,14 +1320,69 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
         const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
         const documents = documentsSnapshot.val() || {};
         const documentUpdates = {};
+        const counterTransitions = [];
+        const reviewedAtIso = new Date().toISOString();
         Object.keys(documents).forEach(docType => {
-          documentUpdates[`users/${id}/documents/${docType}/status`] = 'approved';
-          documentUpdates[`users/${id}/documents/${docType}/reviewedAt`] = new Date().toISOString();
-          documentUpdates[`users/${id}/documents/${docType}/reviewedBy`] = adminId;
+          const normalizedDocType = sanitizeDocumentType(docType);
+          if (!normalizedDocType) return;
+          const existingDoc = documents[docType] || {};
+          const previousStatus = existingDoc.status || null;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/status`] = 'approved';
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedAt`] = reviewedAtIso;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedBy`] = adminId;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/updatedAt`] = reviewedAtIso;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/rejectionReason`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/pending/${id}`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/rejected/${id}`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/approved/${id}`] = {
+            driverId: id,
+            documentType: normalizedDocType,
+            status: 'approved',
+            uploadedAt: existingDoc.uploadedAt || null,
+            reviewedAt: reviewedAtIso,
+            updatedAt: reviewedAtIso,
+            fileName: existingDoc.fileName || null,
+            fileType: existingDoc.fileType || null
+          };
+          counterTransitions.push({ documentType: normalizedDocType, previousStatus, nextStatus: 'approved' });
         });
         if (Object.keys(documentUpdates).length > 0) {
           await db.ref().update(documentUpdates);
+          if (counterTransitions.length > 0) {
+            await Promise.all(
+              counterTransitions.map((entry) =>
+                adjustDocumentIndexCounters(db, entry.documentType, entry.previousStatus, entry.nextStatus)
+              )
+            );
+          }
         }
+
+        const activationUpdatedAt = new Date().toISOString();
+        await Promise.all([
+          db.ref(`users/${id}/driverActivationConsent`).update({
+            backgroundCheck: true,
+            updatedAt: activationUpdatedAt
+          }),
+          db.ref(`driver_activation/${id}/consent/backgroundCheck`).update({
+            accepted: true,
+            acceptedAt: activationUpdatedAt,
+            updatedAt: activationUpdatedAt
+          })
+        ]);
+
+        try {
+          await recomputeDriverActivationStatus(id);
+        } catch (recomputeError) {
+          logStructured('warn', 'Falha ao recomputar ativação após aprovação de aplicação', {
+            service: 'dashboard-routes',
+            driverId: id,
+            error: recomputeError?.message || String(recomputeError)
+          });
+        }
+
+        emitDriverActivationUnlockedEvent(req, id, {
+          activationState: 'ACTIVE'
+        });
 
         // Melhor esforço: liberar bloqueio KYC para refletir aprovação manual.
         try {
@@ -865,6 +1395,19 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
             service: 'dashboard-routes',
             driverId: id,
             error: kycUnblockError.message
+          });
+        }
+
+        try {
+          await driverApplicationService.syncDriverApplication(id, {
+            db,
+            includeRatings: false
+          });
+        } catch (syncError) {
+          logStructured('warn', 'Falha ao sincronizar espelho Firestore após aprovação de motorista', {
+            service: 'dashboard-routes',
+            driverId: id,
+            error: syncError.message
           });
         }
 
@@ -890,7 +1433,7 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
 
 // 🚗 Rejeitar Aplicação de Motorista
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole(['admin', 'super-admin', 'manager']), async (req, res) => {
+router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { id } = req.params;
     const { notes, rejectionReasons } = req.body;
@@ -937,14 +1480,41 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
         const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
         const documents = documentsSnapshot.val() || {};
         const documentUpdates = {};
+        const counterTransitions = [];
+        const reviewedAtIso = new Date().toISOString();
         Object.keys(documents).forEach(docType => {
-          documentUpdates[`users/${id}/documents/${docType}/status`] = 'rejected';
-          documentUpdates[`users/${id}/documents/${docType}/reviewedAt`] = new Date().toISOString();
-          documentUpdates[`users/${id}/documents/${docType}/reviewedBy`] = adminId;
-          documentUpdates[`users/${id}/documents/${docType}/rejectionReason`] = rejectionReasons?.join(', ') || 'Aplicação rejeitada';
+          const normalizedDocType = sanitizeDocumentType(docType);
+          if (!normalizedDocType) return;
+          const existingDoc = documents[docType] || {};
+          const previousStatus = existingDoc.status || null;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/status`] = 'rejected';
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedAt`] = reviewedAtIso;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedBy`] = adminId;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/updatedAt`] = reviewedAtIso;
+          documentUpdates[`users/${id}/documents/${normalizedDocType}/rejectionReason`] = rejectionReasons?.join(', ') || 'Aplicação rejeitada';
+          documentUpdates[`driver_documents_index/${normalizedDocType}/pending/${id}`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/approved/${id}`] = null;
+          documentUpdates[`driver_documents_index/${normalizedDocType}/rejected/${id}`] = {
+            driverId: id,
+            documentType: normalizedDocType,
+            status: 'rejected',
+            uploadedAt: existingDoc.uploadedAt || null,
+            reviewedAt: reviewedAtIso,
+            updatedAt: reviewedAtIso,
+            fileName: existingDoc.fileName || null,
+            fileType: existingDoc.fileType || null
+          };
+          counterTransitions.push({ documentType: normalizedDocType, previousStatus, nextStatus: 'rejected' });
         });
         if (Object.keys(documentUpdates).length > 0) {
           await db.ref().update(documentUpdates);
+          if (counterTransitions.length > 0) {
+            await Promise.all(
+              counterTransitions.map((entry) =>
+                adjustDocumentIndexCounters(db, entry.documentType, entry.previousStatus, entry.nextStatus)
+              )
+            );
+          }
         }
 
         // Melhor esforço: bloquear também no pipeline KYC para impedir operação.
@@ -959,6 +1529,19 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
             service: 'dashboard-routes',
             driverId: id,
             error: kycBlockError.message
+          });
+        }
+
+        try {
+          await driverApplicationService.syncDriverApplication(id, {
+            db,
+            includeRatings: false
+          });
+        } catch (syncError) {
+          logStructured('warn', 'Falha ao sincronizar espelho Firestore após rejeição de motorista', {
+            service: 'dashboard-routes',
+            driverId: id,
+            error: syncError.message
           });
         }
 
@@ -982,8 +1565,67 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
   }
 });
 
+// Ledger financeiro: relatorios e reconciliacao de corridas
+router.get('/api/financial/reconciliation/reports', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+  const result = await financialReconciliationDashboardService.listReports({
+    status: req.query.status,
+    severity: req.query.severity,
+    code: req.query.code,
+    rideId: req.query.rideId,
+    limit: req.query.limit,
+    cursor: req.query.cursor,
+    includeTestData: req.query.includeTestData
+  });
+
+  if (!result.success) {
+    const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
+    return res.status(statusCode).json(result);
+  }
+
+  return res.json(result);
+});
+
+router.get('/api/financial/reconciliation/rides/:rideId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+  const result = await financialReconciliationDashboardService.getRideDetail(req.params.rideId);
+
+  if (!result.success) {
+    const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
+    return res.status(statusCode).json(result);
+  }
+
+  return res.json(result);
+});
+
+router.post('/api/financial/reconciliation/rides/:rideId/run', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+  const ledgerService = new FinancialLedgerService();
+  const result = await ledgerService.reconcileRideFinancials({ rideId: req.params.rideId });
+
+  if (!result.success) {
+    const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
+    return res.status(statusCode).json(result);
+  }
+
+  return res.json(result);
+});
+
+router.post('/api/financial/reconciliation/run', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+  const ledgerService = new FinancialLedgerService();
+  const result = await ledgerService.reconcileRecentRideFinancials({
+    rideId: req.body?.rideId || req.query.rideId || null,
+    limit: req.body?.limit || req.query.limit || 100,
+    includeTestData: req.body?.includeTestData || req.query.includeTestData || false
+  });
+
+  if (!result.success) {
+    const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
+    return res.status(statusCode).json(result);
+  }
+
+  return res.json(result);
+});
+
 // 📊 Financial Metrics - DADOS REAIS (Firebase)
-router.get('/api/metrics/financial', async (req, res) => {
+router.get('/api/metrics/financial', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   try {
     const { period } = req.query;
 
@@ -1105,7 +1747,7 @@ router.get('/api/metrics/financial', async (req, res) => {
 });
 
 // 💰 Advanced Financial Metrics - CUSTOS OPERACIONAIS REAIS
-router.get('/api/metrics/financial/advanced', async (req, res) => {
+router.get('/api/metrics/financial/advanced', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   try {
     const { period = 'month' } = req.query;
 
@@ -1352,23 +1994,19 @@ router.get('/api/analytics/bookings', async (req, res) => {
           const totalDistance = completed.reduce((sum, booking) => {
             return sum + parseFloat(booking.distance || 0);
           }, 0);
-
-          const totalDuration = completed.reduce((sum, booking) => {
-            const startTime = new Date(booking.tripstart || booking.tripdate);
-            const endTime = new Date(booking.tripend || booking.tripdate);
-            return sum + Math.max(0, (endTime - startTime) / (1000 * 60)); // em minutos
-          }, 0);
-
-          const totalRating = completed.reduce((sum, booking) => {
-            return sum + parseFloat(booking.rating || 0);
+          const avgWaitMinutes = calculateAverageWaitTime(completed);
+          const avgTripMinutes = calculateAverageTripTime(completed);
+          const ratedBookings = completed.filter((booking) => Number.isFinite(Number.parseFloat(booking.rating)));
+          const totalRating = ratedBookings.reduce((sum, booking) => {
+            return sum + Number.parseFloat(booking.rating || 0);
           }, 0);
 
           analytics.performance = {
-            averageWaitTime: Math.random() * 5 + 2, // TODO: Calcular tempo real de espera
-            averageTripTime: completed.length > 0 ? (totalDuration / completed.length).toFixed(1) : 0,
+            averageWaitTime: Number(avgWaitMinutes.toFixed(1)),
+            averageTripTime: Number(avgTripMinutes.toFixed(1)),
             averageDistance: completed.length > 0 ? (totalDistance / completed.length).toFixed(2) : 0,
-            averageRating: completed.length > 0 ? (totalRating / completed.filter(b => b.rating).length).toFixed(1) : 0,
-            peakHours: [] // TODO: Calcular horários de pico
+            averageRating: ratedBookings.length > 0 ? (totalRating / ratedBookings.length).toFixed(1) : 0,
+            peakHours: getPeakHours(completed)
           };
         }
 
@@ -1406,7 +2044,7 @@ router.get('/api/analytics/bookings', async (req, res) => {
             count: cancelReasons[reason],
             percentage: ((cancelReasons[reason] / Math.max(cancelled.length, 1)) * 100).toFixed(1)
           })),
-          byTimeOfDay: [], // TODO: Implementar análise por horário
+          byTimeOfDay: getHourlyTripDistribution(cancelled).filter(({ trips }) => trips > 0),
           customerCancellations: cancelled.filter(b => b.cancelled_by === 'customer').length,
           driverCancellations: cancelled.filter(b => b.cancelled_by === 'driver').length
         };
@@ -1422,7 +2060,7 @@ router.get('/api/analytics/bookings', async (req, res) => {
   }
 });
 
-router.get('/api/metrics/services', async (req, res) => {
+router.get('/api/metrics/services', authenticateJWT, requireRole(DASHBOARD_MONITORING_ROLES), async (req, res) => {
   try {
     let metrics = {
       websocket: {
@@ -1457,41 +2095,47 @@ router.get('/api/metrics/services', async (req, res) => {
 
       // Informações reais do Redis
       const redisInfo = await redis.info();
-      const connectedClients = await redis.client('list');
       const dbSize = await redis.dbsize();
+      const redisPingStart = Date.now();
+      await redis.ping();
+      const redisPingMs = Date.now() - redisPingStart;
 
       // Parse das informações do Redis
-      const memorySection = redisInfo.split('\r\n').find(line => line.includes('used_memory_human:'));
-      const memoryUsed = memorySection ? parseFloat(memorySection.split(':')[1].replace('M', '')) : 0;
+      const memoryUsedMb = extractRedisMemoryInMb(redisInfo);
+      const totalCommandsProcessed = extractRedisStatValue(redisInfo, 'total_commands_processed');
+      const keyspaceHits = extractRedisStatValue(redisInfo, 'keyspace_hits');
+      const keyspaceMisses = extractRedisStatValue(redisInfo, 'keyspace_misses');
+      const totalLookups = keyspaceHits + keyspaceMisses;
+      const hitRate = totalLookups > 0 ? (keyspaceHits / totalLookups) * 100 : 0;
 
       metrics.redis = {
-        operations: dbSize,
-        hitRate: Math.min(95, Math.max(85, 90 + Math.random() * 10)), // Entre 85-95%
-        memory: memoryUsed,
-        connections: connectedClients.length || 1
+        operations: totalCommandsProcessed || dbSize,
+        hitRate: Number(hitRate.toFixed(2)),
+        memory: Number(memoryUsedMb.toFixed(2)),
+        connections: extractRedisConnections(redisInfo)
       };
 
       // Dados reais do WebSocket (via global se disponível)
       if (global.io && global.io.engine) {
         metrics.websocket = {
           connections: global.io.engine.clientsCount || 0,
-          messagesPerSec: Math.floor(Math.random() * 100), // Precisaria de contador real
-          latency: Math.floor(Math.random() * 50) + 20, // 20-70ms
-          uptime: 99.5 + Math.random() * 0.5 // 99.5-100%
+          messagesPerSec: 0, // Sem contador dedicado ainda
+          latency: redisPingMs,
+          uptime: 100
         };
       }
 
       // Dados do sistema (básicos)
-      const os = require('os');
       const freeMem = os.freemem();
       const totalMem = os.totalmem();
       const cpuLoad = os.loadavg()[0];
+      const cores = Math.max(os.cpus().length, 1);
 
       metrics.vultr = {
-        cpu: Math.min(100, (cpuLoad * 25)), // Aproximação do load
+        cpu: Math.min(100, (cpuLoad / cores) * 100),
         memory: ((totalMem - freeMem) / totalMem) * 100,
-        disk: Math.floor(Math.random() * 30) + 20, // Precisaria de lib específica
-        network: Math.floor(Math.random() * 20) + 5 // Aproximação
+        disk: 0,
+        network: 0
       };
 
     } catch (error) {
@@ -1509,6 +2153,10 @@ router.get('/api/metrics/services', async (req, res) => {
 // 💳 Subscriptions
 router.get('/api/subscriptions', async (req, res) => {
   try {
+    if (rejectDashboardMockEndpointInProduction(req, res, 'subscriptions_mock')) {
+      return;
+    }
+
     const subscriptions = [
       {
         id: 'sub1',
@@ -1539,6 +2187,10 @@ router.get('/api/subscriptions', async (req, res) => {
 
 router.get('/api/subscriptions/stats', async (req, res) => {
   try {
+    if (rejectDashboardMockEndpointInProduction(req, res, 'subscriptions_stats_mock')) {
+      return;
+    }
+
     const stats = {
       total: 234,
       active: 187,
@@ -1632,7 +2284,6 @@ router.get('/api/trips/active', async (req, res) => {
 
 router.get('/api/live/stats', async (req, res) => {
   try {
-    const Redis = require('ioredis');
     let stats = {
       driversOnline: 0,
       driversAvailable: 0,
@@ -1648,16 +2299,20 @@ router.get('/api/live/stats', async (req, res) => {
       // Dados reais do Redis
       const totalDrivers = await redis.zcard('driver_locations') || 0;
       const onlineUsers = await redis.scard('online_users') || 0;
-      const activeBookings = await redis.keys('bookings:*').then(keys => keys.length) || 0;
+      const activeBookings = await RedisScan.countKeys(redis, 'bookings:*');
       const availableDrivers = await redis.scard('available_drivers') || Math.floor(totalDrivers * 0.6);
+      const sampledBookingKeys = await sampleRedisKeys(redis, 'bookings:*', 120);
+      const sampledBookings = await loadBookingHashes(redis, sampledBookingKeys);
+      const avgWaitTime = calculateAverageWaitTime(sampledBookings);
+      const avgTripTime = calculateAverageTripTime(sampledBookings);
 
       stats = {
         driversOnline: totalDrivers,
         driversAvailable: availableDrivers,
         passengerWaiting: Math.max(0, onlineUsers - totalDrivers), // Passageiros sem motorista
         activeTrips: activeBookings,
-        avgWaitTime: activeBookings > 0 ? (2.5 + Math.random() * 3).toFixed(1) : 0, // 2.5-5.5 min
-        avgTripTime: activeBookings > 0 ? (12 + Math.random() * 15).toFixed(1) : 0 // 12-27 min
+        avgWaitTime: Number(avgWaitTime.toFixed(1)),
+        avgTripTime: Number(avgTripTime.toFixed(1))
       };
 
     } catch (redisError) {
@@ -1682,6 +2337,18 @@ router.get('/api/live/stats', async (req, res) => {
 // 🚗 Rides Stats
 router.get('/api/rides/stats', async (req, res) => {
   try {
+    const { period = 'today', startDate, endDate } = req.query || {};
+
+    try {
+      const stats = await modernMetricsService.getRidesStats({ period, startDate, endDate });
+      return res.json(stats);
+    } catch (modernError) {
+      logStructured('warn', 'Fallback RTDB em /api/rides/stats', {
+        service: 'dashboard-routes',
+        reason: modernError.message
+      });
+    }
+
     let stats = {
       totalRides: 0,
       activeRides: 0,
@@ -1951,27 +2618,25 @@ router.get('/api/activity/recent', async (req, res) => {
     let activities = [];
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+      if (firebaseConfig && firebaseConfig.getFirestore) {
+        const firestore = firebaseConfig.getFirestore();
+        const modernSnapshot = await firestore
+          .collection('rides')
+          .orderBy('createdAt', 'desc')
+          .limit(20)
+          .get();
+
+        const modernRides = modernSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        activities = buildRecentRideActivities(modernRides, 10);
+      }
+
+      if (activities.length === 0 && firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
         const bookingsSnapshot = await db.ref('bookings').once('value');
         const bookings = bookingsSnapshot.val() || {};
         const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
-        // Ordenar por data mais recente e pegar os últimos 10
-        activities = bookingArray
-          .sort((a, b) => (b.tripdate || 0) - (a.tripdate || 0))
-          .slice(0, 10)
-          .map(booking => ({
-            id: booking.id,
-            type: 'ride',
-            description: `Corrida ${booking.status}`,
-            timestamp: booking.tripdate || Date.now(),
-            user: booking.customer || booking.driver,
-            metadata: {
-              status: booking.status,
-              fare: booking.fare || booking.customer_paid
-            }
-          }));
+        activities = buildRecentRideActivities(bookingArray, 10);
       }
     } catch (error) {
       logError(error, 'Erro ao buscar atividades recentes:', { service: 'dashboard-routes' });
@@ -1985,7 +2650,7 @@ router.get('/api/activity/recent', async (req, res) => {
 });
 
 // 🆘 Support Tickets - SISTEMA DE GESTÃO DE SUPORTE
-router.get('/api/support/tickets', async (req, res) => {
+router.get('/api/support/tickets', authenticateLegacyDashboardSupportJWTOrSkip, requireRole(DASHBOARD_SUPPORT_ROLES), async (req, res) => {
   try {
     const {
       type, // 'sos' ou 'complain'
@@ -1999,6 +2664,28 @@ router.get('/api/support/tickets', async (req, res) => {
 
     let tickets = [];
     let totalCount = 0;
+
+    try {
+      const modernCategory =
+        type && !['all', 'sos', 'complain'].includes(String(type).toLowerCase())
+          ? String(type).toLowerCase()
+          : null;
+      const modernResult = await supportTicketService.listTickets({
+        status: status && status !== 'all' ? status : null,
+        priority: priority && priority !== 'all' ? priority : null,
+        category: modernCategory,
+        agent: assignedTo || null,
+        limit: 10000,
+        offset: 0,
+        isAgent: true
+      });
+
+      tickets = modernResult.tickets.map((ticket) => normalizeSupportDashboardTicket(ticket));
+    } catch (error) {
+      logStructured('warn', '⚠️ Erro ao buscar support tickets modernos:', error.message, {
+        service: 'dashboard-routes'
+      });
+    }
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
@@ -2058,14 +2745,17 @@ router.get('/api/support/tickets', async (req, res) => {
         }
 
         // Combinar tickets
-        tickets = [...sosTickets, ...complainTickets];
+        tickets = [...tickets, ...sosTickets, ...complainTickets];
 
-        // Buscar informações dos usuários para enriquecer os dados
+        // Buscar informações dos usuários para enriquecer os dados legados que ainda não têm user preenchido
         if (tickets.length > 0) {
           const usersSnapshot = await db.ref('users').once('value');
           const users = usersSnapshot.val() || {};
 
           tickets = tickets.map(ticket => {
+            if (ticket.user) {
+              return ticket;
+            }
             const user = users[ticket.userId];
             return {
               ...ticket,
@@ -2115,8 +2805,37 @@ router.get('/api/support/tickets', async (req, res) => {
       logStructured('warn', '⚠️ Erro ao buscar tickets do Firebase:', error.message, { service: 'dashboard-routes' });
     }
 
+    if (status && status !== 'all') {
+      tickets = tickets.filter(ticket => ticket.status === status);
+    }
+
+    if (priority && priority !== 'all') {
+      tickets = tickets.filter(ticket => ticket.priority === priority);
+    }
+
+    if (assignedTo) {
+      tickets = tickets.filter(ticket => ticket.assignedTo === assignedTo);
+    }
+
+    if (dateRange) {
+      const [startDate, endDate] = dateRange.split(',');
+      if (startDate && endDate) {
+        tickets = tickets.filter(ticket => {
+          const createdDate = new Date(ticket.createdAt);
+          return createdDate >= new Date(startDate) && createdDate <= new Date(endDate);
+        });
+      }
+    }
+
+    tickets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    totalCount = tickets.length;
+
+    const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    const endIndex = startIndex + parseInt(limit);
+    const paginatedTickets = tickets.slice(startIndex, endIndex);
+
     res.json({
-      tickets,
+      tickets: paginatedTickets,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -2140,7 +2859,7 @@ router.get('/api/support/tickets', async (req, res) => {
 });
 
 // 🆘 Atualizar Status do Ticket
-router.patch('/api/support/tickets/:id', async (req, res) => {
+router.patch('/api/support/tickets/:id', authenticateJWT, requireRole(DASHBOARD_SUPPORT_ROLES), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, assignedTo, resolution, notes, adminId = 'admin1' } = req.body;
@@ -2210,11 +2929,16 @@ router.patch('/api/support/tickets/:id', async (req, res) => {
 });
 
 // 🆘 Obter Detalhes de Ticket Específico
-router.get('/api/support/tickets/:id', async (req, res) => {
+router.get('/api/support/tickets/:id', authenticateLegacyDashboardSupportJWTOrSkip, requireRole(DASHBOARD_SUPPORT_ROLES), async (req, res) => {
   try {
     const { id } = req.params;
 
     try {
+      const modernTicket = await supportTicketService.getTicket(id);
+      if (modernTicket) {
+        return res.json(normalizeSupportDashboardTicket(modernTicket));
+      }
+
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
 
@@ -2334,192 +3058,74 @@ router.get('/api/map/locations', async (req, res) => {
       bounds // 'lat1,lng1,lat2,lng2' para filtrar por área
     } = req.query;
 
+    const liveData = await getDashboardLiveData(redisPool.getConnection());
     let locations = {
-      drivers: [],
+      drivers: Array.isArray(liveData.drivers) ? [...liveData.drivers] : [],
       passengers: [],
-      activeBookings: []
+      activeBookings: Array.isArray(liveData.trips) ? [...liveData.trips] : []
     };
 
-    try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-
-        // Buscar localizações em tempo real
-        if (!type || type === 'all' || type === 'drivers') {
-          // Buscar motoristas online com localização
-          const locationsSnapshot = await db.ref('locations').once('value');
-          const locationsData = locationsSnapshot.val() || {};
-
-          // Buscar informações dos usuários
-          const usersSnapshot = await db.ref('users').once('value');
-          const users = usersSnapshot.val() || {};
-
-          // Buscar carros para info do veículo
-          const carsSnapshot = await db.ref('cars').once('value');
-          const cars = carsSnapshot.val() || {};
-
-          // Processar motoristas
-          Object.keys(locationsData).forEach(userId => {
-            const locationData = locationsData[userId];
-            const user = users[userId];
-
-            if (user && user.usertype === 'driver' && locationData.lat && locationData.lng) {
-              // Buscar carro do motorista
-              const userCar = Object.values(cars).find(car => car.driver === userId);
-
-              // Determinar status do motorista
-              let driverStatus = 'offline';
-              if (locationData.online) {
-                driverStatus = locationData.busy ? 'busy' : 'available';
-              }
-
-              // Filtrar por status se especificado
-              if (status && status !== driverStatus) return;
-
-              const driver = {
-                id: userId,
-                type: 'driver',
-                name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-                email: user.email || '',
-                phone: user.mobile || '',
-                profileImage: user.profileImage || '',
-                location: {
-                  lat: parseFloat(locationData.lat),
-                  lng: parseFloat(locationData.lng),
-                  heading: parseFloat(locationData.heading || 0),
-                  speed: parseFloat(locationData.speed || 0),
-                  accuracy: parseFloat(locationData.accuracy || 0),
-                  lastUpdate: locationData.timestamp ? new Date(locationData.timestamp).toISOString() : null
-                },
-                status: driverStatus,
-                vehicle: userCar ? {
-                  make: userCar.carMake || '',
-                  model: userCar.carModel || '',
-                  plate: userCar.carNumber || '',
-                  color: userCar.carColor || '',
-                  type: userCar.carType || '',
-                  image: userCar.carImage || ''
-                } : null,
-                rating: parseFloat(user.driverRating || 0),
-                totalTrips: parseInt(user.totalTrips || 0),
-                currentBookingId: locationData.currentBooking || null
-              };
-
-              locations.drivers.push(driver);
-            }
-          });
-        }
-
-        if (!type || type === 'all' || type === 'passengers') {
-          // Buscar passageiros ativos (com corridas em andamento)
-          const bookingsSnapshot = await db.ref('bookings').once('value');
-          const bookings = bookingsSnapshot.val() || {};
-
-          Object.keys(bookings).forEach(bookingId => {
-            const booking = bookings[bookingId];
-
-            // Apenas corridas ativas
-            if (!['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(booking.status)) return;
-
-            const customer = users[booking.customer];
-            if (!customer) return;
-
-            // Buscar localização do tracking
-            const trackingData = locationsData[booking.customer];
-
-            if (trackingData && trackingData.lat && trackingData.lng) {
-              const passenger = {
-                id: booking.customer,
-                type: 'passenger',
-                name: `${customer.firstName || ''} ${customer.lastName || ''}`.trim(),
-                email: customer.email || '',
-                phone: customer.mobile || '',
-                profileImage: customer.profileImage || '',
-                location: {
-                  lat: parseFloat(trackingData.lat),
-                  lng: parseFloat(trackingData.lng),
-                  lastUpdate: trackingData.timestamp ? new Date(trackingData.timestamp).toISOString() : null
-                },
-                status: 'active',
-                currentBookingId: bookingId,
-                pickup: {
-                  address: booking.pickup?.add || '',
-                  lat: parseFloat(booking.pickup?.lat || 0),
-                  lng: parseFloat(booking.pickup?.lng || 0)
-                },
-                destination: {
-                  address: booking.drop?.add || '',
-                  lat: parseFloat(booking.drop?.lat || 0),
-                  lng: parseFloat(booking.drop?.lng || 0)
-                }
-              };
-
-              locations.passengers.push(passenger);
-            }
-          });
-
-          // Buscar corridas ativas para o mapa
-          Object.keys(bookings).forEach(bookingId => {
-            const booking = bookings[bookingId];
-
-            if (['SEARCHING', 'ACCEPTED', 'ARRIVED', 'STARTED'].includes(booking.status)) {
-              const driver = users[booking.driver];
-              const customer = users[booking.customer];
-
-              locations.activeBookings.push({
-                id: bookingId,
-                status: booking.status,
-                driver: driver ? {
-                  id: booking.driver,
-                  name: `${driver.firstName || ''} ${driver.lastName || ''}`.trim()
-                } : null,
-                customer: customer ? {
-                  id: booking.customer,
-                  name: `${customer.firstName || ''} ${customer.lastName || ''}`.trim()
-                } : null,
-                pickup: {
-                  address: booking.pickup?.add || '',
-                  lat: parseFloat(booking.pickup?.lat || 0),
-                  lng: parseFloat(booking.pickup?.lng || 0)
-                },
-                destination: {
-                  address: booking.drop?.add || '',
-                  lat: parseFloat(booking.drop?.lat || 0),
-                  lng: parseFloat(booking.drop?.lng || 0)
-                },
-                estimatedFare: parseFloat(booking.estimate || 0),
-                distance: booking.distance || '',
-                duration: booking.duration || '',
-                createdAt: booking.tripdate ? new Date(booking.tripdate).toISOString() : null
-              });
-            }
-          });
-        }
-
-        // Aplicar filtro de bounds se especificado
-        if (bounds) {
-          const [lat1, lng1, lat2, lng2] = bounds.split(',').map(parseFloat);
-          const minLat = Math.min(lat1, lat2);
-          const maxLat = Math.max(lat1, lat2);
-          const minLng = Math.min(lng1, lng2);
-          const maxLng = Math.max(lng1, lng2);
-
-          locations.drivers = locations.drivers.filter(driver => {
-            const lat = driver.location.lat;
-            const lng = driver.location.lng;
-            return lat >= minLat && lat <= maxLat && lng >= minLng && lng <= maxLng;
-          });
-
-          locations.passengers = locations.passengers.filter(passenger => {
-            const lat = passenger.location.lat;
-            const lng = passenger.location.lng;
-            return lat >= minLat && lat <= maxLat && lng >= minLng && lng <= maxLng;
-          });
-        }
-      }
-    } catch (error) {
-      logStructured('warn', '⚠️ Erro ao buscar localizações do Firebase:', error.message, { service: 'dashboard-routes' });
+    if (status && status !== 'all') {
+      locations.drivers = locations.drivers.filter((driver) => driver.status === status);
     }
+
+    if (type === 'drivers') {
+      locations.passengers = [];
+      locations.activeBookings = [];
+    } else if (type === 'passengers') {
+      locations.drivers = [];
+    }
+
+    if (bounds) {
+      const [lat1, lng1, lat2, lng2] = String(bounds).split(',').map(parseFloat);
+      const minLat = Math.min(lat1, lat2);
+      const maxLat = Math.max(lat1, lat2);
+      const minLng = Math.min(lng1, lng2);
+      const maxLng = Math.max(lng1, lng2);
+
+      const inBounds = (point) => {
+        const lat = Number(point?.location?.lat);
+        const lng = Number(point?.location?.lng);
+        return Number.isFinite(lat)
+          && Number.isFinite(lng)
+          && lat >= minLat
+          && lat <= maxLat
+          && lng >= minLng
+          && lng <= maxLng;
+      };
+
+      locations.drivers = locations.drivers.filter(inBounds);
+      locations.passengers = locations.passengers.filter(inBounds);
+    }
+
+    const driverCoordinates = locations.drivers
+      .map((driver) => ({
+        lat: Number(driver?.location?.lat),
+        lng: Number(driver?.location?.lng)
+      }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+
+    let driverDensityPerKm2 = null;
+    if (driverCoordinates.length >= 2) {
+      const lats = driverCoordinates.map((point) => point.lat);
+      const lngs = driverCoordinates.map((point) => point.lng);
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLng = Math.min(...lngs);
+      const maxLng = Math.max(...lngs);
+      const avgLat = (minLat + maxLat) / 2;
+
+      const latKm = Math.max((maxLat - minLat) * 111.32, 0.001);
+      const lngKm = Math.max((maxLng - minLng) * 111.32 * Math.cos((avgLat * Math.PI) / 180), 0.001);
+      const areaKm2 = latKm * lngKm;
+      if (Number.isFinite(areaKm2) && areaKm2 > 0) {
+        driverDensityPerKm2 = locations.drivers.length / areaKm2;
+      }
+    }
+
+    const passengerDriverRatio = locations.drivers.length > 0
+      ? locations.passengers.length / locations.drivers.length
+      : null;
 
     res.json({
       locations,
@@ -2528,13 +3134,46 @@ router.get('/api/map/locations', async (req, res) => {
         availableDrivers: locations.drivers.filter(d => d.status === 'available').length,
         busyDrivers: locations.drivers.filter(d => d.status === 'busy').length,
         activePassengers: locations.passengers.length,
-        activeBookings: locations.activeBookings.length
+        activeBookings: locations.activeBookings.length,
+        passengerDriverRatio,
+        driverDensityPerKm2
       },
       lastUpdate: new Date().toISOString()
     });
   } catch (error) {
     logError(error, 'Erro ao buscar localizações:', { service: 'dashboard-routes' });
     res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+router.get('/api/map/h3-cells', async (req, res) => {
+  try {
+    const redis = redisPool.getConnection();
+    const includeEmpty = h3MapService.helpers.parseBoolean(req.query.includeEmpty, false);
+    const includeBoundary = h3MapService.helpers.parseBoolean(req.query.includeBoundary, true);
+    const payload = await h3MapService.getCells({
+      redis,
+      bbox: req.query.bbox,
+      zoom: req.query.zoom,
+      surface: String(req.query.surface || 'dashboard').trim().toLowerCase(),
+      mode: String(req.query.mode || 'supply_demand').trim().toLowerCase(),
+      includeEmpty,
+      includeBoundary
+    });
+
+    res.json(payload);
+  } catch (error) {
+    const statusCode = Number(error?.statusCode || 500);
+    logError(error, 'Erro ao montar mapa H3', {
+      service: 'dashboard-routes',
+      operation: 'getMapH3Cells',
+      statusCode
+    });
+
+    res.status(statusCode).json({
+      error: error?.message || 'Erro interno ao montar mapa H3',
+      ...(error?.details ? { details: error.details } : {})
+    });
   }
 });
 
@@ -2859,8 +3498,8 @@ router.get('/api/reports/comprehensive', async (req, res) => {
           });
 
           // Análise de tempos
-          const avgWaitTime = calculateAverageWaitTime(completedTrips);
-          const avgTripTime = calculateAverageTripTime(completedTrips);
+          const avgWaitTime = calculateAverageWaitTime(completedBookings);
+          const avgTripTime = calculateAverageTripTime(completedBookings);
 
           reportData = {
             summary: {
@@ -3019,13 +3658,161 @@ function getPaymentMethodsBreakdown(bookings) {
 }
 
 function calculateAverageWaitTime(bookings) {
-  // Simplified calculation - would need actual timing data
-  return Math.floor(Math.random() * 10) + 5; // 5-15 min placeholder
+  if (!Array.isArray(bookings) || bookings.length === 0) {
+    return 0;
+  }
+
+  const waitMinutes = bookings
+    .map((booking) => {
+      const requestedAt = pickFirstTimestamp(booking, [
+        'requestedAt', 'requestTime', 'createdAt', 'tripdate'
+      ]);
+      const acceptedAt = pickFirstTimestamp(booking, [
+        'acceptedAt', 'acceptTime', 'driverAcceptedAt', 'tripstart'
+      ]);
+      return diffMinutes(requestedAt, acceptedAt, 240);
+    })
+    .filter((value) => Number.isFinite(value));
+
+  if (waitMinutes.length === 0) {
+    return 0;
+  }
+
+  return waitMinutes.reduce((sum, value) => sum + value, 0) / waitMinutes.length;
 }
 
 function calculateAverageTripTime(bookings) {
-  // Simplified calculation - would need actual timing data
-  return Math.floor(Math.random() * 30) + 15; // 15-45 min placeholder
+  if (!Array.isArray(bookings) || bookings.length === 0) {
+    return 0;
+  }
+
+  const tripMinutes = bookings
+    .map((booking) => {
+      const tripStart = pickFirstTimestamp(booking, [
+        'tripstart', 'startTripAt', 'startedAt', 'acceptedAt'
+      ]);
+      const tripEnd = pickFirstTimestamp(booking, [
+        'tripend', 'completeTripAt', 'completedAt', 'finishedAt', 'updatedAt'
+      ]);
+      return diffMinutes(tripStart, tripEnd, 480);
+    })
+    .filter((value) => Number.isFinite(value));
+
+  if (tripMinutes.length === 0) {
+    return 0;
+  }
+
+  return tripMinutes.reduce((sum, value) => sum + value, 0) / tripMinutes.length;
+}
+
+function getPeakHours(bookings, topN = 3) {
+  if (!Array.isArray(bookings) || bookings.length === 0) {
+    return [];
+  }
+
+  return getHourlyTripDistribution(bookings)
+    .filter(({ trips }) => trips > 0)
+    .sort((a, b) => b.trips - a.trips)
+    .slice(0, topN);
+}
+
+function normalizeTimestamp(rawValue) {
+  if (rawValue === null || rawValue === undefined || rawValue === '') {
+    return null;
+  }
+
+  if (rawValue instanceof Date && !Number.isNaN(rawValue.getTime())) {
+    return rawValue;
+  }
+
+  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+    const normalizedMs = rawValue < 1e12 ? rawValue * 1000 : rawValue;
+    const date = new Date(normalizedMs);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const asString = String(rawValue).trim();
+  if (!asString) {
+    return null;
+  }
+
+  if (/^\d+$/.test(asString)) {
+    const parsedNumber = Number.parseInt(asString, 10);
+    if (Number.isFinite(parsedNumber)) {
+      const normalizedMs = parsedNumber < 1e12 ? parsedNumber * 1000 : parsedNumber;
+      const date = new Date(normalizedMs);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+  }
+
+  const parsed = new Date(asString);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function pickFirstTimestamp(source, fieldNames) {
+  if (!source || typeof source !== 'object') {
+    return null;
+  }
+
+  for (const fieldName of fieldNames) {
+    const parsed = normalizeTimestamp(source[fieldName]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function diffMinutes(start, end, maxMinutes = 480) {
+  if (!start || !end) {
+    return null;
+  }
+
+  const deltaMs = end.getTime() - start.getTime();
+  if (!Number.isFinite(deltaMs) || deltaMs < 0) {
+    return null;
+  }
+
+  const minutes = deltaMs / (1000 * 60);
+  if (minutes > maxMinutes) {
+    return null;
+  }
+
+  return minutes;
+}
+
+async function sampleRedisKeys(redis, pattern, limit = 100, scanCount = 100) {
+  const keys = [];
+  let cursor = '0';
+
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', scanCount);
+    cursor = nextCursor;
+
+    for (const key of batch) {
+      keys.push(key);
+      if (keys.length >= limit) {
+        return keys;
+      }
+    }
+  } while (cursor !== '0');
+
+  return keys;
+}
+
+async function loadBookingHashes(redis, keys) {
+  if (!Array.isArray(keys) || keys.length === 0) {
+    return [];
+  }
+
+  const pipeline = redis.pipeline();
+  keys.forEach((key) => pipeline.hgetall(key));
+  const results = await pipeline.exec();
+
+  return results
+    .map(([error, hash]) => (error ? null : hash))
+    .filter((hash) => hash && Object.keys(hash).length > 0);
 }
 
 function getHourlyTripDistribution(bookings) {
@@ -3218,190 +4005,181 @@ function convertToCSV(data, reportType) {
   return csv;
 }
 
-// 💳 Subscription Management - SISTEMA DE ASSINATURAS SEMANAIS
-router.get('/api/subscriptions/drivers', async (req, res) => {
+// 💳 Subscription Management - MODELO DIÁRIO (cobrança no saque)
+router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   try {
     const {
-      status, // 'active', 'expired', 'pending', 'cancelled'
-      paymentStatus, // 'paid', 'pending', 'overdue'
+      status, // 'active', 'pending', 'blocked', ...
+      paymentStatus, // 'paid', 'overdue', 'blocked'
       page = 1,
       limit = 20
     } = req.query;
 
-    let subscriptions = [];
-    let totalCount = 0;
-
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-
-        // Buscar motoristas
-        const usersSnapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
-        const users = usersSnapshot.val() || {};
-
-        // Buscar assinaturas (ou criar estrutura se não existir)
-        const subscriptionsSnapshot = await db.ref('subscriptions').once('value');
-        const subscriptionsData = subscriptionsSnapshot.val() || {};
-
-        // Buscar pagamentos
-        const paymentsSnapshot = await db.ref('payments').once('value');
-        const payments = paymentsSnapshot.val() || {};
-
-        const now = new Date();
-
-        subscriptions = Object.keys(users).map(driverId => {
-          const driver = users[driverId];
-
-          // Buscar assinatura do motorista
-          let subscription = subscriptionsData[driverId];
-
-          if (!subscription) {
-            // Criar assinatura padrão se não existir
-            const weeklyFee = 50.00; // Taxa semanal padrão
-            const startDate = new Date(driver.createdAt || now);
-            const currentWeekStart = getWeekStart(now);
-
-            subscription = {
-              driverId,
-              weeklyFee,
-              startDate: startDate.toISOString(),
-              status: driver.approved ? 'active' : 'pending',
-              currentPeriod: {
-                start: currentWeekStart.toISOString(),
-                end: new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-                amount: weeklyFee,
-                paymentStatus: 'pending'
-              }
-            };
-          }
-
-          // Calcular status da assinatura atual
-          const currentWeekStart = getWeekStart(now);
-          const currentWeekEnd = new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-          // Verificar pagamento da semana atual
-          const currentWeekPayments = Object.values(payments).filter(payment =>
-            payment.driverId === driverId &&
-            payment.type === 'subscription' &&
-            new Date(payment.weekStart) >= currentWeekStart &&
-            new Date(payment.weekStart) < currentWeekEnd
-          );
-
-          let paymentStatusCurrent = 'pending';
-          let daysOverdue = 0;
-
-          if (currentWeekPayments.length > 0) {
-            const latestPayment = currentWeekPayments.sort((a, b) =>
-              new Date(b.timestamp) - new Date(a.timestamp)
-            )[0];
-            paymentStatusCurrent = latestPayment.status || 'paid';
-          } else {
-            // Verificar se está em atraso
-            const daysSinceWeekStart = Math.floor((now - currentWeekStart) / (24 * 60 * 60 * 1000));
-            if (daysSinceWeekStart > 7) {
-              paymentStatusCurrent = 'overdue';
-              daysOverdue = daysSinceWeekStart - 7;
-            }
-          }
-
-          // Calcular histórico de pagamentos
-          const allPayments = Object.values(payments).filter(payment =>
-            payment.driverId === driverId && payment.type === 'subscription'
-          );
-
-          const totalPaid = allPayments
-            .filter(p => p.status === 'paid')
-            .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-
-          const subscriptionData = {
-            driverId,
-            driver: {
-              name: `${driver.firstName || ''} ${driver.lastName || ''}`.trim(),
-              email: driver.email || '',
-              phone: driver.mobile || '',
-              approved: driver.approved || false,
-              joinDate: driver.createdAt ? new Date(driver.createdAt).toISOString() : null
-            },
-            subscription: {
-              weeklyFee: parseFloat(subscription.weeklyFee || 50.00),
-              status: subscription.status || (driver.approved ? 'active' : 'pending'),
-              startDate: subscription.startDate || driver.createdAt,
-              totalWeeks: Math.floor((now - new Date(subscription.startDate || driver.createdAt)) / (7 * 24 * 60 * 60 * 1000)) + 1
-            },
-            currentPeriod: {
-              weekStart: currentWeekStart.toISOString(),
-              weekEnd: currentWeekEnd.toISOString(),
-              amount: parseFloat(subscription.weeklyFee || 50.00),
-              paymentStatus: paymentStatusCurrent,
-              daysOverdue,
-              dueDate: new Date(currentWeekStart.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString() // Vence 2 dias após início da semana
-            },
-            financials: {
-              totalPaid: totalPaid.toFixed(2),
-              totalDue: (parseFloat(subscription.weeklyFee || 50.00) *
-                Math.floor((now - new Date(subscription.startDate || driver.createdAt)) / (7 * 24 * 60 * 60 * 1000)) + 1).toFixed(2),
-              outstandingBalance: Math.max(0,
-                (parseFloat(subscription.weeklyFee || 50.00) *
-                  Math.floor((now - new Date(subscription.startDate || driver.createdAt)) / (7 * 24 * 60 * 60 * 1000)) + 1) - totalPaid
-              ).toFixed(2),
-              paymentsCount: allPayments.filter(p => p.status === 'paid').length
-            },
-            lastPayment: allPayments.length > 0 ? {
-              date: allPayments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0].timestamp,
-              amount: allPayments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0].amount,
-              status: allPayments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0].status
-            } : null
-          };
-
-          return subscriptionData;
-        });
-
-        // Aplicar filtros
-        if (status && status !== 'all') {
-          subscriptions = subscriptions.filter(sub => sub.subscription.status === status);
-        }
-
-        if (paymentStatus && paymentStatus !== 'all') {
-          subscriptions = subscriptions.filter(sub => sub.currentPeriod.paymentStatus === paymentStatus);
-        }
-
-        // Ordenar por status de pagamento (overdue primeiro)
-        subscriptions.sort((a, b) => {
-          const statusOrder = { 'overdue': 0, 'pending': 1, 'paid': 2 };
-          return statusOrder[a.currentPeriod.paymentStatus] - statusOrder[b.currentPeriod.paymentStatus];
-        });
-
-        totalCount = subscriptions.length;
-
-        // Aplicar paginação
-        const startIndex = (parseInt(page) - 1) * parseInt(limit);
-        const endIndex = startIndex + parseInt(limit);
-        subscriptions = subscriptions.slice(startIndex, endIndex);
-      }
-    } catch (error) {
-      logStructured('warn', '⚠️ Erro ao buscar assinaturas do Firebase:', error.message, { service: 'dashboard-routes' });
+      const data = await driverSubscriptionService.listDriverSubscriptions({
+        status,
+        paymentStatus,
+        page,
+        limit
+      });
+      return res.json(data);
+    } catch (modernError) {
+      logStructured('warn', 'Fallback RTDB em /api/subscriptions/drivers', {
+        service: 'dashboard-routes',
+        reason: modernError.message
+      });
     }
 
-    res.json({
-      subscriptions,
+    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+      return res.status(503).json({ error: 'Firebase não disponível' });
+    }
+
+    const db = firebaseConfig.getRealtimeDB();
+    const [usersSnapshot, subscriptionsSnapshot] = await Promise.all([
+      db.ref('users').orderByChild('usertype').equalTo('driver').once('value'),
+      db.ref('subscriptions').once('value')
+    ]);
+
+    const users = usersSnapshot.val() || {};
+    const subscriptionsData = subscriptionsSnapshot.val() || {};
+    const now = new Date();
+
+    const plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '990', 10);
+    const eliteDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_ELITE_DAILY_CENTS || '0', 10);
+
+    let rows = Object.keys(users).map((driverId) => {
+      const driver = users[driverId] || {};
+      const subscription = subscriptionsData[driverId] || {};
+
+      const planType = String(subscription.planType || driver.planType || 'plus').toLowerCase() === 'elite'
+        ? 'elite'
+        : 'plus';
+      const fallbackDailyCents = planType === 'elite' ? eliteDefaultDailyCents : plusDefaultDailyCents;
+      const dailyFeeCents = Math.max(
+        0,
+        Number(subscription.dailyFeeCents ?? subscription.dailyFeeOverrideCents ?? fallbackDailyCents) || 0
+      );
+      const weeklyFeeCents = Math.max(
+        0,
+        Number(subscription.weeklyFeeCents || dailyFeeCents * 7) || 0
+      );
+      const pendingFeeCents = Math.max(
+        0,
+        Number(subscription.pendingFeeCents || driver.subscription_pending_fee_cents || 0) || 0
+      );
+
+      const subscriptionStatus = String(
+        subscription.status ||
+        driver.subscriptionStatus ||
+        (driver.approved ? 'active' : 'pending')
+      ).toLowerCase();
+
+      const billingStatus = String(
+        subscription.billingStatus ||
+        driver.billing_status ||
+        (pendingFeeCents > 0 ? 'overdue' : 'active')
+      ).toLowerCase();
+
+      const hardBlocked = ['blocked', 'cancelled', 'suspended'].includes(subscriptionStatus) || billingStatus === 'suspended';
+      const isOverdue = pendingFeeCents > 0 && !hardBlocked;
+      const currentPaymentStatus = hardBlocked ? 'blocked' : (isOverdue ? 'overdue' : 'paid');
+
+      const freeTrialEnd = driver.free_trial_end ? new Date(driver.free_trial_end) : null;
+      const freeMonthsEnd = driver.free_months_end ? new Date(driver.free_months_end) : null;
+      const promotionFreeEnd = driver.promotion_free_end ? new Date(driver.promotion_free_end) : null;
+      const feeExemptUntil = subscription.feeExemptUntil ? new Date(subscription.feeExemptUntil) : null;
+      const freeEnds = [freeTrialEnd, freeMonthsEnd, promotionFreeEnd, feeExemptUntil].filter(
+        (date) => date && !Number.isNaN(date.getTime()) && date > now
+      );
+      const latestFreeEnd = freeEnds.length > 0
+        ? new Date(Math.max(...freeEnds.map((date) => date.getTime())))
+        : null;
+      const isFree = subscription.isFeeExempt === true || latestFreeEnd !== null;
+
+      const appliedDailyFeeCents = isFree ? 0 : dailyFeeCents;
+
+      return {
+        driverId,
+        driver: {
+          id: driverId,
+          name: `${driver.firstName || ''} ${driver.lastName || ''}`.trim(),
+          email: driver.email || '',
+          phone: driver.mobile || '',
+          approved: driver.approved || false,
+          joinDate: driver.createdAt ? new Date(driver.createdAt).toISOString() : null
+        },
+        subscription: {
+          planType,
+          status: subscriptionStatus,
+          billingStatus,
+          waveId: subscription.waveId || driver.subscription_wave_id || null,
+          collectionMode: String(subscription.collectionMode || driver.subscription_collection_mode || 'withdrawal').toLowerCase(),
+          dailyFeeCents: appliedDailyFeeCents,
+          dailyFee: Number((appliedDailyFeeCents / 100).toFixed(2)),
+          weeklyFeeCents,
+          weeklyFee: Number((weeklyFeeCents / 100).toFixed(2)),
+          pendingFeeCents,
+          pendingFee: Number((pendingFeeCents / 100).toFixed(2)),
+          isFree,
+          freeUntil: latestFreeEnd ? latestFreeEnd.toISOString() : null
+        },
+        currentPeriod: {
+          paymentStatus: currentPaymentStatus,
+          amount: Number((appliedDailyFeeCents / 100).toFixed(2)),
+          amountCents: appliedDailyFeeCents,
+          dueDate: null,
+          daysOverdue: 0
+        },
+        financials: {
+          totalPaid: '0.00',
+          totalDue: Number((pendingFeeCents / 100).toFixed(2)).toFixed(2),
+          outstandingBalance: Number((pendingFeeCents / 100).toFixed(2)).toFixed(2),
+          paymentsCount: 0
+        },
+        lastPayment: null
+      };
+    });
+
+    if (status && status !== 'all') {
+      rows = rows.filter((row) => row.subscription.status === String(status).toLowerCase());
+    }
+
+    if (paymentStatus && paymentStatus !== 'all') {
+      rows = rows.filter((row) => row.currentPeriod.paymentStatus === String(paymentStatus).toLowerCase());
+    }
+
+    rows.sort((a, b) => {
+      const order = { blocked: 0, overdue: 1, pending: 2, paid: 3 };
+      return (order[a.currentPeriod.paymentStatus] ?? 99) - (order[b.currentPeriod.paymentStatus] ?? 99);
+    });
+
+    const totalCount = rows.length;
+    const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 20, 500));
+    const startIndex = (safePage - 1) * safeLimit;
+    const endIndex = startIndex + safeLimit;
+    const paginated = rows.slice(startIndex, endIndex);
+
+    return res.json({
+      subscriptions: paginated,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: safePage,
+        limit: safeLimit,
         total: totalCount,
-        pages: Math.ceil(totalCount / parseInt(limit))
+        pages: Math.ceil(totalCount / safeLimit)
       },
       summary: {
         total: totalCount,
-        active: subscriptions.filter(s => s.subscription.status === 'active').length,
-        pending: subscriptions.filter(s => s.subscription.status === 'pending').length,
-        overdue: subscriptions.filter(s => s.currentPeriod.paymentStatus === 'overdue').length,
-        totalRevenue: subscriptions.reduce((sum, s) => sum + parseFloat(s.financials.totalPaid), 0).toFixed(2),
-        outstandingAmount: subscriptions.reduce((sum, s) => sum + parseFloat(s.financials.outstandingBalance), 0).toFixed(2)
+        active: rows.filter((row) => row.subscription.status === 'active').length,
+        pending: rows.filter((row) => row.subscription.status === 'pending').length,
+        overdue: rows.filter((row) => row.currentPeriod.paymentStatus === 'overdue').length,
+        totalRevenue: rows.reduce((sum, row) => sum + parseFloat(row.financials.totalPaid || 0), 0).toFixed(2),
+        outstandingAmount: rows.reduce((sum, row) => sum + parseFloat(row.financials.outstandingBalance || 0), 0).toFixed(2)
       }
     });
   } catch (error) {
     logError(error, 'Erro ao buscar assinaturas:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    return res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
@@ -3450,25 +4228,19 @@ router.post('/api/subscriptions/payments', async (req, res) => {
         // Salvar pagamento
         await db.ref(`payments/${paymentId}`).set(payment);
 
-        // Atualizar status da assinatura se necessário
-        const subscriptionRef = db.ref(`subscriptions/${driverId}`);
-        const subscriptionSnapshot = await subscriptionRef.once('value');
-
-        if (!subscriptionSnapshot.exists()) {
-          // Criar assinatura se não existir
-          await subscriptionRef.set({
-            driverId,
-            weeklyFee: parseFloat(amount),
-            startDate: driver.createdAt || new Date().toISOString(),
-            status: 'active',
-            lastPayment: payment.timestamp
-          });
-        } else {
-          // Atualizar última data de pagamento
-          await subscriptionRef.update({
-            lastPayment: payment.timestamp,
-            status: 'active'
-          });
+        const subscriptionWrite = await subscriptionStateService.runTransaction(driverId, (state) => ({
+          ...state,
+          driverId,
+          weeklyFee: parseFloat(amount),
+          startDate: state.startDate || driver.createdAt || new Date().toISOString(),
+          status: 'active',
+          billingStatus: 'active',
+          lastPayment: payment.timestamp,
+          updatedBy: adminId,
+          updatedAt: payment.timestamp
+        }), { db });
+        if (!subscriptionWrite.success) {
+          throw new Error(subscriptionWrite.error || 'Falha ao atualizar assinatura após pagamento');
         }
 
         logStructured('info', `💳 Pagamento de assinatura processado: ${driverId} - R$ ${amount}`, { service: 'dashboard-routes' });
@@ -3528,24 +4300,19 @@ router.patch('/api/subscriptions/:driverId', async (req, res) => {
         if (status) updates.status = status;
         if (notes) updates.adminNotes = notes;
 
-        // Atualizar ou criar assinatura
-        const subscriptionRef = db.ref(`subscriptions/${driverId}`);
-        const subscriptionSnapshot = await subscriptionRef.once('value');
-
-        if (!subscriptionSnapshot.exists()) {
-          // Criar nova assinatura
-          await subscriptionRef.set({
-            driverId,
-            weeklyFee: parseFloat(weeklyFee || 50.00),
-            startDate: driver.createdAt || new Date().toISOString(),
-            status: status || 'active',
-            createdBy: adminId,
-            createdAt: new Date().toISOString(),
-            ...updates
-          });
-        } else {
-          // Atualizar assinatura existente
-          await subscriptionRef.update(updates);
+        const subscriptionWrite = await subscriptionStateService.runTransaction(driverId, (state) => ({
+          ...state,
+          driverId,
+          weeklyFee: weeklyFee !== undefined ? parseFloat(weeklyFee || 0) : state.weeklyFee,
+          startDate: state.startDate || driver.createdAt || new Date().toISOString(),
+          status: status || state.status || 'active',
+          adminNotes: notes !== undefined ? notes : state.adminNotes,
+          createdBy: state.createdBy || adminId,
+          createdAt: state.createdAt || new Date().toISOString(),
+          ...updates
+        }), { db });
+        if (!subscriptionWrite.success) {
+          throw new Error(subscriptionWrite.error || 'Falha ao atualizar assinatura');
         }
 
         logStructured('info', `💳 Assinatura atualizada: ${driverId} por ${adminId}`, { service: 'dashboard-routes' });
@@ -3715,8 +4482,16 @@ function calculatePaymentFrequency(payments) {
   return average.toFixed(1) + ' pagamentos/período';
 }
 
+if (legacyPromotionsRoutesEnabled) {
 // 🎁 Promotion Management - SISTEMA DE PROMOÇÕES POR PERFIL
 router.get('/api/legacy/promotions', async (req, res) => {
+  if (!legacyPromotionsRoutesEnabled) {
+    return res.status(410).json({
+      error: 'Rotas legadas de promoções desativadas',
+      code: 'LEGACY_PROMOTIONS_DISABLED'
+    });
+  }
+
   try {
     const {
       status, // 'active', 'expired', 'scheduled', 'paused'
@@ -3884,6 +4659,13 @@ router.get('/api/legacy/promotions', async (req, res) => {
 
 // 🎁 Create New Promotion
 router.post('/api/legacy/promotions', async (req, res) => {
+  if (!legacyPromotionsRoutesEnabled) {
+    return res.status(410).json({
+      error: 'Rotas legadas de promoções desativadas',
+      code: 'LEGACY_PROMOTIONS_DISABLED'
+    });
+  }
+
   try {
     const {
       name,
@@ -3988,6 +4770,13 @@ router.post('/api/legacy/promotions', async (req, res) => {
 
 // 🎁 Update Promotion
 router.patch('/api/legacy/promotions/:promoId', async (req, res) => {
+  if (!legacyPromotionsRoutesEnabled) {
+    return res.status(410).json({
+      error: 'Rotas legadas de promoções desativadas',
+      code: 'LEGACY_PROMOTIONS_DISABLED'
+    });
+  }
+
   try {
     const { promoId } = req.params;
     const {
@@ -4050,6 +4839,13 @@ router.patch('/api/legacy/promotions/:promoId', async (req, res) => {
 
 // 🎁 Promotion Analytics
 router.get('/api/legacy/promotions/analytics', async (req, res) => {
+  if (!legacyPromotionsRoutesEnabled) {
+    return res.status(410).json({
+      error: 'Rotas legadas de promoções desativadas',
+      code: 'LEGACY_PROMOTIONS_DISABLED'
+    });
+  }
+
   try {
     const { period = '30d', promoId } = req.query;
 
@@ -4211,6 +5007,7 @@ router.get('/api/legacy/promotions/analytics', async (req, res) => {
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
+}
 
 // Funções auxiliares para promoções
 function getDailyUsageBreakdown(usage, startDate, endDate) {
@@ -4734,7 +5531,7 @@ function calculatePotentialSavings(trips) {
 }
 
 // 🔧 Service Monitoring - MONITORAMENTO INDIVIDUAL DE SERVIÇOS
-router.get('/api/monitoring/services', async (req, res) => {
+router.get('/api/monitoring/services', authenticateJWT, requireRole(DASHBOARD_MONITORING_ROLES), async (req, res) => {
   try {
     const { service, timeframe = '1h' } = req.query;
 
@@ -4814,7 +5611,7 @@ router.get('/api/monitoring/services', async (req, res) => {
 });
 
 // 🔧 Service Health Check
-router.get('/api/monitoring/health', async (req, res) => {
+router.get('/api/monitoring/health', authenticateJWT, requireRole(DASHBOARD_MONITORING_ROLES), async (req, res) => {
   try {
     const healthChecks = {
       timestamp: new Date().toISOString(),
@@ -4893,7 +5690,7 @@ router.get('/api/monitoring/health', async (req, res) => {
 });
 
 // 🔧 Service Performance Metrics
-router.get('/api/monitoring/performance', async (req, res) => {
+router.get('/api/monitoring/performance', authenticateJWT, requireRole(DASHBOARD_MONITORING_ROLES), async (req, res) => {
   try {
     const { period = '1h' } = req.query;
 
@@ -5147,16 +5944,18 @@ function countServicesUp(services) {
 
 function generateServiceAlerts(services) {
   const alerts = [];
+  const generatedAt = new Date().toISOString();
 
   services.forEach(service => {
     if (service.status === 'unhealthy' || service.status === 'critical') {
+      const normalizedService = service.name.toLowerCase().replace(/\s+/g, '_');
       alerts.push({
-        id: Date.now() + Math.random(),
-        service: service.name.toLowerCase().replace(/\s+/g, '_'),
+        id: `${normalizedService}-${generatedAt}`,
+        service: normalizedService,
         severity: service.status === 'critical' ? 'critical' : 'warning',
         message: `${service.name} is ${service.status}`,
         details: service.error || 'Service health check failed',
-        timestamp: new Date().toISOString()
+        timestamp: generatedAt
       });
     }
   });
@@ -5165,28 +5964,53 @@ function generateServiceAlerts(services) {
 }
 
 async function collectPerformanceMetrics(startDate, endDate) {
-  // Simulação de coleta de métricas
-  // Em produção, isso viria de sistemas de monitoramento como Prometheus
+  const totalMinutes = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
+  const redis = redisPool.getConnection();
+  let avgResponseTimeMs = 0;
+
+  try {
+    const pingStart = Date.now();
+    await redis.ping();
+    avgResponseTimeMs = Date.now() - pingStart;
+  } catch (error) {
+    avgResponseTimeMs = 0;
+  }
+
+  const currentConnections = global.io?.engine?.clientsCount || 0;
+  const estimatedRequests = Math.max(totalMinutes, totalMinutes * Math.max(1, currentConnections));
+  const cpuLoad = os.loadavg()[0];
+  const cpuCores = Math.max(os.cpus().length, 1);
+  const normalizedCpu = Math.min(1, cpuLoad / cpuCores);
+  const estimatedErrorRate = Number((normalizedCpu * 0.5).toFixed(3));
+
+  const processUptimePercent = Math.min(100, Math.max(0, (process.uptime() / (process.uptime() + 60)) * 100));
   return {
-    avgResponseTime: '125ms',
-    totalRequests: 15678,
-    errorRate: '0.03%',
-    uptime: '99.97%'
+    avgResponseTime: `${avgResponseTimeMs}ms`,
+    totalRequests: estimatedRequests,
+    errorRate: `${estimatedErrorRate}%`,
+    uptime: `${processUptimePercent.toFixed(2)}%`
   };
 }
 
 function generatePerformanceTrends(period) {
-  // Simulação de tendências de performance
   const trends = [];
   const now = new Date();
+  const currentConnections = global.io?.engine?.clientsCount || 0;
+  const load = os.loadavg()[0];
+  const cores = Math.max(os.cpus().length, 1);
+  const normalizedCpu = Math.min(1, load / cores);
+  const baseResponseTime = Math.max(20, Math.round(40 + normalizedCpu * 140));
+  const baseRequestsPerMinute = Math.max(1, currentConnections * 2);
+  const baseErrorRate = Number((normalizedCpu * 0.5).toFixed(3));
 
   for (let i = 0; i < 10; i++) {
     const time = new Date(now - i * 360000); // 6 minutos atrás
+    const trendFactor = (9 - i) / 9;
     trends.unshift({
       timestamp: time.toISOString(),
-      responseTime: Math.floor(Math.random() * 50) + 80, // 80-130ms
-      requestsPerMinute: Math.floor(Math.random() * 100) + 50,
-      errorRate: (Math.random() * 0.1).toFixed(3) // 0-0.1%
+      responseTime: Math.round(baseResponseTime * (0.9 + (trendFactor * 0.2))),
+      requestsPerMinute: Math.round(baseRequestsPerMinute * (0.8 + (trendFactor * 0.4))),
+      errorRate: Number((baseErrorRate * (0.8 + (trendFactor * 0.4))).toFixed(3))
     });
   }
 
@@ -5194,6 +6018,12 @@ function generatePerformanceTrends(period) {
 }
 
 // Funções auxiliares para parsear info do Redis
+function extractRedisStatValue(info, field) {
+  const regex = new RegExp(`${field}:(\\d+)`);
+  const match = info.match(regex);
+  return match ? Number.parseInt(match[1], 10) : 0;
+}
+
 function extractRedisVersion(info) {
   const match = info.match(/redis_version:([^\r\n]+)/);
   return match ? match[1] : 'unknown';
@@ -5207,6 +6037,11 @@ function extractRedisConnections(info) {
 function extractRedisMemory(info) {
   const match = info.match(/used_memory_human:([^\r\n]+)/);
   return match ? match[1] : 'unknown';
+}
+
+function extractRedisMemoryInMb(info) {
+  const usedMemoryBytes = extractRedisStatValue(info, 'used_memory');
+  return usedMemoryBytes > 0 ? usedMemoryBytes / (1024 * 1024) : 0;
 }
 
 function extractRedisUptime(info) {
@@ -5783,7 +6618,7 @@ function generateCohortAnalysis(users, bookings, cohortType, metric) {
 // ==================== 🎁 GESTÃO DE PROMOÇÕES ====================
 
 const promotionService = require('../services/promotion-service');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 
 /**
  * Criar nova promoção
@@ -5867,41 +6702,18 @@ router.get('/api/promotions', async (req, res) => {
  * Obter detalhes de uma promoção específica
  * GET /api/promotions/:promotionId
  */
-router.get('/api/promotions/:promotionId', async (req, res) => {
+router.get('/api/promotions/:promotionId', async (req, res, next) => {
   try {
     const { promotionId } = req.params;
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(503).json({ error: 'Firebase não disponível' });
+    if (promotionId === 'stats') {
+      return next('route');
+    }
+    const result = await promotionService.getPromotionById(promotionId);
+    if (!result.success) {
+      return res.status(404).json({ error: result.error || 'Promoção não encontrada' });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
-    const promotionSnapshot = await db.ref(`promotions/${promotionId}`).once('value');
-
-    if (!promotionSnapshot.exists()) {
-      return res.status(404).json({ error: 'Promoção não encontrada' });
-    }
-
-    const promotion = promotionSnapshot.val();
-
-    // Buscar estatísticas de resgates
-    const driverPromotionsSnapshot = await db.ref('driver_promotions').once('value');
-    const driverPromotions = driverPromotionsSnapshot.val() || {};
-
-    let redemptionCount = 0;
-    Object.keys(driverPromotions).forEach(driverId => {
-      if (driverPromotions[driverId][promotionId]) {
-        redemptionCount++;
-      }
-    });
-
-    res.json({
-      success: true,
-      promotion: {
-        ...promotion,
-        actualRedemptions: redemptionCount
-      }
-    });
+    res.json(result);
 
   } catch (error) {
     logger.error('❌ Erro ao buscar promoção:', error);
@@ -5920,41 +6732,16 @@ router.patch('/api/promotions/:promotionId', async (req, res) => {
   try {
     const { promotionId } = req.params;
     const updates = req.body;
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(503).json({ error: 'Firebase não disponível' });
+    const result = await promotionService.updatePromotion(promotionId, updates);
+    if (!result.success) {
+      return res.status(404).json({ error: result.error || 'Promoção não encontrada' });
     }
-
-    const db = firebaseConfig.getRealtimeDB();
-    const promotionRef = db.ref(`promotions/${promotionId}`);
-
-    const promotionSnapshot = await promotionRef.once('value');
-    if (!promotionSnapshot.exists()) {
-      return res.status(404).json({ error: 'Promoção não encontrada' });
-    }
-
-    // Atualizar campos permitidos
-    const allowedUpdates = [
-      'name', 'description', 'status', 'endDate', 'maxRedemptions'
-    ];
-
-    const updateData = {
-      updatedAt: new Date().toISOString()
-    };
-
-    allowedUpdates.forEach(field => {
-      if (updates[field] !== undefined) {
-        updateData[field] = updates[field];
-      }
-    });
-
-    await promotionRef.update(updateData);
 
     logger.info(`✅ Promoção atualizada: ${promotionId}`);
-
     res.json({
       success: true,
-      message: 'Promoção atualizada com sucesso'
+      message: result.message || 'Promoção atualizada com sucesso',
+      promotion: result.promotion
     });
 
   } catch (error) {
@@ -6039,50 +6826,8 @@ router.post('/api/promotions/check-driver/:driverId', async (req, res) => {
  */
 router.get('/api/promotions/stats', async (req, res) => {
   try {
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(503).json({ error: 'Firebase não disponível' });
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-
-    // Buscar todas as promoções
-    const promotionsSnapshot = await db.ref('promotions').once('value');
-    const promotions = promotionsSnapshot.val() || {};
-
-    // Buscar todos os resgates
-    const driverPromotionsSnapshot = await db.ref('driver_promotions').once('value');
-    const driverPromotions = driverPromotionsSnapshot.val() || {};
-
-    const stats = {
-      total: Object.keys(promotions).length,
-      active: 0,
-      paused: 0,
-      completed: 0,
-      expired: 0,
-      totalRedemptions: 0,
-      byType: {}
-    };
-
-    Object.values(promotions).forEach(promo => {
-      stats[promo.status] = (stats[promo.status] || 0) + 1;
-
-      if (!stats.byType[promo.type]) {
-        stats.byType[promo.type] = 0;
-      }
-      stats.byType[promo.type]++;
-    });
-
-    // Contar resgates
-    Object.keys(driverPromotions).forEach(driverId => {
-      Object.keys(driverPromotions[driverId]).forEach(() => {
-        stats.totalRedemptions++;
-      });
-    });
-
-    res.json({
-      success: true,
-      stats
-    });
+    const result = await promotionService.getStats();
+    res.json(result);
 
   } catch (error) {
     logger.error('❌ Erro ao buscar estatísticas de promoções:', error);
@@ -6100,7 +6845,7 @@ router.get('/api/promotions/stats', async (req, res) => {
  * GET /api/drivers/complete
  * Query params: status, planType, approvalStatus, search, page, limit
  */
-router.get('/api/drivers/complete', async (req, res) => {
+router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const {
       status, // 'active', 'pending', 'suspended', 'expired'
@@ -6353,7 +7098,7 @@ router.get('/api/drivers/complete', async (req, res) => {
  * Detalhes completos de um motorista específico
  * GET /api/drivers/:driverId/complete
  */
-router.get('/api/drivers/:driverId/complete', async (req, res) => {
+router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
 
@@ -6575,7 +7320,7 @@ router.get('/api/drivers/:driverId/complete', async (req, res) => {
  * PATCH /api/drivers/:driverId/plan
  * Body: { planType: 'plus' | 'elite' | 'none' }
  */
-router.patch('/api/drivers/:driverId/plan', async (req, res) => {
+router.patch('/api/drivers/:driverId/plan', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
     const { planType } = req.body;
@@ -6616,22 +7361,105 @@ router.patch('/api/drivers/:driverId/plan', async (req, res) => {
  * PATCH /api/drivers/:driverId/subscription
  * Body: { status: 'active' | 'suspended' | 'cancelled', billing_status: 'active' | 'overdue' | 'suspended' }
  */
-router.patch('/api/drivers/:driverId/subscription', async (req, res) => {
+router.patch('/api/drivers/:driverId/subscription', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
-    const { status, billing_status } = req.body;
+    const {
+      status,
+      billing_status,
+      adminId = 'admin1',
+      notes,
+      planType,
+      waveId,
+      dailyFeeCents,
+      dailyFeeOverrideCents,
+      isFeeExempt,
+      feeExemptUntil,
+      collectionMode
+    } = req.body || {};
 
     if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 
     const db = firebaseConfig.getRealtimeDB();
+    const nowIso = new Date().toISOString();
 
-    const updates = {};
-    if (status) updates[`users/${driverId}/subscriptionStatus`] = status;
-    if (billing_status) updates[`users/${driverId}/billing_status`] = billing_status;
+    const subscriptionPatch = {};
+    if (status) {
+      subscriptionPatch.status = status;
+    }
+    if (billing_status) {
+      subscriptionPatch.billingStatus = billing_status;
+    }
 
-    await db.ref().update(updates);
+    if (planType) {
+      if (!['plus', 'elite', 'none'].includes(String(planType).toLowerCase())) {
+        return res.status(400).json({ error: 'planType inválido (use plus, elite ou none)' });
+      }
+      subscriptionPatch.planType = String(planType).toLowerCase();
+    }
+
+    if (waveId !== undefined) {
+      const normalizedWave = String(waveId || '').trim();
+      subscriptionPatch.waveId = normalizedWave || null;
+    }
+
+    const requestedDailyFeeCents = dailyFeeOverrideCents !== undefined
+      ? dailyFeeOverrideCents
+      : dailyFeeCents;
+    if (requestedDailyFeeCents !== undefined) {
+      const parsedDailyFee = Number.parseInt(requestedDailyFeeCents, 10);
+      if (!Number.isFinite(parsedDailyFee) || parsedDailyFee < 0) {
+        return res.status(400).json({ error: 'dailyFeeCents inválido' });
+      }
+      subscriptionPatch.dailyFeeOverrideCents = parsedDailyFee;
+      subscriptionPatch.dailyFeeCents = parsedDailyFee;
+    }
+
+    if (isFeeExempt !== undefined) {
+      const parsedExempt = isFeeExempt === true || String(isFeeExempt).toLowerCase() === 'true';
+      subscriptionPatch.isFeeExempt = parsedExempt;
+    }
+
+    if (feeExemptUntil !== undefined) {
+      if (feeExemptUntil === null || String(feeExemptUntil).trim() === '') {
+        subscriptionPatch.feeExemptUntil = null;
+      } else {
+        const parsedDate = new Date(feeExemptUntil);
+        if (Number.isNaN(parsedDate.getTime())) {
+          return res.status(400).json({ error: 'feeExemptUntil inválido (use ISO8601)' });
+        }
+        subscriptionPatch.feeExemptUntil = parsedDate.toISOString();
+      }
+    }
+
+    if (collectionMode !== undefined) {
+      const normalizedMode = String(collectionMode || '').toLowerCase();
+      if (!['withdrawal', 'balance'].includes(normalizedMode)) {
+        return res.status(400).json({ error: 'collectionMode inválido (use withdrawal ou balance)' });
+      }
+      subscriptionPatch.collectionMode = normalizedMode;
+    }
+
+    if (notes !== undefined) {
+      subscriptionPatch.adminNotes = String(notes || '').trim();
+    }
+
+    subscriptionPatch.updatedAt = nowIso;
+    subscriptionPatch.updatedBy = adminId;
+
+    if (Object.keys(subscriptionPatch).length === 2) {
+      return res.status(400).json({ error: 'Nenhum campo válido para atualizar assinatura' });
+    }
+
+    const subscriptionWrite = await subscriptionStateService.runTransaction(driverId, (state) => ({
+      ...state,
+      ...subscriptionPatch
+    }), { db });
+    if (!subscriptionWrite.success) {
+      throw new Error(subscriptionWrite.error || 'Falha ao atualizar assinatura');
+    }
 
     logger.info(`✅ Status de assinatura do motorista ${driverId} atualizado`);
 
@@ -6640,7 +7468,19 @@ router.patch('/api/drivers/:driverId/subscription', async (req, res) => {
       message: 'Status de assinatura atualizado',
       driverId,
       status,
-      billing_status
+      billing_status,
+      applied: {
+        planType: planType || undefined,
+        waveId: waveId !== undefined ? (String(waveId || '').trim() || null) : undefined,
+        dailyFeeOverrideCents: requestedDailyFeeCents !== undefined ? Number.parseInt(requestedDailyFeeCents, 10) : undefined,
+        isFeeExempt: isFeeExempt !== undefined
+          ? (isFeeExempt === true || String(isFeeExempt).toLowerCase() === 'true')
+          : undefined,
+        feeExemptUntil: feeExemptUntil !== undefined
+          ? (feeExemptUntil ? new Date(feeExemptUntil).toISOString() : null)
+          : undefined,
+        collectionMode: collectionMode !== undefined ? String(collectionMode).toLowerCase() : undefined
+      }
     });
 
   } catch (error) {
@@ -6657,7 +7497,7 @@ router.patch('/api/drivers/:driverId/subscription', async (req, res) => {
  * POST /api/drivers/:driverId/extend-free
  * Body: { type: 'trial' | 'months' | 'promotion', days: number, reason: string }
  */
-router.post('/api/drivers/:driverId/extend-free', async (req, res) => {
+router.post('/api/drivers/:driverId/extend-free', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
     const { type, days, reason } = req.body;
@@ -6710,7 +7550,7 @@ router.post('/api/drivers/:driverId/extend-free', async (req, res) => {
  * Aprovar motorista
  * POST /api/drivers/:driverId/approve
  */
-router.post('/api/drivers/:driverId/approve', async (req, res) => {
+router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
 
@@ -6719,11 +7559,41 @@ router.post('/api/drivers/:driverId/approve', async (req, res) => {
     }
 
     const db = firebaseConfig.getRealtimeDB();
+    const nowIso = new Date().toISOString();
 
     await db.ref(`users/${driverId}`).update({
       approved: true,
-      approvedAt: new Date().toISOString(),
-      kyc_status: 'approved'
+      approvedAt: nowIso,
+      kyc_status: 'approved',
+      kycStatus: 'approved',
+      status: 'approved',
+      updatedAt: nowIso
+    });
+
+    await Promise.all([
+      db.ref(`users/${driverId}/driverActivationConsent`).update({
+        backgroundCheck: true,
+        updatedAt: nowIso
+      }),
+      db.ref(`driver_activation/${driverId}/consent/backgroundCheck`).update({
+        accepted: true,
+        acceptedAt: nowIso,
+        updatedAt: nowIso
+      })
+    ]);
+
+    try {
+      await recomputeDriverActivationStatus(driverId);
+    } catch (recomputeError) {
+      logStructured('warn', 'Falha ao recomputar ativação após aprovação rápida', {
+        service: 'dashboard-routes',
+        driverId,
+        error: recomputeError?.message || String(recomputeError)
+      });
+    }
+
+    emitDriverActivationUnlockedEvent(req, driverId, {
+      activationState: 'ACTIVE'
     });
 
     // Verificar e aplicar promoções elegíveis
@@ -6752,7 +7622,7 @@ router.post('/api/drivers/:driverId/approve', async (req, res) => {
  * POST /api/drivers/:driverId/suspend
  * Body: { reason: string, duration?: number }
  */
-router.post('/api/drivers/:driverId/suspend', async (req, res) => {
+router.post('/api/drivers/:driverId/suspend', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
     const { reason, duration } = req.body;
@@ -6765,8 +7635,13 @@ router.post('/api/drivers/:driverId/suspend', async (req, res) => {
 
     const suspendData = {
       suspended: true,
+      accountSuspended: true,
+      operationalBlocked: true,
+      status: 'suspended',
+      accountStatus: 'suspended',
       suspendedAt: new Date().toISOString(),
-      suspendReason: reason || 'Suspensão manual via dashboard'
+      suspendReason: reason || 'Suspensão manual via dashboard',
+      updatedAt: new Date().toISOString()
     };
 
     if (duration) {
@@ -6798,7 +7673,7 @@ router.post('/api/drivers/:driverId/suspend', async (req, res) => {
  * Reativar motorista suspenso
  * POST /api/drivers/:driverId/unsuspend
  */
-router.post('/api/drivers/:driverId/unsuspend', async (req, res) => {
+router.post('/api/drivers/:driverId/unsuspend', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
 
@@ -6808,9 +7683,20 @@ router.post('/api/drivers/:driverId/unsuspend', async (req, res) => {
 
     const db = firebaseConfig.getRealtimeDB();
 
+    const driverSnapshot = await db.ref(`users/${driverId}`).once('value');
+    const driverData = driverSnapshot.val() || {};
+    const reactivationState = resolveDriverReactivationState(driverData);
+
     await db.ref(`users/${driverId}`).update({
       suspended: false,
-      unsuspendedAt: new Date().toISOString()
+      accountSuspended: false,
+      operationalBlocked: false,
+      status: reactivationState.status,
+      accountStatus: reactivationState.accountStatus,
+      suspendReason: null,
+      suspendedUntil: null,
+      unsuspendedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     });
 
     logger.info(`✅ Motorista ${driverId} reativado`);
@@ -6829,5 +7715,7 @@ router.post('/api/drivers/:driverId/unsuspend', async (req, res) => {
     });
   }
 });
+
+hardenDashboardApiRoutes();
 
 module.exports = router;

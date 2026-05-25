@@ -1,0 +1,52 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible: ".*(Ganhos do dia|Ficar Online|Ficar Offline|Ativação pendente).*"
+    timeout: 60000
+
+- takeScreenshot: "e2e-driver-10-nav-home"
+
+- tapOn:
+    point: "88%,11%"
+
+- extendedWaitUntil:
+    visible: ".*(Painel do motorista|Ganhos|Corridas concluídas|Ativação do motorista|Configurações).*"
+    timeout: 30000
+
+- takeScreenshot: "e2e-driver-11-menu"
+
+- runFlow:
+    when:
+      visible: "Ganhos"
+    commands:
+      - tapOn: "Ganhos"
+      - extendedWaitUntil:
+          visible: ".*(Seus ganhos|Taxa efetiva|Realizar saque|Hoje|30 dias).*"
+          timeout: 30000
+      - takeScreenshot: "e2e-driver-12-earnings"
+      - tapOn:
+          point: "12%,11%"
+
+- runFlow:
+    when:
+      visible: "Ativação do motorista"
+    commands:
+      - tapOn: "Ativação do motorista"
+      - extendedWaitUntil:
+          visible: ".*(Ativação|CNH|CRLV|MEI|Em análise|Aprovado|Falha).*"
+          timeout: 30000
+      - takeScreenshot: "e2e-driver-13-activation"

@@ -1,9 +1,12 @@
 const jwt = require('jsonwebtoken');
 const { AuthenticationError, ForbiddenError } = require('apollo-server-express');
+const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 
 class GraphQLAuthMiddleware {
   constructor() {
-    this.secretKey = process.env.JWT_SECRET || 'leaf-secret-key-2024';
+    this.secretKey = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
+      context: 'graphql-auth'
+    });
     this.tokenExpiry = process.env.JWT_EXPIRY || '24h';
   }
 
@@ -274,7 +277,6 @@ class GraphQLAuthMiddleware {
 const graphqlAuth = new GraphQLAuthMiddleware();
 
 module.exports = graphqlAuth;
-
 
 
 

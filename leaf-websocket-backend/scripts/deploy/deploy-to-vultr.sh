@@ -6,7 +6,7 @@
 set -e
 
 # Configurações
-VULTR_IP="216.238.107.59"
+VULTR_IP="147.182.204.181"
 VULTR_USER="root"
 VULTR_SSH_KEY="~/.ssh/id_rsa"
 DOCKER_IMAGE="leaf-websocket-backend:production"

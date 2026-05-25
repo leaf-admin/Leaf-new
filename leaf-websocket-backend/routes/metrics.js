@@ -2,8 +2,17 @@ const express = require('express');
 const admin = require('firebase-admin');
 const { logger, logStructured, logError } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
+const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
+const modernMetricsService = require('../services/modern-metrics-service');
+const driverSubscriptionService = require('../services/driver-subscription-service');
+const supportQueueService = require('../services/support-queue-service');
 
 const router = express.Router();
+const METRICS_READ_ROLES = ['admin', 'manager', 'super-admin', 'viewer'];
+const DASHBOARD_METRICS_CACHE_TTL_SECONDS = Math.max(
+  15,
+  Number.parseInt(process.env.DASHBOARD_METRICS_CACHE_TTL_SECONDS || '60', 10) || 60
+);
 
 let firebaseConfig = null;
 try {
@@ -54,6 +63,92 @@ const getLandingMetrics = async () => {
   };
 };
 
+function buildMetricsCacheKey(scope, params = {}) {
+  const serializedParams = Object.keys(params)
+    .sort()
+    .map((key) => `${key}=${params[key] ?? ''}`)
+    .join('&');
+
+  return `metrics:dashboard:${scope}:${serializedParams}`;
+}
+
+async function readMetricsCache(cacheKey) {
+  try {
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
+    const cached = await redis.get(cacheKey);
+    if (!cached) return null;
+
+    const parsed = JSON.parse(cached);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function writeMetricsCache(cacheKey, payload, ttlSeconds = DASHBOARD_METRICS_CACHE_TTL_SECONDS) {
+  try {
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
+    await redis.set(cacheKey, JSON.stringify(payload), 'EX', ttlSeconds);
+  } catch (_) {
+    // Cache é best-effort para não adicionar fragilidade ao runtime.
+  }
+}
+
+function isPrivateNetworkAddress(ip) {
+  const normalized = String(ip || '')
+    .replace('::ffff:', '')
+    .replace(/^::1$/, '127.0.0.1')
+    .trim();
+
+  if (!normalized) return false;
+  if (normalized === '127.0.0.1' || normalized === 'localhost') return true;
+  if (normalized.startsWith('10.')) return true;
+  if (normalized.startsWith('192.168.')) return true;
+
+  const parts = normalized.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length === 4 && parts.every((part) => Number.isFinite(part))) {
+    return parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31;
+  }
+
+  return false;
+}
+
+function allowPrometheusScrape(req, res, next) {
+  const configuredToken = String(process.env.PROMETHEUS_BEARER_TOKEN || '').trim();
+  const providedToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+
+  if (configuredToken && providedToken && providedToken === configuredToken) {
+    return next();
+  }
+
+  const allowPrivateScrape = String(process.env.PROMETHEUS_ALLOW_PRIVATE_SCRAPE || 'true').toLowerCase() !== 'false';
+  if (allowPrivateScrape && isPrivateNetworkAddress(req.ip)) {
+    return next();
+  }
+
+  return next('route');
+}
+
+async function prometheusMetricsHandler(req, res) {
+  try {
+    const { getMetrics } = require('../utils/prometheus-metrics');
+    const metricsText = await getMetrics();
+
+    res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.send(metricsText);
+  } catch (error) {
+    logError(error, 'Erro ao obter métricas Prometheus', {
+      service: 'metrics-routes',
+      operation: 'prometheus'
+    });
+    res.status(500).send('# Erro ao obter métricas Prometheus\n');
+  }
+}
+
+router.get('/api/metrics/prometheus', allowPrometheusScrape, prometheusMetricsHandler);
+
 router.post('/api/metrics/calculator', async (req, res) => {
   try {
     const landingMetricsRef = getLandingMetricsRef();
@@ -83,6 +178,13 @@ router.get('/api/metrics/overview', async (req, res) => {
   }
 });
 
+// Hotfix de seguranca: apenas endpoints publicos da landing permanecem sem auth.
+router.use(
+  '/api/metrics',
+  authenticateSupport,
+  requireSupportRoles(METRICS_READ_ROLES)
+);
+
 // ==========================================
 // 📊 MÉTRICAS DE CORRIDAS
 // ==========================================
@@ -90,6 +192,27 @@ router.get('/api/metrics/overview', async (req, res) => {
 // GET /api/metrics/rides/daily - Corridas realizadas no dia e % canceladas (após motorista aceitar)
 router.get('/api/metrics/rides/daily', async (req, res) => {
   try {
+    const cacheKey = buildMetricsCacheKey('rides-daily', {
+      day: new Date().toISOString().slice(0, 10)
+    });
+    const cached = await readMetricsCache(cacheKey);
+    if (cached) {
+      res.set('X-Leaf-Metrics-Cache', 'HIT');
+      return res.json(cached);
+    }
+
+    try {
+      const stats = await modernMetricsService.getRidesDailyStats();
+      await writeMetricsCache(cacheKey, stats);
+      res.set('X-Leaf-Metrics-Cache', 'MISS');
+      return res.json(stats);
+    } catch (modernError) {
+      logStructured('warn', 'Fallback RTDB em /api/metrics/rides/daily', {
+        service: 'metrics-routes',
+        reason: modernError.message
+      });
+    }
+
     let stats = {
       totalToday: 0,
       completedToday: 0,
@@ -151,6 +274,8 @@ router.get('/api/metrics/rides/daily', async (req, res) => {
       activeStatuses.includes(b.status)
     ).length;
 
+    await writeMetricsCache(cacheKey, stats);
+    res.set('X-Leaf-Metrics-Cache', 'MISS');
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas de corridas diárias:', { service: 'metrics-routes' });
@@ -165,6 +290,16 @@ router.get('/api/metrics/rides/daily', async (req, res) => {
 // GET /api/metrics/users/status - Customers e motoristas cadastrados, online e offline
 router.get('/api/metrics/users/status', async (req, res) => {
   try {
+    try {
+      const stats = await modernMetricsService.getUsersStatusStats();
+      return res.json(stats);
+    } catch (modernError) {
+      logStructured('warn', 'Fallback RTDB em /api/metrics/users/status', {
+        service: 'metrics-routes',
+        reason: modernError.message
+      });
+    }
+
     let stats = {
       customers: {
         total: 0,
@@ -259,6 +394,16 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
   try {
     const { period = 'today', startDate, endDate } = req.query;
 
+    try {
+      const stats = await modernMetricsService.getFinancialRidesStats({ period, startDate, endDate });
+      return res.json(stats);
+    } catch (modernError) {
+      logStructured('warn', 'Fallback RTDB em /api/metrics/financial/rides', {
+        service: 'metrics-routes',
+        reason: modernError.message
+      });
+    }
+
     let stats = {
       totalValue: 0,
       totalRides: 0,
@@ -350,6 +495,16 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
 router.get('/api/metrics/financial/operational-fee', async (req, res) => {
   try {
     const { period = 'today', startDate, endDate } = req.query;
+
+    try {
+      const stats = await modernMetricsService.getOperationalFeeStats({ period, startDate, endDate });
+      return res.json(stats);
+    } catch (modernError) {
+      logStructured('warn', 'Fallback RTDB em /api/metrics/financial/operational-fee', {
+        service: 'metrics-routes',
+        reason: modernError.message
+      });
+    }
 
     let stats = {
       totalOperationalFee: 0,
@@ -645,6 +800,16 @@ router.get('/api/metrics/maps/demand-by-region', async (req, res) => {
 // GET /api/metrics/subscriptions/active - Motoristas assinantes ativos
 router.get('/api/metrics/subscriptions/active', async (req, res) => {
   try {
+    try {
+      const stats = await driverSubscriptionService.getActiveSubscriptionMetrics();
+      return res.json(stats);
+    } catch (modernError) {
+      logStructured('warn', 'Fallback RTDB em /api/metrics/subscriptions/active', {
+        service: 'metrics-routes',
+        reason: modernError.message
+      });
+    }
+
     let stats = {
       totalActiveSubscriptions: 0,
       subscriptionsByPlan: {},
@@ -1032,6 +1197,109 @@ function parseTs(value) {
   return Number.isFinite(ts) ? ts : null;
 }
 
+function parseCurrencyCents(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number.parseFloat(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return Math.round(numeric);
+}
+
+function parseCurrencyReaisToCents(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = typeof value === 'string' && value.includes(',')
+    ? value.replace(/\./g, '').replace(',', '.')
+    : value;
+  const numeric = Number.parseFloat(normalized);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return Math.round(numeric * 100);
+}
+
+function resolveAcquisitionSpendCents(query = {}) {
+  const cents = [
+    query.acquisitionSpendCents,
+    query.marketingSpendCents,
+    process.env.DRIVER_ACQUISITION_SPEND_CENTS,
+    process.env.MARKETING_ACQUISITION_SPEND_CENTS
+  ].map(parseCurrencyCents).find((value) => Number.isFinite(value));
+
+  if (Number.isFinite(cents)) return cents;
+
+  return [
+    query.acquisitionSpend,
+    query.marketingSpend,
+    process.env.DRIVER_ACQUISITION_SPEND_BRL,
+    process.env.MARKETING_ACQUISITION_SPEND_BRL
+  ].map(parseCurrencyReaisToCents).find((value) => Number.isFinite(value)) ?? null;
+}
+
+function mean(values = []) {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (valid.length === 0) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function buildDriverLifecycle({ drivers = [], bookings = [], nowMs = Date.now() }) {
+  const bookingsByDriver = new Map();
+  bookings.forEach((booking) => {
+    if (!booking.driverId || !Number.isFinite(booking.requestTs)) return;
+    if (!bookingsByDriver.has(booking.driverId)) bookingsByDriver.set(booking.driverId, []);
+    bookingsByDriver.get(booking.driverId).push(booking);
+  });
+
+  return drivers.map((driver) => {
+    const driverBookings = (bookingsByDriver.get(driver.id) || [])
+      .slice()
+      .sort((a, b) => a.requestTs - b.requestTs);
+    const createdTs = pickFirstTs(
+      driver.createdAt,
+      driver.created_at,
+      driver.registrationDate,
+      driver.registeredAt,
+      driver.signUpAt
+    );
+    const firstActivityTs = driverBookings.length > 0 ? driverBookings[0].requestTs : null;
+    const activatedWithin7d = Number.isFinite(createdTs) && Number.isFinite(firstActivityTs)
+      ? firstActivityTs >= createdTs && firstActivityTs <= createdTs + (7 * 24 * 60 * 60 * 1000)
+      : false;
+
+    return {
+      driverId: driver.id,
+      createdTs,
+      firstActivityTs,
+      activatedWithin7d,
+      bookings: driverBookings,
+      ageDays: Number.isFinite(createdTs)
+        ? (nowMs - createdTs) / (24 * 60 * 60 * 1000)
+        : null
+    };
+  });
+}
+
+function calculateDriverRetention(lifecycleRows = [], days, windowDays = 7, asOfMs = Date.now()) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const eligible = lifecycleRows.filter((row) =>
+    Number.isFinite(row.firstActivityTs) && asOfMs >= row.firstActivityTs + (days * dayMs)
+  );
+
+  const retained = eligible.filter((row) => {
+    const start = row.firstActivityTs + (days * dayMs);
+    const end = Math.min(start + (windowDays * dayMs), asOfMs);
+    return row.bookings.some((booking) =>
+      Number.isFinite(booking.requestTs) &&
+      booking.requestTs >= start &&
+      booking.requestTs <= end
+    );
+  });
+
+  return {
+    rate: eligible.length > 0 ? retained.length / eligible.length : null,
+    retained: retained.length,
+    cohort: eligible.length,
+    days,
+    windowDays
+  };
+}
+
 function getWindow(period, startDate, endDate) {
   const now = new Date();
   let start = new Date(now);
@@ -1069,6 +1337,69 @@ function isWithin(ts, window) {
   return ts >= window.start.getTime() && ts <= window.end.getTime();
 }
 
+function parseLatLng(source) {
+  if (!source) return { lat: null, lng: null };
+
+  if (typeof source === 'string') {
+    try {
+      const parsed = JSON.parse(source);
+      return parseLatLng(parsed);
+    } catch (_error) {
+      return { lat: null, lng: null };
+    }
+  }
+
+  const lat = Number.parseFloat(source.lat ?? source.latitude ?? source.pickupLat ?? source.pickup_lat);
+  const lng = Number.parseFloat(source.lng ?? source.lon ?? source.longitude ?? source.pickupLng ?? source.pickup_lng);
+
+  return {
+    lat: Number.isFinite(lat) ? lat : null,
+    lng: Number.isFinite(lng) ? lng : null
+  };
+}
+
+function parseObjectSafe(value) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function pickFirstTs(...values) {
+  for (const value of values) {
+    const ts = parseTs(value);
+    if (Number.isFinite(ts)) {
+      return ts;
+    }
+  }
+  return null;
+}
+
+function estimateBoundingAreaKm2(points = []) {
+  const valid = points.filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  if (valid.length < 2) return null;
+
+  const lats = valid.map((point) => point.lat);
+  const lngs = valid.map((point) => point.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+
+  const avgLat = (minLat + maxLat) / 2;
+  const latKm = Math.max((maxLat - minLat) * 111.32, 0.001);
+  const lngKm = Math.max((maxLng - minLng) * 111.32 * Math.cos((avgLat * Math.PI) / 180), 0.001);
+  const areaKm2 = latKm * lngKm;
+
+  return Number.isFinite(areaKm2) ? areaKm2 : null;
+}
+
 router.get('/api/metrics/marketplace', async (req, res) => {
   try {
     const {
@@ -1076,6 +1407,18 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       startDate,
       endDate
     } = req.query;
+    const acquisitionSpendCents = resolveAcquisitionSpendCents(req.query);
+    const cacheKey = buildMetricsCacheKey('marketplace', {
+      period,
+      startDate: startDate || '',
+      endDate: endDate || '',
+      acquisitionSpendCents: acquisitionSpendCents ?? ''
+    });
+    const cached = await readMetricsCache(cacheKey);
+    if (cached) {
+      res.set('X-Leaf-Metrics-Cache', 'HIT');
+      return res.json(cached);
+    }
 
     const response = {
       period,
@@ -1084,7 +1427,11 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       raw: {},
       assumptions: {
         driverUtilizationEstimated: true,
-        costPerRideEstimated: true
+        costPerRideEstimated: true,
+        driverActivityBasis: 'booking com motorista atribuido',
+        activationWindowDays: 7,
+        retentionWindowDays: 7,
+        acquisitionSpendSource: acquisitionSpendCents == null ? 'not_configured' : 'query_or_env'
       }
     };
 
@@ -1105,9 +1452,20 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       }
     };
 
-    const [bookingsSnapshot, usersSnapshot] = await Promise.all([
+    const supportSummaryPromise = supportQueueService
+      .getQueueSummary({ autoEscalate: false })
+      .catch((error) => {
+        logStructured('warn', 'Falha ao carregar resumo de suporte para marketplace metrics', {
+          service: 'metrics-routes',
+          reason: error.message
+        });
+        return null;
+      });
+
+    const [bookingsSnapshot, usersSnapshot, supportSummary] = await Promise.all([
       db.ref('bookings').once('value'),
-      db.ref('users').once('value')
+      db.ref('users').once('value'),
+      supportSummaryPromise
     ]);
 
     const bookings = bookingsSnapshot.val() || {};
@@ -1115,17 +1473,28 @@ router.get('/api/metrics/marketplace', async (req, res) => {
 
     const normalizedBookings = Object.keys(bookings).map((id) => {
       const b = bookings[id] || {};
+      const paymentData = parseObjectSafe(b.paymentData);
+      const payment = parseObjectSafe(b.payment);
       const requestTs = parseTs(b.createdAt || b.tripdate || b.timestamp || b.activatedAt);
       const acceptTs = parseTs(b.acceptedAt || b.driverAcceptedAt || b.matchedAt);
       const arrivedTs = parseTs(b.driverArrivedAt || b.arrivedAt || b.pickupArrivedAt);
       const tripStartTs = parseTs(b.tripstart || b.startedAt || b.startTime);
       const tripEndTs = parseTs(b.tripend || b.completedAt || b.endTime || b.paidAt);
+      const paymentConfirmedTs = pickFirstTs(
+        b.paymentConfirmedAt,
+        b.paymentApprovedAt,
+        b.confirmedAt,
+        paymentData?.confirmedAt,
+        payment?.confirmedAt
+      );
       const status = String(b.status || '').toUpperCase();
       const driverId = b.driver || b.driverId || null;
       const customerId = b.customer || b.customerId || b.user || b.userId || null;
       const fare = toNumber(b.customer_paid || b.total_fare || b.fare || b.estimate, 0);
       const convenienceFee = toNumber(b.convenience_fees, 0);
       const driverShare = toNumber(b.driver_share, 0);
+      const pickupParsed = parseLatLng(b.pickup || b.pickupLocation || null);
+      const destinationParsed = parseLatLng(b.drop || b.destination || null);
 
       return {
         id,
@@ -1133,13 +1502,18 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         requestTs,
         acceptTs,
         arrivedTs,
+        paymentConfirmedTs,
         tripStartTs,
         tripEndTs,
         driverId,
         customerId,
         fare,
         convenienceFee,
-        driverShare
+        driverShare,
+        pickupLat: pickupParsed.lat,
+        pickupLng: pickupParsed.lng,
+        destinationLat: destinationParsed.lat,
+        destinationLng: destinationParsed.lng
       };
     });
 
@@ -1159,6 +1533,9 @@ router.get('/api/metrics/marketplace', async (req, res) => {
     const pickupSamplesMin = currentBookings
       .filter((b) => Number.isFinite(b.acceptTs) && Number.isFinite(b.arrivedTs) && b.arrivedTs >= b.acceptTs)
       .map((b) => (b.arrivedTs - b.acceptTs) / (1000 * 60));
+    const paymentApprovalToPickupSamplesMin = currentBookings
+      .filter((b) => Number.isFinite(b.paymentConfirmedTs) && Number.isFinite(b.arrivedTs) && b.arrivedTs >= b.paymentConfirmedTs)
+      .map((b) => (b.arrivedTs - b.paymentConfirmedTs) / (1000 * 60));
 
     const waitAvgMin = waitSamplesMin.length
       ? waitSamplesMin.reduce((sum, v) => sum + v, 0) / waitSamplesMin.length
@@ -1166,12 +1543,16 @@ router.get('/api/metrics/marketplace', async (req, res) => {
     const pickupAvgMin = pickupSamplesMin.length
       ? pickupSamplesMin.reduce((sum, v) => sum + v, 0) / pickupSamplesMin.length
       : null;
+    const paymentApprovalToPickupAvgMin = paymentApprovalToPickupSamplesMin.length
+      ? paymentApprovalToPickupSamplesMin.reduce((sum, v) => sum + v, 0) / paymentApprovalToPickupSamplesMin.length
+      : null;
 
     const activeDriverSet = new Set(currentBookings.map((b) => b.driverId).filter(Boolean));
     const activePassengerSet = new Set(currentBookings.map((b) => b.customerId).filter(Boolean));
 
     const activeDrivers = activeDriverSet.size;
     const activePassengers = activePassengerSet.size;
+    const passengerDriverRatio = activeDrivers > 0 ? (activePassengers / activeDrivers) : null;
     const periodDays = Math.max(
       1,
       Math.ceil((current.end.getTime() - current.start.getTime()) / (24 * 60 * 60 * 1000))
@@ -1211,6 +1592,14 @@ router.get('/api/metrics/marketplace', async (req, res) => {
     }, 0);
 
     const driverUtilization = estimatedOnlineMs > 0 ? (totalBusyMs / estimatedOnlineMs) : null;
+
+    const spatialPoints = currentBookings
+      .map((b) => ({ lat: b.pickupLat, lng: b.pickupLng }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+    const coverageAreaKm2 = estimateBoundingAreaKm2(spatialPoints);
+    const driversPerKm2 = (coverageAreaKm2 && coverageAreaKm2 > 0 && activeDrivers > 0)
+      ? (activeDrivers / coverageAreaKm2)
+      : null;
 
     const revenueTotal = completedCurrent.reduce((sum, b) => sum + b.fare, 0);
     const ridesForFinancial = Math.max(completed, 1);
@@ -1252,12 +1641,105 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       : null;
 
     const driversArray = Object.keys(users).map((id) => ({ id, ...(users[id] || {}) }))
-      .filter((u) => String(u.usertype || '').toLowerCase() === 'driver');
+      .filter((u) => String(u.usertype || u.userType || '').toLowerCase() === 'driver');
+    const driverUsersById = new Map(driversArray.map((driver) => [driver.id, driver]));
     const newDriversCurrent = driversArray.filter((d) => isWithin(parseTs(d.createdAt), current)).length;
     const churnDrivers = [...previousActiveDrivers].filter((driverId) => !activeDriverSet.has(driverId)).length;
+    const churnRate = previousActiveDrivers.size > 0 ? churnDrivers / previousActiveDrivers.size : null;
     const driverGrowth = previousActiveDrivers.size > 0
       ? (newDriversCurrent - churnDrivers) / previousActiveDrivers.size
       : null;
+    const driverLifecycleRows = buildDriverLifecycle({
+      drivers: driversArray,
+      bookings: normalizedBookings,
+      nowMs: current.end.getTime()
+    });
+    const newDriverLifecycleRows = driverLifecycleRows.filter((row) => isWithin(row.createdTs, current));
+    const activatedDriversWithin7d = newDriverLifecycleRows.filter((row) => row.activatedWithin7d).length;
+    const driverActivationRate = newDriverLifecycleRows.length > 0
+      ? activatedDriversWithin7d / newDriverLifecycleRows.length
+      : null;
+    const retentionD30 = calculateDriverRetention(driverLifecycleRows, 30, 7, current.end.getTime());
+    const retentionD60 = calculateDriverRetention(driverLifecycleRows, 60, 7, current.end.getTime());
+    const acquisitionSpend = acquisitionSpendCents == null
+      ? null
+      : Number((acquisitionSpendCents / 100).toFixed(2));
+    const driverAcquisitionCost = acquisitionSpend != null && newDriversCurrent > 0
+      ? acquisitionSpend / newDriversCurrent
+      : null;
+    const supportTickets = Array.isArray(supportSummary?.tickets) ? supportSummary.tickets : [];
+    const supportFirstResponseMinutes = supportTickets
+      .map((ticket) => {
+        const createdAt = Date.parse(ticket.createdAt || '');
+        const firstResponseAt = Date.parse(ticket.queue?.firstResponseAt || '');
+        if (!Number.isFinite(createdAt) || !Number.isFinite(firstResponseAt) || firstResponseAt < createdAt) {
+          return null;
+        }
+        return (firstResponseAt - createdAt) / 60000;
+      })
+      .filter((value) => Number.isFinite(value));
+    const averageSupportFirstResponseMinutes = mean(supportFirstResponseMinutes);
+
+    const driverBreakdownMap = new Map();
+    currentBookings.forEach((b) => {
+      if (!b.driverId) return;
+
+      if (!driverBreakdownMap.has(b.driverId)) {
+        driverBreakdownMap.set(b.driverId, {
+          driverId: b.driverId,
+          rides: 0,
+          completedRides: 0,
+          cancelledRides: 0,
+          fareTotal: 0,
+          activeDays: new Set()
+        });
+      }
+
+      const entry = driverBreakdownMap.get(b.driverId);
+      entry.rides += 1;
+      if (COMPLETED_STATUSES.has(b.status)) {
+        entry.completedRides += 1;
+        entry.fareTotal += b.fare;
+      }
+      if (CANCELLED_STATUSES.has(b.status)) {
+        entry.cancelledRides += 1;
+      }
+      if (Number.isFinite(b.requestTs)) {
+        entry.activeDays.add(new Date(b.requestTs).toISOString().split('T')[0]);
+      }
+    });
+
+    const driverBreakdown = [...driverBreakdownMap.values()]
+      .map((entry) => {
+        const driver = driverUsersById.get(entry.driverId) || {};
+        const activeDaysCount = Math.max(entry.activeDays.size, 1);
+        const displayName =
+          driver.name ||
+          driver.fullname ||
+          driver.fullName ||
+          driver.username ||
+          driver.nickname ||
+          driver.email ||
+          entry.driverId;
+
+        return {
+          driverId: entry.driverId,
+          displayName,
+          phone: driver.phone || driver.phoneNumber || driver.mobile || null,
+          rides: entry.rides,
+          completedRides: entry.completedRides,
+          cancelledRides: entry.cancelledRides,
+          ridesPerCalendarDay: periodDays > 0 ? entry.rides / periodDays : null,
+          ridesPerActiveDay: activeDaysCount > 0 ? entry.rides / activeDaysCount : null,
+          activeDays: activeDaysCount,
+          fareTotal: entry.fareTotal
+        };
+      })
+      .sort((a, b) => {
+        if (b.rides !== a.rides) return b.rides - a.rides;
+        if (b.completedRides !== a.completedRides) return b.completedRides - a.completedRides;
+        return b.fareTotal - a.fareTotal;
+      });
 
     const conversionRate = requested > 0 ? completed / requested : null;
     const cancellationRate = requested > 0 ? cancelled / requested : null;
@@ -1268,12 +1750,16 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         mlr,
         averageWaitMinutes: waitAvgMin,
         averagePickupMinutes: pickupAvgMin,
+        averagePaymentApprovalToPickupMinutes: paymentApprovalToPickupAvgMin,
         cancellationRate
       },
       drivers: {
         ridesPerDriverPerDay,
         utilization: driverUtilization,
-        activeDrivers
+        activeDrivers,
+        passengerDriverRatio,
+        driversPerKm2,
+        coverageAreaKm2
       },
       passengers: {
         activePassengers,
@@ -1288,12 +1774,26 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         costPerRide,
         marginPerRide,
         revenuePerDriver,
-        totalRevenue: revenueTotal
+        totalRevenue: revenueTotal,
+        driverAcquisitionCost,
+        acquisitionSpend
       },
       growth: {
         driverGrowth,
         ridesGrowth,
-        driverRetention: retentionDrivers
+        driverRetention: retentionDrivers,
+        driverRetentionD30: retentionD30.rate,
+        driverRetentionD60: retentionD60.rate,
+        driverActivationRate,
+        driverChurnRate: churnRate
+      },
+      support: {
+        averageFirstResponseMinutes: averageSupportFirstResponseMinutes,
+        medianFirstResponseMinutes: supportSummary?.medianFirstResponseMinutes ?? null,
+        totalOpenTickets: supportSummary?.totalOpenTickets ?? null,
+        overdueAckCount: supportSummary?.overdueAckCount ?? null,
+        overdueFirstResponseCount: supportSummary?.overdueFirstResponseCount ?? null,
+        ticketsWithoutOwner: supportSummary?.ticketsWithoutOwner ?? null
       },
       summary: {
         ridesRequested: requested,
@@ -1316,6 +1816,7 @@ router.get('/api/metrics/marketplace', async (req, res) => {
           cancelled: 0,
           waitSamples: [],
           pickupSamples: [],
+          paymentApprovalToPickupSamples: [],
           fareTotal: 0,
           driverIds: new Set(),
           passengerIds: new Set(),
@@ -1341,6 +1842,9 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       }
       if (Number.isFinite(b.acceptTs) && Number.isFinite(b.arrivedTs) && b.arrivedTs >= b.acceptTs) {
         bucket.pickupSamples.push((b.arrivedTs - b.acceptTs) / (1000 * 60));
+      }
+      if (Number.isFinite(b.paymentConfirmedTs) && Number.isFinite(b.arrivedTs) && b.arrivedTs >= b.paymentConfirmedTs) {
+        bucket.paymentApprovalToPickupSamples.push((b.arrivedTs - b.paymentConfirmedTs) / (1000 * 60));
       }
 
       if (b.driverId) {
@@ -1369,6 +1873,9 @@ router.get('/api/metrics/marketplace', async (req, res) => {
           : null;
         const pickupAvg = bucket.pickupSamples.length
           ? bucket.pickupSamples.reduce((sum, v) => sum + v, 0) / bucket.pickupSamples.length
+          : null;
+        const paymentApprovalToPickupAvg = bucket.paymentApprovalToPickupSamples.length
+          ? bucket.paymentApprovalToPickupSamples.reduce((sum, v) => sum + v, 0) / bucket.paymentApprovalToPickupSamples.length
           : null;
         const mlrDay = bucket.requested > 0 ? bucket.accepted / bucket.requested : null;
         const cancelRateDay = bucket.requested > 0 ? bucket.cancelled / bucket.requested : null;
@@ -1404,6 +1911,7 @@ router.get('/api/metrics/marketplace', async (req, res) => {
             mlr: mlrDay,
             averageWaitMinutes: waitAvg,
             averagePickupMinutes: pickupAvg,
+            averagePaymentApprovalToPickupMinutes: paymentApprovalToPickupAvg,
             cancellationRate: cancelRateDay
           },
           drivers: {
@@ -1429,27 +1937,51 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       daily: timeline
     };
 
+    response.breakdowns = {
+      drivers: driverBreakdown
+    };
+
     response.raw = {
       numeratorDenominator: {
         mlr: { accepted, requested },
         cancellation: { cancelled, requested },
         conversion: { completed, requested },
         ridesPerDriverPerDay: { rides: requested, activeDrivers, days: periodDays },
-        ridesPerPassengerMonth: { ridesMonth: monthRideCount, mau }
+        ridesPerPassengerMonth: { ridesMonth: monthRideCount, mau },
+        driverActivationRate: { activatedDriversWithin7d, newDrivers: newDriverLifecycleRows.length },
+        driverRetentionD30: { retained: retentionD30.retained, cohort: retentionD30.cohort, days: 30, windowDays: 7 },
+        driverRetentionD60: { retained: retentionD60.retained, cohort: retentionD60.cohort, days: 60, windowDays: 7 },
+        driverChurnRate: { churnDrivers, previousActiveDrivers: previousActiveDrivers.size },
+        driverAcquisitionCost: { acquisitionSpend, newDrivers: newDriversCurrent }
       },
       timingSamples: {
         waitCount: waitSamplesMin.length,
-        pickupCount: pickupSamplesMin.length
+        pickupCount: pickupSamplesMin.length,
+        paymentApprovalToPickupCount: paymentApprovalToPickupSamplesMin.length
       },
       growth: {
         previousRequested,
         previousActiveDrivers: previousActiveDrivers.size,
         retainedDrivers: retainedDriversCount,
         newDriversCurrent,
-        churnDrivers
+        churnDrivers,
+        activatedDriversWithin7d,
+        driverRetentionD30: retentionD30,
+        driverRetentionD60: retentionD60
+      },
+      support: {
+        firstResponseSamples: supportFirstResponseMinutes.length,
+        openTickets: supportSummary?.totalOpenTickets ?? null,
+        overdueAckCount: supportSummary?.overdueAckCount ?? null,
+        overdueFirstResponseCount: supportSummary?.overdueFirstResponseCount ?? null
+      },
+      breakdowns: {
+        activeDriverRows: driverBreakdown.length
       }
     };
 
+    await writeMetricsCache(cacheKey, response);
+    res.set('X-Leaf-Metrics-Cache', 'MISS');
     res.json(response);
   } catch (error) {
     logError(error, 'Erro ao gerar métricas consolidadas de marketplace', {
@@ -1631,6 +2163,119 @@ router.get('/api/metrics/observability', async (req, res) => {
       byListener: metrics.listeners?.byListener || {}
     };
 
+    const realtimeMetrics = {
+      total: metrics.realtime?.total || 0,
+      byChannel: metrics.realtime?.byChannel || {}
+    };
+
+    const hotpathMetrics = {
+      total: metrics.hotpath?.total || 0,
+      success: metrics.hotpath?.success || 0,
+      failures: metrics.hotpath?.failures || 0,
+      avgLatencyMs: metrics.hotpath?.avgLatencyMs || 0,
+      byPath: metrics.hotpath?.byPath || {}
+    };
+
+    const ridesMetrics = {
+      requested: metrics.rides?.requested || 0,
+      accepted: metrics.rides?.accepted || 0,
+      cancelled: metrics.rides?.cancelled || 0,
+      completed: metrics.rides?.completed || 0,
+      timeToAcceptAvgSec: metrics.rides?.timeToAcceptAvgSec || 0,
+      rideDurationAvgSec: metrics.rides?.rideDurationAvgSec || 0,
+      byCity: metrics.rides?.byCity || {}
+    };
+
+    const workersMetrics = {
+      total: metrics.workers?.total || 0,
+      byType: metrics.workers?.byType || {}
+    };
+
+    const eventLoopLagMetrics = {
+      meanMs: metrics.eventLoopLag?.meanMs || 0,
+      p95Ms: metrics.eventLoopLag?.p95Ms || 0,
+      maxMs: metrics.eventLoopLag?.maxMs || 0
+    };
+
+    const getRealtimeChannelResults = (channel) => {
+      return realtimeMetrics?.byChannel?.[channel]?.results || {};
+    };
+
+    const sumRealtimeEntriesByPrefix = (entries, prefix) => {
+      return Object.entries(entries || {})
+        .filter(([key]) => key.startsWith(prefix))
+        .reduce((acc, [, value]) => acc + Number(value || 0), 0);
+    };
+
+    const sumRealtimeEntriesByIncludes = (entries, token) => {
+      const normalizedToken = String(token || '').trim().toLowerCase();
+      if (!normalizedToken) {
+        return 0;
+      }
+      return Object.entries(entries || {})
+        .filter(([key]) => String(key || '').toLowerCase().includes(normalizedToken))
+        .reduce((acc, [, value]) => acc + Number(value || 0), 0);
+    };
+
+    const requestRideCommand = commandsMetrics?.byCommand?.request_ride || {};
+    const createBookingRealtime = getRealtimeChannelResults('create_booking');
+    const setDriverStatusRealtime = getRealtimeChannelResults('set_driver_status');
+    const authenticateRealtime = getRealtimeChannelResults('authenticate');
+    const driverActivationRealtime = getRealtimeChannelResults('driver_activation');
+    const docInReviewRealtime = getRealtimeChannelResults('doc_in_review');
+    const docFailedRealtime = getRealtimeChannelResults('doc_failed');
+    const createBookingSuccess = Number(createBookingRealtime.success || 0);
+    const createBookingErrors = sumRealtimeEntriesByPrefix(createBookingRealtime, 'error_');
+    const createBookingTotal = createBookingSuccess + createBookingErrors;
+
+    const criticalSignals = {
+      createBooking: {
+        total: createBookingTotal,
+        success: createBookingSuccess,
+        errors: createBookingErrors,
+        errorRatePct: createBookingTotal > 0 ? Number(((createBookingErrors / createBookingTotal) * 100).toFixed(2)) : 0,
+        topErrors: Object.entries(createBookingRealtime)
+          .filter(([key]) => key.startsWith('error_'))
+          .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+          .slice(0, 6)
+          .map(([error, count]) => ({ error, count: Number(count || 0) }))
+      },
+      requestRideCommand: {
+        total: Number(requestRideCommand.total || 0),
+        failures: Number(requestRideCommand.failures || 0),
+        failureRatePct: Number(requestRideCommand.total || 0) > 0
+          ? Number(((Number(requestRideCommand.failures || 0) / Number(requestRideCommand.total || 0)) * 100).toFixed(2))
+          : 0
+      },
+      auth: {
+        success: Number(authenticateRealtime.success || 0),
+        authBusy: Number(authenticateRealtime.auth_busy || 0),
+        invalidToken: Number(authenticateRealtime.error_invalid_token || 0),
+        missingToken: Number(authenticateRealtime.error_missing_token || 0),
+        exceptions: Number(authenticateRealtime.error_exception || 0)
+      },
+      driverOnlineGate: {
+        successOnline: Number(setDriverStatusRealtime.success_online || 0),
+        successOffline: Number(setDriverStatusRealtime.success_offline || 0),
+        onlineNotReady: Number(setDriverStatusRealtime.error_online_not_ready || 0),
+        locationRequired: Number(setDriverStatusRealtime.error_location_required || 0),
+        vehicleLockFailed: Number(setDriverStatusRealtime.error_vehicle_lock_failed || 0)
+      },
+      socketAdmission: {
+        busyRetry: Number(getRealtimeChannelResults('socket_admission').server_busy_retry || 0),
+        busyTimeout: Number(getRealtimeChannelResults('socket_admission').server_busy_timeout || 0)
+      },
+      operationalIndicators: {
+        authBusyRetries: Number(authenticateRealtime.auth_busy || 0),
+        setDriverStatusErrors: Number(sumRealtimeEntriesByPrefix(setDriverStatusRealtime, 'error_') || 0),
+        onlineNotReady: Number(setDriverStatusRealtime.error_online_not_ready || 0),
+        locationRequired: Number(setDriverStatusRealtime.error_location_required || 0),
+        createBookingRetry: Number(sumRealtimeEntriesByIncludes(createBookingRealtime, 'retry') || 0),
+        docInReview: Number(driverActivationRealtime.doc_in_review || 0) + Number(docInReviewRealtime.total || 0),
+        docFailed: Number(driverActivationRealtime.doc_failed || 0) + Number(docFailedRealtime.total || 0)
+      }
+    };
+
     res.json({
       success: true,
       timestamp: new Date().toISOString(),
@@ -1639,6 +2284,12 @@ router.get('/api/metrics/observability', async (req, res) => {
       commands: commandsMetrics,
       events: eventsMetrics,
       listeners: listenersMetrics,
+      realtime: realtimeMetrics,
+      hotpath: hotpathMetrics,
+      rides: ridesMetrics,
+      workers: workersMetrics,
+      eventLoopLag: eventLoopLagMetrics,
+      critical: criticalSignals,
       otel: getOtelIngestStatus()
     });
   } catch (error) {
@@ -1689,6 +2340,35 @@ function parsePrometheusMetrics(metricsText) {
       failures: 0,
       avgLatency: 0,
       byListener: {}
+    },
+    realtime: {
+      total: 0,
+      byChannel: {}
+    },
+    hotpath: {
+      total: 0,
+      success: 0,
+      failures: 0,
+      avgLatencyMs: 0,
+      byPath: {}
+    },
+    rides: {
+      requested: 0,
+      accepted: 0,
+      cancelled: 0,
+      completed: 0,
+      timeToAcceptAvgSec: 0,
+      rideDurationAvgSec: 0,
+      byCity: {}
+    },
+    workers: {
+      total: 0,
+      byType: {}
+    },
+    eventLoopLag: {
+      meanMs: 0,
+      p95Ms: 0,
+      maxMs: 0
     }
   };
 
@@ -1714,16 +2394,82 @@ function parsePrometheusMetrics(metricsText) {
   const listenerDurationSumRegex = /^leaf_listener_duration_seconds_sum\{listener_name="([^"]+)",status="([^"]+)"\} (\d+\.?\d*)/;
   const listenerDurationCountRegex = /^leaf_listener_duration_seconds_count\{listener_name="([^"]+)",status="([^"]+)"\} (\d+)/;
 
+  // Parsear métricas realtime/hotpath
+  const realtimeUpdatesRegex = /^leaf_realtime_updates_total\{channel="([^"]+)",result="([^"]+)"\} (\d+\.?\d*)/;
+  const hotpathDurationSumRegex = /^leaf_hotpath_duration_seconds_sum\{path="([^"]+)",status="([^"]+)"\} (\d+\.?\d*)/;
+  const hotpathDurationCountRegex = /^leaf_hotpath_duration_seconds_count\{path="([^"]+)",status="([^"]+)"\} (\d+\.?\d*)/;
+
+  // Parsear métricas de negócio (corridas)
+  const ridesRequestedRegex = /^leaf_rides_requested_total\{city="([^"]+)",service_type="([^"]+)"\} (\d+\.?\d*)/;
+  const ridesAcceptedRegex = /^leaf_rides_accepted_total\{city="([^"]+)",service_type="([^"]+)"\} (\d+\.?\d*)/;
+  const ridesCancelledRegex = /^leaf_rides_cancelled_total\{city="([^"]+)",reason="([^"]+)"\} (\d+\.?\d*)/;
+  const ridesCompletedRegex = /^leaf_rides_completed_total\{city="([^"]+)",service_type="([^"]+)"\} (\d+\.?\d*)/;
+  const timeToAcceptSumRegex = /^leaf_time_to_accept_seconds_sum\{city="([^"]+)"\} (\d+\.?\d*)/;
+  const timeToAcceptCountRegex = /^leaf_time_to_accept_seconds_count\{city="([^"]+)"\} (\d+\.?\d*)/;
+  const rideDurationSumRegex = /^leaf_ride_total_duration_seconds_sum\{city="([^"]+)"\} (\d+\.?\d*)/;
+  const rideDurationCountRegex = /^leaf_ride_total_duration_seconds_count\{city="([^"]+)"\} (\d+\.?\d*)/;
+
+  // Parsear métricas de workers/event loop
+  const workersActiveRegex = /^leaf_workers_active\{worker_type="([^"]+)"\} (\d+\.?\d*)/;
+  const eventLoopLagMeanRegex = /^leaf_event_loop_lag_mean_ms (\d+\.?\d*)/;
+  const eventLoopLagP95Regex = /^leaf_event_loop_lag_p95_ms (\d+\.?\d*)/;
+  const eventLoopLagMaxRegex = /^leaf_event_loop_lag_max_ms (\d+\.?\d*)/;
+
   // Parsear métricas do sistema (nodejs padrão)
   const processCpuRegex = /^process_cpu_user_seconds_total (\d+\.?\d*)/;
   const processMemoryRegex = /^process_resident_memory_bytes (\d+)/;
 
   // Agregadores para cálculos
-  const redisLatencies = [];
-  const commandLatencies = [];
-  const listenerLatencies = [];
+  let redisLatencySumMs = 0;
+  let redisLatencyCount = 0;
+  const redisLatencySamplesMs = [];
+  let commandLatencySumMs = 0;
+  let commandLatencyCount = 0;
+  let listenerLatencySumMs = 0;
+  let listenerLatencyCount = 0;
   let totalEventLag = 0;
   let totalEventLagCount = 0;
+  const hotpathAggregates = {};
+
+  const ensureRealtimeChannel = (channel) => {
+    if (!metrics.realtime.byChannel[channel]) {
+      metrics.realtime.byChannel[channel] = {
+        total: 0,
+        results: {}
+      };
+    }
+    return metrics.realtime.byChannel[channel];
+  };
+
+  const ensureRideCity = (city) => {
+    if (!metrics.rides.byCity[city]) {
+      metrics.rides.byCity[city] = {
+        requested: 0,
+        accepted: 0,
+        cancelled: 0,
+        completed: 0,
+        timeToAcceptSumSec: 0,
+        timeToAcceptCount: 0,
+        rideDurationSumSec: 0,
+        rideDurationCount: 0,
+        timeToAcceptAvgSec: 0,
+        rideDurationAvgSec: 0
+      };
+    }
+    return metrics.rides.byCity[city];
+  };
+
+  const ensureHotpathAggregate = (path) => {
+    if (!hotpathAggregates[path]) {
+      hotpathAggregates[path] = {
+        successCount: 0,
+        failureCount: 0,
+        durationSumSec: 0,
+        durationCount: 0
+      };
+    }
+    return hotpathAggregates[path];
+  };
 
   lines.forEach(line => {
     // Redis - Erros
@@ -1742,7 +2488,7 @@ function parsePrometheusMetrics(metricsText) {
     if (redisDurationSumMatch) {
       const [, operation, status, value] = redisDurationSumMatch;
       if (status === 'success') {
-        redisLatencies.push(parseFloat(value) * 1000); // Converter para ms
+        redisLatencySumMs += parseFloat(value) * 1000;
       }
     }
 
@@ -1750,13 +2496,18 @@ function parsePrometheusMetrics(metricsText) {
     if (redisDurationCountMatch) {
       const [, operation, status, value] = redisDurationCountMatch;
       if (status === 'success') {
-        metrics.redis.total += parseInt(value);
-        metrics.redis.success += parseInt(value);
+        const numericValue = parseFloat(value);
+        metrics.redis.total += numericValue;
+        metrics.redis.success += numericValue;
+        redisLatencyCount += numericValue;
         if (!metrics.redis.byType[operation]) {
           metrics.redis.byType[operation] = { total: 0, success: 0, errors: 0 };
         }
-        metrics.redis.byType[operation].total += parseInt(value);
-        metrics.redis.byType[operation].success += parseInt(value);
+        metrics.redis.byType[operation].total += numericValue;
+        metrics.redis.byType[operation].success += numericValue;
+        if (numericValue > 0 && redisLatencySumMs > 0) {
+          redisLatencySamplesMs.push((redisLatencySumMs / redisLatencyCount) || 0);
+        }
       }
     }
 
@@ -1779,7 +2530,15 @@ function parsePrometheusMetrics(metricsText) {
     if (commandDurationSumMatch) {
       const [, commandName, status, value] = commandDurationSumMatch;
       if (status === 'success') {
-        commandLatencies.push(parseFloat(value) * 1000); // Converter para ms
+        commandLatencySumMs += parseFloat(value) * 1000;
+      }
+    }
+
+    const commandDurationCountMatch = line.match(commandDurationCountRegex);
+    if (commandDurationCountMatch) {
+      const [, , status, value] = commandDurationCountMatch;
+      if (status === 'success') {
+        commandLatencyCount += parseFloat(value);
       }
     }
 
@@ -1835,8 +2594,139 @@ function parsePrometheusMetrics(metricsText) {
     if (listenerDurationSumMatch) {
       const [, listenerName, status, value] = listenerDurationSumMatch;
       if (status === 'success') {
-        listenerLatencies.push(parseFloat(value) * 1000); // Converter para ms
+        listenerLatencySumMs += parseFloat(value) * 1000;
       }
+    }
+
+    const listenerDurationCountMatch = line.match(listenerDurationCountRegex);
+    if (listenerDurationCountMatch) {
+      const [, , status, value] = listenerDurationCountMatch;
+      if (status === 'success') {
+        listenerLatencyCount += parseFloat(value);
+      }
+    }
+
+    // Realtime counters
+    const realtimeUpdatesMatch = line.match(realtimeUpdatesRegex);
+    if (realtimeUpdatesMatch) {
+      const [, channel, result, value] = realtimeUpdatesMatch;
+      const numericValue = parseFloat(value);
+      const channelRef = ensureRealtimeChannel(channel);
+      channelRef.total += numericValue;
+      channelRef.results[result] = Number(channelRef.results[result] || 0) + numericValue;
+      metrics.realtime.total += numericValue;
+    }
+
+    // Hotpath
+    const hotpathDurationSumMatch = line.match(hotpathDurationSumRegex);
+    if (hotpathDurationSumMatch) {
+      const [, path, status, value] = hotpathDurationSumMatch;
+      const pathRef = ensureHotpathAggregate(path);
+      pathRef.durationSumSec += parseFloat(value);
+    }
+
+    const hotpathDurationCountMatch = line.match(hotpathDurationCountRegex);
+    if (hotpathDurationCountMatch) {
+      const [, path, status, value] = hotpathDurationCountMatch;
+      const pathRef = ensureHotpathAggregate(path);
+      const numericValue = parseFloat(value);
+      pathRef.durationCount += numericValue;
+      if (status === 'success') {
+        pathRef.successCount += numericValue;
+        metrics.hotpath.success += numericValue;
+      } else {
+        pathRef.failureCount += numericValue;
+        metrics.hotpath.failures += numericValue;
+      }
+      metrics.hotpath.total += numericValue;
+    }
+
+    // Rides counters
+    const ridesRequestedMatch = line.match(ridesRequestedRegex);
+    if (ridesRequestedMatch) {
+      const [, city, , value] = ridesRequestedMatch;
+      const numericValue = parseFloat(value);
+      metrics.rides.requested += numericValue;
+      const cityRef = ensureRideCity(city);
+      cityRef.requested += numericValue;
+    }
+
+    const ridesAcceptedMatch = line.match(ridesAcceptedRegex);
+    if (ridesAcceptedMatch) {
+      const [, city, , value] = ridesAcceptedMatch;
+      const numericValue = parseFloat(value);
+      metrics.rides.accepted += numericValue;
+      const cityRef = ensureRideCity(city);
+      cityRef.accepted += numericValue;
+    }
+
+    const ridesCancelledMatch = line.match(ridesCancelledRegex);
+    if (ridesCancelledMatch) {
+      const [, city, , value] = ridesCancelledMatch;
+      const numericValue = parseFloat(value);
+      metrics.rides.cancelled += numericValue;
+      const cityRef = ensureRideCity(city);
+      cityRef.cancelled += numericValue;
+    }
+
+    const ridesCompletedMatch = line.match(ridesCompletedRegex);
+    if (ridesCompletedMatch) {
+      const [, city, , value] = ridesCompletedMatch;
+      const numericValue = parseFloat(value);
+      metrics.rides.completed += numericValue;
+      const cityRef = ensureRideCity(city);
+      cityRef.completed += numericValue;
+    }
+
+    const timeToAcceptSumMatch = line.match(timeToAcceptSumRegex);
+    if (timeToAcceptSumMatch) {
+      const [, city, value] = timeToAcceptSumMatch;
+      const cityRef = ensureRideCity(city);
+      cityRef.timeToAcceptSumSec += parseFloat(value);
+    }
+
+    const timeToAcceptCountMatch = line.match(timeToAcceptCountRegex);
+    if (timeToAcceptCountMatch) {
+      const [, city, value] = timeToAcceptCountMatch;
+      const cityRef = ensureRideCity(city);
+      cityRef.timeToAcceptCount += parseFloat(value);
+    }
+
+    const rideDurationSumMatch = line.match(rideDurationSumRegex);
+    if (rideDurationSumMatch) {
+      const [, city, value] = rideDurationSumMatch;
+      const cityRef = ensureRideCity(city);
+      cityRef.rideDurationSumSec += parseFloat(value);
+    }
+
+    const rideDurationCountMatch = line.match(rideDurationCountRegex);
+    if (rideDurationCountMatch) {
+      const [, city, value] = rideDurationCountMatch;
+      const cityRef = ensureRideCity(city);
+      cityRef.rideDurationCount += parseFloat(value);
+    }
+
+    // Workers
+    const workersActiveMatch = line.match(workersActiveRegex);
+    if (workersActiveMatch) {
+      const [, workerType, value] = workersActiveMatch;
+      const numericValue = parseFloat(value);
+      metrics.workers.byType[workerType] = numericValue;
+      metrics.workers.total += numericValue;
+    }
+
+    // Event loop lag
+    const eventLoopLagMeanMatch = line.match(eventLoopLagMeanRegex);
+    if (eventLoopLagMeanMatch) {
+      metrics.eventLoopLag.meanMs = parseFloat(eventLoopLagMeanMatch[1]) || 0;
+    }
+    const eventLoopLagP95Match = line.match(eventLoopLagP95Regex);
+    if (eventLoopLagP95Match) {
+      metrics.eventLoopLag.p95Ms = parseFloat(eventLoopLagP95Match[1]) || 0;
+    }
+    const eventLoopLagMaxMatch = line.match(eventLoopLagMaxRegex);
+    if (eventLoopLagMaxMatch) {
+      metrics.eventLoopLag.maxMs = parseFloat(eventLoopLagMaxMatch[1]) || 0;
     }
 
     // Sistema
@@ -1852,44 +2742,89 @@ function parsePrometheusMetrics(metricsText) {
   });
 
   // Calcular latências médias
-  if (redisLatencies.length > 0) {
-    metrics.redis.avgLatency = redisLatencies.reduce((a, b) => a + b, 0) / redisLatencies.length;
-    const sorted = [...redisLatencies].sort((a, b) => a - b);
+  if (redisLatencyCount > 0) {
+    metrics.redis.avgLatency = redisLatencySumMs / redisLatencyCount;
+    const sorted = [...redisLatencySamplesMs].sort((a, b) => a - b);
     metrics.redis.p95Latency = sorted[Math.floor(sorted.length * 0.95)] || 0;
     metrics.redis.p99Latency = sorted[Math.floor(sorted.length * 0.99)] || 0;
   }
 
-  if (commandLatencies.length > 0) {
-    metrics.commands.avgLatency = commandLatencies.reduce((a, b) => a + b, 0) / commandLatencies.length;
+  if (commandLatencyCount > 0) {
+    metrics.commands.avgLatency = commandLatencySumMs / commandLatencyCount;
   }
 
-  if (listenerLatencies.length > 0) {
-    metrics.listeners.avgLatency = listenerLatencies.reduce((a, b) => a + b, 0) / listenerLatencies.length;
+  if (listenerLatencyCount > 0) {
+    metrics.listeners.avgLatency = listenerLatencySumMs / listenerLatencyCount;
   }
 
   if (totalEventLagCount > 0) {
     metrics.events.avgLag = totalEventLag / totalEventLagCount;
   }
 
+  // Consolidar hotpath por rota
+  Object.entries(hotpathAggregates).forEach(([pathName, aggregate]) => {
+    const totalCount = Number(aggregate.successCount || 0) + Number(aggregate.failureCount || 0);
+    const avgLatencyMs = aggregate.durationCount > 0
+      ? (aggregate.durationSumSec / aggregate.durationCount) * 1000
+      : 0;
+    metrics.hotpath.byPath[pathName] = {
+      total: totalCount,
+      success: Number(aggregate.successCount || 0),
+      failures: Number(aggregate.failureCount || 0),
+      avgLatencyMs
+    };
+  });
+
+  if (metrics.hotpath.total > 0) {
+    const weightedLatency = Object.values(metrics.hotpath.byPath).reduce((acc, item) => {
+      const weight = Number(item.total || 0);
+      const avgLatencyMs = Number(item.avgLatencyMs || 0);
+      return acc + (avgLatencyMs * weight);
+    }, 0);
+    metrics.hotpath.avgLatencyMs = weightedLatency / metrics.hotpath.total;
+  }
+
+  // Consolidar métricas de corrida por cidade
+  let ridesTimeToAcceptSumSec = 0;
+  let ridesTimeToAcceptCount = 0;
+  let ridesDurationSumSec = 0;
+  let ridesDurationCount = 0;
+
+  Object.entries(metrics.rides.byCity).forEach(([city, cityMetrics]) => {
+    const timeToAcceptAvgSec = cityMetrics.timeToAcceptCount > 0
+      ? cityMetrics.timeToAcceptSumSec / cityMetrics.timeToAcceptCount
+      : 0;
+    const rideDurationAvgSec = cityMetrics.rideDurationCount > 0
+      ? cityMetrics.rideDurationSumSec / cityMetrics.rideDurationCount
+      : 0;
+
+    metrics.rides.byCity[city] = {
+      requested: Number(cityMetrics.requested || 0),
+      accepted: Number(cityMetrics.accepted || 0),
+      cancelled: Number(cityMetrics.cancelled || 0),
+      completed: Number(cityMetrics.completed || 0),
+      timeToAcceptAvgSec,
+      rideDurationAvgSec
+    };
+
+    ridesTimeToAcceptSumSec += Number(cityMetrics.timeToAcceptSumSec || 0);
+    ridesTimeToAcceptCount += Number(cityMetrics.timeToAcceptCount || 0);
+    ridesDurationSumSec += Number(cityMetrics.rideDurationSumSec || 0);
+    ridesDurationCount += Number(cityMetrics.rideDurationCount || 0);
+  });
+
+  if (ridesTimeToAcceptCount > 0) {
+    metrics.rides.timeToAcceptAvgSec = ridesTimeToAcceptSumSec / ridesTimeToAcceptCount;
+  }
+  if (ridesDurationCount > 0) {
+    metrics.rides.rideDurationAvgSec = ridesDurationSumSec / ridesDurationCount;
+  }
+
   return metrics;
 }
 
 // GET /api/metrics/prometheus - Endpoint para métricas Prometheus (formato texto)
-router.get('/api/metrics/prometheus', async (req, res) => {
-  try {
-    const { getMetrics } = require('../utils/prometheus-metrics');
-    const metricsText = await getMetrics();
-
-    res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-    res.send(metricsText);
-  } catch (error) {
-    logError(error, 'Erro ao obter métricas Prometheus', {
-      service: 'metrics-routes',
-      operation: 'prometheus'
-    });
-    res.status(500).send('# Erro ao obter métricas Prometheus\n');
-  }
-});
+router.get('/api/metrics/prometheus', prometheusMetricsHandler);
 
 // ==========================================
 // 📊 SIMULADOR FINANCEIRO (TOKENOMICS)
@@ -1967,7 +2902,7 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
         let estimatedSubTotal = cat.base_fare + cat.fixed_fee + distCost + timeCost;
         if (estimatedSubTotal < cat.min_fare) estimatedSubTotal = cat.min_fare;
 
-        let assumedWooviFee = estimatedSubTotal * 0.0008;
+        let assumedWooviFee = estimatedSubTotal * 0.008;
         if (assumedWooviFee < 0.50) assumedWooviFee = 0.50;
 
         report.preAcceptanceCancellationCosts += assumedWooviFee;
@@ -1999,9 +2934,10 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
       let opFee = 0;
       if (rawFare <= 10.00) opFee = 0.79;
       else if (rawFare <= 25.00) opFee = 0.99;
-      else opFee = 1.49;
+      else if (rawFare <= 50.00) opFee = 1.49;
+      else opFee = rawFare * 0.03;
 
-      let wooviFee = grandTotal * 0.0008;
+      let wooviFee = grandTotal * 0.008;
       if (wooviFee < 0.50) wooviFee = 0.50;
 
       let driverShare = grandTotal - opFee - wooviFee;
@@ -2033,14 +2969,3 @@ router.get('/api/metrics/simulation/run', async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
-
-
-
-
-
-
-

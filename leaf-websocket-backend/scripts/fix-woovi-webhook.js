@@ -10,10 +10,17 @@
 
 const axios = require('axios');
 
-const WOOVI_API_TOKEN = process.env.WOOVI_API_TOKEN || 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X01ENWpTTW1DMExBYWx2WHhiY0tTSnlrVmYyM0g1Z0FxS0pZaE5zT0tUK1E9';
+const WOOVI_API_TOKEN = process.env.WOOVI_API_TOKEN;
 const WOOVI_BASE_URL = process.env.WOOVI_BASE_URL || 'https://api.woovi-sandbox.com/api/v1';
-const CORRECT_WEBHOOK_URL = process.env.WEBHOOK_URL || 'http://216.238.107.59:3001/api/woovi/webhook';
+const CORRECT_WEBHOOK_URL =
+  process.env.WEBHOOK_URL ||
+  'https://api.62.169.31.231.sslip.io/api/woovi/webhook';
 const TARGET_EVENT = process.env.WEBHOOK_EVENT || 'OPENPIX:CHARGE_COMPLETED';
+
+if (!WOOVI_API_TOKEN) {
+  console.error('❌ WOOVI_API_TOKEN não definido. Abortei para evitar uso inseguro.');
+  process.exit(1);
+}
 
 const api = axios.create({
   baseURL: WOOVI_BASE_URL,
@@ -154,4 +161,3 @@ async function main() {
 }
 
 main().catch(console.error);
-

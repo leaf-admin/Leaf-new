@@ -11,10 +11,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
 VPS_PORT="22"
-DEPLOY_DIR="/home/leaf/leaf-websocket-backend"
+DEPLOY_DIR="/opt/leaf-app"
 LEAF_USER="leaf"
 
 echo -e "${BLUE}🔄 REINICIANDO SERVIDOR LEAF${NC}"

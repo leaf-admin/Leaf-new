@@ -14,7 +14,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Instalar dependências de produção
-RUN npm ci && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 # Copiar código da aplicação
 COPY . .
@@ -36,5 +36,5 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3001/health/liveness || exit 1
 
-# Comando de inicialização
-CMD ["node", "server.js"]
+# Comando de inicialização (runtime selecionável por variável de ambiente)
+CMD ["bash", "./scripts/runtime/start-server.sh"]

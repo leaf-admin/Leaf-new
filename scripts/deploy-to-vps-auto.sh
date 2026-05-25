@@ -2,7 +2,7 @@
 
 echo "🚀 DEPLOY AUTOMÁTICO PARA VPS..."
 
-VPS_IP="216.238.107.59"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
 VPS_PATH="/root/leaf-backend"
 

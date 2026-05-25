@@ -1,0 +1,202 @@
+appId: br.com.leaf.ride
+env:
+  PASSENGER_PHONE: "21102938475"
+---
+- launchApp:
+    clearState: true
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "http://10.0.2.2:8081"
+    commands:
+      - tapOn: "http://10.0.2.2:8081"
+      - waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "No development servers found"
+    commands:
+      - tapOn: "Enter URL manually"
+      - inputText: "http://10.0.2.2:8081"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+      - runFlow:
+          when:
+            visible: "Open"
+          commands:
+            - tapOn: "Open"
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 120000
+
+- tapOn:
+    id: "auth-phone-input"
+- eraseText
+- inputText: ${PASSENGER_PHONE}
+- tapOn:
+    id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Erro de Autenticacao"
+    commands:
+      - tapOn: "OK"
+      - waitForAnimationToEnd
+      - tapOn:
+          id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Erro de Conexao"
+    commands:
+      - tapOn: "OK"
+      - waitForAnimationToEnd
+      - tapOn:
+          id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Estamos com instabilidade no servidor.*"
+    commands:
+      - tapOn: "OK"
+      - waitForAnimationToEnd
+      - tapOn:
+          id: "auth-continue-btn"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-password-input"
+    commands:
+      - takeScreenshot: "signup-passenger-blocked-existing-password-account"
+      - assertNotVisible:
+          id: "auth-password-input"
+
+- runFlow:
+    when:
+      visible: "Código OTP obrigatório"
+    commands:
+      - tapOn: "OK"
+
+- runFlow:
+    when:
+      visible: "Codigo OTP obrigatorio"
+    commands:
+      - tapOn: "OK"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-otp-digit-0"
+    commands:
+      - tapOn:
+          id: "auth-otp-digit-0"
+      - inputText: "9"
+      - tapOn:
+          id: "auth-otp-digit-1"
+      - inputText: "9"
+      - tapOn:
+          id: "auth-otp-digit-2"
+      - inputText: "2"
+      - tapOn:
+          id: "auth-otp-digit-3"
+      - inputText: "1"
+      - tapOn:
+          id: "auth-otp-digit-4"
+      - inputText: "1"
+      - tapOn:
+          id: "auth-otp-digit-5"
+      - inputText: "1"
+      - runFlow:
+          when:
+            visible:
+              id: "auth-otp-verify-btn"
+          commands:
+            - tapOn:
+                id: "auth-otp-verify-btn"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-profile-selection-trigger"
+    commands:
+      - tapOn:
+          id: "auth-profile-selection-trigger"
+      - tapOn:
+          id: "auth-profile-option-customer"
+      - tapOn:
+          id: "auth-profile-selection-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Digite seu nome completo"
+    commands:
+      - tapOn: "Digite seu nome completo"
+      - eraseText
+      - inputText: "QA Passageiro Signup"
+      - tapOn: ".*Termos de Uso.*"
+      - tapOn: ".*Privacidade.*"
+      - swipe:
+          start: "50%,82%"
+          end: "50%,36%"
+      - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Allow Leaf to access this device's location\\?"
+    commands:
+      - tapOn: "While using the app"
+
+- runFlow:
+    when:
+      visible: "Allow Leaf to access this device’s location\\?"
+    commands:
+      - tapOn: "While using the app"
+
+- runFlow:
+    when:
+      visible: "Permitir que a Leaf acesse a localização deste dispositivo\\?"
+    commands:
+      - tapOn: "Durante o uso do app"
+
+- extendedWaitUntil:
+    visible:
+      id: "(passenger-home-destination-input|passenger-rating-screen|robotaxi-support-screen)"
+    timeout: 120000
+
+- takeScreenshot: "signup-passenger-success-home"

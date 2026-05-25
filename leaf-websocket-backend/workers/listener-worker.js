@@ -15,7 +15,6 @@ const WorkerManager = require('./WorkerManager');
 const { logStructured } = require('../utils/logger');
 
 // Importar listeners pesados e críticos (migrados de eventos em memória local)
-const notifyDrivers = require('../listeners/onRideRequested.notifyDrivers');
 const sendPush = require('../listeners/onRideAccepted.sendPush');
 const notifyPassenger = require('../listeners/onRideAccepted.notifyPassenger');
 const notifyDriver = require('../listeners/onRideAccepted.notifyDriver');
@@ -29,6 +28,13 @@ const { Server } = require('socket.io');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const redisPool = require('../utils/redis-pool');
 
+const WORKER_STREAM_NAME = process.env.WORKER_STREAM_NAME || 'ride_events';
+const WORKER_GROUP_NAME = process.env.WORKER_GROUP_NAME || 'listener-workers';
+const WORKER_CONSUMER_PREFIX = process.env.WORKER_CONSUMER_PREFIX || 'listener-worker';
+const WORKER_BATCH_SIZE = Math.max(1, Number.parseInt(process.env.WORKER_BATCH_SIZE || '10', 10));
+const WORKER_BLOCK_TIME = Math.max(50, Number.parseInt(process.env.WORKER_BLOCK_TIME || '200', 10));
+const WORKER_MAX_RETRIES = Math.max(1, Number.parseInt(process.env.WORKER_MAX_RETRIES || '3', 10));
+
 // Configurar instância dummy do Socket.IO com Redis Adapter
 const pubClient = redisPool.getConnection();
 const subClient = pubClient.duplicate();
@@ -40,22 +46,19 @@ logStructured('info', 'Socket.IO com Redis Adapter inicializado no worker', {
 
 // Criar WorkerManager
 const workerManager = new WorkerManager({
-    streamName: 'ride_events',
-    groupName: 'listener-workers',
-    consumerName: `listener-worker-${process.pid}`,
-    batchSize: 10,
-    blockTime: 1000,
-    maxRetries: 3,
+    streamName: WORKER_STREAM_NAME,
+    groupName: WORKER_GROUP_NAME,
+    consumerName: `${WORKER_CONSUMER_PREFIX}-${process.pid}`,
+    batchSize: WORKER_BATCH_SIZE,
+    blockTime: WORKER_BLOCK_TIME,
+    maxRetries: WORKER_MAX_RETRIES,
     retryBackoff: [1000, 2000, 5000]
 });
 
 // Registrar listeners pesados e orquestrações
 // Passamos a instância `io` configurada com Redis Adapter
 
-workerManager.registerListener(EVENT_TYPES.RIDE_REQUESTED, async (event) => {
-    // Apenas notifyDrivers
-    await notifyDrivers(event, io);
-});
+// `ride.requested` permanece no gateway (caminho crítico de dispatch).
 
 workerManager.registerListener(EVENT_TYPES.RIDE_ACCEPTED, async (event) => {
     // Executar múltiplas ações de ride.accepted em paralelo sem que a falha de uma quebre a outra
@@ -122,4 +125,3 @@ setInterval(() => {
         ...stats
     });
 }, 60000);
-

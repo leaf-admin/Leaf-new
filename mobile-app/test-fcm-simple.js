@@ -11,7 +11,7 @@ const http = require('http');
 
 class FCMTesterSimple {
   constructor() {
-    this.vultrApiUrl = 'http://216.238.107.59:3001';
+    this.vultrApiUrl = 'http://147.182.204.181:3001';
     this.testResults = [];
   }
 

@@ -8,6 +8,16 @@ const promClient = require('prom-client');
 
 // Criar registry
 const register = new promClient.Registry();
+const sanitizeLabelValue = (value, fallback = 'unknown', maxLength = 40) => {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    if (!normalized) return fallback;
+    return normalized.slice(0, maxLength);
+};
 
 // Coletar métricas padrão (CPU, memória, etc)
 promClient.collectDefaultMetrics({ register });
@@ -192,6 +202,243 @@ const activeWorkers = new promClient.Gauge({
     registers: [register]
 });
 
+const websocketConnectionsCurrent = new promClient.Gauge({
+    name: 'leaf_websocket_connections_current',
+    help: 'Número atual de conexões WebSocket por papel de runtime',
+    labelNames: ['runtime_role'],
+    registers: [register]
+});
+
+// ==================== HOTPATH / REALTIME ====================
+
+// Event loop lag (ms)
+const eventLoopLagMeanMs = new promClient.Gauge({
+    name: 'leaf_event_loop_lag_mean_ms',
+    help: 'Média de event loop lag em milissegundos',
+    registers: [register]
+});
+
+const eventLoopLagP95Ms = new promClient.Gauge({
+    name: 'leaf_event_loop_lag_p95_ms',
+    help: 'P95 de event loop lag em milissegundos',
+    registers: [register]
+});
+
+const eventLoopLagMaxMs = new promClient.Gauge({
+    name: 'leaf_event_loop_lag_max_ms',
+    help: 'Máximo de event loop lag em milissegundos',
+    registers: [register]
+});
+
+// Volume de updates realtime (presença/localização)
+const realtimeUpdatesTotal = new promClient.Counter({
+    name: 'leaf_realtime_updates_total',
+    help: 'Total de updates realtime processados por canal e resultado',
+    labelNames: ['channel', 'result'],
+    registers: [register]
+});
+
+// Latência de operações críticas (hot path)
+const hotpathDuration = new promClient.Histogram({
+    name: 'leaf_hotpath_duration_seconds',
+    help: 'Latência das operações críticas no hot path',
+    labelNames: ['path', 'status'],
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    registers: [register]
+});
+
+const hotpathStageDuration = new promClient.Histogram({
+    name: 'leaf_hotpath_stage_duration_seconds',
+    help: 'Latência por estágio das operações críticas do hot path',
+    labelNames: ['path', 'stage', 'status'],
+    buckets: [0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    registers: [register]
+});
+
+const hotpathReasonTotal = new promClient.Counter({
+    name: 'leaf_hotpath_reason_total',
+    help: 'Total de reason codes canônicos observados no hot path',
+    labelNames: ['path', 'reason'],
+    registers: [register]
+});
+
+// Volume de operações Redis no hot path
+const redisHotpathOps = new promClient.Counter({
+    name: 'leaf_redis_hotpath_ops_total',
+    help: 'Total de operações Redis no hot path por caminho e operação',
+    labelNames: ['path', 'operation'],
+    registers: [register]
+});
+
+// ==================== LEGACY RUNTIME ====================
+
+const legacyRuntimeAccessTotal = new promClient.Counter({
+    name: 'leaf_legacy_runtime_access_total',
+    help: 'Total de acessos a dependencias legadas por tipo de operacao e resultado',
+    labelNames: ['dependency', 'operation', 'source', 'result'],
+    registers: [register]
+});
+
+// ==================== H3 MAP ====================
+
+const h3CellsRequests = new promClient.Counter({
+    name: 'leaf_h3_cells_request_total',
+    help: 'Total de requisições do mapa H3 por superfície e modo',
+    labelNames: ['surface', 'mode'],
+    registers: [register]
+});
+
+const h3CellsComputeMs = new promClient.Histogram({
+    name: 'leaf_h3_cells_compute_ms',
+    help: 'Tempo de computação do payload H3 em milissegundos',
+    labelNames: ['surface', 'mode'],
+    buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+    registers: [register]
+});
+
+const h3CellsCacheHit = new promClient.Counter({
+    name: 'leaf_h3_cells_cache_hit_total',
+    help: 'Total de hits de cache do mapa H3',
+    labelNames: ['surface', 'mode'],
+    registers: [register]
+});
+
+const h3CellsCacheMiss = new promClient.Counter({
+    name: 'leaf_h3_cells_cache_miss_total',
+    help: 'Total de misses de cache do mapa H3',
+    labelNames: ['surface', 'mode'],
+    registers: [register]
+});
+
+const h3CellsReturned = new promClient.Counter({
+    name: 'leaf_h3_cells_returned_total',
+    help: 'Total de células H3 retornadas por superfície e modo',
+    labelNames: ['surface', 'mode'],
+    registers: [register]
+});
+
+const h3RefreshHints = new promClient.Counter({
+    name: 'leaf_h3_refresh_hint_total',
+    help: 'Total de hints de refresh H3 emitidos por superfície e motivo',
+    labelNames: ['surface', 'reason'],
+    registers: [register]
+});
+
+const pricingEvaluations = new promClient.Counter({
+    name: 'leaf_pricing_evaluation_total',
+    help: 'Total de avaliações de pricing por estado operacional e source de baseline',
+    labelNames: ['result', 'operational_state', 'baseline_source'],
+    registers: [register]
+});
+
+const pricingDynamicQuotes = new promClient.Counter({
+    name: 'leaf_pricing_dynamic_quotes_total',
+    help: 'Total de avaliações de pricing com dinâmica aplicada',
+    labelNames: ['operational_state'],
+    registers: [register]
+});
+
+const pricingMinimumFareApplied = new promClient.Counter({
+    name: 'leaf_pricing_minimum_fare_applied_total',
+    help: 'Total de avaliações de pricing que caíram no valor mínimo',
+    labelNames: ['operational_state'],
+    registers: [register]
+});
+
+const pricingPressureScore = new promClient.Histogram({
+    name: 'leaf_pricing_score_pressao',
+    help: 'Distribuição do score de pressão operacional',
+    labelNames: ['operational_state'],
+    buckets: [0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.6, 0.75, 0.9, 1],
+    registers: [register]
+});
+
+const pricingExceptionScore = new promClient.Histogram({
+    name: 'leaf_pricing_score_excecao',
+    help: 'Distribuição do score de exceção operacional',
+    labelNames: ['operational_state'],
+    buckets: [0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.6, 0.75, 0.9, 1],
+    registers: [register]
+});
+
+const pricingBaselineMaterializations = new promClient.Counter({
+    name: 'leaf_pricing_baseline_materialization_total',
+    help: 'Total de execuções da materialização de baseline de pricing',
+    labelNames: ['result'],
+    registers: [register]
+});
+
+const pricingBaselineMaterializationDuration = new promClient.Histogram({
+    name: 'leaf_pricing_baseline_materialization_duration_seconds',
+    help: 'Duração em segundos da materialização de baseline de pricing',
+    labelNames: ['result'],
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120],
+    registers: [register]
+});
+
+const pricingBaselineMaterializedCells = new promClient.Counter({
+    name: 'leaf_pricing_baseline_materialized_cells_total',
+    help: 'Total de células observadas durante a materialização de baseline de pricing',
+    labelNames: ['status'],
+    registers: [register]
+});
+
+const rideHealthStateTotal = new promClient.Gauge({
+    name: 'leaf_ride_health_state_total',
+    help: 'Total atual de corridas em estados operacionais monitorados',
+    labelNames: ['state'],
+    registers: [register]
+});
+
+const rideHealthStuckTotal = new promClient.Gauge({
+    name: 'leaf_ride_health_stuck_total',
+    help: 'Total atual de corridas presas em estados operacionais monitorados',
+    labelNames: ['state'],
+    registers: [register]
+});
+
+const rideHealthRecentTotal = new promClient.Gauge({
+    name: 'leaf_ride_health_recent_total',
+    help: 'Total recente de corridas em estados operacionais monitorados',
+    labelNames: ['state'],
+    registers: [register]
+});
+
+const rideHealthAlertsTotal = new promClient.Counter({
+    name: 'leaf_ride_health_alert_total',
+    help: 'Total de alertas emitidos pelo monitor operacional de corridas',
+    labelNames: ['alert_type', 'severity'],
+    registers: [register]
+});
+
+const rideCostRecentAverageBrl = new promClient.Gauge({
+    name: 'leaf_ride_cost_recent_average_brl',
+    help: 'Custo variavel medio por corrida concluida na janela recente, excluindo Woovi',
+    labelNames: ['window'],
+    registers: [register]
+});
+
+const rideCostRecentGoogleAverageBrl = new promClient.Gauge({
+    name: 'leaf_ride_cost_recent_google_average_brl',
+    help: 'Custo medio de Google APIs por corrida concluida na janela recente',
+    labelNames: ['window'],
+    registers: [register]
+});
+
+const rideCostRecentDirectionsPerRide = new promClient.Gauge({
+    name: 'leaf_ride_cost_recent_directions_per_ride',
+    help: 'Media de chamadas Directions por corrida concluida na janela recente',
+    labelNames: ['window'],
+    registers: [register]
+});
+
+const rideCostAlertsTotal = new promClient.Counter({
+    name: 'leaf_ride_cost_alert_total',
+    help: 'Total de alertas emitidos pelo monitor de custo por corrida',
+    labelNames: ['metric', 'severity'],
+    registers: [register]
+});
+
 // ==================== EXPORT ====================
 
 /**
@@ -253,8 +500,13 @@ const metrics = {
     
     // Idempotency
     recordIdempotency: (operation, hit) => {
-        const result = hit ? 'hit' : 'miss';
-        idempotencyTotal.inc({ operation, result });
+        const result = typeof hit === 'string'
+            ? sanitizeLabelValue(hit, 'unknown')
+            : (hit ? 'hit' : 'miss');
+        idempotencyTotal.inc({
+            operation: sanitizeLabelValue(operation, 'unknown'),
+            result
+        });
     },
     
     // ==================== MÉTRICAS DE NEGÓCIO ====================
@@ -294,6 +546,236 @@ const metrics = {
     // Workers ativos
     setActiveWorkers: (count, workerType = 'listener') => {
         activeWorkers.set({ worker_type: workerType }, count);
+    },
+
+    setWebSocketConnections: (count, runtimeRole = 'gateway') => {
+        websocketConnectionsCurrent.set({
+            runtime_role: sanitizeLabelValue(runtimeRole, 'gateway')
+        }, Number.isFinite(count) && count >= 0 ? count : 0);
+    },
+
+    // Event loop lag
+    setEventLoopLag: (meanMs = 0, p95Ms = 0, maxMs = 0) => {
+        eventLoopLagMeanMs.set(Number.isFinite(meanMs) ? meanMs : 0);
+        eventLoopLagP95Ms.set(Number.isFinite(p95Ms) ? p95Ms : 0);
+        eventLoopLagMaxMs.set(Number.isFinite(maxMs) ? maxMs : 0);
+    },
+
+    // Realtime update volume
+    recordRealtimeUpdate: (channel = 'unknown', result = 'processed', count = 1) => {
+        realtimeUpdatesTotal.inc({
+            channel: sanitizeLabelValue(channel, 'unknown'),
+            result: sanitizeLabelValue(result, 'processed')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    // Hot path latency
+    recordHotpathLatency: (path, durationSeconds, success = true) => {
+        hotpathDuration.observe({
+            path: sanitizeLabelValue(path, 'unknown'),
+            status: success ? 'success' : 'failure'
+        }, Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0);
+    },
+
+    recordHotpathStageLatency: (path, stage, durationSeconds, success = true) => {
+        hotpathStageDuration.observe({
+            path: sanitizeLabelValue(path, 'unknown'),
+            stage: sanitizeLabelValue(stage, 'unknown'),
+            status: success ? 'success' : 'failure'
+        }, Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0);
+    },
+
+    recordHotpathReason: (path, reason, count = 1) => {
+        hotpathReasonTotal.inc({
+            path: sanitizeLabelValue(path, 'unknown'),
+            reason: sanitizeLabelValue(reason, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    // Redis ops in hot path
+    recordRedisHotpathOp: (path, operation, count = 1) => {
+        redisHotpathOps.inc({
+            path: sanitizeLabelValue(path, 'unknown'),
+            operation: sanitizeLabelValue(operation, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    // Legacy runtime dependency access
+    recordLegacyDependencyAccess: ({
+        dependency = 'unknown',
+        operation = 'access',
+        source = 'unknown',
+        result = 'success',
+        count = 1
+    } = {}) => {
+        legacyRuntimeAccessTotal.inc({
+            dependency: sanitizeLabelValue(dependency, 'unknown'),
+            operation: sanitizeLabelValue(operation, 'access'),
+            source: sanitizeLabelValue(source, 'unknown'),
+            result: sanitizeLabelValue(result, 'success')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    // H3 map
+    recordH3CellsRequest: (surface = 'dashboard', mode = 'supply_demand') => {
+        h3CellsRequests.inc({
+            surface: sanitizeLabelValue(surface, 'dashboard'),
+            mode: sanitizeLabelValue(mode, 'supply_demand')
+        });
+    },
+
+    recordH3CellsCompute: (surface = 'dashboard', mode = 'supply_demand', durationMs = 0) => {
+        h3CellsComputeMs.observe({
+            surface: sanitizeLabelValue(surface, 'dashboard'),
+            mode: sanitizeLabelValue(mode, 'supply_demand')
+        }, Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0);
+    },
+
+    recordH3CellsCache: (surface = 'dashboard', mode = 'supply_demand', hit = false) => {
+        const labels = {
+            surface: sanitizeLabelValue(surface, 'dashboard'),
+            mode: sanitizeLabelValue(mode, 'supply_demand')
+        };
+        if (hit) {
+            h3CellsCacheHit.inc(labels);
+            return;
+        }
+        h3CellsCacheMiss.inc(labels);
+    },
+
+    recordH3CellsReturned: (surface = 'dashboard', mode = 'supply_demand', count = 0) => {
+        h3CellsReturned.inc({
+            surface: sanitizeLabelValue(surface, 'dashboard'),
+            mode: sanitizeLabelValue(mode, 'supply_demand')
+        }, Number.isFinite(count) && count > 0 ? count : 0);
+    },
+
+    recordH3RefreshHint: (surface = 'driver', reason = 'unknown', count = 1) => {
+        h3RefreshHints.inc({
+            surface: sanitizeLabelValue(surface, 'driver'),
+            reason: sanitizeLabelValue(reason, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    recordPricingEvaluation: ({
+        success = true,
+        operationalState = 'NORMAL',
+        baselineSource = 'unknown',
+        dynamicApplied = false,
+        minimumFareApplied = false,
+        scorePressao = 0,
+        scoreExcecao = 0
+    } = {}) => {
+        const labels = {
+            result: success ? 'success' : 'failure',
+            operational_state: sanitizeLabelValue(operationalState, 'normal'),
+            baseline_source: sanitizeLabelValue(baselineSource, 'unknown')
+        };
+
+        pricingEvaluations.inc(labels);
+
+        if (dynamicApplied) {
+            pricingDynamicQuotes.inc({
+                operational_state: labels.operational_state
+            });
+        }
+
+        if (minimumFareApplied) {
+            pricingMinimumFareApplied.inc({
+                operational_state: labels.operational_state
+            });
+        }
+
+        pricingPressureScore.observe(
+            { operational_state: labels.operational_state },
+            Number.isFinite(scorePressao) ? scorePressao : 0
+        );
+        pricingExceptionScore.observe(
+            { operational_state: labels.operational_state },
+            Number.isFinite(scoreExcecao) ? scoreExcecao : 0
+        );
+    },
+
+    recordPricingBaselineMaterialization: ({
+        success = true,
+        durationSeconds = 0,
+        candidateCells = 0,
+        processedCells = 0,
+        failedCells = 0
+    } = {}) => {
+        const result = success ? 'success' : 'failure';
+
+        pricingBaselineMaterializations.inc({ result });
+        pricingBaselineMaterializationDuration.observe(
+            { result },
+            Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0
+        );
+
+        if (Number.isFinite(candidateCells) && candidateCells > 0) {
+            pricingBaselineMaterializedCells.inc({ status: 'candidate' }, candidateCells);
+        }
+        if (Number.isFinite(processedCells) && processedCells > 0) {
+            pricingBaselineMaterializedCells.inc({ status: 'processed' }, processedCells);
+        }
+        if (Number.isFinite(failedCells) && failedCells > 0) {
+            pricingBaselineMaterializedCells.inc({ status: 'failed' }, failedCells);
+        }
+    },
+
+    setRideHealthStateCount: (state = 'unknown', count = 0) => {
+        rideHealthStateTotal.set(
+            { state: sanitizeLabelValue(state, 'unknown') },
+            Number.isFinite(count) && count >= 0 ? count : 0
+        );
+    },
+
+    setRideHealthStuckCount: (state = 'unknown', count = 0) => {
+        rideHealthStuckTotal.set(
+            { state: sanitizeLabelValue(state, 'unknown') },
+            Number.isFinite(count) && count >= 0 ? count : 0
+        );
+    },
+
+    setRideHealthRecentCount: (state = 'unknown', count = 0) => {
+        rideHealthRecentTotal.set(
+            { state: sanitizeLabelValue(state, 'unknown') },
+            Number.isFinite(count) && count >= 0 ? count : 0
+        );
+    },
+
+    recordRideHealthAlert: (alertType = 'unknown', severity = 'warning', count = 1) => {
+        rideHealthAlertsTotal.inc({
+            alert_type: sanitizeLabelValue(alertType, 'unknown'),
+            severity: sanitizeLabelValue(severity, 'warning')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    setRideCostRecentSummary: ({
+        windowSize = 0,
+        averageBrl = 0,
+        googleAverageBrl = 0,
+        directionsPerRide = 0
+    } = {}) => {
+        const windowLabel = sanitizeLabelValue(`last_${Number.isFinite(windowSize) ? windowSize : 0}`, 'last_0');
+        rideCostRecentAverageBrl.set(
+            { window: windowLabel },
+            Number.isFinite(averageBrl) && averageBrl >= 0 ? averageBrl : 0
+        );
+        rideCostRecentGoogleAverageBrl.set(
+            { window: windowLabel },
+            Number.isFinite(googleAverageBrl) && googleAverageBrl >= 0 ? googleAverageBrl : 0
+        );
+        rideCostRecentDirectionsPerRide.set(
+            { window: windowLabel },
+            Number.isFinite(directionsPerRide) && directionsPerRide >= 0 ? directionsPerRide : 0
+        );
+    },
+
+    recordRideCostAlert: (metric = 'unknown', severity = 'warning', count = 1) => {
+        rideCostAlertsTotal.inc({
+            metric: sanitizeLabelValue(metric, 'unknown'),
+            severity: sanitizeLabelValue(severity, 'warning')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
     }
 };
 

@@ -15,8 +15,9 @@ import {
 import { Icon } from 'react-native-elements';
 import QRCode from 'react-native-qrcode-svg';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 
 const { width } = Dimensions.get('window');
@@ -60,7 +61,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
 
   const createPixCharge = async () => {
     try {
-      const response = await api.post('/api/payments/create-weekly-plan', {
+      const response = await apiClient.post('/api/payments/create-weekly-plan', {
         planId: plan.id,
         userId: currentUser.id,
         amount: plan.price,
@@ -101,7 +102,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
 
   const checkPaymentStatus = async (chargeId) => {
     try {
-      const response = await api.get(`/api/payments/status/${chargeId}`);
+      const response = await apiClient.get(`/api/payments/status/${chargeId}`);
       return response.data.status;
     } catch (error) {
       Logger.error('Erro ao verificar status:', error);
@@ -151,7 +152,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
 
   const activateUserPlan = async () => {
     try {
-      await api.post('/api/plans/activate', {
+      await apiClient.post('/api/plans/activate', {
         userId: currentUser.id,
         planId: plan.id,
         paymentId: paymentData.id
@@ -205,12 +206,7 @@ const WeeklyPaymentScreen = ({ navigation, route }) => {
           </Text>
         </View>
         
-        <View style={styles.detailItem}>
-          <Icon name="security" type="material" color="#666" size={20} />
-          <Text style={styles.detailText}>
-            Pagamento seguro
-          </Text>
-        </View>
+        <SecurePaymentBadge style={styles.securePaymentBadge} color="#7f8c8d" />
       </View>
     </View>
   );
@@ -465,6 +461,10 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
     marginLeft: 12,
   },
+  securePaymentBadge: {
+    marginTop: 2,
+    marginLeft: 2,
+  },
   statusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -662,4 +662,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default WeeklyPaymentScreen; 
+export default WeeklyPaymentScreen;

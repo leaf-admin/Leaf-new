@@ -15,7 +15,7 @@ export const formatBookingObject = async (bookingData, settings) => {
     appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
     databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
     storageBucket: "leaf-reactnative.firebasestorage.app",
-    apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+    apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
     authDomain: "leaf-reactnative.firebaseapp.com",
     messagingSenderId: "106504629884",
     measurementId: "G-22368DBCY9"
@@ -224,10 +224,11 @@ export const calculateDriverShare = (tripCost, tollFee = 0, decimalPrecision = 2
   let opFee = 0;
   if (rawFare <= 10.00) opFee = 0.79;
   else if (rawFare <= 25.00) opFee = 0.99;
-  else opFee = 1.49;
+  else if (rawFare <= 50.00) opFee = 1.49;
+  else opFee = rawFare * 0.03;
 
   // Taxa Woovi sobre toda a transação
-  let wooviFee = grandTotal * 0.0008; // 0.08%
+  let wooviFee = grandTotal * 0.008; // 0.8%
   if (wooviFee < 0.50) wooviFee = 0.50;
 
   const driverShare = grandTotal - opFee - wooviFee;

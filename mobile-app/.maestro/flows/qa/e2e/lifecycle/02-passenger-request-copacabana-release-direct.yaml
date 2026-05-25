@@ -1,0 +1,90 @@
+appId: br.com.leaf.ride
+---
+- launchApp:
+    appId: br.com.leaf.ride
+    clearState: false
+    stopApp: false
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-home-destination-input"
+    commands:
+      - tapOn:
+          id: "passenger-home-destination-input"
+
+- runFlow:
+    when:
+      visible: ".*(Para onde vamos\\?|Onde vamos\\?).*"
+    commands:
+      - tapOn: ".*(Para onde vamos\\?|Onde vamos\\?).*"
+
+- extendedWaitUntil:
+    visible: ".*(Use o microfone para ditar o destino|Nenhum destino encontrado\\.|Av\\. Atlântica|Copacabana|22021-001).*"
+    timeout: 30000
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-destination-search-input"
+    commands:
+      - tapOn:
+          id: "passenger-destination-search-input"
+
+- eraseText
+
+- inputText: "Av. Atlântica, 1702"
+
+- extendedWaitUntil:
+    visible: ".*(Av\\. Atlântica|Copacabana|22021-001).*"
+    timeout: 45000
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-destination-result-0"
+    commands:
+      - tapOn:
+          id: "passenger-destination-result-0"
+
+- runFlow:
+    when:
+      visible: ".*(Av\\. Atlântica.*1702|22021-001).*"
+    commands:
+      - tapOn: ".*(Av\\. Atlântica.*1702|22021-001).*"
+
+- extendedWaitUntil:
+    visible: ".*(Solicitar .*|Confirme sua viagem|Realize seu pagamento|Pagamento PIX|Gerando cobrança PIX...|Pagamento confirmado!|Procurando motorista|Corrida criada com sucesso|Continuar para busca).*"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible: "Solicitar .*"
+    commands:
+      - tapOn: "Solicitar .*"
+
+- runFlow:
+    when:
+      visible: "Confirme sua viagem"
+    commands:
+      - tapOn:
+          point: "50%,93%"
+
+- extendedWaitUntil:
+    visible: ".*(Realize seu pagamento|Pagamento PIX|Gerando cobrança PIX...|Pagamento confirmado!|Procurando motorista|Corrida criada com sucesso|Continuar para busca).*"
+    timeout: 240000
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-driver-search-elapsed"
+    timeout: 60000
+
+- extendedWaitUntil:
+    visible: "Procurando motorista(s)?"
+    timeout: 60000

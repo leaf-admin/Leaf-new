@@ -10,7 +10,7 @@ const getSafeConfig = () => {
         appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
         databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
         storageBucket: "leaf-reactnative.firebasestorage.app",
-        apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+        apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
         authDomain: "leaf-reactnative.firebaseapp.com",
         messagingSenderId: "106504629884",
         measurementId: "G-22368DBCY9"
@@ -140,7 +140,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints) => {
         console.log('🗺️ getDirectionsApi chamado com:', { startLoc, destLoc, waypoints });
         
         // ✅ CORRIGIDO: Usar API do Google diretamente (endpoint do backend não existe mais)
-        const apiKey = 'AIzaSyBLwKg0KRiLVjAHVBQAUP7pB3Q80G246KY'; // Chave real do projeto (sem restrições)
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
         // Garantir que startLoc e destLoc estão no formato correto (sem espaços)
         const origin = String(startLoc).trim().replace(/\s+/g, '');

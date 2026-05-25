@@ -4,7 +4,7 @@ echo "🔧 CORRIGINDO PROBLEMAS DA API"
 echo "==============================="
 
 # Conectar à VPS e corrigir problemas
-ssh root@147.93.66.253 << 'EOF'
+ssh root@147.182.204.181 << 'EOF'
 echo "🔧 Corrigindo problemas da API..."
 
 # Parar PM2

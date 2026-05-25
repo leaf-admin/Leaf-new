@@ -1,18 +1,71 @@
-import Logger from '../utils/Logger';
-import { Platform } from 'react-native';
+import Logger from "../utils/Logger";
+import { Platform } from "react-native";
+
+const normalizeBaseUrl = (rawUrl, fallback) => {
+  const raw = String(rawUrl || "").trim();
+  if (!raw) return fallback;
+  return raw.replace(/\/+$/, "").replace(/\/api$/i, "");
+};
+
+const deriveSocketBaseUrlFromApi = (
+  rawUrl,
+  fallback = "https://socket.leaf.app.br",
+) => {
+  const normalized = normalizeBaseUrl(rawUrl, fallback);
+  try {
+    const parsed = new URL(normalized);
+    if (/^api(?=[.-])/i.test(parsed.hostname)) {
+      parsed.hostname = parsed.hostname.replace(/^api(?=[.-])/i, "socket");
+    }
+    parsed.pathname = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch (_error) {
+    return fallback;
+  }
+};
+
+const normalizeSocketBaseUrl = (
+  rawUrl,
+  fallback = "https://socket.leaf.app.br",
+) => {
+  const normalized = normalizeBaseUrl(rawUrl, fallback);
+  try {
+    const parsed = new URL(normalized);
+    parsed.pathname = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch (_error) {
+    return fallback;
+  }
+};
+
+const DEFAULT_WS_URL = normalizeSocketBaseUrl(
+  process.env.EXPO_PUBLIC_WS_URL ||
+    process.env.EXPO_PUBLIC_SOCKET_URL ||
+    process.env.MOBILE_TEST_WS_URL,
+  deriveSocketBaseUrlFromApi(
+    process.env.EXPO_PUBLIC_API_URL || process.env.MOBILE_TEST_BACKEND_URL,
+    "https://socket.leaf.app.br",
+  ),
+);
 
 // Configurações do WebSocket
 const WEBSOCKET_CONFIG = {
-  // Para desenvolvimento local (emulador Android/iOS)
+  // Para desenvolvimento local (opcional via env vars)
   LOCAL: {
-    ANDROID_EMULATOR: 'http://10.0.2.2:3001',
-    IOS_SIMULATOR: 'http://localhost:3001',
-    DEVICE: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
+    ANDROID_EMULATOR:
+      process.env.EXPO_PUBLIC_ANDROID_EMULATOR_WS_URL || DEFAULT_WS_URL,
+    IOS_SIMULATOR:
+      process.env.EXPO_PUBLIC_IOS_SIMULATOR_WS_URL || DEFAULT_WS_URL,
+    DEVICE: DEFAULT_WS_URL,
   },
 
   // Para produção
   PRODUCTION: {
-    URL: process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001',
+    URL: DEFAULT_WS_URL,
   },
 
   // Configurações de conexão
@@ -26,7 +79,7 @@ const WEBSOCKET_CONFIG = {
   // Configurações de localização
   LOCATION: {
     UPDATE_INTERVAL: 2000, // 2 segundos
-    ACCURACY: 'high', // 'high', 'balanced', 'low'
+    ACCURACY: "high", // 'high', 'balanced', 'low'
     DISTANCE_FILTER: 10, // metros
   },
 
@@ -41,7 +94,7 @@ const WEBSOCKET_CONFIG = {
 
 // Determinar URL baseada na plataforma e ambiente
 const getWebSocketURL = () => {
-  return process.env.EXPO_PUBLIC_WS_URL || 'http://147.182.204.181:3001';
+  return DEFAULT_WS_URL;
 
   // Código antigo (comentado para referência):
   // if (__DEV__) {
@@ -61,7 +114,7 @@ const getWebSocketURL = () => {
 // Obter configurações de conexão
 const getConnectionOptions = () => {
   return {
-    transports: ['websocket'],
+    transports: ["websocket"],
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: WEBSOCKET_CONFIG.CONNECTION.RECONNECTION_ATTEMPTS,
@@ -96,7 +149,7 @@ const getLocalIP = async () => {
     // Por enquanto, retorna o IP configurado
     return WEBSOCKET_CONFIG.LOCAL.DEVICE;
   } catch (error) {
-    Logger.error('Erro ao obter IP local:', error);
+    Logger.error("Erro ao obter IP local:", error);
     return WEBSOCKET_CONFIG.LOCAL.DEVICE;
   }
 };
@@ -107,13 +160,13 @@ const validateConfig = () => {
   const issues = [];
 
   if (__DEV__) {
-    if (url.includes('216.238.107.59')) {
-      issues.push('⚠️ Altere o IP em WebSocketConfig.js para localhost ou IP da sua máquina');
+    if (url.includes("your-backend-domain.com")) {
+      issues.push("⚠️ Configure EXPO_PUBLIC_WS_URL com a URL real do backend");
     }
   }
 
-  if (url.includes('your-backend-domain.com')) {
-    issues.push('⚠️ Configure o domínio de produção em WebSocketConfig.js');
+  if (!__DEV__ && /(localhost|127\.0\.0\.1|10\.0\.2\.2)/i.test(url)) {
+    issues.push("⚠️ URL local de WebSocket detectada fora de dev");
   }
 
   return {
@@ -143,19 +196,8 @@ export const getWebSocketUrl = () => {
   return getWebSocketURL();
 };
 
-// Instruções para configurar o IP:
+// Instruções para configurar via env:
 /*
-1. No Windows, abra o CMD e digite: ipconfig
-2. Procure por "IPv4 Address" na sua rede Wi-Fi
-3. Copie o IP (exemplo: 192.168.1.100)
-4. Substitua no arquivo acima na linha: url: 'http://SEU_IP:3001'
-
-Exemplo:
-- Seu IP é 192.168.1.50
-- Mude para: url: 'http://192.168.1.50:3001'
-
-IMPORTANTE:
-- Use o IP da sua máquina, não localhost
-- O app no dispositivo físico não consegue acessar localhost do PC
-- Certifique-se que o backend está rodando na porta 3001
-*/ 
+Defina EXPO_PUBLIC_WS_URL no ambiente:
+EXPO_PUBLIC_WS_URL=https://socket.leaf.app.br
+*/

@@ -14,7 +14,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # Configurações da VPS
-VPS_IP="147.93.66.253"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
 VPS_PATH="/opt/leaf-app"  # ✅ Corrigido: caminho real na VPS
 
@@ -196,4 +196,3 @@ echo "     ssh ${VPS_USER}@${VPS_IP}"
 echo "     cd ${VPS_PATH}"
 echo "     pm2 restart leaf-websocket"
 echo ""
-

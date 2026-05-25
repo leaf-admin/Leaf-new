@@ -3,10 +3,6 @@ import Logger from '../utils/Logger';
  * Serviço para monitorar disponibilidade de motoristas em tempo real
  * Atualiza automaticamente a lista de motoristas disponíveis na região
  */
-
-import { fetchNearbyDrivers } from '../common-local/usersactions';
-
-
 class DriverAvailabilityService {
     constructor() {
         this.subscribers = new Set();
@@ -239,4 +235,3 @@ class DriverAvailabilityService {
 const driverAvailabilityService = new DriverAvailabilityService();
 
 export default driverAvailabilityService;
-

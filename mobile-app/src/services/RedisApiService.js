@@ -1,14 +1,12 @@
 import Logger from '../utils/Logger';
 // RedisApiService.js - Serviço para acessar Redis via webhooks/API
 import { Platform } from 'react-native';
+import BACKEND_BASE_URL from '../config/backendBaseUrl';
 
-
-// Configuração da API base
-const API_BASE_URL = 'http://147.182.204.181:3001'; // VPS - API
 
 class RedisApiService {
     constructor() {
-        this.baseUrl = API_BASE_URL;
+        this.baseUrl = BACKEND_BASE_URL;
         this.isAvailable = Platform.OS === 'web'; // Apenas web por enquanto
     }
 

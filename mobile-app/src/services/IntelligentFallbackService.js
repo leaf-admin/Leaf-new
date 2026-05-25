@@ -364,28 +364,18 @@ class IntelligentFallbackService {
      * Mapear operação WebSocket para endpoint REST
      */
     getRestApiEndpoint(operation) {
+        // Mantemos apenas rotas REST comprovadamente disponíveis na API atual.
+        // Operações de corrida/localização permanecem 100% WebSocket.
         const endpointMap = {
-            'createBooking': '/api/bookings',
-            'confirmPayment': '/api/payments/confirm',
-            'cancelRide': '/api/rides/cancel',
-            'submitRating': '/api/ratings',
-            'emergencyContact': '/api/emergency',
-            'reportIncident': '/api/incidents',
-            'updateDriverLocation': '/api/drivers/location',
-            'setDriverStatus': '/api/drivers/status',
-            'searchDrivers': '/api/drivers/search',
-            'sendMessage': '/api/messages',
-            'createChat': '/api/chat',
-            'createSupportTicket': '/api/support/tickets',
-            'updateNotificationPreferences': '/api/notifications/preferences',
-            'trackUserAction': '/api/analytics/track',
-            'submitFeedback': '/api/feedback',
-            'registerFCMToken': '/api/notifications/fcm/register',
-            'unregisterFCMToken': '/api/notifications/fcm/unregister',
-            'sendNotification': '/api/notifications/send'
+            createSupportTicket: '/api/support/tickets'
         };
-        
-        return endpointMap[operation] || '/api/fallback';
+
+        const endpoint = endpointMap[operation];
+        if (!endpoint) {
+            throw new Error(`Fallback REST não suportado para operação "${operation}"`);
+        }
+
+        return endpoint;
     }
 
     /**
@@ -482,7 +472,6 @@ class IntelligentFallbackService {
 // Singleton
 const intelligentFallbackService = new IntelligentFallbackService();
 export default intelligentFallbackService;
-
 
 
 

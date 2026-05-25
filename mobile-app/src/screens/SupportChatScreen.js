@@ -15,8 +15,10 @@ import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
 import SupportTicketService from '../services/SupportTicketService';
 import AuthService from '../services/AuthService';
-import { colors } from '../common-local/theme';
+import { fonts } from '../theme/runtimeTokens';
+import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 
+const { color, typography } = robotaxiPrototypeTokens;
 
 const SupportChatScreen = ({ navigation, route }) => {
   const { ticketId } = route.params || {};
@@ -42,7 +44,7 @@ const SupportChatScreen = ({ navigation, route }) => {
       const isAuthenticated = await AuthService.isAuthenticated();
       if (!isAuthenticated) {
         Alert.alert('Erro', 'Sessão expirada. Faça login novamente.');
-        navigation.navigate('Login');
+        navigation.navigate('PhoneInputScreen');
         return;
       }
       
@@ -140,7 +142,7 @@ const SupportChatScreen = ({ navigation, route }) => {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={color.accent.primary} />
         <Text style={styles.loadingText}>Carregando chat...</Text>
       </View>
     );
@@ -163,12 +165,12 @@ const SupportChatScreen = ({ navigation, route }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={Platform.OS === 'android'} />
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color={colors.primary} />
+        <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
+          <Icon name="arrow-back" size={18} color={color.text.primary} />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
           <Text style={styles.ticketId}>{ticket.id}</Text>
@@ -200,10 +202,10 @@ const SupportChatScreen = ({ navigation, route }) => {
               {...props}
               wrapperStyle={{
                 right: {
-                  backgroundColor: colors.primary
+                  backgroundColor: color.accent.primary
                 },
                 left: {
-                  backgroundColor: '#f0f0f0'
+                  backgroundColor: color.surface.secondary
                 }
               }}
               textStyle={{
@@ -284,138 +286,156 @@ const SupportChatScreen = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff'
+    backgroundColor: color.bg.app
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5'
+    backgroundColor: color.bg.app
   },
   loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666'
+    marginTop: 10,
+    fontFamily: fonts.Regular,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    color: color.text.secondary
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: color.bg.app,
     paddingHorizontal: 32
   },
   errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: typography.subtitle.size,
+    lineHeight: typography.subtitle.lineHeight,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
     marginTop: 16,
     marginBottom: 24
   },
   backButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: color.accent.primary,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8
+    borderRadius: 12
   },
   backButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600'
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    fontFamily: fonts.SemiBold
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
+    paddingHorizontal: 14,
+    paddingTop: Platform.OS === 'ios' ? 54 : 34,
+    paddingBottom: 10,
+    backgroundColor: color.bg.app,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3
+    borderBottomColor: color.border.subtle
+  },
+  headerButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.primary,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   headerInfo: {
     flex: 1,
-    marginHorizontal: 12
+    marginHorizontal: 10
   },
   ticketId: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333'
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold
   },
   ticketSubject: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
     marginTop: 2
   },
   headerBadges: {
     flexDirection: 'row',
-    gap: 8
+    gap: 6
   },
   priorityBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12
+    paddingVertical: 3,
+    borderRadius: 999
   },
   priorityText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '600'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    fontFamily: fonts.SemiBold
   },
   statusBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12
+    paddingVertical: 3,
+    borderRadius: 999
   },
   statusText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '600'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    fontFamily: fonts.SemiBold
   },
   chatContainer: {
     flex: 1
   },
   inputToolbar: {
-    backgroundColor: '#fff',
+    backgroundColor: color.surface.primary,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    paddingHorizontal: 8,
-    paddingVertical: 8
+    borderTopColor: color.border.subtle,
+    paddingHorizontal: 8
   },
   composerText: {
-    fontSize: 16,
-    color: '#333',
-    lineHeight: 20
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    color: color.text.primary,
+    fontFamily: fonts.Regular
   },
   sendButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 20,
-    width: 40,
-    height: 40,
+    backgroundColor: color.accent.primary,
+    borderRadius: 17,
+    width: 34,
+    height: 34,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
     marginBottom: 8
   },
   systemMessage: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: color.surface.secondary,
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginVertical: 8,
     marginHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     alignItems: 'center'
   },
   systemMessageText: {
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular
   },
   timeText: {
-    fontSize: 12,
-    color: '#999',
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    color: color.text.muted,
+    fontFamily: fonts.Regular,
     marginHorizontal: 8,
     marginVertical: 4
   },
@@ -429,16 +449,17 @@ const styles = StyleSheet.create({
   avatarText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: '600'
+    fontFamily: fonts.SemiBold
   },
   typingContainer: {
     paddingHorizontal: 16,
     paddingVertical: 8
   },
   typingText: {
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic'
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular
   }
 });
 

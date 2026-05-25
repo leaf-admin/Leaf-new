@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 
 const BaaSAccountScreen = ({ navigation, route }) => {
   const [accountData, setAccountData] = useState({
@@ -52,7 +52,7 @@ const BaaSAccountScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      const response = await api.get(`/api/baas/account/${currentUser.id}`);
+      const response = await apiClient.get(`/api/baas/account/${currentUser.id}`);
       setAccountData(response.data);
       
     } catch (error) {

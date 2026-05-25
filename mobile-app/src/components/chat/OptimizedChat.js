@@ -15,7 +15,7 @@ import { GiftedChat, Bubble, InputToolbar, Composer, Send, MessageText } from 'r
 import { Icon } from 'react-native-elements';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { useSelector, useDispatch } from 'react-redux';
-import { colors } from '../../common-local/theme';
+import { colors } from '../../theme/runtimeTokens';
 import { useTranslation } from 'react-i18next';
 
 

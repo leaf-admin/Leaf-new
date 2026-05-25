@@ -2,90 +2,121 @@ const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins'
 const fs = require('fs');
 const path = require('path');
 
-const withNetworkSecurityConfig = (config) => {
-  // 1. Adicionar arquivo network_security_config.xml
-  config = withDangerousMod(config, [
-    'android',
-    async (config) => {
-      const projectRoot = config.modRequest.platformProjectRoot;
-      const resPath = path.join(projectRoot, 'app/src/main/res/xml');
-      
-      // Criar diretório se não existir
-      if (!fs.existsSync(resPath)) {
-        fs.mkdirSync(resPath, { recursive: true });
-      }
-      
-      // Criar arquivo network_security_config.xml
-      const networkConfigPath = path.join(resPath, 'network_security_config.xml');
-      const networkConfigContent = `<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-    <!-- Permitir cleartext traffic para localhost e IPs locais (desenvolvimento) -->
+const allowInsecureHttp = String(process.env.EXPO_PUBLIC_ALLOW_INSECURE_HTTP || 'false').toLowerCase() === 'true';
+const DEV_HTTP_HOSTS = [
+  'localhost',
+  '127.0.0.1',
+  '10.0.2.2',
+  '192.168.0.37',
+  '62.169.31.231',
+];
+
+const DEFAULT_INSECURE_PROD_HTTP_HOSTS = ['62.169.31.231'];
+const insecureProdHttpHostsFromEnv = String(process.env.EXPO_PUBLIC_INSECURE_HTTP_HOSTS || '')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean);
+const PROD_ALLOWED_HTTP_HOSTS = allowInsecureHttp
+  ? (insecureProdHttpHostsFromEnv.length > 0 ? insecureProdHttpHostsFromEnv : DEFAULT_INSECURE_PROD_HTTP_HOSTS)
+  : [];
+
+const buildDomainEntries = (hosts) =>
+  hosts
+    .map((host) => `        <domain includeSubdomains="true">${host}</domain>`)
+    .join('\n');
+
+const prodDomainConfig = PROD_ALLOWED_HTTP_HOSTS.length > 0
+  ? `    <!-- Explicit dev override: allow HTTP only for the hosts below -->
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
-        <domain includeSubdomains="true">10.0.2.2</domain>
-        <domain includeSubdomains="true">192.168.0.37</domain>
-        <!-- Permitir IPs da VPS -->
-        <domain includeSubdomains="true">147.93.66.253</domain>
-        <domain includeSubdomains="true">147.182.204.181</domain>
-        <!-- Permitir toda a faixa de IPs privados para desenvolvimento local -->
-        <domain includeSubdomains="true">192.168.0.0</domain>
-        <domain includeSubdomains="true">192.168.1.0</domain>
-        <domain includeSubdomains="true">10.0.0.0</domain>
+${buildDomainEntries(PROD_ALLOWED_HTTP_HOSTS)}
     </domain-config>
-    
-    <!-- Permitir acesso ao Google Maps e serviços do Google -->
-    <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">googleapis.com</domain>
-        <domain includeSubdomains="true">google.com</domain>
-        <domain includeSubdomains="true">gstatic.com</domain>
-        <domain includeSubdomains="true">googleusercontent.com</domain>
-        <trust-anchors>
-            <certificates src="system" />
-        </trust-anchors>
-    </domain-config>
-    
-    <!-- Configuração base para dev/teste: permitir HTTP -->
-    <base-config cleartextTrafficPermitted="true">
+`
+  : '';
+
+const mainNetworkSecurityConfig = `<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+${prodDomainConfig}
+    <!-- Block cleartext for all other hosts -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
 </network-security-config>
 `;
-      
-      fs.writeFileSync(networkConfigPath, networkConfigContent);
-      console.log('✅ network_security_config.xml criado');
-      
+
+const debugNetworkSecurityConfig = `<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Dev/test hosts that still require HTTP -->
+    <domain-config cleartextTrafficPermitted="true">
+${buildDomainEntries(DEV_HTTP_HOSTS)}
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
+`;
+
+const ensureDir = (dirPath) => {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+};
+
+const writeConfigFile = (filePath, content) => {
+  ensureDir(path.dirname(filePath));
+  fs.writeFileSync(filePath, content);
+};
+
+const withNetworkSecurityConfig = (config) => {
+  // 1) Write network_security_config per build type.
+  config = withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const projectRoot = config.modRequest.platformProjectRoot;
+
+      const mainConfigPath = path.join(projectRoot, 'app/src/main/res/xml/network_security_config.xml');
+      const debugConfigPath = path.join(projectRoot, 'app/src/debug/res/xml/network_security_config.xml');
+      const debugOptimizedConfigPath = path.join(
+        projectRoot,
+        'app/src/debugOptimized/res/xml/network_security_config.xml'
+      );
+
+      writeConfigFile(mainConfigPath, mainNetworkSecurityConfig);
+      writeConfigFile(debugConfigPath, debugNetworkSecurityConfig);
+      writeConfigFile(debugOptimizedConfigPath, debugNetworkSecurityConfig);
+
+      console.log('✅ network_security_config.xml synchronized (main + debug + debugOptimized)');
+
       return config;
     },
   ]);
 
-  // 2. Atualizar AndroidManifest.xml
+  // 2) Force safe defaults in main AndroidManifest.
   config = withAndroidManifest(config, (config) => {
     const androidManifest = config.modResults;
-    
-    // Encontrar ou criar o elemento <application>
+
+    // Find or create <application>.
     let application = androidManifest.manifest.application?.[0];
     if (!application) {
       application = {
         $: {},
-        'meta-data': []
+        'meta-data': [],
       };
       androidManifest.manifest.application = [application];
     }
-    
-    // Adicionar usesCleartextTraffic e networkSecurityConfig
-    if (!application.$['android:usesCleartextTraffic']) {
-      application.$['android:usesCleartextTraffic'] = 'true';
-    }
-    
+
+    // Release/main should never allow global cleartext.
+    application.$['android:usesCleartextTraffic'] = 'false';
+
     if (!application.$['android:networkSecurityConfig']) {
       application.$['android:networkSecurityConfig'] = '@xml/network_security_config';
     }
-    
-    console.log('✅ Network Security Config adicionado ao AndroidManifest.xml');
-    
+
+    console.log('✅ Network Security Config added to AndroidManifest.xml (secure defaults)');
+
     return config;
   });
 

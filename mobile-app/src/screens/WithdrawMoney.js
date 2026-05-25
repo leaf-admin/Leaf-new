@@ -6,43 +6,93 @@ import {
   TextInput,
   Alert
 } from 'react-native';
-import { Header, Button } from 'react-native-elements';
+import { Button } from 'react-native-elements';
 import { colors } from '../common/theme';
 import i18n from '../i18n';
-import { useSelector,useDispatch } from 'react-redux';
-import { api } from '../../common';
+import { useSelector } from 'react-redux';
 import { MAIN_COLOR } from '../common/sharedFunctions';
 import { fonts } from '../common/font';
+import DriverBalanceService from '../services/DriverBalanceService';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 export default function WithdrawMoneyScreen(props) {
-  const {
-    withdrawBalance,
-  } = api;
-  const dispatch = useDispatch();
   const settings = useSelector(state => state.settingsdata.settings) || {};
-  const {userdata} = props.route.params;
+  const auth = useSelector(state => state.auth);
+  const routeParams = props.route?.params || {};
+  const userdata = routeParams.userdata || routeParams.accountData || auth?.profile || {};
+  const initialBalance = Number(
+    userdata.walletBalance ??
+    userdata.availableBalance ??
+    userdata.balance ??
+    0
+  );
   const [state, setState] = useState({
     userdata: userdata,
-    amount: null
+    amount: '',
+    pixKey: '',
+    appPassword: ''
   });
+  const [withdrawRequestId, setWithdrawRequestId] = useState(null);
   const [loading,setLoading] = useState(false);
 
   const { t } = i18n;
   const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
 
-  const withdrawNow = () => {
-    if(parseFloat(state.userdata.walletBalance)>0 && parseFloat(state.amount)> 0 && parseFloat(state.amount)<=parseFloat(state.userdata.walletBalance)){
-      dispatch(withdrawBalance(state.userdata,state.amount));
+  const withdrawNow = async () => {
+    const amount = Number(String(state.amount || '').replace(',', '.'));
+    const balance = Number(state.userdata.walletBalance ?? state.userdata.availableBalance ?? state.userdata.balance ?? initialBalance);
+    const driverId = state.userdata.uid || state.userdata.id || auth?.profile?.uid || auth?.profile?.id;
+    const pixKey = String(state.pixKey || '').trim();
+    const appPassword = String(state.appPassword || '').trim();
+
+    if (!driverId) {
+      Alert.alert(t('alert'), 'Motorista não autenticado');
+      return;
+    }
+
+    if (balance > 0 && amount > 0 && amount <= balance) {
+      if (!pixKey) {
+        Alert.alert(t('alert'), 'Informe sua chave Pix');
+        return;
+      }
+      if (!appPassword) {
+        Alert.alert(t('alert'), 'Informe sua senha do app');
+        return;
+      }
+
       setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
+      const stableRequestId =
+        withdrawRequestId ||
+        DriverBalanceService.buildWithdrawalRequestId(driverId, amount, pixKey);
+      setWithdrawRequestId(stableRequestId);
+      const result = await DriverBalanceService.requestWithdrawal(
+        driverId,
+        amount,
+        pixKey,
+        appPassword,
+        { requestId: stableRequestId }
+      );
+      setLoading(false);
+
+      if (result?.success) {
+        Alert.alert('Saque solicitado', 'Seu saque foi enviado para processamento.');
+        setState(previous => ({
+          ...previous,
+          amount: '',
+          pixKey: '',
+          appPassword: ''
+        }));
+        setWithdrawRequestId(null);
         props.navigation.navigate('TabRoot', { screen: 'Wallet' });
-      }, 2000);
-    }else{
-      if(parseFloat(state.amount)> parseFloat(state.userdata.walletBalance)){
+        return;
+      }
+
+      Alert.alert(t('alert'), result?.error || 'Não foi possível solicitar o saque');
+    } else {
+      if (amount > balance) {
         Alert.alert(t('alert'),t('withdraw_more'));
       }
-      else if(parseFloat(state.amount)<=0){
+      else if (amount <= 0) {
         Alert.alert(t('alert'),t('withdraw_below_zero'));
       }else{
         Alert.alert(t('alert'),t('valid_amount'));
@@ -51,22 +101,66 @@ export default function WithdrawMoneyScreen(props) {
   }
 
   return (
-    <View style={styles.mainView}>
+    <View
+      style={styles.mainView}
+      testID="driver-withdraw-screen"
+      accessibilityLabel="driver-withdraw-screen"
+    >
       
       <View style={styles.bodyContainer}>
       {settings?.swipe_symbol === false ?
-        <Text style={[styles.walletbalText,{textAlign: isRTL ? 'right': 'left'}]}>{t('Balance')} - <Text style={styles.ballance}>{settings?.symbol || ''}{state.userdata ? parseFloat(state.userdata.walletBalance).toFixed(settings?.decimal || 2) : ''}</Text></Text>
+        <Text style={[styles.walletbalText,{textAlign: isRTL ? 'right': 'left'}]}>{t('Balance')} - <Text style={styles.ballance}>{settings?.symbol || ''}{state.userdata ? parseFloat(initialBalance).toFixed(settings?.decimal || 2) : ''}</Text></Text>
         :
-        <Text style={[styles.walletbalText,{textAlign: isRTL ? 'right': 'left'}]}>{t('Balance')} - <Text style={styles.ballance}>{state.userdata ? parseFloat(state.userdata.walletBalance).toFixed(settings?.decimal || 2) : ''}{settings?.symbol || ''}</Text></Text>
+        <Text style={[styles.walletbalText,{textAlign: isRTL ? 'right': 'left'}]}>{t('Balance')} - <Text style={styles.ballance}>{state.userdata ? parseFloat(initialBalance).toFixed(settings?.decimal || 2) : ''}{settings?.symbol || ''}</Text></Text>
       }
 
         <TextInput
           style={[styles.inputTextStyle,{textAlign: isRTL ? 'right': 'left'}]}
           placeholder={t('amount') + " (" + settings?.symbol || '' + ")"}
           keyboardType={'number-pad'}
-          onChangeText={(text) => setState({ ...state,amount: text })}
+          onChangeText={(text) => {
+            setState({ ...state,amount: text });
+            if (!loading) {
+              setWithdrawRequestId(null);
+            }
+          }}
           value={state.amount}
+          testID="driver-withdraw-amount-input"
+          accessibilityLabel="driver-withdraw-amount-input"
         />
+        <TextInput
+          style={[styles.inputTextStyle,{textAlign: isRTL ? 'right': 'left'}]}
+          placeholder="Chave Pix"
+          autoCapitalize="none"
+          autoCorrect={false}
+          onChangeText={(text) => {
+            setState({ ...state,pixKey: text });
+            if (!loading) {
+              setWithdrawRequestId(null);
+            }
+          }}
+          value={state.pixKey}
+          testID="driver-withdraw-pix-key-input"
+          accessibilityLabel="driver-withdraw-pix-key-input"
+        />
+        <SecurePaymentBadge style={styles.securePaymentBadge} color="#6E7D72" />
+        <TextInput
+          style={[styles.inputTextStyle,{textAlign: isRTL ? 'right': 'left'}]}
+          placeholder="Senha do app"
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="password"
+          onChangeText={(text) => setState({ ...state,appPassword: text })}
+          value={state.appPassword}
+          testID="driver-withdraw-password-input"
+          accessibilityLabel="driver-withdraw-password-input"
+        />
+        <View style={styles.dailyFeeRow}>
+          <Text style={styles.dailyFeeLabel}>Taxa diária</Text>
+          <Text style={styles.dailyFeeStruck}>R$ 9,90</Text>
+          <Text style={styles.dailyFeeFree}>R$ 0,00 agora</Text>
+        </View>
         <Button
             title={t('withdraw')}
             loading={loading}
@@ -74,6 +168,8 @@ export default function WithdrawMoneyScreen(props) {
             onPress={withdrawNow}
             buttonStyle={styles.buttonWrapper2}
             containerStyle={{ height: '100%' }}
+            testID="driver-withdraw-submit-button"
+            accessibilityLabel="driver-withdraw-submit-button"
         />
       </View>
     </View>
@@ -117,6 +213,36 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     fontSize: 30,
     fontFamily:fonts.Regular
+  },
+  dailyFeeRow: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#EEF8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  securePaymentBadge: {
+    marginTop: 6,
+    marginLeft: 2,
+  },
+  dailyFeeLabel: {
+    fontSize: 14,
+    fontFamily: fonts.Bold,
+    color: '#1F6B37',
+    marginRight: 8,
+  },
+  dailyFeeStruck: {
+    fontSize: 14,
+    fontFamily: fonts.Regular,
+    color: '#6E7D72',
+    textDecorationLine: 'line-through',
+    marginRight: 8,
+  },
+  dailyFeeFree: {
+    fontSize: 14,
+    fontFamily: fonts.Bold,
+    color: MAIN_COLOR,
   },
   buttonWrapper2: {
     marginBottom: 10,

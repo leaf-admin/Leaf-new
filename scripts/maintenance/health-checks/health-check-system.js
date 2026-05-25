@@ -72,7 +72,7 @@ class HealthCheckSystem {
         try {
             const start = Date.now();
             
-            const response = await this.makeRequest('http://216.238.107.59:3000/health', {
+            const response = await this.makeRequest('http://147.182.204.181:3000/health', {
                 timeout: 5000
             });
             
@@ -100,7 +100,7 @@ class HealthCheckSystem {
         try {
             const start = Date.now();
             
-            const response = await this.makeRequest('http://216.238.107.59:3001/health', {
+            const response = await this.makeRequest('http://147.182.204.181:3001/health', {
                 timeout: 5000
             });
             

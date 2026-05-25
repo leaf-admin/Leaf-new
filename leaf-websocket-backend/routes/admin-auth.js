@@ -4,11 +4,21 @@ const bcrypt = require('bcryptjs');
 const admin = require('firebase-admin');
 const auditService = require('../services/audit-service');
 const { logStructured, logError } = require('../utils/logger');
+const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
+const {
+  getAdminUser,
+  primeAdminUser,
+  invalidateAdminUser
+} = require('../utils/admin-user-cache');
 
 const router = express.Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_JWT_SECRET || 'leaf-admin-secret-key-change-in-production';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || process.env.ADMIN_JWT_REFRESH_SECRET || 'leaf-admin-refresh-secret-key-change-in-production';
+const JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
+  context: 'admin-auth-access'
+});
+const JWT_REFRESH_SECRET = resolveJwtSecret(['JWT_REFRESH_SECRET', 'ADMIN_JWT_REFRESH_SECRET'], {
+  context: 'admin-auth-refresh'
+});
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
 
@@ -122,6 +132,10 @@ router.post('/login', async (req, res) => {
     await firestore.collection('adminUsers').doc(userId).update({
       lastLogin: admin.firestore.FieldValue.serverTimestamp()
     });
+    primeAdminUser(userId, {
+      ...userData,
+      lastLogin: new Date().toISOString()
+    });
 
     // Log de auditoria (não-bloqueante)
     auditService.logSecurityAction(userId, 'loginSuccess', 'adminLogin', {
@@ -185,6 +199,13 @@ router.post('/refresh', async (req, res) => {
     const tokenDoc = await firestore.collection('adminRefreshTokens').doc(decoded.userId).get();
     
     if (!tokenDoc.exists || tokenDoc.data().token !== refreshToken) {
+      logStructured('warn', 'Firestore adminRefreshTokens doc ausente ou divergente', {
+        service: 'admin-auth-routes',
+        firestore_collection: 'adminRefreshTokens',
+        firestore_result: tokenDoc.exists ? 'MISMATCH' : 'NOT_FOUND',
+        userId: String(decoded.userId),
+        source: 'admin-auth.refresh'
+      });
       return res.status(401).json({
         success: false,
         error: 'Refresh token inválido'
@@ -203,15 +224,18 @@ router.post('/refresh', async (req, res) => {
     }
 
     // Buscar dados do usuário
-    const userDoc = await firestore.collection('adminUsers').doc(decoded.userId).get();
-    if (!userDoc.exists || userDoc.data().active === false) {
+    const userRecord = await getAdminUser(decoded.userId, {
+      source: 'admin-auth.refresh',
+      maxAgeMs: 15 * 1000
+    });
+    if (!userRecord.exists || userRecord.data?.active === false) {
       return res.status(403).json({
         success: false,
         error: 'Usuário não encontrado ou inativo'
       });
     }
 
-    const userData = userDoc.data();
+    const userData = userRecord.data || {};
 
     // Gerar novo access token
     const accessToken = jwt.sign(
@@ -266,17 +290,19 @@ router.get('/verify', async (req, res) => {
     }
 
     // Verificar se usuário ainda existe e está ativo
-    const firestore = admin.firestore();
-    const userDoc = await firestore.collection('adminUsers').doc(decoded.userId).get();
-    
-    if (!userDoc.exists || userDoc.data().active === false) {
+    const userRecord = await getAdminUser(decoded.userId, {
+      source: 'admin-auth.verify',
+      maxAgeMs: 15 * 1000
+    });
+
+    if (!userRecord.exists || userRecord.data?.active === false) {
       return res.status(403).json({
         success: false,
         error: 'Usuário não encontrado ou inativo'
       });
     }
 
-    const userData = userDoc.data();
+    const userData = userRecord.data || {};
 
     res.json({
       success: true,
@@ -327,6 +353,7 @@ router.post('/logout', async (req, res) => {
     // Remover refresh token do Firestore
     const firestore = admin.firestore();
     await firestore.collection('adminRefreshTokens').doc(decoded.userId).delete();
+    invalidateAdminUser(decoded.userId);
 
     // Log de auditoria
     await auditService.logSecurityAction(decoded.userId, 'logout', 'adminLogout', {
@@ -348,6 +375,3 @@ router.post('/logout', async (req, res) => {
 });
 
 module.exports = router;
-
-
-

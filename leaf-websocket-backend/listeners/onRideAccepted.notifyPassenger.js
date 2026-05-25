@@ -11,24 +11,49 @@ const { getTracer } = require('../utils/tracer');
 const { createListenerSpan, runInSpan, endSpanSuccess, endSpanError } = require('../utils/span-helpers');
 const { metrics } = require('../utils/prometheus-metrics');
 
+function normalizeAcceptedPayload(event) {
+    const rawData = event?.data && typeof event.data === 'object' ? event.data : {};
+    const nestedData = rawData?.data && typeof rawData.data === 'object' ? rawData.data : null;
+    const payload = (rawData?.bookingId || rawData?.customerId || rawData?.driverId)
+        ? rawData
+        : (nestedData || rawData);
+
+    const metadata = payload?.metadata && typeof payload.metadata === 'object'
+        ? payload.metadata
+        : (rawData?.metadata && typeof rawData.metadata === 'object' ? rawData.metadata : {});
+
+    return {
+        payload,
+        metadata,
+        traceId: payload?.traceId || metadata?.traceId || rawData?.traceId || null,
+        spanContext: payload?._otelSpanContext || rawData?._otelSpanContext || null
+    };
+}
+
+function passengerSocketAlreadyDelivered(metadata) {
+    return Boolean(metadata?.socketDelivery?.passengerRideAcceptedEmitted);
+}
+
 /**
  * Notificar passageiro via WebSocket
  */
 async function notifyPassenger(event, io) {
     const startTime = Date.now();
     const eventType = event.eventType || 'ride.accepted';
+    const normalized = normalizeAcceptedPayload(event);
+    const payload = normalized.payload || {};
     // ✅ OBSERVABILIDADE: Extrair traceId do evento
-    const traceId = event.data?.traceId || traceContext.getCurrentTraceId();
+    const traceId = normalized.traceId || traceContext.getCurrentTraceId();
     return await traceContext.runWithTraceId(traceId, async () => {
         // ✅ FASE 1.3: Criar span para Listener (linkado ao evento)
         const tracer = getTracer();
         const { trace, context } = require('@opentelemetry/api');
 
         // ✅ Linkar span usando traceId do evento (não parent)
-        const eventMetadata = event.data?.metadata || {};
-        const eventTraceId = eventMetadata.traceId || event.data?._otelSpanContext?.traceId;
-        const eventSpanId = eventMetadata.spanId || event.data?._otelSpanContext?.spanId;
-        const correlationId = eventMetadata.correlationId || event.data?.bookingId || event.data?.rideId;
+        const eventMetadata = normalized.metadata || {};
+        const eventTraceId = eventMetadata.traceId || normalized.spanContext?.traceId;
+        const eventSpanId = eventMetadata.spanId || normalized.spanContext?.spanId;
+        const correlationId = eventMetadata.correlationId || payload?.bookingId || payload?.rideId;
 
         // Criar link para o span do evento
         let links = [];
@@ -47,14 +72,14 @@ async function notifyPassenger(event, io) {
             links: links,
             attributes: {
                 'listener.name': 'notify_passenger',
-                'listener.booking_id': event.data?.bookingId,
+                'listener.booking_id': payload?.bookingId,
                 ...(correlationId && { 'correlation.id': correlationId }) // ✅ Adicionar correlationId
             }
         });
 
         try {
             return await runInSpan(listenerSpan, async () => {
-                const { customerId, bookingId, driverId } = event.data;
+                const { customerId, bookingId, driverId } = payload;
 
                 // ✅ Logs correlacionados (correlationId + traceId)
                 const { trace } = require('@opentelemetry/api');
@@ -79,12 +104,28 @@ async function notifyPassenger(event, io) {
                 });
 
                 if (!customerId || !bookingId || !driverId) {
-                    logger.warn('⚠️ [notifyPassenger] Dados incompletos no evento');
+                    logStructured('debug', 'notifyPassenger ignorou evento incompleto', {
+                        listener: 'notifyPassenger',
+                        eventType,
+                        hasCustomerId: Boolean(customerId),
+                        hasBookingId: Boolean(bookingId),
+                        hasDriverId: Boolean(driverId)
+                    });
                     return;
                 }
 
                 if (!io) {
                     logger.warn('⚠️ [notifyPassenger] Socket.IO não disponível');
+                    return;
+                }
+
+                if (passengerSocketAlreadyDelivered(normalized.metadata)) {
+                    logStructured('debug', 'notifyPassenger pulou emissão duplicada', {
+                        customerId,
+                        bookingId,
+                        listener: 'notifyPassenger',
+                        reason: 'passenger_socket_already_emitted'
+                    });
                     return;
                 }
 
@@ -106,8 +147,8 @@ async function notifyPassenger(event, io) {
         } catch (error) {
             endSpanError(listenerSpan, error);
             logStructured('error', 'notifyPassenger falhou', {
-                customerId: event.data?.customerId,
-                bookingId: event.data?.bookingId,
+                customerId: payload?.customerId,
+                bookingId: payload?.bookingId,
                 listener: 'notifyPassenger',
                 error: error.message
             });

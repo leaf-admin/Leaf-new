@@ -1,0 +1,124 @@
+export const RUNTIME_RIDE_STATUSES = Object.freeze({
+  IDLE: "idle",
+  REQUESTING: "requesting",
+  SEARCHING: "searching",
+  ACCEPTED: "accepted",
+  ARRIVED: "arrived",
+  STARTED: "started",
+  OPERATIONAL_INTERRUPTED: "operational_interrupted",
+  SEARCHING_REPLACEMENT: "searching_replacement",
+  COMPLETED: "completed",
+  CANCELED: "canceled",
+  NO_DRIVERS: "no_drivers",
+  REJECTED: "rejected",
+});
+
+const STATUS_ALIASES = Object.freeze({
+  pending: RUNTIME_RIDE_STATUSES.REQUESTING,
+  awaiting_payment: RUNTIME_RIDE_STATUSES.REQUESTING,
+  requesting: RUNTIME_RIDE_STATUSES.REQUESTING,
+  requested: RUNTIME_RIDE_STATUSES.REQUESTING,
+
+  searching: RUNTIME_RIDE_STATUSES.SEARCHING,
+  expanded: RUNTIME_RIDE_STATUSES.SEARCHING,
+  notified: RUNTIME_RIDE_STATUSES.SEARCHING,
+  awaiting_response: RUNTIME_RIDE_STATUSES.SEARCHING,
+
+  matched: RUNTIME_RIDE_STATUSES.ACCEPTED,
+  accepted: RUNTIME_RIDE_STATUSES.ACCEPTED,
+  driver_accepted: RUNTIME_RIDE_STATUSES.ACCEPTED,
+  accepted_by_driver: RUNTIME_RIDE_STATUSES.ACCEPTED,
+
+  arrived: RUNTIME_RIDE_STATUSES.ARRIVED,
+  driver_arrived: RUNTIME_RIDE_STATUSES.ARRIVED,
+  arrived_at_pickup: RUNTIME_RIDE_STATUSES.ARRIVED,
+  at_pickup: RUNTIME_RIDE_STATUSES.ARRIVED,
+
+  started: RUNTIME_RIDE_STATUSES.STARTED,
+  in_trip: RUNTIME_RIDE_STATUSES.STARTED,
+  on_trip: RUNTIME_RIDE_STATUSES.STARTED,
+  trip_started: RUNTIME_RIDE_STATUSES.STARTED,
+  "trip-started": RUNTIME_RIDE_STATUSES.STARTED,
+  trip_in_progress: RUNTIME_RIDE_STATUSES.STARTED,
+  "trip-in-progress": RUNTIME_RIDE_STATUSES.STARTED,
+  in_progress: RUNTIME_RIDE_STATUSES.STARTED,
+  "in-progress": RUNTIME_RIDE_STATUSES.STARTED,
+  reassigned_in_progress: RUNTIME_RIDE_STATUSES.STARTED,
+  reassigned_started: RUNTIME_RIDE_STATUSES.STARTED,
+  replacement_driver_accepted: RUNTIME_RIDE_STATUSES.STARTED,
+
+  interrupted_operational: RUNTIME_RIDE_STATUSES.OPERATIONAL_INTERRUPTED,
+  operational_interrupted: RUNTIME_RIDE_STATUSES.OPERATIONAL_INTERRUPTED,
+  passenger_decision_pending: RUNTIME_RIDE_STATUSES.OPERATIONAL_INTERRUPTED,
+
+  reassignment_pending: RUNTIME_RIDE_STATUSES.SEARCHING_REPLACEMENT,
+  searching_replacement: RUNTIME_RIDE_STATUSES.SEARCHING_REPLACEMENT,
+  searching_replacement_driver: RUNTIME_RIDE_STATUSES.SEARCHING_REPLACEMENT,
+  replacement_driver_searching: RUNTIME_RIDE_STATUSES.SEARCHING_REPLACEMENT,
+
+  completed: RUNTIME_RIDE_STATUSES.COMPLETED,
+  trip_completed: RUNTIME_RIDE_STATUSES.COMPLETED,
+  early_ended_by_rider: RUNTIME_RIDE_STATUSES.COMPLETED,
+  interrupted_operational_ended: RUNTIME_RIDE_STATUSES.COMPLETED,
+  early_ended_review: RUNTIME_RIDE_STATUSES.COMPLETED,
+
+  canceled: RUNTIME_RIDE_STATUSES.CANCELED,
+  cancelled: RUNTIME_RIDE_STATUSES.CANCELED,
+
+  no_driver: RUNTIME_RIDE_STATUSES.NO_DRIVERS,
+  no_drivers: RUNTIME_RIDE_STATUSES.NO_DRIVERS,
+  no_drivers_found: RUNTIME_RIDE_STATUSES.NO_DRIVERS,
+  no_drivers_available: RUNTIME_RIDE_STATUSES.NO_DRIVERS,
+
+  rejected: RUNTIME_RIDE_STATUSES.REJECTED,
+});
+
+export const ACTIVE_PASSENGER_RIDE_STATUSES = Object.freeze(new Set([
+  RUNTIME_RIDE_STATUSES.REQUESTING,
+  RUNTIME_RIDE_STATUSES.SEARCHING,
+  RUNTIME_RIDE_STATUSES.ACCEPTED,
+  RUNTIME_RIDE_STATUSES.ARRIVED,
+  RUNTIME_RIDE_STATUSES.STARTED,
+  RUNTIME_RIDE_STATUSES.OPERATIONAL_INTERRUPTED,
+  RUNTIME_RIDE_STATUSES.SEARCHING_REPLACEMENT,
+]));
+
+export const ACTIVE_DRIVER_RIDE_STATUSES = Object.freeze(new Set([
+  RUNTIME_RIDE_STATUSES.SEARCHING,
+  RUNTIME_RIDE_STATUSES.ACCEPTED,
+  RUNTIME_RIDE_STATUSES.ARRIVED,
+  RUNTIME_RIDE_STATUSES.STARTED,
+  RUNTIME_RIDE_STATUSES.OPERATIONAL_INTERRUPTED,
+  RUNTIME_RIDE_STATUSES.SEARCHING_REPLACEMENT,
+]));
+
+export const TERMINAL_RIDE_STATUSES = Object.freeze(new Set([
+  RUNTIME_RIDE_STATUSES.COMPLETED,
+  RUNTIME_RIDE_STATUSES.CANCELED,
+  RUNTIME_RIDE_STATUSES.NO_DRIVERS,
+  RUNTIME_RIDE_STATUSES.REJECTED,
+]));
+
+export function normalizeRuntimeRideStatus(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) {
+    return "";
+  }
+
+  return STATUS_ALIASES[normalized] || normalized;
+}
+
+export function isActivePassengerRideStatus(value) {
+  return ACTIVE_PASSENGER_RIDE_STATUSES.has(normalizeRuntimeRideStatus(value));
+}
+
+export function isActiveDriverRideStatus(value) {
+  return ACTIVE_DRIVER_RIDE_STATUSES.has(normalizeRuntimeRideStatus(value));
+}
+
+export function isTerminalRideStatus(value) {
+  return TERMINAL_RIDE_STATUSES.has(normalizeRuntimeRideStatus(value));
+}

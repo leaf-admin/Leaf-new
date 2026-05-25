@@ -10,20 +10,20 @@
 const express = require('express');
 const router = express.Router();
 const supportChatService = require('../services/support-chat-service');
-const { authenticateJWT } = require('../middleware/jwt-auth');
+const { authenticateSupport, canAccessUserScope, isSupportAgent } = require('../middleware/support-auth');
 const { logger } = require('../utils/logger');
 
 /**
  * GET /api/support/chat/:userId/history
  * Buscar histórico de mensagens
  */
-router.get('/chat/:userId/history', authenticateJWT, async (req, res) => {
+router.get('/chat/:userId/history', authenticateSupport, async (req, res) => {
     try {
         const { userId } = req.params;
         const limit = parseInt(req.query.limit) || 50;
 
         // Verificar se usuário tem permissão (próprio usuário ou admin)
-        if (req.user.id !== userId && !['admin', 'manager'].includes(req.user.role)) {
+        if (!canAccessUserScope(req.user, userId)) {
             return res.status(403).json({ error: 'Acesso negado' });
         }
 
@@ -45,13 +45,13 @@ router.get('/chat/:userId/history', authenticateJWT, async (req, res) => {
  * POST /api/support/chat/:userId/mark-read
  * Marcar mensagens como lidas
  */
-router.post('/chat/:userId/mark-read', authenticateJWT, async (req, res) => {
+router.post('/chat/:userId/mark-read', authenticateSupport, async (req, res) => {
     try {
         const { userId } = req.params;
         const { messageIds } = req.body;
 
         // Verificar se usuário tem permissão
-        if (req.user.id !== userId && !['admin', 'manager'].includes(req.user.role)) {
+        if (!canAccessUserScope(req.user, userId)) {
             return res.status(403).json({ error: 'Acesso negado' });
         }
 
@@ -72,7 +72,7 @@ router.post('/chat/:userId/mark-read', authenticateJWT, async (req, res) => {
  * POST /api/support/chat/:userId/message
  * Enviar mensagem (REST fallback, preferir WebSocket)
  */
-router.post('/chat/:userId/message', authenticateJWT, async (req, res) => {
+router.post('/chat/:userId/message', authenticateSupport, async (req, res) => {
     try {
         const { userId } = req.params;
         const { message, senderType = 'user' } = req.body;
@@ -82,20 +82,23 @@ router.post('/chat/:userId/message', authenticateJWT, async (req, res) => {
         }
 
         // Verificar se usuário tem permissão
-        if (req.user.id !== userId && !['admin', 'manager'].includes(req.user.role)) {
+        if (!canAccessUserScope(req.user, userId)) {
             return res.status(403).json({ error: 'Acesso negado' });
         }
 
         // ✅ Verificar se o chat não está encerrado
         const chatStatus = await supportChatService.getChatStatus(userId);
         if (chatStatus.status === 'closed') {
-            return res.status(400).json({ error: 'Chat já está encerrado' });
+            const reopenResult = await supportChatService.reopenChatForOpenTicket(userId, 'incoming_message_after_closed');
+            if (!reopenResult.reopened) {
+                return res.status(400).json({ error: 'Chat já está encerrado' });
+            }
         }
 
         const result = await supportChatService.sendMessage(
             userId,
             message.trim(),
-            req.user.role === 'admin' || req.user.role === 'manager' ? 'agent' : senderType
+            isSupportAgent(req.user) ? 'agent' : senderType
         );
 
         res.json({
@@ -113,13 +116,13 @@ router.post('/chat/:userId/message', authenticateJWT, async (req, res) => {
  * POST /api/support/chat/:userId/close
  * ✅ Encerrar chat e salvar todas as mensagens no Firestore
  */
-router.post('/chat/:userId/close', authenticateJWT, async (req, res) => {
+router.post('/chat/:userId/close', authenticateSupport, async (req, res) => {
     try {
         const { userId } = req.params;
         const { closedBy = 'agent' } = req.body;
 
         // Verificar se usuário tem permissão (apenas admin/manager pode encerrar)
-        if (!['admin', 'manager'].includes(req.user.role)) {
+        if (!isSupportAgent(req.user)) {
             return res.status(403).json({ error: 'Apenas administradores podem encerrar chats' });
         }
 
@@ -147,12 +150,12 @@ router.post('/chat/:userId/close', authenticateJWT, async (req, res) => {
  * GET /api/support/chat/:userId/status
  * ✅ Obter status do chat
  */
-router.get('/chat/:userId/status', authenticateJWT, async (req, res) => {
+router.get('/chat/:userId/status', authenticateSupport, async (req, res) => {
     try {
         const { userId } = req.params;
 
         // Verificar se usuário tem permissão
-        if (req.user.id !== userId && !['admin', 'manager'].includes(req.user.role)) {
+        if (!canAccessUserScope(req.user, userId)) {
             return res.status(403).json({ error: 'Acesso negado' });
         }
 
@@ -170,4 +173,3 @@ router.get('/chat/:userId/status', authenticateJWT, async (req, res) => {
 });
 
 module.exports = router;
-

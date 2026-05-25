@@ -10,8 +10,8 @@
 export const REVIEW_ACCOUNTS = {
   // Conta de passageiro para review
   PASSENGER: {
-    phoneNumber: '11999999999',
-    fullPhoneNumber: '+5511999999999',
+    phoneNumber: '21102938475',
+    fullPhoneNumber: '+5521102938475',
     userType: 'customer', // ✅ CORRIGIDO: projeto usa 'customer', não 'passenger'
     skipOTP: true, // Pula OTP completamente
     description: 'Customer test account for App Review'
@@ -19,8 +19,8 @@ export const REVIEW_ACCOUNTS = {
   
   // Conta de motorista para review
   DRIVER: {
-    phoneNumber: '11888888888',
-    fullPhoneNumber: '+5511888888888',
+    phoneNumber: '21123456789',
+    fullPhoneNumber: '+5521123456789',
     userType: 'driver',
     skipOTP: true, // Pula OTP completamente
     description: 'Driver test account for App Review'
@@ -61,4 +61,3 @@ export const getReviewAccountInfo = (phoneNumber) => {
   
   return null;
 };
-

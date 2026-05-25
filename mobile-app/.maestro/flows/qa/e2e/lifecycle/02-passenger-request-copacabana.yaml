@@ -1,0 +1,78 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/destination?qaAutomation=1&qaAutoFlow=request&qaPresetQuery=Copacabana%20Palace"
+
+- runFlow: ../../_accept-open-prompt-no-launch.yaml
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-home-destination-input"
+    commands:
+      - tapOn:
+          id: "passenger-home-destination-input"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-destination-search-input"
+    commands:
+      - tapOn:
+          id: "passenger-destination-search-input"
+      - eraseText
+      - inputText: "Av. Atlântica, 1702"
+      - extendedWaitUntil:
+          visible: ".*(Av\\. Atlântica|Copacabana|22021-001).*"
+          timeout: 45000
+      - runFlow:
+          when:
+            visible:
+              id: "passenger-destination-result-0"
+          commands:
+            - tapOn:
+                id: "passenger-destination-result-0"
+      - runFlow:
+          when:
+            visible: ".*(Av\\. Atlântica.*1702|22021-001).*"
+          commands:
+            - tapOn: ".*(Av\\. Atlântica.*1702|22021-001).*"
+
+- extendedWaitUntil:
+    visible: ".*(Solicitar .*|Confirme sua viagem|Realize seu pagamento|Pagamento PIX|Gerando cobrança PIX...|Pagamento confirmado!|Procurando motorista|Corrida criada com sucesso|Continuar para busca).*"
+    timeout: 120000
+
+- runFlow: ../../_accept-open-prompt-no-launch.yaml
+
+- runFlow:
+    when:
+      visible: "Solicitar .*"
+    commands:
+      - tapOn: "Solicitar .*"
+
+- runFlow:
+    when:
+      visible: "Confirme sua viagem"
+    commands:
+      - tapOn:
+          point: "50%,93%"
+
+- extendedWaitUntil:
+    visible: ".*(Realize seu pagamento|Pagamento PIX|Gerando cobrança PIX...|Pagamento confirmado!|Procurando motorista|Corrida criada com sucesso|Continuar para busca).*"
+    timeout: 240000
+
+- runFlow: ../../_accept-open-prompt-no-launch.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-driver-search-elapsed"
+    timeout: 60000
+
+- extendedWaitUntil:
+    visible: "Procurando motorista(s)?"
+    timeout: 60000

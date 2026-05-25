@@ -3,7 +3,55 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { toUserFriendlyError } from './friendlyErrorMessages';
 
+const TEST_MODE_STORAGE_KEY = '@test_mode';
+const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
+
+function isCanceledAxiosError(error) {
+    return axios.isCancel?.(error)
+        || error?.code === 'ERR_CANCELED'
+        || error?.name === 'CanceledError'
+        || error?.message === 'canceled';
+}
+
+async function resolveRequestAuthToken({ forceRefresh = false } = {}) {
+    try {
+        const currentUser = auth().currentUser;
+        if (currentUser) {
+            return {
+                token: await currentUser.getIdToken(Boolean(forceRefresh)),
+                source: 'firebase'
+            };
+        }
+    } catch (tokenError) {
+        Logger.warn('⚠️ [Axios] Falha ao obter token do Firebase:', tokenError);
+    }
+
+    try {
+        const [testModeRaw, qaSocketIdTokenRaw] = await Promise.all([
+            AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+            AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY)
+        ]);
+
+        const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
+        const qaSocketIdToken = String(qaSocketIdTokenRaw || '').trim();
+
+        if (qaModeEnabled && qaSocketIdToken) {
+            return {
+                token: qaSocketIdToken,
+                source: 'qa_storage'
+            };
+        }
+    } catch (qaTokenError) {
+        Logger.warn('⚠️ [Axios] Falha ao recuperar token QA persistido:', qaTokenError);
+    }
+
+    return {
+        token: null,
+        source: null
+    };
+}
 
 /**
  * Cria uma instância do axios com configurações padrão
@@ -23,7 +71,14 @@ export function createAxiosInstance(config = {}) {
 
     // Interceptor de requisição - adiciona headers padrão
     instance.interceptors.request.use(
-        (requestConfig) => {
+        async (requestConfig) => {
+            const { token, source } = await resolveRequestAuthToken({ forceRefresh: false });
+            if (token && !requestConfig.headers?.Authorization) {
+                requestConfig.headers = requestConfig.headers || {};
+                requestConfig.headers.Authorization = `Bearer ${token}`;
+                requestConfig._authTokenSource = source;
+            }
+
             // Log apenas em desenvolvimento
             if (__DEV__) {
                 Logger.log(`🌐 [Axios] ${requestConfig.method?.toUpperCase()} ${requestConfig.url}`);
@@ -32,7 +87,7 @@ export function createAxiosInstance(config = {}) {
         },
         (error) => {
             Logger.error('❌ [Axios] Erro na requisição:', error);
-            return Promise.reject(error);
+            return Promise.reject(toUserFriendlyError(error, { context: 'api' }));
         }
     );
 
@@ -42,48 +97,60 @@ export function createAxiosInstance(config = {}) {
             return response;
         },
         async (error) => {
+            if (isCanceledAxiosError(error)) {
+                return Promise.reject(error);
+            }
+
             const originalRequest = error.config;
 
             // Tratamento de erros de rede
             if (error.code === 'ECONNABORTED') {
                 Logger.error('⏱️ [Axios] Timeout na requisição');
+                error.code = error.code || 'ECONNABORTED';
                 error.message = 'Tempo de espera esgotado. Tente novamente.';
             } else if (error.message === 'Network Error') {
                 Logger.error('🌐 [Axios] Erro de rede');
+                error.code = error.code || 'NETWORK_ERROR';
                 error.message = 'Erro de conexão. Verifique sua internet.';
             } else if (error.response) {
                 // Erro com resposta do servidor
                 const status = error.response.status;
                 if (status === 401 && !originalRequest._retry) {
                     originalRequest._retry = true;
-                    Logger.warn('🔒 [Axios] Não autorizado (401), tentando atualizar token Firebase...');
+                    Logger.warn('🔒 [Axios] Não autorizado (401), tentando renovar credencial HTTP...');
 
                     try {
-                        const currentUser = auth().currentUser;
-                        if (currentUser) {
-                            // Força a atualização do token (true = force refresh session)
-                            const newToken = await currentUser.getIdToken(true);
-                            Logger.log('✅ [Axios] Novo Token gerado. Refazendo requisição original...');
+                        const { token: newToken, source } = await resolveRequestAuthToken({ forceRefresh: true });
+                        if (newToken && source === 'firebase') {
+                            Logger.log('✅ [Axios] Novo token Firebase gerado. Refazendo requisição original...');
 
                             // Atualiza os headers da requisição falha
                             originalRequest.headers = originalRequest.headers || {};
                             originalRequest.headers.Authorization = `Bearer ${newToken}`;
+                            originalRequest._authTokenSource = source;
 
                             // Retorna uma nova chamada do Axios usando a mesma instância configurada original
                             return instance(originalRequest);
                         }
+
+                        if (originalRequest?._authTokenSource === 'qa_storage') {
+                            error.message = 'Sessão QA expirada. Reabra o app ou resemeie a autenticação.';
+                            error.code = error.code || 'TOKEN_INVALID_OR_EXPIRED';
+                        }
                     } catch (refreshError) {
                         Logger.error('❌ [Axios] Falha ao renovar Token do Firebase:', refreshError);
                         error.message = 'Sessão expirada permanentemente. Faça login novamente.';
+                        error.code = error.code || 'TOKEN_EXPIRED';
                         // Pode despachar evento de logout aqui
                     }
                 } else if (status >= 500) {
                     Logger.error('🔥 [Axios] Erro do servidor');
+                    error.code = error.code || 'INTERNAL_SERVER_ERROR';
                     error.message = 'Erro no servidor. Tente novamente mais tarde.';
                 }
             }
 
-            return Promise.reject(error);
+            return Promise.reject(toUserFriendlyError(error, { context: 'api' }));
         }
     );
 
@@ -113,7 +180,7 @@ export function setupAxiosInterceptor() {
         },
         (error) => {
             Logger.error('❌ [Axios Global] Erro na requisição:', error);
-            return Promise.reject(error);
+            return Promise.reject(toUserFriendlyError(error, { context: 'api' }));
         }
     );
 
@@ -123,6 +190,10 @@ export function setupAxiosInterceptor() {
             return response;
         },
         async (error) => {
+            if (isCanceledAxiosError(error)) {
+                return Promise.reject(error);
+            }
+
             const originalRequest = error.config;
 
             // Tratamento global de erros para tokens expirados (Sessão Infinita)
@@ -143,10 +214,9 @@ export function setupAxiosInterceptor() {
                     Logger.error('❌ [Axios Global] Não foi possível renovar a sessão:', refreshError);
                 }
             }
-            return Promise.reject(error);
+            return Promise.reject(toUserFriendlyError(error, { context: 'api' }));
         }
     );
 
     Logger.log('✅ Axios interceptors configurados');
 }
-

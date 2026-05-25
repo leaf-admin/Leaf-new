@@ -13,8 +13,8 @@ const { logStructured, logError } = require('../utils/logger');
 
 class KYCVPSClient {
   constructor() {
-    // VPS dedicada: 147.93.66.253
-    this.vpsUrl = process.env.KYC_VPS_URL || 'http://147.93.66.253:3002';
+    // VPS dedicada: 147.182.204.181
+    this.vpsUrl = process.env.KYC_VPS_URL || 'http://147.182.204.181:3002';
     this.apiKey = process.env.KYC_VPS_API_KEY || '';
     // ✅ CORREÇÃO: Aumentar timeout para 60s (upload de imagens pode demorar)
     this.timeout = parseInt(process.env.KYC_VPS_TIMEOUT) || 60000; // 60 segundos (era 30s)
@@ -177,5 +177,4 @@ class KYCVPSClient {
 }
 
 module.exports = KYCVPSClient;
-
 

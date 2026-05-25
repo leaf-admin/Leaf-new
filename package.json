@@ -9,10 +9,25 @@
     "bootstrap": "npm install --workspaces --include-workspace-root",
     "dev:backend": "npm run dev --workspace leaf-websocket-backend",
     "dev:dashboard": "npm run dev --workspace leaf-dashboard-js",
+    "dev:orchestrator": "npm run dev --prefix services/support-agent-orchestrator",
     "dev:mobile": "npm run start --workspace mobile-app",
     "build:dashboard": "npm run build --workspace leaf-dashboard-js",
     "lint:dashboard": "npm run lint --workspace leaf-dashboard-js",
-    "test:backend": "npm run test --workspace leaf-websocket-backend"
+    "check:orchestrator": "npm run check --prefix services/support-agent-orchestrator",
+    "test:profile": "node scripts/tests/print-test-profile.cjs workspace-root",
+    "test:mobile": "npm run test:unit --workspace mobile-app",
+    "test:backend": "npm run test --workspace leaf-websocket-backend",
+    "test:backend:all": "npm run test:all --workspace leaf-websocket-backend",
+    "test:all": "node scripts/tests/run-with-profile.cjs workspace-all \"npm run test:unit --workspace mobile-app && npm run test:all --workspace leaf-websocket-backend\"",
+    "security:scan": "node scripts/maintenance/security/scan-secrets.cjs",
+    "prelaunch:copy": "node scripts/prelaunch/assert-onboarding-copy.cjs",
+    "prelaunch:testids": "node scripts/prelaunch/assert-mobile-testids.cjs",
+    "prelaunch:audit": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode audit --no-strict",
+    "prelaunch:full": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode full",
+    "prelaunch:rides": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode rides --rides 10",
+    "prelaunch:rides:concurrent": "node leaf-websocket-backend/scripts/tests/run-real-core-concurrent-rides.cjs",
+    "canary:preflight:non-device": "node scripts/prelaunch/run-non-device-canary-preflight.cjs",
+    "branch:task": "bash scripts/workflow/new-task-branch.sh"
   },
   "dependencies": {
     "axios": "^1.12.1",
@@ -22,8 +37,11 @@
     "firebase-admin": "^11.11.1",
     "helmet": "^8.1.0",
     "ioredis": "^5.7.0",
-    "react-native-gesture-handler": "^2.28.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "expo": "^54.0.33",
+    "next": "^16.1.0"
   }
 }

@@ -3,7 +3,7 @@
 /**
  * 🧾 TESTE DOS PARÂMETROS ATUALIZADOS DO SISTEMA DE RECIBOS
  * 
- * Taxa PIX: R$ 0,50 fixo
+ * Taxa PIX/Woovi: 0,8% com mínimo de R$ 0,50
  * Apenas forma de pagamento PIX
  */
 
@@ -14,17 +14,19 @@ const testRides = [
     { value: 8.50, description: 'Corrida pequena' },
     { value: 15.00, description: 'Corrida média' }, 
     { value: 25.00, description: 'Corrida alta' },
-    { value: 42.50, description: 'Corrida longa' }
+    { value: 42.50, description: 'Corrida longa' },
+    { value: 75.00, description: 'Corrida premium' }
 ];
 
 console.log('📊 ESTRUTURA DE TAXAS LEAF:');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 console.log('💳 FORMA DE PAGAMENTO: Apenas PIX');
-console.log('💰 TAXA DE PAGAMENTO: R$ 0,50 (fixo)');
+console.log('💰 TAXA DE PAGAMENTO: 0,8% com mínimo de R$ 0,50');
 console.log('🔧 TAXA OPERACIONAL:');
-console.log('   • Corridas < R$ 10,00: R$ 0,79');
-console.log('   • R$ 10,00 - R$ 20,00: R$ 0,99');
-console.log('   • Corridas > R$ 20,00: R$ 1,49');
+console.log('   • Corridas até R$ 10,00: R$ 0,79');
+console.log('   • Acima de R$ 10,00 até R$ 25,00: R$ 0,99');
+console.log('   • Acima de R$ 25,00 até R$ 50,00: R$ 1,49');
+console.log('   • Acima de R$ 50,00: 3%');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 console.log('📋 SIMULAÇÃO DE RECIBOS:\n');
@@ -34,16 +36,18 @@ testRides.forEach((ride, index) => {
     
     // Calcular taxa operacional
     let operationalFee;
-    if (ride.value < 10.00) {
+    if (ride.value <= 10.00) {
         operationalFee = 0.79;
-    } else if (ride.value <= 20.00) {
+    } else if (ride.value <= 25.00) {
         operationalFee = 0.99;
-    } else {
+    } else if (ride.value <= 50.00) {
         operationalFee = 1.49;
+    } else {
+        operationalFee = ride.value * 0.03;
     }
     
-    // Taxa PIX fixa
-    const pixFee = 0.50;
+    // Taxa PIX/Woovi: 0,8% com mínimo
+    const pixFee = Math.max(ride.value * 0.008, 0.50);
     
     // Valor para o motorista
     const driverAmount = ride.value - operationalFee - pixFee;
@@ -64,7 +68,6 @@ console.log('• Transparência total no recibo');
 console.log('• Maior margem líquida para o motorista');
 
 console.log('\n🚀 O sistema está configurado e funcionando com os novos parâmetros!');
-
 
 
 

@@ -13,6 +13,22 @@ import { getAuth } from '@react-native-firebase/auth';
 import { onValue, push, remove, set, update } from '@react-native-firebase/database';
 import { getLangKey } from "../other/getLangKey";
 
+const getLegacyTranslationEndpoint = () => {
+    const enabled =
+        String(process.env.EXPO_PUBLIC_ENABLE_FIREBASE_FALLBACK || process.env.ENABLE_FIREBASE_FALLBACK || '')
+            .trim()
+            .toLowerCase() === 'true';
+    const baseUrl = String(process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL || process.env.FIREBASE_FUNCTIONS_URL || '')
+        .trim()
+        .replace(/\/+$/, '');
+
+    if (!enabled || !baseUrl) {
+        return null;
+    }
+
+    return `${baseUrl}/gettranslation`;
+};
+
 
 export const fetchLanguages = () => (dispatch) => {
 
@@ -83,13 +99,14 @@ export const convertLanguage = async (word, userLangLocale)=>{
         appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
         databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
         storageBucket: "leaf-reactnative.firebasestorage.app",
-        apiKey: "AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc",
+        apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '',
         authDomain: "leaf-reactnative.firebaseapp.com",
         messagingSenderId: "106504629884",
         measurementId: "G-22368DBCY9"
     };
     
     let langKey = getLangKey(word);
+    const translationEndpoint = getLegacyTranslationEndpoint();
 
     onValue(languagesRef, async (snapshot) => {
         if (snapshot.val()) {
@@ -117,7 +134,18 @@ export const convertLanguage = async (word, userLangLocale)=>{
                     if(langLocaleArr[j].langLocale === defLangLocale){
                         update(langEditRef(langLocaleArr[j].id),{[langKey]:word})
                     }else{
-                        const response = await fetch(`https://us-central1-${safeConfig.projectId}.cloudfunctions.net/gettranslation?str=${word}&from=${defLangLocale}&to=${langLocaleArr[j].langLocale}`, {
+                        if (!translationEndpoint) {
+                            Logger.log('ℹ️ Legacy translation endpoint disabled; mirroring source text locally.');
+                            update(langEditRef(langLocaleArr[j].id),{[langKey]:word})
+                            continue;
+                        }
+
+                        const query = new URLSearchParams({
+                            str: word,
+                            from: defLangLocale,
+                            to: langLocaleArr[j].langLocale
+                        });
+                        const response = await fetch(`${translationEndpoint}?${query.toString()}`, {
                             method: 'GET',
                             headers: {
                               'Content-Type': 'application/json'
@@ -125,7 +153,7 @@ export const convertLanguage = async (word, userLangLocale)=>{
                           })
                           const json = await response.json();
                           if(json){
-                            update(langEditRef(langLocaleArr[j].id),{[langKey]:json.text})
+                            update(langEditRef(langLocaleArr[j].id),{[langKey]:json.text || word})
                           }
                     }
                   }

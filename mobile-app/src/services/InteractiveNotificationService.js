@@ -16,11 +16,71 @@ import { Platform } from 'react-native';
 import WebSocketManager from './WebSocketManager';
 import fcmService from './FCMNotificationService';
 
+const COMPACT_NOTIFICATION_ACTION_LABELS = Object.freeze({
+    arrivedAtPickup: 'Cheguei',
+    startTrip: 'Iniciar',
+    endTrip: 'Encerrar',
+    cancelRide: 'Cancelar',
+});
+
+function buildCategoryAction(identifier, buttonTitle, options = {}) {
+    return {
+        identifier,
+        buttonTitle,
+        options: {
+            opensAppToForeground: false,
+            ...options,
+        },
+    };
+}
+
+function getCompactCategoryActions(categoryId) {
+    switch (categoryId) {
+        case 'RIDE_ACCEPTED':
+            return [
+                buildCategoryAction('arrived_at_pickup', COMPACT_NOTIFICATION_ACTION_LABELS.arrivedAtPickup),
+                buildCategoryAction('cancel_ride', COMPACT_NOTIFICATION_ACTION_LABELS.cancelRide, {
+                    isDestructive: true,
+                }),
+            ];
+        case 'TRIP_STARTED':
+            return [
+                buildCategoryAction('arrived_at_pickup', COMPACT_NOTIFICATION_ACTION_LABELS.arrivedAtPickup),
+                buildCategoryAction('start_trip', COMPACT_NOTIFICATION_ACTION_LABELS.startTrip),
+            ];
+        case 'TRIP_IN_PROGRESS':
+            return [
+                buildCategoryAction('end_trip', COMPACT_NOTIFICATION_ACTION_LABELS.endTrip),
+            ];
+        case 'DRIVER_PICKUP_READY':
+            return [
+                buildCategoryAction('arrived_at_pickup', COMPACT_NOTIFICATION_ACTION_LABELS.arrivedAtPickup),
+            ];
+        case 'DRIVER_BOARDING':
+            return [
+                buildCategoryAction('start_trip', COMPACT_NOTIFICATION_ACTION_LABELS.startTrip),
+            ];
+        case 'DRIVER_TRIP_ACTIVE':
+            return [
+                buildCategoryAction('end_trip', COMPACT_NOTIFICATION_ACTION_LABELS.endTrip),
+            ];
+        default:
+            return [];
+    }
+}
+
+function getCompactAndroidActions(categoryId) {
+    return getCompactCategoryActions(categoryId).map(({ identifier, buttonTitle }) => ({
+        identifier,
+        buttonTitle,
+    }));
+}
 
 // Configurar comportamento padrão das notificações
 Notifications.setNotificationHandler({
     handleNotification: async () => ({
-        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
     }),
@@ -30,6 +90,15 @@ class InteractiveNotificationService {
     constructor() {
         this.isInitialized = false;
         this.wsManager = WebSocketManager.getInstance();
+        this.actionExecutor = null;
+    }
+
+    setActionExecutor(executor) {
+        this.actionExecutor = typeof executor === 'function' ? executor : null;
+    }
+
+    clearActionExecutor() {
+        this.actionExecutor = null;
     }
 
     /**
@@ -44,10 +113,8 @@ class InteractiveNotificationService {
                 await this.setupAndroidChannels();
             }
 
-            // 2. Registrar categorias com ações (iOS)
-            if (Platform.OS === 'ios') {
-                await this.setupIOSCategories();
-            }
+            // 2. Registrar categorias com ações (Android + iOS)
+            await this.setupNotificationCategories();
 
             // 3. Registrar como handler no serviço FCM central
             this.setupFCMHandler();
@@ -90,78 +157,52 @@ class InteractiveNotificationService {
     /**
      * Configurar categorias de notificação para iOS
      */
-    async setupIOSCategories() {
+    async setupNotificationCategories() {
         try {
             // Categoria para corrida aceita com ações
-            await Notifications.setNotificationCategoryAsync('RIDE_ACCEPTED', [
-                {
-                    identifier: 'arrived_at_pickup',
-                    buttonTitle: 'Cheguei ao local',
-                    options: {
-                        opensAppToForeground: false, // Não abre o app, apenas processa ação
-                    },
-                },
-                {
-                    identifier: 'cancel_ride',
-                    buttonTitle: 'Cancelar',
-                    options: {
-                        opensAppToForeground: false,
-                        isDestructive: true, // Botão vermelho no iOS
-                    },
-                },
-            ], {
+            await Notifications.setNotificationCategoryAsync('RIDE_ACCEPTED', getCompactCategoryActions('RIDE_ACCEPTED'), {
                 intentIdentifiers: [],
                 hiddenPreviewsBodyPlaceholder: '',
                 options: [],
             });
 
             // ✅ NOVA: Categoria para viagem iniciada com ações
-            await Notifications.setNotificationCategoryAsync('TRIP_STARTED', [
-                {
-                    identifier: 'arrived_at_pickup',
-                    buttonTitle: 'Cheguei ao local',
-                    options: {
-                        opensAppToForeground: false,
-                    },
-                },
-                {
-                    identifier: 'start_trip',
-                    buttonTitle: 'Iniciar corrida',
-                    options: {
-                        opensAppToForeground: false,
-                    },
-                },
-            ], {
+            await Notifications.setNotificationCategoryAsync('TRIP_STARTED', getCompactCategoryActions('TRIP_STARTED'), {
                 intentIdentifiers: [],
                 hiddenPreviewsBodyPlaceholder: '',
                 options: [],
             });
 
             // ✅ NOVA: Categoria para corrida em andamento com botão "Encerrar corrida"
-            await Notifications.setNotificationCategoryAsync('TRIP_IN_PROGRESS', [
-                {
-                    identifier: 'end_trip',
-                    buttonTitle: 'Encerrar corrida',
-                    options: {
-                        opensAppToForeground: false,
-                    },
-                },
-            ], {
+            await Notifications.setNotificationCategoryAsync('TRIP_IN_PROGRESS', getCompactCategoryActions('TRIP_IN_PROGRESS'), {
                 intentIdentifiers: [],
                 hiddenPreviewsBodyPlaceholder: '',
                 options: [],
             });
 
-            // Categoria para chegada ao destino (sem ações, apenas informativa)
-            await Notifications.setNotificationCategoryAsync('ARRIVED_AT_DESTINATION', [], {
+            // Chegada ao destino é informativa; Expo SDK rejeita categorias sem ações.
+
+            await Notifications.setNotificationCategoryAsync('DRIVER_PICKUP_READY', getCompactCategoryActions('DRIVER_PICKUP_READY'), {
                 intentIdentifiers: [],
                 hiddenPreviewsBodyPlaceholder: '',
                 options: [],
             });
 
-            Logger.log('✅ [InteractiveNotification] Categorias iOS configuradas');
+            await Notifications.setNotificationCategoryAsync('DRIVER_BOARDING', getCompactCategoryActions('DRIVER_BOARDING'), {
+                intentIdentifiers: [],
+                hiddenPreviewsBodyPlaceholder: '',
+                options: [],
+            });
+
+            await Notifications.setNotificationCategoryAsync('DRIVER_TRIP_ACTIVE', getCompactCategoryActions('DRIVER_TRIP_ACTIVE'), {
+                intentIdentifiers: [],
+                hiddenPreviewsBodyPlaceholder: '',
+                options: [],
+            });
+
+            Logger.log('✅ [InteractiveNotification] Categorias de notificação configuradas');
         } catch (error) {
-            Logger.error('❌ [InteractiveNotification] Erro ao configurar categorias iOS:', error);
+            Logger.error('❌ [InteractiveNotification] Erro ao configurar categorias de notificação:', error);
         }
     }
 
@@ -333,35 +374,7 @@ class InteractiveNotificationService {
                         priority: Notifications.AndroidNotificationPriority.HIGH,
                         sticky: true, // Notificação persistente (como a Uber)
                         ongoing: true, // Não pode ser removida pelo usuário
-                        actions: categoryId === 'TRIP_STARTED' ? [
-                            {
-                                identifier: 'arrived_at_pickup',
-                                buttonTitle: 'Cheguei ao local',
-                                icon: 'ic_check',
-                            },
-                            {
-                                identifier: 'start_trip',
-                                buttonTitle: 'Iniciar corrida',
-                                icon: 'ic_play',
-                            },
-                        ] : categoryId === 'TRIP_IN_PROGRESS' ? [
-                            {
-                                identifier: 'end_trip',
-                                buttonTitle: 'Encerrar corrida',
-                                icon: 'ic_stop',
-                            },
-                        ] : [
-                            {
-                                identifier: 'arrived_at_pickup',
-                                buttonTitle: 'Cheguei ao local',
-                                icon: 'ic_check',
-                            },
-                            {
-                                identifier: 'cancel_ride',
-                                buttonTitle: 'Cancelar',
-                                icon: 'ic_close',
-                            },
-                        ],
+                        actions: getCompactAndroidActions(categoryId),
                     },
                 }),
             });
@@ -386,6 +399,23 @@ class InteractiveNotificationService {
 
             const { actionIdentifier, notification } = response;
             const data = notification.request.content.data;
+
+            if (this.actionExecutor) {
+                try {
+                    const handled = await this.actionExecutor({
+                        actionIdentifier,
+                        notification,
+                        data,
+                    });
+
+                    if (handled) {
+                        Logger.log('✅ [InteractiveNotification] Ação tratada por executor customizado');
+                        return;
+                    }
+                } catch (error) {
+                    Logger.error('❌ [InteractiveNotification] Executor customizado falhou:', error);
+                }
+            }
 
             // Verificar se é ação de corrida aceita ou viagem iniciada
             if ((data?.type === 'ride_accepted' || data?.type === 'trip_started') && data?.bookingId) {
@@ -473,6 +503,3 @@ class InteractiveNotificationService {
 // Exportar instância singleton
 const interactiveNotificationService = new InteractiveNotificationService();
 export default interactiveNotificationService;
-
-
-

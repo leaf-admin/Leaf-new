@@ -3,12 +3,12 @@ import Logger from '../utils/Logger';
 // Serviço para bypass de pagamentos em usuários de teste
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { allowPaymentBypass } from '../config/runtimeAccessPolicy';
 
 
 class PaymentBypassService {
-    constructor() {
-        // Usa __DEV__ para permitir apenas no modo desenvolvedor do RN ou se E2E_TEST for explicitly true
-        this.isTestMode = __DEV__ || process.env.EXPO_PUBLIC_E2E_TEST === 'true';
+    get isTestMode() {
+        return allowPaymentBypass();
     }
 
     // Verificar se é customer de teste
@@ -180,5 +180,4 @@ class PaymentBypassService {
 
 // Exportar instância singleton
 export default new PaymentBypassService();
-
 

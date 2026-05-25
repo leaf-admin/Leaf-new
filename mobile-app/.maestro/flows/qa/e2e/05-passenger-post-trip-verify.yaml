@@ -1,0 +1,45 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible: ".*(A caminho|Embarque em até|Viagem em andamento|Corrida concluída|Recibos|Procurando motorista).*"
+    timeout: 240000
+
+- takeScreenshot: "e2e-passenger-07-trip-progress"
+
+- extendedWaitUntil:
+    visible: ".*(Corrida concluída|Recibos|Avaliar viagem|Voltar para o mapa).*"
+    timeout: 240000
+
+- takeScreenshot: "e2e-passenger-08-trip-completed"

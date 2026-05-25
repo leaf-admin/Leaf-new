@@ -14,7 +14,7 @@ function get(obj, path, fallback = null) {
 }
 
 function formatValue(value, format) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "N/D";
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
   if (format === "percent") return `${(Number(value) * 100).toFixed(1)}%`;
   if (format === "minutes") return `${Number(value).toFixed(1)} min`;
   if (format === "brl") {
@@ -22,6 +22,15 @@ function formatValue(value, format) {
   }
   if (format === "decimal") return Number(value).toFixed(2);
   return Number(value).toLocaleString("pt-BR");
+}
+
+function summarizeCalcBase(rawValue) {
+  if (!rawValue || typeof rawValue !== "object") return "-";
+  const entries = Object.entries(rawValue).slice(0, 4);
+  if (entries.length === 0) return "-";
+  return entries
+    .map(([key, value]) => `${key}: ${Number.isFinite(Number(value)) ? Number(value).toLocaleString("pt-BR") : String(value)}`)
+    .join(" • ");
 }
 
 function evaluateGoal(metric) {
@@ -45,13 +54,17 @@ const METRIC_CONFIG = [
   { id: "mlr", group: "Resumo Ideal", title: "MLR", path: "metrics.liquidity.mlr", format: "decimal", formula: "corridas aceitas / corridas solicitadas", targetType: "gte", target: 1.1, critical: true, rawPath: "raw.numeratorDenominator.mlr" },
   { id: "wait", group: "Resumo Ideal", title: "Tempo de espera", path: "metrics.liquidity.averageWaitMinutes", format: "minutes", formula: "média do tempo entre pedido e aceite", targetType: "lte", target: 4, critical: true },
   { id: "pickup", group: "Resumo Ideal", title: "Pickup médio", path: "metrics.liquidity.averagePickupMinutes", format: "minutes", formula: "média do tempo entre aceite e chegada", targetType: "lte", target: 7 },
-  { id: "ridesPerDriver", group: "Resumo Ideal", title: "Corridas/motorista/dia", path: "metrics.drivers.ridesPerDriverPerDay", format: "decimal", formula: "corridas totais / motoristas ativos / dias", targetType: "gte", target: 10, critical: true, rawPath: "raw.numeratorDenominator.ridesPerDriverPerDay" },
+  { id: "paymentToPickup", group: "Resumo Ideal", title: "Pagamento -> embarque", path: "metrics.liquidity.averagePaymentApprovalToPickupMinutes", format: "minutes", formula: "média do tempo entre aprovação do pagamento e chegada do motorista ao embarque" },
+  { id: "ridesPerDriver", group: "Resumo Ideal", title: "Qtd. corridas/motorista/dia", path: "metrics.drivers.ridesPerDriverPerDay", format: "decimal", formula: "corridas totais / motoristas ativos / dias", targetType: "gte", target: 10, critical: true, rawPath: "raw.numeratorDenominator.ridesPerDriverPerDay" },
   { id: "cancelRate", group: "Resumo Ideal", title: "Cancelamento", path: "metrics.liquidity.cancellationRate", format: "percent", formula: "cancelamentos / corridas solicitadas", targetType: "lte", target: 0.07, rawPath: "raw.numeratorDenominator.cancellation" },
   { id: "revenueTotal", group: "Resumo Ideal", title: "Receita (período)", path: "metrics.financial.totalRevenue", format: "brl", formula: "receita total do período" },
   { id: "costPerRide", group: "Resumo Ideal", title: "Custo por corrida", path: "metrics.financial.costPerRide", format: "brl", formula: "(infra + APIs + pagamento) / corridas", targetType: "lte", target: 0.3 },
   { id: "marginPerRide", group: "Resumo Ideal", title: "Margem por corrida", path: "metrics.financial.marginPerRide", format: "brl", formula: "receita por corrida - custo por corrida" },
 
   { id: "driverUtilization", group: "Atividade Motoristas", title: "Utilização motorista", path: "metrics.drivers.utilization", format: "percent", formula: "tempo em corrida / tempo online (estimado)", targetType: "gte", target: 0.6 },
+  { id: "passengerDriverRatio", group: "Atividade Motoristas", title: "Passageiros por motorista", path: "metrics.drivers.passengerDriverRatio", format: "decimal", formula: "passageiros ativos / motoristas ativos", targetType: "range", targetMin: 0.8, targetMax: 2.5 },
+  { id: "driversPerKm2", group: "Atividade Motoristas", title: "Motoristas por km²", path: "metrics.drivers.driversPerKm2", format: "decimal", formula: "motoristas ativos / área estimada de cobertura (km²)" },
+  { id: "coverageAreaKm2", group: "Atividade Motoristas", title: "Área cobertura estimada", path: "metrics.drivers.coverageAreaKm2", format: "decimal", formula: "área do bounding box dos pontos de pickup (km²)" },
   { id: "dau", group: "Atividade Passageiros", title: "DAU", path: "metrics.passengers.dau", format: "number", formula: "passageiros com >=1 corrida no dia" },
   { id: "wau", group: "Atividade Passageiros", title: "WAU", path: "metrics.passengers.wau", format: "number", formula: "passageiros com >=1 corrida em 7 dias" },
   { id: "mau", group: "Atividade Passageiros", title: "MAU", path: "metrics.passengers.mau", format: "number", formula: "passageiros com >=1 corrida em 30 dias" },
@@ -60,13 +73,24 @@ const METRIC_CONFIG = [
 
   { id: "revenuePerRide", group: "Financeiro", title: "Receita por corrida", path: "metrics.financial.revenuePerRide", format: "brl", formula: "receita total / corridas concluídas" },
   { id: "revenuePerDriver", group: "Financeiro", title: "Receita por motorista", path: "metrics.financial.revenuePerDriver", format: "brl", formula: "receita total / motoristas ativos", targetType: "gte", target: 560 },
+  { id: "driverCpa", group: "Financeiro", title: "CPA motorista", path: "metrics.financial.driverAcquisitionCost", format: "brl", formula: "verba de aquisição configurada / novos motoristas no período", rawPath: "raw.numeratorDenominator.driverAcquisitionCost" },
 
   { id: "driverGrowth", group: "Crescimento", title: "Crescimento motoristas", path: "metrics.growth.driverGrowth", format: "percent", formula: "(novos - churn) / base anterior" },
   { id: "ridesGrowth", group: "Crescimento", title: "Crescimento corridas", path: "metrics.growth.ridesGrowth", format: "percent", formula: "corridas período atual / período anterior - 1", targetType: "range", targetMin: 0.1, targetMax: 0.15 },
   { id: "driverRetention", group: "Crescimento", title: "Retenção motoristas", path: "metrics.growth.driverRetention", format: "percent", formula: "ativos no período atual que também estavam no anterior", targetType: "gte", target: 0.85 },
+  { id: "driverRetentionD30", group: "Crescimento", title: "Retenção D30", path: "metrics.growth.driverRetentionD30", format: "percent", formula: "motoristas com atividade entre D30 e D37 após a primeira corrida", targetType: "gte", target: 0.65, critical: true, rawPath: "raw.numeratorDenominator.driverRetentionD30" },
+  { id: "driverRetentionD60", group: "Crescimento", title: "Retenção D60", path: "metrics.growth.driverRetentionD60", format: "percent", formula: "motoristas com atividade entre D60 e D67 após a primeira corrida", targetType: "gte", target: 0.55, critical: true, rawPath: "raw.numeratorDenominator.driverRetentionD60" },
+  { id: "driverActivation", group: "Crescimento", title: "Taxa de ativação", path: "metrics.growth.driverActivationRate", format: "percent", formula: "novos motoristas que receberam primeira corrida em até 7 dias", targetType: "gte", target: 0.7, critical: true, rawPath: "raw.numeratorDenominator.driverActivationRate" },
+  { id: "driverChurn", group: "Crescimento", title: "Churn motorista", path: "metrics.growth.driverChurnRate", format: "percent", formula: "motoristas ativos no período anterior que não aparecem no período atual", targetType: "lte", target: 0.15, critical: true, rawPath: "raw.numeratorDenominator.driverChurnRate" },
+
+  { id: "supportFirstResponse", group: "Suporte", title: "1ª resposta suporte", path: "metrics.support.averageFirstResponseMinutes", format: "minutes", formula: "média entre criação do ticket e primeira resposta pública", targetType: "lte", target: 30, critical: true, rawPath: "raw.support" },
+  { id: "supportMedianFirstResponse", group: "Suporte", title: "Mediana 1ª resposta", path: "metrics.support.medianFirstResponseMinutes", format: "minutes", formula: "mediana entre criação do ticket e primeira resposta pública", targetType: "lte", target: 30 },
+  { id: "supportOpenTickets", group: "Suporte", title: "Tickets abertos", path: "metrics.support.totalOpenTickets", format: "number", formula: "tickets ainda abertos, atribuídos, em progresso ou escalados" },
+  { id: "supportOverdue", group: "Suporte", title: "SLA vencido", path: "metrics.support.overdueFirstResponseCount", format: "number", formula: "tickets sem primeira resposta dentro do SLA" },
 ];
 
-const GROUP_ORDER = ["Resumo Ideal", "Atividade Motoristas", "Atividade Passageiros", "Financeiro", "Crescimento"];
+const GROUP_ORDER = ["Resumo Ideal", "Atividade Motoristas", "Atividade Passageiros", "Financeiro", "Crescimento", "Suporte"];
+const DASHBOARD_REFRESH_MS = 60000;
 
 export default function MarketplaceMetricsPage() {
   const [period, setPeriod] = useState("month");
@@ -74,11 +98,18 @@ export default function MarketplaceMetricsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState("mlr");
+  const [selectedGroup, setSelectedGroup] = useState("Resumo Ideal");
+  const [seriesFilter, setSeriesFilter] = useState("");
+  const [driverFilter, setDriverFilter] = useState("");
 
   useEffect(() => {
     let mounted = true;
 
     const load = async () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+
       try {
         if (mounted) {
           setLoading(true);
@@ -94,7 +125,7 @@ export default function MarketplaceMetricsPage() {
     };
 
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(load, DASHBOARD_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -119,20 +150,38 @@ export default function MarketplaceMetricsPage() {
     group,
     items: metrics.filter((m) => m.group === group),
   }));
-  const timeline = Array.isArray(data?.timeline?.daily) ? data.timeline.daily : [];
+  const visibleGroup = byGroup.find((group) => group.group === selectedGroup) || byGroup[0];
   const series = useMemo(() => {
     if (!selected) return [];
+    const timeline = Array.isArray(data?.timeline?.daily) ? data.timeline.daily : [];
     return timeline.map((row) => ({
       date: row.date,
       value: get(row, selected.path.replace(/^metrics\./, ""), null),
     }));
-  }, [timeline, selected]);
+  }, [data, selected]);
   const seriesMax = useMemo(() => {
     const values = series
       .map((point) => Number(point.value))
       .filter((value) => Number.isFinite(value));
     return values.length ? Math.max(...values) : 0;
   }, [series]);
+  const filteredSeries = useMemo(() => {
+    const term = seriesFilter.trim().toLowerCase();
+    if (!term) return series;
+    return series.filter((point) =>
+      `${point?.date || ""} ${String(point?.value ?? "")}`.toLowerCase().includes(term),
+    );
+  }, [series, seriesFilter]);
+  const driverRows = useMemo(() => {
+    return Array.isArray(data?.breakdowns?.drivers) ? data.breakdowns.drivers : [];
+  }, [data]);
+  const filteredDriverRows = useMemo(() => {
+    const term = driverFilter.trim().toLowerCase();
+    if (!term) return driverRows;
+    return driverRows.filter((row) =>
+      `${row?.displayName || ""} ${row?.driverId || ""} ${row?.phone || ""}`.toLowerCase().includes(term),
+    );
+  }, [driverRows, driverFilter]);
 
   return (
     <ProtectedRoute>
@@ -155,7 +204,7 @@ export default function MarketplaceMetricsPage() {
         <AppNav />
         {loading ? <LoadingState message="Carregando marketplace health..." /> : null}
 
-        <Panel title="3 indicadores críticos (regra de ouro)">
+        <Panel title="Indicadores críticos" subtitle="A primeira leitura da saúde do marketplace.">
           <section className="grid grid-kpi">
             {critical.map((metric) => (
               <KpiCard
@@ -171,23 +220,33 @@ export default function MarketplaceMetricsPage() {
           </section>
         </Panel>
 
-        {byGroup.map(({ group, items }) => (
-          <Panel key={group} title={group}>
-            <section className="grid grid-kpi">
-              {items.map((metric) => (
-                <KpiCard
-                  key={metric.id}
-                  title={metric.title}
-                  value={metric.display}
-                  subtitle={metric.formula}
-                  tone={metric.tone}
-                  onClick={() => setSelectedId(metric.id)}
-                  selected={selected?.id === metric.id}
-                />
-              ))}
-            </section>
-          </Panel>
-        ))}
+        <Panel title="Indicadores por área" subtitle="Use as abas para trocar a leitura sem alongar a página.">
+          <div className="segmented-control">
+            {GROUP_ORDER.map((group) => (
+              <button
+                key={group}
+                type="button"
+                className={selectedGroup === group ? "segmented-control-active" : ""}
+                onClick={() => setSelectedGroup(group)}
+              >
+                {group}
+              </button>
+            ))}
+          </div>
+          <section className="grid grid-kpi">
+            {(visibleGroup?.items || []).map((metric) => (
+              <KpiCard
+                key={metric.id}
+                title={metric.title}
+                value={metric.display}
+                subtitle={metric.formula}
+                tone={metric.tone}
+                onClick={() => setSelectedId(metric.id)}
+                selected={selected?.id === metric.id}
+              />
+            ))}
+          </section>
+        </Panel>
 
         <Panel title={`Detalhe da métrica: ${selected?.title || "-"}`}>
           {selected ? (
@@ -222,7 +281,7 @@ export default function MarketplaceMetricsPage() {
               {selected.rawPath ? (
                 <div className="row">
                   <div className="label">Base do cálculo</div>
-                  <div className="value">{JSON.stringify(get(data, selected.rawPath, {}))}</div>
+                  <div className="value">{summarizeCalcBase(get(data, selected.rawPath, {}))}</div>
                 </div>
               ) : null}
             </div>
@@ -231,12 +290,13 @@ export default function MarketplaceMetricsPage() {
           )}
         </Panel>
 
-        <Panel title="Evolução temporal (diária)">
+        <section className="grid">
+        <Panel title="Evolução temporal" subtitle={selected?.title || ""}>
           {series.length === 0 ? (
             <p className="text-muted">Sem série histórica para o período selecionado.</p>
           ) : (
-            <div className="bar-list">
-              {series.map((point) => {
+            <div className="bar-list compact-bars">
+              {series.slice(-14).map((point) => {
                 const numericValue = Number(point.value);
                 const valid = Number.isFinite(numericValue);
                 const pct = valid && seriesMax > 0 ? Math.min((numericValue / seriesMax) * 100, 100) : 0;
@@ -256,36 +316,91 @@ export default function MarketplaceMetricsPage() {
           )}
         </Panel>
 
-        <Panel title="Tabela de apoio (diária)">
-          {series.length === 0 ? (
-            <p className="text-muted">Sem dados.</p>
+        <Panel title="Corridas por motorista">
+          <div className="filters">
+            <input
+              placeholder="Filtrar por motorista, telefone ou ID"
+              value={driverFilter}
+              onChange={(e) => setDriverFilter(e.target.value)}
+            />
+          </div>
+          {filteredDriverRows.length === 0 ? (
+            <p className="text-muted">Sem motoristas ativos no período.</p>
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>{selected?.title || "Métrica"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {series.map((point) => (
-                  <tr key={`row-${point.date}`}>
-                    <td>{point.date}</td>
-                    <td>{formatValue(point.value, selected?.format)}</td>
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Motorista</th>
+                    <th>Corridas</th>
+                    <th>Concluídas</th>
+                    <th>Canceladas</th>
+                    <th>Corridas/dia</th>
+                    <th>Corridas/dia ativo</th>
+                    <th>Receita</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredDriverRows.map((row) => (
+                    <tr key={row.driverId}>
+                      <td>
+                        <div>{row.displayName || row.driverId}</div>
+                        <div className="table-muted">{row.phone || row.driverId}</div>
+                      </td>
+                      <td>{Number(row.rides || 0).toLocaleString("pt-BR")}</td>
+                      <td>{Number(row.completedRides || 0).toLocaleString("pt-BR")}</td>
+                      <td>{Number(row.cancelledRides || 0).toLocaleString("pt-BR")}</td>
+                      <td>{formatValue(row.ridesPerCalendarDay, "decimal")}</td>
+                      <td>{formatValue(row.ridesPerActiveDay, "decimal")}</td>
+                      <td>{formatValue(row.fareTotal, "brl")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Panel>
+        </section>
 
-        <Panel title="Notas de qualidade de dados">
-          <ul>
-            <li>Utilização de motorista está marcada como estimada quando não existe sessão online explícita.</li>
-            <li>Custo por corrida usa modelo estimado (infra + APIs + processamento) para dar referência operacional.</li>
-            <li>As métricas são recarregadas automaticamente a cada 30 segundos.</li>
-          </ul>
-        </Panel>
+        <details className="technical-details">
+          <summary>Tabela diária e notas técnicas</summary>
+          <div className="technical-details-inner">
+            <div className="filters">
+              <input
+                placeholder="Filtrar por data ou valor"
+                value={seriesFilter}
+                onChange={(e) => setSeriesFilter(e.target.value)}
+              />
+            </div>
+            {filteredSeries.length === 0 ? (
+              <p className="text-muted">Sem dados.</p>
+            ) : (
+              <div className="table-shell table-shell-tight">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>{selected?.title || "Métrica"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSeries.map((point) => (
+                      <tr key={`row-${point.date}`}>
+                        <td>{point.date}</td>
+                        <td>{formatValue(point.value, selected?.format)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <ul>
+              <li>Utilização de motorista é estimada quando não existe sessão online explícita.</li>
+              <li>Custo por corrida usa modelo estimado para referência operacional.</li>
+              <li>As métricas recarregam a cada 60 segundos e usam cache curto no backend.</li>
+            </ul>
+          </div>
+        </details>
 
         <ErrorText message={error} />
       </main>

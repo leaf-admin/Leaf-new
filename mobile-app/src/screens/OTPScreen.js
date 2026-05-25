@@ -11,10 +11,10 @@ import { TextInputMask } from 'react-native-masked-text';
 import rnauth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingLayout from '../components/OnboardingLayout';
+import { fonts } from '../theme/runtimeTokens';
+import onboardingTheme from '../components/auth/common/onboardingTheme';
 
-
-const LEAF_GREEN = '#1A330E';
-const LEAF_GRAY = '#B0B0B0';
+const { color, radius, spacing } = onboardingTheme;
 
 export default function OTPScreen({ navigation, route }) {
     const [otp, setOtp] = useState("");
@@ -53,7 +53,7 @@ export default function OTPScreen({ navigation, route }) {
 
     const handleContinue = async () => {
         if (!otp || otp.replace(/\D/g, '').length !== 6) {
-            Alert.alert('Atenção', 'Digite o código de 6 dígitos recebido por SMS.');
+            Alert.alert('Atenção', 'Digite o código de 6 dígitos que enviamos por SMS.');
             return;
         }
 
@@ -76,7 +76,7 @@ export default function OTPScreen({ navigation, route }) {
             if (route.params?.isExistingUser) {
                 navigation.reset({
                     index: 0,
-                    routes: [{ name: 'TabRoot' }]
+                    routes: [{ name: 'Map' }]
                 });
                 return;
             }
@@ -99,7 +99,7 @@ export default function OTPScreen({ navigation, route }) {
             });
         } catch (error) {
             Logger.error('Erro na verificação do OTP:', error);
-            Alert.alert('Erro', 'Código inválido ou expirado. Tente novamente.');
+            Alert.alert('Código não confirmado', 'Não conseguimos confirmar esse código. Verifique e tente novamente.');
         }
     };
 
@@ -126,7 +126,7 @@ export default function OTPScreen({ navigation, route }) {
             }
         } catch (error) {
             Logger.error('Erro ao reenviar código:', error);
-            Alert.alert('Erro', 'Erro ao reenviar código. Tente novamente.');
+            Alert.alert('Erro', 'Não foi possível enviar um novo código. Tente novamente.');
             setCanResend(true);
         }
     };
@@ -157,19 +157,19 @@ export default function OTPScreen({ navigation, route }) {
         <OnboardingLayout
             progress={progressBar}
             onContinue={handleContinue}
-            continueLabel="Verificar código"
+            continueLabel="Confirmar"
             continueDisabled={!isOtpValid}
         >
             <View style={styles.container}>
                 <Text style={styles.title}>
-                    {userType === 'driver' ? 'Verificação de Parceiro' : 'Verificação de Passageiro'}
+                    Confira seu SMS
                 </Text>
                 <Text style={styles.subtitle}>
-                    Digite o código de 6 dígitos enviado para seu telefone
+                    Enviamos um código de 6 dígitos para confirmar seu celular.
                 </Text>
                 
                 <View style={styles.otpContainer}>
-                    <Text style={styles.otpLabel}>Código de verificação</Text>
+                    <Text style={styles.otpLabel}>Código recebido</Text>
                     <TextInputMask
                         type={'custom'}
                         options={{ mask: '9 9 9 9 9 9' }}
@@ -177,7 +177,7 @@ export default function OTPScreen({ navigation, route }) {
                         onChangeText={setOtp}
                         style={styles.otpInput}
                         placeholder="_ _ _ _ _ _"
-                        placeholderTextColor={LEAF_GRAY}
+                        placeholderTextColor={color.textMuted}
                         keyboardType="number-pad"
                         maxLength={11}
                         autoFocus
@@ -190,12 +190,12 @@ export default function OTPScreen({ navigation, route }) {
                     disabled={!canResend}
                 >
                     <Text style={styles.resendButtonText}>
-                        {canResend ? 'Reenviar código' : `Reenviar em ${timer}s`}
+                        {canResend ? 'Enviar novamente' : `Novo código em ${timer}s`}
                     </Text>
                 </TouchableOpacity>
                 
                 <Text style={styles.infoText}>
-                    Não recebeu o código? Verifique se o número está correto
+                    Se não chegou, confira o número ou tente enviar novamente.
                 </Text>
             </View>
         </OnboardingLayout>
@@ -206,57 +206,64 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         alignItems: 'center',
-        paddingHorizontal: 24,
-        paddingTop: 48,
+        paddingHorizontal: spacing.sm,
+        paddingTop: spacing.sm
     },
     title: {
         fontSize: 24,
-        fontWeight: 'bold',
-        color: LEAF_GREEN,
+        fontFamily: fonts.Bold,
+        color: color.textPrimary,
         marginBottom: 8,
-        textAlign: 'center',
+        textAlign: 'center'
     },
     subtitle: {
         fontSize: 16,
-        color: LEAF_GRAY,
-        marginBottom: 32,
+        color: color.textSecondary,
+        marginBottom: spacing.md,
         textAlign: 'center',
-        lineHeight: 22,
+        lineHeight: 22
     },
     otpContainer: {
         width: '100%',
-        marginBottom: 32,
+        marginBottom: spacing.md,
+        backgroundColor: color.panel,
+        borderWidth: 1,
+        borderColor: color.borderStrong,
+        borderRadius: radius.lg,
+        padding: spacing.md
     },
     otpLabel: {
         fontSize: 16,
-        fontWeight: '600',
-        color: LEAF_GREEN,
-        marginBottom: 8,
+        fontFamily: fonts.SemiBold,
+        color: color.textPrimary,
+        marginBottom: 8
     },
     otpInput: {
         fontSize: 24,
-        color: LEAF_GREEN,
-        borderBottomWidth: 2,
-        borderBottomColor: LEAF_GRAY,
+        color: color.textPrimary,
+        borderWidth: 1,
+        borderColor: color.border,
+        borderRadius: radius.md,
         paddingVertical: 12,
-        paddingHorizontal: 0,
+        paddingHorizontal: 10,
+        backgroundColor: color.surfaceMuted,
         textAlign: 'center',
-        letterSpacing: 8,
+        letterSpacing: 8
     },
     resendButton: {
-        marginBottom: 24,
+        marginBottom: spacing.sm
     },
     resendButtonText: {
-        fontSize: 16,
-        color: LEAF_GREEN,
-        fontWeight: '600',
-        textAlign: 'center',
+        fontSize: 15,
+        color: color.textPrimary,
+        fontFamily: fonts.SemiBold,
+        textAlign: 'center'
     },
     infoText: {
         fontSize: 14,
-        color: LEAF_GRAY,
+        color: color.textSecondary,
         textAlign: 'center',
-        lineHeight: 20,
+        lineHeight: 20
     },
     progressBarContainer: {
         flexDirection: 'row',
@@ -268,10 +275,10 @@ const styles = StyleSheet.create({
         width: 12,
         height: 12,
         borderRadius: 6,
-        backgroundColor: LEAF_GRAY,
-        marginHorizontal: 4,
+        backgroundColor: color.borderStrong,
+        marginHorizontal: 4
     },
     progressActive: {
-        backgroundColor: LEAF_GREEN,
-    },
-}); 
+        backgroundColor: color.accent
+    }
+});

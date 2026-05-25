@@ -33,6 +33,13 @@ class VehicleLockManager {
      */
     async acquireLock(plate, driverId, ttl = this.defaultTTL) {
         try {
+            if (!plate || !driverId) {
+                return {
+                    success: false,
+                    error: 'Dados inválidos para bloquear veículo.'
+                };
+            }
+
             // Normalizar placa (remover espaços, caracteres especiais, uppercase)
             const normalizedPlate = plate.toUpperCase().replace(/[^A-Z0-9]/g, '');
             const lockKey = `vehicle_lock:${normalizedPlate}`;
@@ -52,8 +59,18 @@ class VehicleLockManager {
                     success: true
                 };
             } else {
-                // Lock já existe (veículo em uso)
+                // Lock já existe (pode ser o próprio motorista após reconexão/intermitência)
                 const currentDriver = await this.redis.get(lockKey);
+
+                if (currentDriver === driverId) {
+                    await this.redis.expire(lockKey, ttl);
+                    logger.info(`🔁 [VehicleLock] Lock renovado pelo próprio driver: ${normalizedPlate} → driver ${driverId}`);
+                    return {
+                        success: true,
+                        reused: true
+                    };
+                }
+
                 logger.warn(`⚠️ [VehicleLock] Veículo ${normalizedPlate} já está em uso por driver ${currentDriver}`);
                 return {
                     success: false,
@@ -278,4 +295,3 @@ class VehicleLockManager {
 const vehicleLockManager = new VehicleLockManager();
 
 module.exports = vehicleLockManager;
-

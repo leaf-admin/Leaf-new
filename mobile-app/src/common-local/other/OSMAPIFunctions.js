@@ -31,6 +31,17 @@ const fetchOsm = async (url, timeoutMs = 5000) => {
     }
 };
 
+const isBrazilCoordinate = (location) => {
+    const lat = Number(location?.lat);
+    const lng = Number(location?.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return false;
+    }
+
+    return lat >= -34 && lat <= 6 && lng >= -74.5 && lng <= -28;
+};
+
 export const fetchPlacesAutocomplete = async (searchKeyword, sessionToken, location = null) => {
     if (!MAP_PROVIDER_CONFIG.enableOsmApiFallback) {
         return googleFetchPlacesAutocomplete(searchKeyword, sessionToken, location);
@@ -39,7 +50,11 @@ export const fetchPlacesAutocomplete = async (searchKeyword, sessionToken, locat
     try {
         if (!searchKeyword || searchKeyword.trim().length < 3) return [];
 
-        let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchKeyword)}&format=json&addressdetails=1&countrycodes=br&limit=5`;
+        // Restrict to Brazil only when the current map context is actually in Brazil.
+        let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchKeyword)}&format=json&addressdetails=1&limit=5`;
+        if (isBrazilCoordinate(location)) {
+            url += '&countrycodes=br';
+        }
         if (location && location.lat && location.lng) {
             url += `&viewbox=${location.lng - 0.5},${location.lat + 0.5},${location.lng + 0.5},${location.lat - 0.5}&bounded=0`;
         }

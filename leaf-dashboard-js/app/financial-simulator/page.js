@@ -7,6 +7,7 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText } from "@/src/components/ui/PageFeedback";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
 export default function FinancialSimulatorPage() {
   const [drivers, setDrivers] = useState(250);
@@ -63,29 +64,50 @@ export default function FinancialSimulatorPage() {
         </section>
         <section className="grid">
           <Panel title="Resumo financeiro">
-            <table className="table">
-              <tbody>
-                <tr>
-                  <td>GMV</td>
-                  <td>R$ {Number(report?.grossVolume || 0).toLocaleString("pt-BR")}</td>
-                </tr>
-                <tr>
-                  <td>Repasse motoristas</td>
-                  <td>R$ {Number(report?.totalDriverPayout || 0).toLocaleString("pt-BR")}</td>
-                </tr>
-                <tr>
-                  <td>Taxa Woovi</td>
-                  <td>R$ {Number(report?.totalWooviFees || 0).toLocaleString("pt-BR")}</td>
-                </tr>
-                <tr>
-                  <td>Receita Leaf (líquida)</td>
-                  <td>R$ {Number(report?.leafNetRevenue || 0).toLocaleString("pt-BR")}</td>
-                </tr>
-              </tbody>
-            </table>
+            <div className="table-shell table-shell-tight">
+              <table className="table table-compact">
+                <tbody>
+                  <tr>
+                    <td>GMV</td>
+                    <td>R$ {Number(report?.grossVolume || 0).toLocaleString("pt-BR")}</td>
+                  </tr>
+                  <tr>
+                    <td>Repasse motoristas</td>
+                    <td>R$ {Number(report?.totalDriverPayout || 0).toLocaleString("pt-BR")}</td>
+                  </tr>
+                  <tr>
+                    <td>Taxa Woovi</td>
+                    <td>R$ {Number(report?.totalWooviFees || 0).toLocaleString("pt-BR")}</td>
+                  </tr>
+                  <tr>
+                    <td>Receita Leaf (líquida)</td>
+                    <td>R$ {Number(report?.leafNetRevenue || 0).toLocaleString("pt-BR")}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </Panel>
-          <Panel title="Payload da simulação">
-            <pre>{JSON.stringify(report || {}, null, 2)}</pre>
+          <Panel title="Resumo de performance">
+            <KeyValueGrid
+              data={{
+                totalRequests: report?.totalRequests || 0,
+                completed: report?.completed || 0,
+                canceledByPassenger: report?.canceledByPassenger || 0,
+                rejectedByDriver: report?.rejectedByDriver || 0,
+                completionRate:
+                  report?.totalRequests > 0
+                    ? `${((Number(report?.completed || 0) / Number(report?.totalRequests || 1)) * 100).toFixed(1)}%`
+                    : "0%",
+              }}
+              labels={{
+                totalRequests: "Solicitações totais",
+                completed: "Corridas concluídas",
+                canceledByPassenger: "Canceladas por passageiro",
+                rejectedByDriver: "Rejeitadas por motorista",
+                completionRate: "Taxa de conclusão",
+              }}
+            />
+            <TechnicalDetails title="Ver payload técnico da simulação" data={report || {}} />
           </Panel>
         </section>
         <ErrorText message={error} />

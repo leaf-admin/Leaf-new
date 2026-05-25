@@ -2,6 +2,13 @@ import config from "@/src/config";
 
 const API_BASE_URL = config.api.baseUrl;
 
+const getApiBaseUrl = () => {
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") {
+    return "/api";
+  }
+  return API_BASE_URL;
+};
+
 class AuthService {
   constructor() {
     this.ACCESS_TOKEN_KEY = "leaf_admin_access_token";
@@ -11,8 +18,9 @@ class AuthService {
   }
 
   async login(email, password) {
-    const response = await fetch(`${API_BASE_URL}/admin/auth/login`, {
+    const response = await fetch(`${getApiBaseUrl()}/admin/auth/login`, {
       method: "POST",
+      credentials: "omit",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
@@ -34,8 +42,9 @@ class AuthService {
     if (!refreshToken) return null;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/admin/auth/refresh`, {
+      const response = await fetch(`${getApiBaseUrl()}/admin/auth/refresh`, {
         method: "POST",
+        credentials: "omit",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
       });
@@ -60,7 +69,8 @@ class AuthService {
     if (!token) return null;
 
     const doVerify = async (accessToken) => {
-      const response = await fetch(`${API_BASE_URL}/admin/auth/verify`, {
+      const response = await fetch(`${getApiBaseUrl()}/admin/auth/verify`, {
+        credentials: "omit",
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!response.ok) return null;
@@ -86,8 +96,9 @@ class AuthService {
     const token = this.getAccessToken();
     if (token) {
       try {
-        await fetch(`${API_BASE_URL}/admin/auth/logout`, {
+        await fetch(`${getApiBaseUrl()}/admin/auth/logout`, {
           method: "POST",
+          credentials: "omit",
           headers: { Authorization: `Bearer ${token}` },
         });
       } catch {}
@@ -104,47 +115,80 @@ class AuthService {
     return !!this.getAccessToken() && !!this.getUser();
   }
 
-  getAccessToken() {
+  getPrimaryStorage() {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem(this.ACCESS_TOKEN_KEY);
+    return window.sessionStorage;
+  }
+
+  getLegacyStorage() {
+    if (typeof window === "undefined") return null;
+    return window.localStorage;
+  }
+
+  readValue(key) {
+    const primary = this.getPrimaryStorage();
+    const legacy = this.getLegacyStorage();
+    let value = primary?.getItem(key) || null;
+
+    // Migração suave: move token legado para sessionStorage na primeira leitura.
+    if (!value && legacy) {
+      value = legacy.getItem(key);
+      if (value && primary) {
+        primary.setItem(key, value);
+        legacy.removeItem(key);
+      }
+    }
+
+    return value;
+  }
+
+  writeValue(key, value) {
+    const primary = this.getPrimaryStorage();
+    const legacy = this.getLegacyStorage();
+    if (primary) primary.setItem(key, value);
+    if (legacy) legacy.removeItem(key);
+  }
+
+  removeValue(key) {
+    const primary = this.getPrimaryStorage();
+    const legacy = this.getLegacyStorage();
+    if (primary) primary.removeItem(key);
+    if (legacy) legacy.removeItem(key);
+  }
+
+  getAccessToken() {
+    return this.readValue(this.ACCESS_TOKEN_KEY);
   }
 
   getRefreshToken() {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem(this.REFRESH_TOKEN_KEY);
+    return this.readValue(this.REFRESH_TOKEN_KEY);
   }
 
   getUser() {
-    if (typeof window === "undefined") return null;
-    const raw = localStorage.getItem(this.USER_KEY);
+    const raw = this.readValue(this.USER_KEY);
     return raw ? JSON.parse(raw) : null;
   }
 
   setTokens(accessToken, refreshToken) {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(this.ACCESS_TOKEN_KEY, accessToken);
-    localStorage.setItem(this.REFRESH_TOKEN_KEY, refreshToken);
+    this.writeValue(this.ACCESS_TOKEN_KEY, accessToken);
+    this.writeValue(this.REFRESH_TOKEN_KEY, refreshToken);
   }
 
   setAccessToken(accessToken) {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(this.ACCESS_TOKEN_KEY, accessToken);
+    this.writeValue(this.ACCESS_TOKEN_KEY, accessToken);
   }
 
   setUser(user) {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(this.USER_KEY, JSON.stringify(user));
+    this.writeValue(this.USER_KEY, JSON.stringify(user));
   }
 
   clearTokens() {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(this.ACCESS_TOKEN_KEY);
-    localStorage.removeItem(this.REFRESH_TOKEN_KEY);
+    this.removeValue(this.ACCESS_TOKEN_KEY);
+    this.removeValue(this.REFRESH_TOKEN_KEY);
   }
 
   clearUser() {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(this.USER_KEY);
+    this.removeValue(this.USER_KEY);
   }
 
   setupAutoRefresh(expiresIn) {

@@ -12,13 +12,24 @@
 const express = require('express');
 const router = express.Router();
 const redisPool = require('../utils/redis-pool');
+const RedisScan = require('../utils/redis-scan');
 const rideQueueManager = require('../services/ride-queue-manager');
 const metricsCollector = require('../services/metrics-collector');
 const geospatialCache = require('../services/geospatial-cache');
-const QueueWorker = require('../services/queue-worker');
+const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
+
+const QUEUE_MONITORING_READ_ROLES = ['admin', 'manager', 'super-admin', 'viewer'];
+const QUEUE_MONITORING_WRITE_ROLES = ['admin', 'manager', 'super-admin'];
 
 // Instância do worker (será injetada)
 let queueWorkerInstance = null;
+
+// Hotfix de segurança: endpoints de monitoramento de fila exigem autenticação de suporte/admin.
+router.use(
+    '/api/queue',
+    authenticateSupport,
+    requireSupportRoles(QUEUE_MONITORING_READ_ROLES)
+);
 
 /**
  * Injetar instância do QueueWorker
@@ -33,8 +44,6 @@ function setQueueWorker(worker) {
  */
 router.get('/api/queue/status', async (req, res) => {
     try {
-        const redis = redisPool.getConnection();
-        
         // Buscar todas as regiões com filas
         const regions = await rideQueueManager.getActiveRegions();
         
@@ -113,7 +122,10 @@ router.get('/api/queue/region/:regionHash', async (req, res) => {
 router.get('/api/queue/metrics', async (req, res) => {
     try {
         const { hours = 1 } = req.query;
-        const hoursNum = parseInt(hours);
+        const parsedHours = Number.parseInt(hours, 10);
+        const hoursNum = Number.isFinite(parsedHours)
+            ? Math.min(Math.max(parsedHours, 1), 168)
+            : 1;
         
         const metrics = await metricsCollector.getAllMetrics(hoursNum);
         
@@ -136,14 +148,26 @@ router.get('/api/queue/metrics', async (req, res) => {
  */
 router.get('/api/queue/drivers/notified', async (req, res) => {
     try {
-        const { limit = 50 } = req.query;
+        const { limit = 50, includeTotal = 'false' } = req.query;
         const redis = redisPool.getConnection();
-        
-        // Buscar todas as chaves de notificações
-        const notificationKeys = await redis.keys('ride_notifications:*');
+        const parsedLimit = Number.parseInt(limit, 10);
+        const safeLimit = Number.isFinite(parsedLimit)
+            ? Math.min(Math.max(parsedLimit, 1), 200)
+            : 50;
+        const shouldIncludeTotal = String(includeTotal).toLowerCase() === 'true';
+
+        // Hotfix de performance: SCAN com limite evita KEYS bloqueante e reduz custo de monitoramento.
+        const scannedKeys = await RedisScan.scanKeys(
+            redis,
+            'ride_notifications:*',
+            undefined,
+            safeLimit + 1
+        );
+        const hasMore = scannedKeys.length > safeLimit;
+        const notificationKeys = scannedKeys.slice(0, safeLimit);
         const notifiedDrivers = [];
-        
-        for (const key of notificationKeys.slice(0, parseInt(limit))) {
+
+        for (const key of notificationKeys) {
             const bookingId = key.replace('ride_notifications:', '');
             const driverIds = await redis.smembers(key);
             
@@ -156,7 +180,11 @@ router.get('/api/queue/drivers/notified', async (req, res) => {
         
         res.json({
             timestamp: new Date().toISOString(),
-            totalNotifications: notificationKeys.length,
+            totalNotifications: shouldIncludeTotal
+                ? await RedisScan.countKeys(redis, 'ride_notifications:*')
+                : notificationKeys.length,
+            exactTotal: shouldIncludeTotal,
+            hasMore,
             rides: notifiedDrivers
         });
     } catch (error) {
@@ -185,7 +213,7 @@ router.get('/api/queue/cache/stats', async (req, res) => {
  * POST /api/queue/cache/clear
  * Limpar cache geoespacial
  */
-router.post('/api/queue/cache/clear', async (req, res) => {
+router.post('/api/queue/cache/clear', requireSupportRoles(QUEUE_MONITORING_WRITE_ROLES), async (req, res) => {
     try {
         await geospatialCache.clear();
         
@@ -222,5 +250,3 @@ router.get('/api/queue/worker/stats', async (req, res) => {
 
 module.exports = router;
 module.exports.setQueueWorker = setQueueWorker;
-
-

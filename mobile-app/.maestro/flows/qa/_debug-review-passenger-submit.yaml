@@ -1,0 +1,31 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+- tapOn: "Número"
+- eraseText
+- inputText: "21102938475"
+- runFlow:
+    when:
+      visible: "Done"
+    commands:
+      - tapOn: "Done"
+- tapOn:
+    point: "50%,56%"
+- waitForAnimationToEnd
+- runFlow:
+    when:
+      visible: "Verificação"
+    commands:
+      - inputText: "992111"
+- runFlow:
+    when:
+      visible: "Verificar"
+    commands:
+      - tapOn: "Verificar"
+- waitForAnimationToEnd
+- takeScreenshot: "debug-review-passenger-submit"

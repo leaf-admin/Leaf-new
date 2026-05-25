@@ -1,0 +1,11 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+- runFlow:
+    when:
+      visible: "OK"
+    commands:
+      - tapOn: "OK"
+- tapOn: "B"
+- waitForAnimationToEnd
+- takeScreenshot: "debug-passenger-switch-b"

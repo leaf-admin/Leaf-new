@@ -5,15 +5,29 @@ class LeafApiService {
   constructor() {
     this.baseURL = config.api.baseUrl;
     this.timeoutMs = config.api.timeoutMs;
+    this.supportOrchestratorBaseURL = config.supportOrchestrator?.baseUrl || "";
+    this.supportOrchestratorTimeoutMs = config.supportOrchestrator?.timeoutMs || this.timeoutMs;
   }
 
   async request(endpoint, options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const externalSignal = options.signal;
+    const abortFromExternal = () => controller.abort();
+
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalSignal.addEventListener("abort", abortFromExternal, { once: true });
+      }
+    }
 
     try {
+      const isFormData =
+        typeof FormData !== "undefined" && options.body instanceof FormData;
       const headers = {
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...(options.headers || {}),
       };
       const token = authService.getAccessToken();
@@ -37,16 +51,120 @@ class LeafApiService {
         }
       }
 
+      const contentType = response.headers.get("content-type") || "";
+      const payload = contentType.includes("application/json")
+        ? await response.json().catch(() => null)
+        : await response.text().catch(() => "");
+
       if (!response.ok) {
-        const err = new Error(`API Error ${response.status}`);
+        const apiMessage =
+          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+          (typeof payload === "string" ? payload : "") ||
+          `API Error ${response.status}`;
+        const err = new Error(apiMessage);
         err.status = response.status;
+        err.payload = payload;
         throw err;
       }
 
-      return await response.json();
+      return payload;
+    } finally {
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", abortFromExternal);
+      }
+      clearTimeout(timeout);
+    }
+  }
+
+  isSupportOrchestratorEnabled() {
+    return Boolean(this.supportOrchestratorBaseURL);
+  }
+
+  async requestSupportOrchestrator(endpoint, options = {}) {
+    if (!this.supportOrchestratorBaseURL) {
+      throw new Error("Orquestrador de suporte nao configurado");
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.supportOrchestratorTimeoutMs);
+    const headers = {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    };
+    const token = authService.getAccessToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    try {
+      let response = await fetch(`${this.supportOrchestratorBaseURL}${endpoint}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+
+      if (response.status === 401 && token) {
+        const renewed = await authService.refreshToken();
+        if (renewed) {
+          headers.Authorization = `Bearer ${renewed}`;
+          response = await fetch(`${this.supportOrchestratorBaseURL}${endpoint}`, {
+            ...options,
+            headers,
+            signal: controller.signal,
+          });
+        }
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      const payload = contentType.includes("application/json")
+        ? await response.json().catch(() => null)
+        : await response.text().catch(() => "");
+
+      if (!response.ok) {
+        const apiMessage =
+          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+          (typeof payload === "string" ? payload : "") ||
+          `Support Orchestrator Error ${response.status}`;
+        const err = new Error(apiMessage);
+        err.status = response.status;
+        err.payload = payload;
+        throw err;
+      }
+
+      return payload;
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw new Error("Copiloto de suporte indisponivel: tempo de conexao esgotado. O atendimento manual continua disponivel.");
+      }
+      if (err instanceof TypeError) {
+        throw new Error("Copiloto de suporte indisponivel: falha de conexao. O atendimento manual continua disponivel.");
+      }
+      throw err;
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async getSupportOrchestratorStatus() {
+    return this.requestSupportOrchestrator("/v1/status");
+  }
+
+  async getSupportOrchestratorRuns(limit = 8) {
+    return this.requestSupportOrchestrator(`/v1/runs?limit=${Number(limit) || 8}`);
+  }
+
+  async getSupportOrchestratorTicketAnalysis(ticketId, { force = false } = {}) {
+    const encoded = encodeURIComponent(ticketId);
+    if (force) {
+      return this.requestSupportOrchestrator(`/v1/tickets/${encoded}/analyze`, { method: "POST" });
+    }
+    return this.requestSupportOrchestrator(`/v1/tickets/${encoded}/analysis`);
+  }
+
+  async applySupportOrchestratorAction(runId, payload = {}) {
+    const encoded = encodeURIComponent(runId);
+    return this.requestSupportOrchestrator(`/v1/runs/${encoded}/actions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   }
 
   async getDashboardSnapshot() {
@@ -63,50 +181,18 @@ class LeafApiService {
     };
   }
 
+  async getUserStats(period = "24h") {
+    return this.request(`/users/stats?period=${encodeURIComponent(period)}`);
+  }
+
   async getNewDrivers(period = "24h") {
-    try {
-      const data = await this.request(`/users?type=driver&page=1&limit=500`);
-      const users = Array.isArray(data?.users) ? data.users : [];
-      const now = Date.now();
-      const periodMs =
-        period === "24h" ? 24 * 60 * 60 * 1000 :
-        period === "3d" ? 3 * 24 * 60 * 60 * 1000 :
-        period === "week" ? 7 * 24 * 60 * 60 * 1000 :
-        30 * 24 * 60 * 60 * 1000;
-
-      const filtered = users.filter((u) => {
-        if (!u?.registrationDate) return false;
-        const ts = new Date(u.registrationDate).getTime();
-        return Number.isFinite(ts) && now - ts <= periodMs;
-      });
-
-      return { users: filtered, count: filtered.length };
-    } catch {
-      return this.request("/users/stats").then((stats) => ({ users: [], count: Number(stats?.newToday || 0) }));
-    }
+    const stats = await this.getUserStats(period);
+    return { users: [], count: Number(stats?.period?.newDrivers ?? stats?.newDriversInPeriod ?? 0) };
   }
 
   async getNewCustomers(period = "24h") {
-    try {
-      const data = await this.request(`/users?type=customer&page=1&limit=500`);
-      const users = Array.isArray(data?.users) ? data.users : [];
-      const now = Date.now();
-      const periodMs =
-        period === "24h" ? 24 * 60 * 60 * 1000 :
-        period === "3d" ? 3 * 24 * 60 * 60 * 1000 :
-        period === "week" ? 7 * 24 * 60 * 60 * 1000 :
-        30 * 24 * 60 * 60 * 1000;
-
-      const filtered = users.filter((u) => {
-        if (!u?.registrationDate) return false;
-        const ts = new Date(u.registrationDate).getTime();
-        return Number.isFinite(ts) && now - ts <= periodMs;
-      });
-
-      return { users: filtered, count: filtered.length };
-    } catch {
-      return this.request("/users/stats").then((stats) => ({ users: [], count: Number(stats?.newToday || 0) }));
-    }
+    const stats = await this.getUserStats(period);
+    return { users: [], count: Number(stats?.period?.newCustomers ?? stats?.newCustomersInPeriod ?? 0) };
   }
 
   async getRidesStats(period = "today") {
@@ -167,6 +253,57 @@ class LeafApiService {
     return this.request("/metrics/observability");
   }
 
+  async getSystemStatus() {
+    return this.request("/system/status");
+  }
+
+  async getMonitoringHealth() {
+    return this.request("/monitoring/health");
+  }
+
+  async getOpsOverview(hours = 1) {
+    return this.request(`/ops/overview?hours=${encodeURIComponent(hours)}`);
+  }
+
+  async getOpsAlerts(hours = 1) {
+    return this.request(`/ops/alerts?hours=${encodeURIComponent(hours)}`);
+  }
+
+  async getWorkerHealth() {
+    return this.request("/workers/health");
+  }
+
+  async getWorkerLag() {
+    return this.request("/workers/lag");
+  }
+
+  async getWorkerDLQ() {
+    return this.request("/workers/dlq");
+  }
+
+  async getWorkerDLQEvents(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/workers/dlq/events${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async getRuntimeFlags() {
+    return this.request("/health/runtime-flags");
+  }
+
+  async getAlerts(limit = 20) {
+    return this.request(`/alerts?limit=${encodeURIComponent(limit)}`);
+  }
+
+  async getAlertStats() {
+    return this.request("/alerts/stats");
+  }
+
   async getDrivers(page = 1, limit = 20, status = "all", search = "") {
     const params = new URLSearchParams({
       page: String(page),
@@ -191,12 +328,30 @@ class LeafApiService {
     return this.request(`/users/${userId}`);
   }
 
+  async updateUserOperationalStatus(userId, payload = {}) {
+    return this.request(`/users/${userId}/status`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getDriverComplete(driverId) {
     return this.request(`/drivers/${driverId}/complete`);
   }
 
   async getDriverDocuments(driverId) {
     return this.request(`/drivers/${driverId}/documents`);
+  }
+
+  async getDriverDocumentReviewQueue(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/drivers/documents/review-queue${suffix ? `?${suffix}` : ""}`);
   }
 
   async updateDriverVehicleConfig(driverId, payload = {}) {
@@ -228,6 +383,22 @@ class LeafApiService {
         rejectionReason,
         reviewedBy: "admin",
       }),
+    });
+  }
+
+  async uploadDriverDocument(driverId, documentType, file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.request(`/drivers/${driverId}/documents/${documentType}/upload`, {
+      method: "POST",
+      body: formData,
+    });
+  }
+
+  async requestDriverDocument(driverId, documentType, payload = {}) {
+    return this.request(`/drivers/${driverId}/documents/${documentType}/request`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 
@@ -266,6 +437,154 @@ class LeafApiService {
     if (startDate) params.append("startDate", startDate);
     if (endDate) params.append("endDate", endDate);
     return this.request(`/map/heatmap?${params.toString()}`);
+  }
+
+  async getMapH3Cells(params = {}, options = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    return this.request(`/map/h3-cells?${query.toString()}`, options);
+  }
+
+  async getGeofenceAdminConfig() {
+    return this.request("/geofence/admin/config");
+  }
+
+  async updateGeofenceConfig(payload = {}) {
+    return this.request("/geofence/admin/config", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateGeofenceState(stateCode, enabled) {
+    return this.request(`/geofence/admin/states/${encodeURIComponent(stateCode)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: Boolean(enabled) }),
+    });
+  }
+
+  async updateGeofenceCity(stateCode, cityKey, payloadOrActive) {
+    const payload = (typeof payloadOrActive === "object" && payloadOrActive !== null)
+      ? payloadOrActive
+      : { active: Boolean(payloadOrActive) };
+    return this.request(
+      `/geofence/admin/cities/${encodeURIComponent(stateCode)}/${encodeURIComponent(cityKey)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getReferralProgramsSummary() {
+    return this.request("/programs/referrals/summary");
+  }
+
+  async getReferralProgramsConfig() {
+    return this.request("/programs/referrals/config");
+  }
+
+  async updateReferralProgramsConfig(payload = {}) {
+    return this.request("/programs/referrals/config", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listReferralCampaigns() {
+    return this.request("/programs/referrals/campaigns");
+  }
+
+  async createReferralCampaign(payload = {}) {
+    return this.request("/programs/referrals/campaigns", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateReferralCampaign(campaignId, payload = {}) {
+    return this.request(`/programs/referrals/campaigns/${encodeURIComponent(campaignId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listInAppCampaigns(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/campaign-center/campaigns${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async createInAppCampaign(payload = {}) {
+    return this.request("/campaign-center/campaigns", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async uploadInAppCampaignAsset(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.request("/campaign-center/assets", {
+      method: "POST",
+      body: formData,
+    });
+  }
+
+  async updateInAppCampaign(campaignId, payload = {}) {
+    return this.request(`/campaign-center/campaigns/${encodeURIComponent(campaignId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async previewInAppCampaign(campaignId, payload = {}) {
+    return this.request(`/campaign-center/campaigns/${encodeURIComponent(campaignId)}/preview-eligibility`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getInAppCampaignStats(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/campaign-center/stats${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async getInAppCampaignCommercialReport(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/campaign-center/commercial-report${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async listInAppCampaignSlots() {
+    return this.request("/campaign-center/slots");
+  }
+
+  async createGeofenceCity(payload = {}) {
+    return this.request("/geofence/admin/cities", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   }
 
   async getNotifications() {
@@ -325,23 +644,80 @@ class LeafApiService {
     });
   }
 
+  async updatePromotion(promotionId, payload = {}) {
+    return this.request(`/promotions/${promotionId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getPromotionStats() {
+    return this.request("/promotions/stats");
+  }
+
   async applyPromotion(promotionId, driverId) {
     return this.request(`/promotions/${promotionId}/apply/${driverId}`, {
       method: "POST",
     });
   }
 
-  async getWaitlist(page = 1, limit = 20, status = "pending") {
+  async getWaitlist(page = 1, limit = 20, status = "pending", city = "") {
     const params = new URLSearchParams({
       page: String(page),
       limit: String(limit),
       status,
     });
+    if (city) params.append("city", city);
     return this.request(`/waitlist/drivers?${params.toString()}`);
   }
 
   async getWaitlistStats() {
-    return this.request("/metrics/waitlist/landing");
+    return this.request("/waitlist/stats");
+  }
+
+  async approveWaitlistDriver(driverId, notes = "") {
+    return this.request("/waitlist/approve", {
+      method: "POST",
+      body: JSON.stringify({ driverId, notes }),
+    });
+  }
+
+  async rejectWaitlistDriver(driverId, reason = "") {
+    return this.request("/waitlist/reject", {
+      method: "POST",
+      body: JSON.stringify({ driverId, reason }),
+    });
+  }
+
+  async updateWaitlistPosition(driverId, newPosition) {
+    return this.request("/waitlist/position", {
+      method: "PUT",
+      body: JSON.stringify({ driverId, newPosition }),
+    });
+  }
+
+  async getLandingWaitlist(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/waitlist/landing/list${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async updateLandingWaitlistStatus(leadId, status, notes = "") {
+    return this.request(`/waitlist/landing/${encodeURIComponent(leadId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, notes }),
+    });
+  }
+
+  async deleteLandingWaitlistLead(leadId) {
+    return this.request(`/waitlist/landing/${encodeURIComponent(leadId)}`, {
+      method: "DELETE",
+    });
   }
 
   async runFinancialSimulation(drivers = 250, hours = 1) {
@@ -350,6 +726,34 @@ class LeafApiService {
       hours: String(hours),
     });
     return this.request(`/metrics/simulation/run?${params.toString()}`);
+  }
+
+  async listFinancialReconciliationReports(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/financial/reconciliation/reports${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async getFinancialReconciliationRide(rideId) {
+    return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}`);
+  }
+
+  async runFinancialReconciliation(payload = {}) {
+    return this.request("/financial/reconciliation/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async runFinancialReconciliationRide(rideId) {
+    return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}/run`, {
+      method: "POST",
+    });
   }
 
   async getSupportTickets(params = {}) {
@@ -372,6 +776,42 @@ class LeafApiService {
     } catch {
       return this.request(`/support/tickets?${query.toString()}`);
     }
+  }
+
+  async getSupportQueueSummary() {
+    return this.request("/support/queue/summary");
+  }
+
+  async getSupportQueueBacklog(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/support/queue/backlog${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async assignSupportTicket(ticketId, agentId, agentName) {
+    return this.request(`/support/admin/tickets/${ticketId}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ agentId, agentName }),
+    });
+  }
+
+  async escalateSupportTicket(ticketId, reason) {
+    return this.request(`/support/admin/tickets/${ticketId}/escalate`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async resolveSupportTicket(ticketId, resolution = "") {
+    return this.request(`/support/admin/tickets/${ticketId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolution }),
+    });
   }
 
   async getSupportMessages(ticketId) {

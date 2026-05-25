@@ -7,7 +7,7 @@ echo "🚀 DEPLOY LEAF APP PARA HOSTINGER VPS"
 echo "======================================"
 
 # 🔑 Configurações
-VPS_IP="147.93.66.253"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
 SETUP_FILE="setup-hostinger-leaf.sh"
 
@@ -29,6 +29,11 @@ echo "🔧 Executando setup na VPS..."
 ssh ${VPS_USER}@${VPS_IP} << 'EOF'
     echo "🌿 INICIANDO SETUP LEAF APP NA HOSTINGER VPS"
     echo "============================================="
+    if command -v openssl >/dev/null 2>&1; then
+        REDIS_PASSWORD="${REDIS_PASSWORD:-$(openssl rand -hex 24)}"
+    else
+        REDIS_PASSWORD="${REDIS_PASSWORD:-$(head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 48)}"
+    fi
     
     # 📊 Verificar sistema
     echo "📊 Verificando sistema..."
@@ -60,8 +65,8 @@ ssh ${VPS_USER}@${VPS_IP} << 'EOF'
         apt install -y redis-server
         
         # Configurar Redis
-        sed -i 's/bind 216.238.107.59/bind 0.0.0.0/' /etc/redis/redis.conf
-        sed -i 's/# requirepass foobared/requirepass leaf_redis_2024/' /etc/redis/redis.conf
+        sed -E -i 's/^bind (216\.238\.107\.59|147\.182\.204\.181)$/bind 0.0.0.0/' /etc/redis/redis.conf
+        sed -i "s/# requirepass foobared/requirepass ${REDIS_PASSWORD}/" /etc/redis/redis.conf
         sed -i 's/maxmemory 256mb/maxmemory 2gb/' /etc/redis/redis.conf
         sed -i 's/maxmemory-policy noeviction/maxmemory-policy allkeys-lru/' /etc/redis/redis.conf
         
@@ -114,14 +119,14 @@ PACKAGE_EOF
     
     # 🔐 Criar arquivo .env
     echo "🔐 Criando arquivo .env..."
-    cat > .env << 'ENV_EOF'
+    cat > .env << ENV_EOF
 # 🌿 LEAF APP - CONFIGURAÇÃO
 NODE_ENV=production
 PORT=3000
 WS_PORT=3001
 REDIS_HOST=localhost
 REDIS_PORT=6379
-REDIS_PASSWORD=leaf_redis_2024
+REDIS_PASSWORD=${REDIS_PASSWORD}
 REDIS_DB=0
 
 # 🔑 API KEYS (configurar depois)
@@ -182,7 +187,7 @@ const redisClient = redis.createClient({
         host: process.env.REDIS_HOST || 'localhost',
         port: parseInt(process.env.REDIS_PORT) || 6379
     },
-    password: process.env.REDIS_PASSWORD || 'leaf_redis_2024',
+    password: process.env.REDIS_PASSWORD || null,
     database: parseInt(process.env.REDIS_DB) || 0
 });
 
@@ -437,10 +442,10 @@ SERVER_EOF
     echo ""
     echo "🎯 LEAF APP CONFIGURADO COM SUCESSO!"
     echo "====================================="
-    echo "🌐 API: http://147.93.66.253:3000"
-    echo "🔌 WebSocket: ws://147.93.66.253:3001"
-    echo "📊 Health: http://147.93.66.253:3000/api/health"
-    echo "📈 Stats: http://147.93.66.253:3000/api/stats"
+    echo "🌐 API: http://147.182.204.181:3000"
+    echo "🔌 WebSocket: ws://147.182.204.181:3001"
+    echo "📊 Health: http://147.182.204.181:3000/api/health"
+    echo "📈 Stats: http://147.182.204.181:3000/api/stats"
     echo ""
     echo "🔧 Comandos úteis:"
     echo "  pm2 status          - Ver status"
@@ -448,7 +453,7 @@ SERVER_EOF
     echo "  pm2 restart leaf-api - Reiniciar"
     echo "  pm2 stop leaf-api   - Parar"
     echo ""
-    echo "🔑 Redis password: leaf_redis_2024"
+    echo "🔑 Redis password: ${REDIS_PASSWORD}"
     echo "📁 Diretório: /opt/leaf-app"
 EOF
 
@@ -456,11 +461,11 @@ echo ""
 echo "🎯 DEPLOY CONCLUÍDO!"
 echo "===================="
 echo "✅ Leaf App configurado na VPS da Hostinger"
-echo "🌐 API: http://147.93.66.253:3000"
-echo "🔌 WebSocket: ws://147.93.66.253:3001"
+echo "🌐 API: http://147.182.204.181:3000"
+echo "🔌 WebSocket: ws://147.182.204.181:3001"
 echo ""
 echo "🔧 Para verificar status:"
-echo "ssh root@147.93.66.253 'pm2 status'"
+echo "ssh root@147.182.204.181 'pm2 status'"
 echo ""
 echo "📊 Para ver logs:"
-echo "ssh root@147.93.66.253 'pm2 logs leaf-api'" 
+echo "ssh root@147.182.204.181 'pm2 logs leaf-api'"

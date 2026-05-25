@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const circuitBreakerService = require('./services/circuit-breaker-service');
 const { logStructured } = require('./utils/logger');
+const { metrics } = require('./utils/prometheus-metrics');
 const traceContext = require('./utils/trace-context');
 
 // Configuração do Firebase Admin SDK
@@ -10,6 +11,19 @@ let firebaseApp = null;
 let firestore = null;
 let realtimeDB = null;
 let storage = null;
+
+function recordRealtimeDbMetric(operation, result = 'success', source = 'firebase_config') {
+    try {
+        metrics.recordLegacyDependencyAccess({
+            dependency: 'realtime_db',
+            operation,
+            source,
+            result
+        });
+    } catch (_error) {
+        // Métricas nunca devem quebrar o runtime.
+    }
+}
 
 // Inicializar Firebase Admin SDK
 function initializeFirebase() {
@@ -19,6 +33,22 @@ function initializeFirebase() {
             logStructured('info', 'Firebase já inicializado', {
                 service: 'firebase',
                 operation: 'initialize'
+            });
+            return firebaseApp;
+        }
+
+        // Reutilizar app default já inicializado por outro módulo (ex.: helper de token em testes)
+        if (Array.isArray(admin.apps) && admin.apps.length > 0) {
+            firebaseApp = admin.app();
+            firestore = admin.firestore();
+            realtimeDB = admin.database();
+            storage = admin.storage();
+            recordRealtimeDbMetric('initialize', 'success', 'firebase_config_reuse');
+
+            logStructured('info', 'Firebase app default reaproveitado', {
+                service: 'firebase',
+                operation: 'initialize',
+                source: 'admin.apps[0]'
             });
             return firebaseApp;
         }
@@ -54,6 +84,7 @@ function initializeFirebase() {
 
         // Inicializar Realtime Database
         realtimeDB = admin.database();
+        recordRealtimeDbMetric('initialize', 'success');
 
         // Inicializar Storage
         storage = admin.storage();
@@ -78,6 +109,7 @@ function initializeFirebase() {
         return firebaseApp;
 
     } catch (error) {
+        recordRealtimeDbMetric('initialize', 'failure');
         logStructured('error', 'Erro ao inicializar Firebase', {
             service: 'firebase',
             operation: 'initialize',
@@ -109,13 +141,22 @@ function getRealtimeDB() {
         initializeFirebase();
     }
     if (!realtimeDB) {
+        recordRealtimeDbMetric('get_instance', 'unavailable');
         logStructured('warn', 'Realtime Database não disponível', {
             service: 'firebase',
             operation: 'getRealtimeDB'
         });
         return null;
     }
+    recordRealtimeDbMetric('get_instance', 'success');
     return realtimeDB;
+}
+
+function isRealtimeDBAvailable() {
+    if (!realtimeDB) {
+        initializeFirebase();
+    }
+    return !!realtimeDB;
 }
 
 // Obter instância do Storage
@@ -173,6 +214,7 @@ async function syncToFirestore(collection, documentId, data) {
 async function syncToRealtimeDB(path, data) {
     try {
         if (!realtimeDB) {
+            recordRealtimeDbMetric('write', 'unavailable');
             logStructured('warn', 'Realtime Database não disponível', {
                 service: 'firebase',
                 operation: 'syncToRealtimeDB',
@@ -187,6 +229,7 @@ async function syncToRealtimeDB(path, data) {
             synced_at: admin.database.ServerValue.TIMESTAMP,
             source: 'redis-backend'
         });
+        recordRealtimeDbMetric('write', 'success');
 
         logStructured('info', 'Dados sincronizados para Realtime DB', {
             service: 'firebase',
@@ -196,6 +239,7 @@ async function syncToRealtimeDB(path, data) {
         return true;
 
     } catch (error) {
+        recordRealtimeDbMetric('write', 'failure');
         logStructured('error', 'Erro ao sincronizar para Realtime DB', {
             service: 'firebase',
             operation: 'syncToRealtimeDB',
@@ -332,6 +376,7 @@ async function getFromFirestore(collection, documentId) {
 async function getFromRealtimeDB(path) {
     try {
         if (!realtimeDB) {
+            recordRealtimeDbMetric('read', 'unavailable');
             logStructured('warn', 'Realtime Database não disponível', {
                 service: 'firebase',
                 operation: 'getFromRealtimeDB',
@@ -344,12 +389,16 @@ async function getFromRealtimeDB(path) {
         const snapshot = await ref.once('value');
 
         if (snapshot.exists()) {
+            recordRealtimeDbMetric('read', 'success');
             return snapshot.val();
         }
+
+        recordRealtimeDbMetric('read', 'empty');
 
         return null;
 
     } catch (error) {
+        recordRealtimeDbMetric('read', 'failure');
         logStructured('error', 'Erro ao obter dados do Realtime DB', {
             service: 'firebase',
             operation: 'getFromRealtimeDB',
@@ -360,10 +409,111 @@ async function getFromRealtimeDB(path) {
     }
 }
 
+// Atualizar dados no Realtime Database sem expor ref/update no domínio
+async function updateRealtimeDB(path, data) {
+    try {
+        if (!realtimeDB) {
+            recordRealtimeDbMetric('update', 'unavailable');
+            logStructured('warn', 'Realtime Database não disponível', {
+                service: 'firebase',
+                operation: 'updateRealtimeDB',
+                path
+            });
+            return false;
+        }
+
+        const ref = realtimeDB.ref(path);
+        await ref.update(data);
+        recordRealtimeDbMetric('update', 'success');
+
+        logStructured('info', 'Dados atualizados no Realtime DB', {
+            service: 'firebase',
+            operation: 'updateRealtimeDB',
+            path
+        });
+        return true;
+    } catch (error) {
+        recordRealtimeDbMetric('update', 'failure');
+        logStructured('error', 'Erro ao atualizar dados no Realtime DB', {
+            service: 'firebase',
+            operation: 'updateRealtimeDB',
+            path,
+            error: error.message
+        });
+        return false;
+    }
+}
+
+async function setRealtimeDB(path, data) {
+    try {
+        if (!realtimeDB) {
+            recordRealtimeDbMetric('set', 'unavailable');
+            logStructured('warn', 'Realtime Database não disponível', {
+                service: 'firebase',
+                operation: 'setRealtimeDB',
+                path
+            });
+            return false;
+        }
+
+        const ref = realtimeDB.ref(path);
+        await ref.set(data);
+        recordRealtimeDbMetric('set', 'success');
+
+        logStructured('info', 'Dados gravados no Realtime DB', {
+            service: 'firebase',
+            operation: 'setRealtimeDB',
+            path
+        });
+        return true;
+    } catch (error) {
+        recordRealtimeDbMetric('set', 'failure');
+        logStructured('error', 'Erro ao gravar dados no Realtime DB', {
+            service: 'firebase',
+            operation: 'setRealtimeDB',
+            path,
+            error: error.message
+        });
+        return false;
+    }
+}
+
+async function updateRealtimeDBRoot(updates) {
+    try {
+        if (!realtimeDB) {
+            recordRealtimeDbMetric('update_root', 'unavailable');
+            logStructured('warn', 'Realtime Database não disponível', {
+                service: 'firebase',
+                operation: 'updateRealtimeDBRoot'
+            });
+            return false;
+        }
+
+        await realtimeDB.ref().update(updates);
+        recordRealtimeDbMetric('update_root', 'success');
+
+        logStructured('info', 'Atualização raiz concluída no Realtime DB', {
+            service: 'firebase',
+            operation: 'updateRealtimeDBRoot',
+            keys: Object.keys(updates || {}).length
+        });
+        return true;
+    } catch (error) {
+        recordRealtimeDbMetric('update_root', 'failure');
+        logStructured('error', 'Erro ao atualizar raiz do Realtime DB', {
+            service: 'firebase',
+            operation: 'updateRealtimeDBRoot',
+            error: error.message
+        });
+        return false;
+    }
+}
+
 module.exports = {
     initializeFirebase,
     getFirestore,
     getRealtimeDB,
+    isRealtimeDBAvailable,
     getStorage,
     syncToFirestore,
     syncToRealtimeDB,
@@ -371,5 +521,8 @@ module.exports = {
     syncDriverStatus,
     syncTripData,
     getFromFirestore,
-    getFromRealtimeDB
+    getFromRealtimeDB,
+    setRealtimeDB,
+    updateRealtimeDB,
+    updateRealtimeDBRoot
 }; 

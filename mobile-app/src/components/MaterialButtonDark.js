@@ -1,6 +1,7 @@
 import React, { Component } from "react";
 import { StyleSheet, TouchableOpacity, Text } from "react-native";
 import { colors } from '../common/theme';
+import { fonts } from '../theme/runtimeTokens';
 
 function MaterialButtonDark(props) {
   return (
@@ -32,7 +33,7 @@ const styles = StyleSheet.create({
   caption: {
     color: colors.WHITE,
     fontSize: 14,
-    fontFamily: "Roboto-Regular"
+    fontFamily: fonts.Regular
   }
 });
 

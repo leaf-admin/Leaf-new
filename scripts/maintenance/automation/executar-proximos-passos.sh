@@ -48,7 +48,7 @@ else
 fi
 
 # Verificar Hostinger
-if timeout 5 curl -s http://147.93.66.253/health > /dev/null 2>&1; then
+if timeout 5 curl -s http://147.182.204.181/health > /dev/null 2>&1; then
     success "Hostinger: Respondendo"
 else
     warning "Hostinger: Não respondendo"
@@ -64,9 +64,9 @@ log "2. Configurando Firebase (opcional)..."
 # Verificar se arquivo de credenciais existe localmente
 if [ -f "leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json" ]; then
     log "Copiando credenciais Firebase para Vultr..."
-    scp leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json vultr-leaf:/home/leaf/leaf-websocket-backend/ > /dev/null 2>&1
+    scp leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json vultr-leaf:/opt/leaf-app/ > /dev/null 2>&1
     
-    if ssh vultr-leaf "chmod 600 /home/leaf/leaf-websocket-backend/leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json" > /dev/null 2>&1; then
+    if ssh vultr-leaf "chmod 600 /opt/leaf-app/leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json" > /dev/null 2>&1; then
         success "Firebase: Credenciais configuradas"
         
         # Reiniciar serviço para carregar credenciais
@@ -178,21 +178,21 @@ echo ""
 log "6. Executando testes básicos..."
 
 # Teste de conectividade
-if timeout 10 curl -s https://216.238.107.59.nip.io/health > /dev/null 2>&1; then
+if timeout 10 curl -s https://147.182.204.181.nip.io/health > /dev/null 2>&1; then
     success "Teste: API Vultr acessível"
 else
     error "Teste: API Vultr não acessível"
 fi
 
 # Teste de fallback
-if timeout 10 curl -s http://147.93.66.253/health > /dev/null 2>&1; then
+if timeout 10 curl -s http://147.182.204.181/health > /dev/null 2>&1; then
     success "Teste: API Hostinger acessível"
 else
     warning "Teste: API Hostinger não acessível"
 fi
 
 # Teste de SSL
-if timeout 10 openssl s_client -connect 216.238.107.59:443 -servername 216.238.107.59.nip.io < /dev/null > /dev/null 2>&1; then
+if timeout 10 openssl s_client -connect 147.182.204.181:443 -servername 147.182.204.181.nip.io < /dev/null > /dev/null 2>&1; then
     success "Teste: SSL funcionando"
 else
     warning "Teste: SSL não funcionando"
@@ -293,8 +293,8 @@ echo "🎯 PRÓXIMOS PASSOS MANUAIS:"
 echo "==========================="
 
 echo "1. 🔗 Configurar DNS para leafapp.com"
-echo "   - A: leafapp.com -> 216.238.107.59"
-echo "   - A: www.leafapp.com -> 216.238.107.59"
+echo "   - A: leafapp.com -> 147.182.204.181"
+echo "   - A: www.leafapp.com -> 147.182.204.181"
 
 echo ""
 echo "2. 🔒 Configurar SSL para domínio"

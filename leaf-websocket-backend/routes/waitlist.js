@@ -1,13 +1,100 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
-const { logger } = require('../utils/logger');
+const { logger, logStructured } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
+const cityActivationStateService = require('../services/city-activation-state-service');
+const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
+const {
+  isLaunchFeatureEnabled,
+  buildLaunchFeatureDisabledPayload
+} = require('../utils/pilot-launch-flags');
+const {
+  parseEnvList,
+  resolveRuntimeCorsHosts,
+  buildRuntimeSslipOrigins
+} = require('../utils/runtime-cors-origins');
 
 let firebaseConfig = null;
 try {
   firebaseConfig = require('../firebase-config');
 } catch (_e) {}
+
+const WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS = Number.parseInt(
+  process.env.WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS || '300',
+  10
+);
+const WAITLIST_ADMIN_ROLES = ['admin', 'manager', 'super-admin'];
+const isProductionRuntime = process.env.NODE_ENV === 'production';
+const allowLocalCors = String(process.env.ALLOW_LOCAL_CORS || (!isProductionRuntime)).toLowerCase() === 'true';
+const waitlistRuntimeHosts = resolveRuntimeCorsHosts({
+  env: process.env,
+  defaultHosts: ['62.169.31.231'],
+  allowLegacyFlagName: 'ALLOW_LEGACY_VULTR_CORS',
+  legacyHost: '147.182.204.181'
+});
+const waitlistBaseAllowedOrigins = [
+  'https://leaf.app.br',
+  'https://www.leaf.app.br'
+];
+waitlistBaseAllowedOrigins.push(...buildRuntimeSslipOrigins(waitlistRuntimeHosts));
+if (allowLocalCors) {
+  waitlistBaseAllowedOrigins.push('http://localhost:3000', 'http://localhost:8080');
+}
+const WAITLIST_ALLOWED_ORIGINS = Array.from(
+  new Set([
+    ...waitlistBaseAllowedOrigins,
+    ...parseEnvList(process.env.CORS_ORIGIN),
+    ...parseEnvList(process.env.WAITLIST_CORS_ORIGIN)
+  ])
+);
+
+function isMissingFirestoreIndexError(error) {
+  if (!error) return false;
+  if (Number(error.code) === 9) return true;
+  const message = String(error.message || '');
+  return message.includes('FAILED_PRECONDITION') && message.includes('requires an index');
+}
+
+function buildAuditOperator(user = {}) {
+  return {
+    id: user.id || user.uid || null,
+    email: user.email || null,
+    role: user.role || null
+  };
+}
+
+function logWaitlistAdminAudit(req, action, entity, metadata = {}) {
+  logStructured('info', 'Auditoria admin waitlist', {
+    service: 'waitlist',
+    action,
+    entity,
+    operator: buildAuditOperator(req.user || {}),
+    ...metadata
+  });
+}
+
+function requireAdminMutationsEnabled(req, res, next) {
+  if (isLaunchFeatureEnabled('adminMutationsEnabled', true)) {
+    return next();
+  }
+
+  logger.warn('Mutação admin da waitlist bloqueada por feature flag', {
+    action: 'waitlist.admin_mutation.blocked',
+    entity: { type: 'waitlist', id: null },
+    operator: buildAuditOperator(req.user || {}),
+    path: req.originalUrl || req.url,
+    adminUserId: req.user?.id || req.user?.uid || null,
+    adminRole: req.user?.role || null
+  });
+
+  return res.status(503).json(
+    buildLaunchFeatureDisabledPayload(
+      'admin_mutations',
+      'Mutacoes administrativas estao desativadas neste perfil de lancamento'
+    )
+  );
+}
 
 const getLandingMetricsRef = () => {
   if (admin.apps.length === 0 && firebaseConfig && firebaseConfig.initializeFirebase) {
@@ -32,6 +119,108 @@ const incrementLandingMetric = async (field) => {
     logger.error('Erro ao atualizar métricas da landing page:', error);
   }
 };
+
+function slugify(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function normalizeStateCode(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+async function loadCityActivationConfig() {
+  return cityActivationStateService.getConfig();
+}
+
+function resolveCityConfigFromActivation(config, cityValue, fallbackStateCode) {
+  const citySlug = slugify(cityValue);
+  const safeStateCode = normalizeStateCode(fallbackStateCode) || 'RJ';
+
+  if (!citySlug) {
+    return {
+      cityKey: '',
+      stateCode: safeStateCode,
+      cityLabel: '',
+      cityActive: true,
+      stateEnabled: true,
+      waitlistEnabled: true,
+      maxActiveDrivers: WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS
+    };
+  }
+
+  const states = (config && config.states && typeof config.states === 'object')
+    ? config.states
+    : {};
+
+  // Tentativa 1: procurar no estado informado
+  if (states[safeStateCode] && states[safeStateCode].cities?.[citySlug]) {
+    const city = states[safeStateCode].cities[citySlug];
+    return {
+      cityKey: city.key || citySlug,
+      stateCode: safeStateCode,
+      cityLabel: city.label || city.name || citySlug,
+      cityActive: city.active !== false,
+      stateEnabled: states[safeStateCode].enabled !== false,
+      waitlistEnabled: city.waitlistEnabled !== false,
+      maxActiveDrivers: Number(city.maxActiveDrivers || WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS)
+    };
+  }
+
+  // Tentativa 2: procurar em todos os estados
+  for (const [stateCode, stateData] of Object.entries(states)) {
+    const city = stateData?.cities?.[citySlug];
+    if (!city) continue;
+    return {
+      cityKey: city.key || citySlug,
+      stateCode: normalizeStateCode(stateCode),
+      cityLabel: city.label || city.name || citySlug,
+      cityActive: city.active !== false,
+      stateEnabled: stateData.enabled !== false,
+      waitlistEnabled: city.waitlistEnabled !== false,
+      maxActiveDrivers: Number(city.maxActiveDrivers || WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS)
+    };
+  }
+
+  // Fallback para cidade ainda nao cadastrada na matriz de ativacao
+  return {
+    cityKey: citySlug,
+    stateCode: safeStateCode,
+    cityLabel: cityValue || citySlug,
+    cityActive: true,
+    stateEnabled: true,
+    waitlistEnabled: true,
+    maxActiveDrivers: WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS
+  };
+}
+
+async function getCityWaitlistCounts(cityKey) {
+  if (!cityKey) {
+    return { pending: 0, approved: 0 };
+  }
+
+  const [pendingSnapshot, approvedSnapshot] = await Promise.all([
+    admin.firestore()
+      .collection('waitList')
+      .where('status', '==', 'pending')
+      .where('cityKey', '==', cityKey)
+      .get(),
+    admin.firestore()
+      .collection('waitList')
+      .where('status', '==', 'approved')
+      .where('cityKey', '==', cityKey)
+      .get()
+  ]);
+
+  return {
+    pending: pendingSnapshot.size,
+    approved: approvedSnapshot.size
+  };
+}
 
 // Rate Limiter específico para waitlist - MUITO RESTRITIVO
 // Apenas 3 cadastros por IP por hora (proteção contra spam/DDoS)
@@ -63,16 +252,10 @@ const waitlistLimiter = rateLimit({
 const validateOrigin = (req, res, next) => {
   try {
     const origin = req.headers.origin;
-    const allowedOrigins = [
-      'https://leaf.app.br',
-      'https://www.leaf.app.br',
-      'http://localhost:3000', // Para desenvolvimento
-      'http://localhost:8080'  // Para desenvolvimento
-    ];
     
     // Configurar headers CORS ANTES de validar
     // Se a origem estiver na lista permitida, definir o header CORS
-    if (origin && allowedOrigins.includes(origin)) {
+    if (origin && WAITLIST_ALLOWED_ORIGINS.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
@@ -85,9 +268,7 @@ const validateOrigin = (req, res, next) => {
     }
     
     // Verificar se a origem é permitida
-    const isAllowed = !origin || allowedOrigins.some(allowed => 
-      origin && origin.startsWith(allowed)
-    );
+    const isAllowed = !origin || WAITLIST_ALLOWED_ORIGINS.includes(origin);
     
     // Apenas validar em produção (se NODE_ENV estiver definido)
     const isProduction = process.env.NODE_ENV === 'production';
@@ -187,12 +368,6 @@ const checkDuplicates = async (req, res, next) => {
 // Este middleware sobrescreve a configuração CORS global para garantir headers corretos
 const corsWaitlist = (req, res, next) => {
   const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://leaf.app.br',
-    'https://www.leaf.app.br',
-    'http://localhost:3000',
-    'http://localhost:8080'
-  ];
   
   // IMPORTANTE: Remover TODOS os headers CORS que possam ter sido definidos anteriormente
   // Isso garante que não haja conflito com o CORS global do Express
@@ -210,7 +385,7 @@ const corsWaitlist = (req, res, next) => {
   });
   
   // Definir headers CORS corretos - APENAS um valor por header
-  if (origin && allowedOrigins.includes(origin)) {
+  if (origin && WAITLIST_ALLOWED_ORIGINS.includes(origin)) {
     // Definir APENAS a origem específica (não array, não múltiplos valores)
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else if (!origin) {
@@ -235,12 +410,6 @@ const corsWaitlist = (req, res, next) => {
 // Este middleware intercepta TODAS as formas de enviar resposta para garantir headers corretos
 const ensureCorsHeaders = (req, res, next) => {
   const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://leaf.app.br',
-    'https://www.leaf.app.br',
-    'http://localhost:3000',
-    'http://localhost:8080'
-  ];
   
   // Interceptar o método json()
   const originalJson = res.json.bind(res);
@@ -260,7 +429,7 @@ const ensureCorsHeaders = (req, res, next) => {
     });
     
     // Definir header CORS correto (apenas um valor, não array)
-    if (origin && allowedOrigins.includes(origin)) {
+    if (origin && WAITLIST_ALLOWED_ORIGINS.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
     } else if (!origin) {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -290,7 +459,7 @@ const ensureCorsHeaders = (req, res, next) => {
       res.removeHeader(header);
     });
     
-    if (origin && allowedOrigins.includes(origin)) {
+    if (origin && WAITLIST_ALLOWED_ORIGINS.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
     } else if (!origin) {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -382,14 +551,6 @@ const requireFirebase = async (req, res, next) => {
   }
 };
 
-// Middleware para verificar se é admin
-const requireAdmin = (req, res, next) => {
-  if (!req.user || !req.user.role || !['admin', 'manager', 'super-admin'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Acesso negado. Apenas administradores.' });
-  }
-  next();
-};
-
 // GET /api/waitlist/status - Status da wait list para motorista
 router.get('/api/waitlist/status', requireFirebase, async (req, res) => {
   try {
@@ -408,10 +569,10 @@ router.get('/api/waitlist/status', requireFirebase, async (req, res) => {
       return res.status(400).json({ error: 'Usuário não é um motorista' });
     }
 
-    // Buscar configurações do sistema
+    // Buscar configurações globais de fallback
     const configSnapshot = await admin.firestore().collection('systemConfig').doc('waitList').get();
     const config = configSnapshot.exists ? configSnapshot.data() : {
-      maxActiveDrivers: 100,
+      maxActiveDrivers: WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS,
       currentActiveDrivers: 0,
       waitListEnabled: true
     };
@@ -430,9 +591,21 @@ router.get('/api/waitlist/status', requireFirebase, async (req, res) => {
         id: waitListDoc.id,
         position: waitListDoc.data().position,
         joinedAt: waitListDoc.data().joinedAt,
-        priority: waitListDoc.data().priority || 'normal'
+        priority: waitListDoc.data().priority || 'normal',
+        cityKey: waitListDoc.data().cityKey || null,
+        cityLabel: waitListDoc.data().cityLabel || null,
+        stateCode: waitListDoc.data().stateCode || null
       };
     }
+
+    const cityActivationConfig = await loadCityActivationConfig();
+    const requestedCityValue = waitListData?.cityKey || userData.waitListCityKey || userData.city || userData.citySlug || '';
+    const resolvedCity = resolveCityConfigFromActivation(
+      cityActivationConfig,
+      requestedCityValue,
+      waitListData?.stateCode || userData.state || userData.waitListStateCode || 'RJ'
+    );
+    const cityCounts = await getCityWaitlistCounts(resolvedCity.cityKey);
 
     // Calcular estimativa de tempo (baseado na posição)
     let estimatedWaitTime = null;
@@ -447,9 +620,18 @@ router.get('/api/waitlist/status', requireFirebase, async (req, res) => {
       isActiveDriver: userData.isActiveDriver || false,
       position: waitListData?.position || null,
       estimatedWaitTime: estimatedWaitTime,
-      maxActiveDrivers: config.maxActiveDrivers,
-      currentActiveDrivers: config.currentActiveDrivers,
-      waitListEnabled: config.waitListEnabled,
+      maxActiveDrivers: Number(resolvedCity.maxActiveDrivers || config.maxActiveDrivers || WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS),
+      currentActiveDrivers: Number(cityCounts.approved || 0),
+      waitListEnabled: resolvedCity.waitlistEnabled !== false,
+      city: {
+        cityKey: resolvedCity.cityKey,
+        cityLabel: waitListData?.cityLabel || resolvedCity.cityLabel,
+        stateCode: resolvedCity.stateCode,
+        cityActive: resolvedCity.cityActive !== false,
+        stateEnabled: resolvedCity.stateEnabled !== false,
+        pendingDrivers: Number(cityCounts.pending || 0),
+        approvedDrivers: Number(cityCounts.approved || 0)
+      },
       documentsStatus: {
         cnhUploaded: userData.cnhUploaded || false,
         vehicleRegistered: userData.vehicleRegistered || false,
@@ -472,7 +654,7 @@ router.get('/api/waitlist/status', requireFirebase, async (req, res) => {
 router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
   try {
     const driverId = req.user.uid;
-    const { priority = 'normal', notes = '' } = req.body;
+    const { priority = 'normal', notes = '', city: requestedCity } = req.body;
 
     // Verificar se já está na wait list
     const existingWaitList = await admin.firestore()
@@ -496,15 +678,43 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
       return res.status(400).json({ error: 'Motorista já está ativo' });
     }
 
-    // Buscar próxima posição na fila
+    const cityActivationConfig = await loadCityActivationConfig();
+    const resolvedCity = resolveCityConfigFromActivation(
+      cityActivationConfig,
+      requestedCity || userData.city || userData.waitListCityKey || '',
+      userData.state || userData.waitListStateCode || 'RJ'
+    );
+
+    if (!resolvedCity.cityKey) {
+      return res.status(400).json({
+        error: 'Cidade obrigatoria para entrar na waitlist'
+      });
+    }
+
+    if (resolvedCity.stateEnabled === false || resolvedCity.cityActive === false) {
+      return res.status(400).json({
+        error: 'Cidade desativada para operacao no momento'
+      });
+    }
+
+    if (resolvedCity.waitlistEnabled === false) {
+      return res.status(400).json({
+        error: 'Fila de espera desativada para esta cidade'
+      });
+    }
+
+    // Buscar próxima posição na fila (por cidade)
     const waitListSnapshot = await admin.firestore()
       .collection('waitList')
       .where('status', '==', 'pending')
-      .orderBy('position', 'desc')
-      .limit(1)
+      .where('cityKey', '==', resolvedCity.cityKey)
       .get();
 
-    const nextPosition = waitListSnapshot.empty ? 1 : waitListSnapshot.docs[0].data().position + 1;
+    const maxPosition = waitListSnapshot.docs.reduce((max, doc) => {
+      const positionValue = Number(doc.data()?.position || 0);
+      return Math.max(max, positionValue);
+    }, 0);
+    const nextPosition = maxPosition + 1;
 
     // Adicionar à wait list
     const waitListData = {
@@ -514,7 +724,10 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
       joinedAt: admin.firestore.FieldValue.serverTimestamp(),
       priority,
       notes,
-      adminId: null
+      adminId: null,
+      cityKey: resolvedCity.cityKey,
+      cityLabel: resolvedCity.cityLabel || requestedCity || userData.city || resolvedCity.cityKey,
+      stateCode: resolvedCity.stateCode
     };
 
     await admin.firestore().collection('waitList').add(waitListData);
@@ -523,15 +736,25 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
     await admin.firestore().collection('users').doc(driverId).update({
       waitListStatus: 'pending',
       waitListPosition: nextPosition,
-      waitListJoinedAt: admin.firestore.FieldValue.serverTimestamp()
+      waitListJoinedAt: admin.firestore.FieldValue.serverTimestamp(),
+      waitListCityKey: resolvedCity.cityKey,
+      waitListCityLabel: resolvedCity.cityLabel || requestedCity || userData.city || resolvedCity.cityKey,
+      waitListStateCode: resolvedCity.stateCode
     });
 
-    logger.info(`Motorista ${driverId} adicionado à wait list na posição ${nextPosition}`);
+    logger.info(`Motorista ${driverId} adicionado à wait list na posição ${nextPosition}`, {
+      cityKey: resolvedCity.cityKey
+    });
 
     res.json({
       success: true,
       message: 'Adicionado à wait list com sucesso',
       position: nextPosition,
+      city: {
+        cityKey: resolvedCity.cityKey,
+        cityLabel: resolvedCity.cityLabel || requestedCity || userData.city || resolvedCity.cityKey,
+        stateCode: resolvedCity.stateCode
+      },
       estimatedWaitTime: nextPosition * 7 // 7 dias por posição
     });
 
@@ -559,30 +782,45 @@ router.delete('/api/waitlist/leave', requireFirebase, async (req, res) => {
 
     const waitListDoc = waitListSnapshot.docs[0];
     const position = waitListDoc.data().position;
+    const cityKey = waitListDoc.data().cityKey || null;
 
     // Remover da wait list
     await waitListDoc.ref.delete();
 
-    // Atualizar posições dos outros motoristas
-    const otherWaitListSnapshot = await admin.firestore()
-      .collection('waitList')
-      .where('status', '==', 'pending')
-      .where('position', '>', position)
-      .get();
+    // Atualizar posições dos outros motoristas (apenas da mesma cidade)
+    let otherWaitListSnapshot = null;
+    if (cityKey) {
+      otherWaitListSnapshot = await admin.firestore()
+        .collection('waitList')
+        .where('status', '==', 'pending')
+        .where('cityKey', '==', cityKey)
+        .get();
+    } else {
+      otherWaitListSnapshot = await admin.firestore()
+        .collection('waitList')
+        .where('status', '==', 'pending')
+        .where('position', '>', position)
+        .get();
+    }
 
     const batch = admin.firestore().batch();
-    otherWaitListSnapshot.docs.forEach(doc => {
+    otherWaitListSnapshot.docs
+      .filter((doc) => Number(doc.data()?.position || 0) > Number(position || 0))
+      .forEach(doc => {
       batch.update(doc.ref, {
         position: doc.data().position - 1
       });
-    });
+      });
     await batch.commit();
 
     // Atualizar status do usuário
     await admin.firestore().collection('users').doc(driverId).update({
       waitListStatus: 'none',
       waitListPosition: null,
-      waitListJoinedAt: null
+      waitListJoinedAt: null,
+      waitListCityKey: null,
+      waitListCityLabel: null,
+      waitListStateCode: null
     });
 
     logger.info(`Motorista ${driverId} removido da wait list`);
@@ -599,22 +837,55 @@ router.delete('/api/waitlist/leave', requireFirebase, async (req, res) => {
 });
 
 // GET /api/waitlist/drivers - Listar motoristas na wait list (admin)
-router.get('/api/waitlist/drivers', requireFirebase, requireAdmin, async (req, res) => {
+router.get('/api/waitlist/drivers', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
-    const { page = 1, limit = 20, status = 'pending' } = req.query;
+    const { page = 1, limit = 20, status = 'pending', city } = req.query;
     const offset = (page - 1) * limit;
+    const cityKeyFilter = slugify(city);
 
     // Buscar motoristas na wait list
-    const waitListSnapshot = await admin.firestore()
-      .collection('waitList')
-      .where('status', '==', status)
-      .orderBy('position', 'asc')
-      .offset(offset)
-      .limit(parseInt(limit))
-      .get();
+    let waitListDocs = [];
+    if (cityKeyFilter) {
+      const citySnapshot = await admin.firestore()
+        .collection('waitList')
+        .where('status', '==', status)
+        .where('cityKey', '==', cityKeyFilter)
+        .get();
+      waitListDocs = citySnapshot.docs
+        .sort((a, b) => Number(a.data()?.position || 0) - Number(b.data()?.position || 0))
+        .slice(offset, offset + parseInt(limit, 10));
+    } else {
+      try {
+        const waitListSnapshot = await admin.firestore()
+          .collection('waitList')
+          .where('status', '==', status)
+          .orderBy('position', 'asc')
+          .offset(offset)
+          .limit(parseInt(limit, 10))
+          .get();
+        waitListDocs = waitListSnapshot.docs;
+      } catch (queryError) {
+        // Fallback quando o índice composto status+position ainda não foi criado.
+        if (!isMissingFirestoreIndexError(queryError)) {
+          throw queryError;
+        }
+        logger.warn('Waitlist drivers list fallback sem índice composto status+position', {
+          status,
+          page: Number(page),
+          limit: Number(limit)
+        });
+        const fallbackSnapshot = await admin.firestore()
+          .collection('waitList')
+          .where('status', '==', status)
+          .get();
+        waitListDocs = fallbackSnapshot.docs
+          .sort((a, b) => Number(a.data()?.position || 0) - Number(b.data()?.position || 0))
+          .slice(offset, offset + parseInt(limit, 10));
+      }
+    }
 
     const drivers = [];
-    for (const doc of waitListSnapshot.docs) {
+    for (const doc of waitListDocs) {
       const waitListData = doc.data();
       
       // Buscar dados do motorista
@@ -629,6 +900,9 @@ router.get('/api/waitlist/drivers', requireFirebase, requireAdmin, async (req, r
           joinedAt: waitListData.joinedAt,
           priority: waitListData.priority,
           notes: waitListData.notes,
+          cityKey: waitListData.cityKey || null,
+          cityLabel: waitListData.cityLabel || null,
+          stateCode: waitListData.stateCode || null,
           driver: {
             firstName: userData.firstName,
             lastName: userData.lastName,
@@ -646,10 +920,15 @@ router.get('/api/waitlist/drivers', requireFirebase, requireAdmin, async (req, r
     }
 
     // Buscar total de motoristas na wait list
-    const totalSnapshot = await admin.firestore()
+    let totalQuery = admin.firestore()
       .collection('waitList')
-      .where('status', '==', status)
-      .get();
+      .where('status', '==', status);
+
+    if (cityKeyFilter) {
+      totalQuery = totalQuery.where('cityKey', '==', cityKeyFilter);
+    }
+
+    const totalSnapshot = await totalQuery.get();
 
     res.json({
       drivers,
@@ -658,6 +937,10 @@ router.get('/api/waitlist/drivers', requireFirebase, requireAdmin, async (req, r
         limit: parseInt(limit),
         total: totalSnapshot.size,
         pages: Math.ceil(totalSnapshot.size / limit)
+      },
+      filters: {
+        status,
+        city: cityKeyFilter || null
       }
     });
 
@@ -668,7 +951,7 @@ router.get('/api/waitlist/drivers', requireFirebase, requireAdmin, async (req, r
 });
 
 // POST /api/waitlist/approve - Aprovar motorista da wait list (admin)
-router.post('/api/waitlist/approve', requireFirebase, requireAdmin, async (req, res) => {
+router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId, notes = '' } = req.body;
     const adminId = req.user.uid;
@@ -685,14 +968,35 @@ router.post('/api/waitlist/approve', requireFirebase, requireAdmin, async (req, 
     }
 
     const waitListDoc = waitListSnapshot.docs[0];
-    const position = waitListDoc.data().position;
+    const waitListData = waitListDoc.data();
+    const position = waitListData.position;
+    const cityKey = waitListData.cityKey || null;
+    const stateCode = waitListData.stateCode || 'RJ';
 
-    // Verificar se há vaga
+    // Verificar se há vaga global
     const configSnapshot = await admin.firestore().collection('systemConfig').doc('waitList').get();
-    const config = configSnapshot.exists ? configSnapshot.data() : { maxActiveDrivers: 100, currentActiveDrivers: 0 };
+    const config = configSnapshot.exists
+      ? configSnapshot.data()
+      : { maxActiveDrivers: WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS, currentActiveDrivers: 0 };
 
     if (config.currentActiveDrivers >= config.maxActiveDrivers) {
       return res.status(400).json({ error: 'Limite de motoristas ativos atingido' });
+    }
+
+    // Verificar limite por cidade
+    const cityActivationConfig = await loadCityActivationConfig();
+    const resolvedCity = resolveCityConfigFromActivation(cityActivationConfig, cityKey, stateCode);
+    const cityCounts = await getCityWaitlistCounts(resolvedCity.cityKey);
+    if (Number(cityCounts.approved || 0) >= Number(resolvedCity.maxActiveDrivers || WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS)) {
+      return res.status(400).json({
+        error: 'Limite de motoristas ativos atingido para esta cidade',
+        city: {
+          cityKey: resolvedCity.cityKey,
+          cityLabel: resolvedCity.cityLabel,
+          maxActiveDrivers: resolvedCity.maxActiveDrivers,
+          currentActiveDrivers: cityCounts.approved
+        }
+      });
     }
 
     // Aprovar motorista
@@ -708,7 +1012,10 @@ router.post('/api/waitlist/approve', requireFirebase, requireAdmin, async (req, 
       waitListStatus: 'approved',
       isActiveDriver: true,
       waitListApprovedAt: admin.firestore.FieldValue.serverTimestamp(),
-      waitListReason: notes
+      waitListReason: notes,
+      waitListCityKey: resolvedCity.cityKey,
+      waitListCityLabel: waitListData.cityLabel || resolvedCity.cityLabel,
+      waitListStateCode: resolvedCity.stateCode
     });
 
     // Atualizar contador de motoristas ativos
@@ -717,26 +1024,52 @@ router.post('/api/waitlist/approve', requireFirebase, requireAdmin, async (req, 
       currentActiveDrivers: config.currentActiveDrivers + 1
     }, { merge: true });
 
-    // Ajustar posições dos outros motoristas
-    const otherWaitListSnapshot = await admin.firestore()
-      .collection('waitList')
-      .where('status', '==', 'pending')
-      .where('position', '>', position)
-      .get();
+    // Ajustar posições dos outros motoristas (apenas mesma cidade)
+    let otherWaitListSnapshot = null;
+    if (cityKey) {
+      otherWaitListSnapshot = await admin.firestore()
+        .collection('waitList')
+        .where('status', '==', 'pending')
+        .where('cityKey', '==', cityKey)
+        .get();
+    } else {
+      otherWaitListSnapshot = await admin.firestore()
+        .collection('waitList')
+        .where('status', '==', 'pending')
+        .where('position', '>', position)
+        .get();
+    }
 
     const batch = admin.firestore().batch();
-    otherWaitListSnapshot.docs.forEach(doc => {
+    otherWaitListSnapshot.docs
+      .filter((doc) => Number(doc.data()?.position || 0) > Number(position || 0))
+      .forEach(doc => {
       batch.update(doc.ref, {
         position: doc.data().position - 1
       });
-    });
+      });
     await batch.commit();
 
-    logger.info(`Motorista ${driverId} aprovado da wait list por admin ${adminId}`);
+    logger.info(`Motorista ${driverId} aprovado da wait list por admin ${adminId}`, {
+      cityKey: resolvedCity.cityKey
+    });
+    logWaitlistAdminAudit(req, 'waitlist.driver.approve', {
+      type: 'driver',
+      id: driverId
+    }, {
+      cityKey: resolvedCity.cityKey,
+      waitListEntryId: waitListDoc.id
+    });
 
     res.json({
       success: true,
-      message: 'Motorista aprovado com sucesso'
+      message: 'Motorista aprovado com sucesso',
+      city: {
+        cityKey: resolvedCity.cityKey,
+        cityLabel: resolvedCity.cityLabel,
+        maxActiveDrivers: resolvedCity.maxActiveDrivers,
+        currentActiveDrivers: Number(cityCounts.approved || 0) + 1
+      }
     });
 
   } catch (error) {
@@ -746,7 +1079,7 @@ router.post('/api/waitlist/approve', requireFirebase, requireAdmin, async (req, 
 });
 
 // POST /api/waitlist/reject - Rejeitar motorista da wait list (admin)
-router.post('/api/waitlist/reject', requireFirebase, requireAdmin, async (req, res) => {
+router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId, reason = '' } = req.body;
     const adminId = req.user.uid;
@@ -764,6 +1097,7 @@ router.post('/api/waitlist/reject', requireFirebase, requireAdmin, async (req, r
 
     const waitListDoc = waitListSnapshot.docs[0];
     const position = waitListDoc.data().position;
+    const cityKey = waitListDoc.data().cityKey || null;
 
     // Rejeitar motorista
     await waitListDoc.ref.update({
@@ -777,25 +1111,46 @@ router.post('/api/waitlist/reject', requireFirebase, requireAdmin, async (req, r
     await admin.firestore().collection('users').doc(driverId).update({
       waitListStatus: 'rejected',
       waitListRejectedAt: admin.firestore.FieldValue.serverTimestamp(),
-      waitListReason: reason
+      waitListReason: reason,
+      waitListPosition: null
     });
 
-    // Ajustar posições dos outros motoristas
-    const otherWaitListSnapshot = await admin.firestore()
-      .collection('waitList')
-      .where('status', '==', 'pending')
-      .where('position', '>', position)
-      .get();
+    // Ajustar posições dos outros motoristas (mesma cidade)
+    let otherWaitListSnapshot = null;
+    if (cityKey) {
+      otherWaitListSnapshot = await admin.firestore()
+        .collection('waitList')
+        .where('status', '==', 'pending')
+        .where('cityKey', '==', cityKey)
+        .get();
+    } else {
+      otherWaitListSnapshot = await admin.firestore()
+        .collection('waitList')
+        .where('status', '==', 'pending')
+        .where('position', '>', position)
+        .get();
+    }
 
     const batch = admin.firestore().batch();
-    otherWaitListSnapshot.docs.forEach(doc => {
+    otherWaitListSnapshot.docs
+      .filter((doc) => Number(doc.data()?.position || 0) > Number(position || 0))
+      .forEach(doc => {
       batch.update(doc.ref, {
         position: doc.data().position - 1
       });
-    });
+      });
     await batch.commit();
 
-    logger.info(`Motorista ${driverId} rejeitado da wait list por admin ${adminId}`);
+    logger.info(`Motorista ${driverId} rejeitado da wait list por admin ${adminId}`, {
+      cityKey
+    });
+    logWaitlistAdminAudit(req, 'waitlist.driver.reject', {
+      type: 'driver',
+      id: driverId
+    }, {
+      cityKey,
+      waitListEntryId: waitListDoc.id
+    });
 
     res.json({
       success: true,
@@ -809,7 +1164,7 @@ router.post('/api/waitlist/reject', requireFirebase, requireAdmin, async (req, r
 });
 
 // PUT /api/waitlist/position - Ajustar posição na wait list (admin)
-router.put('/api/waitlist/position', requireFirebase, requireAdmin, async (req, res) => {
+router.put('/api/waitlist/position', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId, newPosition } = req.body;
     const adminId = req.user.uid;
@@ -827,12 +1182,18 @@ router.put('/api/waitlist/position', requireFirebase, requireAdmin, async (req, 
 
     const waitListDoc = waitListSnapshot.docs[0];
     const currentPosition = waitListDoc.data().position;
+    const cityKey = waitListDoc.data().cityKey || null;
 
-    // Buscar total de motoristas na wait list
-    const totalSnapshot = await admin.firestore()
+    // Buscar total de motoristas na wait list (mesma cidade)
+    let totalQuery = admin.firestore()
       .collection('waitList')
-      .where('status', '==', 'pending')
-      .get();
+      .where('status', '==', 'pending');
+
+    if (cityKey) {
+      totalQuery = totalQuery.where('cityKey', '==', cityKey);
+    }
+
+    const totalSnapshot = await totalQuery.get();
 
     if (newPosition < 1 || newPosition > totalSnapshot.size) {
       return res.status(400).json({ error: 'Posição inválida' });
@@ -843,32 +1204,54 @@ router.put('/api/waitlist/position', requireFirebase, requireAdmin, async (req, 
     
     if (newPosition > currentPosition) {
       // Movendo para baixo
-      const otherWaitListSnapshot = await admin.firestore()
+      let otherWaitListSnapshot = await admin.firestore()
         .collection('waitList')
         .where('status', '==', 'pending')
-        .where('position', '>', currentPosition)
-        .where('position', '<=', newPosition)
         .get();
 
-      otherWaitListSnapshot.docs.forEach(doc => {
+      if (cityKey) {
+        otherWaitListSnapshot = {
+          docs: otherWaitListSnapshot.docs.filter(
+            (doc) => String(doc.data()?.cityKey || '') === String(cityKey || '')
+          )
+        };
+      }
+
+      otherWaitListSnapshot.docs
+        .filter((doc) => {
+          const pos = Number(doc.data()?.position || 0);
+          return pos > Number(currentPosition || 0) && pos <= Number(newPosition || 0);
+        })
+        .forEach(doc => {
         batch.update(doc.ref, {
           position: doc.data().position - 1
         });
-      });
+        });
     } else if (newPosition < currentPosition) {
       // Movendo para cima
-      const otherWaitListSnapshot = await admin.firestore()
+      let otherWaitListSnapshot = await admin.firestore()
         .collection('waitList')
         .where('status', '==', 'pending')
-        .where('position', '>=', newPosition)
-        .where('position', '<', currentPosition)
         .get();
 
-      otherWaitListSnapshot.docs.forEach(doc => {
+      if (cityKey) {
+        otherWaitListSnapshot = {
+          docs: otherWaitListSnapshot.docs.filter(
+            (doc) => String(doc.data()?.cityKey || '') === String(cityKey || '')
+          )
+        };
+      }
+
+      otherWaitListSnapshot.docs
+        .filter((doc) => {
+          const pos = Number(doc.data()?.position || 0);
+          return pos >= Number(newPosition || 0) && pos < Number(currentPosition || 0);
+        })
+        .forEach(doc => {
         batch.update(doc.ref, {
           position: doc.data().position + 1
         });
-      });
+        });
     }
 
     // Atualizar posição do motorista
@@ -881,6 +1264,15 @@ router.put('/api/waitlist/position', requireFirebase, requireAdmin, async (req, 
     await batch.commit();
 
     logger.info(`Posição do motorista ${driverId} ajustada para ${newPosition} por admin ${adminId}`);
+    logWaitlistAdminAudit(req, 'waitlist.driver.position.update', {
+      type: 'driver',
+      id: driverId
+    }, {
+      cityKey,
+      waitListEntryId: waitListDoc.id,
+      previousPosition: currentPosition,
+      newPosition
+    });
 
     res.json({
       success: true,
@@ -894,12 +1286,12 @@ router.put('/api/waitlist/position', requireFirebase, requireAdmin, async (req, 
 });
 
 // GET /api/waitlist/stats - Estatísticas da wait list (admin)
-router.get('/api/waitlist/stats', requireFirebase, requireAdmin, async (req, res) => {
+router.get('/api/waitlist/stats', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     // Buscar configurações
     const configSnapshot = await admin.firestore().collection('systemConfig').doc('waitList').get();
     const config = configSnapshot.exists ? configSnapshot.data() : {
-      maxActiveDrivers: 100,
+      maxActiveDrivers: WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS,
       currentActiveDrivers: 0,
       waitListEnabled: true
     };
@@ -920,6 +1312,46 @@ router.get('/api/waitlist/stats', requireFirebase, requireAdmin, async (req, res
       .where('status', '==', 'rejected')
       .get();
 
+    const [pendingCitySnapshot, approvedCitySnapshot, rejectedCitySnapshot] = await Promise.all([
+      admin.firestore().collection('waitList').where('status', '==', 'pending').get(),
+      admin.firestore().collection('waitList').where('status', '==', 'approved').get(),
+      admin.firestore().collection('waitList').where('status', '==', 'rejected').get()
+    ]);
+
+    const cityStatsMap = {};
+    const addCityCounter = (docData, counterField) => {
+      const cityKey = docData.cityKey || 'unknown';
+      if (!cityStatsMap[cityKey]) {
+        cityStatsMap[cityKey] = {
+          cityKey,
+          cityLabel: docData.cityLabel || cityKey,
+          stateCode: docData.stateCode || 'NA',
+          pending: 0,
+          approved: 0,
+          rejected: 0
+        };
+      }
+      cityStatsMap[cityKey][counterField] += 1;
+    };
+
+    pendingCitySnapshot.docs.forEach((doc) => addCityCounter(doc.data(), 'pending'));
+    approvedCitySnapshot.docs.forEach((doc) => addCityCounter(doc.data(), 'approved'));
+    rejectedCitySnapshot.docs.forEach((doc) => addCityCounter(doc.data(), 'rejected'));
+
+    const cityActivationConfig = await loadCityActivationConfig();
+    const cityCapIndex = {};
+    const states = cityActivationConfig?.states || {};
+    Object.values(states).forEach((state) => {
+      Object.values(state?.cities || {}).forEach((city) => {
+        cityCapIndex[city.key] = {
+          maxActiveDrivers: Number(city.maxActiveDrivers || WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS),
+          waitlistEnabled: city.waitlistEnabled !== false,
+          active: city.active !== false,
+          stateEnabled: state.enabled !== false
+        };
+      });
+    });
+
     // Calcular tempo médio de espera
     const now = new Date();
     let totalWaitTime = 0;
@@ -937,6 +1369,24 @@ router.get('/api/waitlist/stats', requireFirebase, requireAdmin, async (req, res
     }
 
     const avgWaitTime = count > 0 ? totalWaitTime / count : 0;
+    const byCity = Object.values(cityStatsMap)
+      .map((cityItem) => {
+        const capData = cityCapIndex[cityItem.cityKey] || {
+          maxActiveDrivers: WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS,
+          waitlistEnabled: true,
+          active: true,
+          stateEnabled: true
+        };
+        return {
+          ...cityItem,
+          maxActiveDrivers: capData.maxActiveDrivers,
+          availableSlots: Math.max(0, capData.maxActiveDrivers - cityItem.approved),
+          waitlistEnabled: capData.waitlistEnabled,
+          cityActive: capData.active,
+          stateEnabled: capData.stateEnabled
+        };
+      })
+      .sort((a, b) => String(a.cityLabel || '').localeCompare(String(b.cityLabel || ''), 'pt-BR'));
 
     res.json({
       config,
@@ -947,7 +1397,8 @@ router.get('/api/waitlist/stats', requireFirebase, requireAdmin, async (req, res
         total: pendingSnapshot.size + approvedSnapshot.size + rejectedSnapshot.size,
         avgWaitTime: Math.round(avgWaitTime * 10) / 10, // 1 casa decimal
         availableSlots: config.maxActiveDrivers - config.currentActiveDrivers
-      }
+      },
+      byCity
     });
 
   } catch (error) {
@@ -962,7 +1413,7 @@ router.get('/api/waitlist/stats', requireFirebase, requireAdmin, async (req, res
  * GET /api/waitlist/landing/list - Listar todos os cadastros da waitlist (Dashboard)
  * Query params: page, limit, search, status
  */
-router.get('/api/waitlist/landing/list', requireFirebase, requireAdmin, async (req, res) => {
+router.get('/api/waitlist/landing/list', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
     const {
       page = 1,
@@ -1069,7 +1520,7 @@ router.get('/api/waitlist/landing/list', requireFirebase, requireAdmin, async (r
  * PATCH /api/waitlist/landing/:id/status - Atualizar status de um cadastro
  * Body: { status: 'pending' | 'contacted' | 'converted' }
  */
-router.patch('/api/waitlist/landing/:id/status', requireFirebase, requireAdmin, async (req, res) => {
+router.patch('/api/waitlist/landing/:id/status', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -1085,6 +1536,12 @@ router.patch('/api/waitlist/landing/:id/status', requireFirebase, requireAdmin, 
     });
 
     logger.info(`Status da waitlist atualizado: ${id} -> ${status}`);
+    logWaitlistAdminAudit(req, 'waitlist.landing.status.update', {
+      type: 'waitlist_landing',
+      id
+    }, {
+      status
+    });
 
     res.json({
       success: true,
@@ -1105,7 +1562,7 @@ router.patch('/api/waitlist/landing/:id/status', requireFirebase, requireAdmin, 
 /**
  * DELETE /api/waitlist/landing/:id - Remover cadastro da waitlist
  */
-router.delete('/api/waitlist/landing/:id', requireFirebase, requireAdmin, async (req, res) => {
+router.delete('/api/waitlist/landing/:id', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { id } = req.params;
     const firestore = admin.firestore();
@@ -1113,6 +1570,10 @@ router.delete('/api/waitlist/landing/:id', requireFirebase, requireAdmin, async 
     await firestore.collection('waitlist_landing').doc(id).delete();
 
     logger.info(`Cadastro removido da waitlist: ${id}`);
+    logWaitlistAdminAudit(req, 'waitlist.landing.delete', {
+      type: 'waitlist_landing',
+      id
+    });
 
     res.json({
       success: true,
@@ -1130,12 +1591,3 @@ router.delete('/api/waitlist/landing/:id', requireFirebase, requireAdmin, async 
 });
 
 module.exports = router;
-
-
-
-
-
-
-
-
-

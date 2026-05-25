@@ -1,0 +1,81 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "Abrir com \".*Leaf.*\"\\?"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+
+- extendedWaitUntil:
+    visible: ".*(Enter URL manually|No development servers found|http://.*:808[0-9]|This is the developer menu|Continue|Connected to:|Buscar|Ficar Online|Ficar online|Ficar Offline|Ficar offline|Ganhos do dia|META DIÁRIA|Ativação pendente|Onde vamos\\?|Para onde vamos\\?).*"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible: "Enter URL manually"
+    commands:
+      - runFlow:
+          when:
+            visible: "http://.*:808[0-9]"
+          commands:
+            - tapOn: "http://.*:808[0-9]"
+      - runFlow:
+          when:
+            visible: "Leaf"
+          commands:
+            - tapOn: "Leaf"
+
+- runFlow:
+    when:
+      visible: "No development servers found"
+    commands:
+      - tapOn: "Enter URL manually"
+      - tapOn:
+          point: "50%,32%"
+      - tapOn: "http://.*"
+      - eraseText
+      - inputText: "http://${MAESTRO_METRO_HOST}:${MAESTRO_METRO_PORT}"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, StyleSheet } from 'react-native';
-import { colors } from '../../common-local/theme';
-import { fonts } from '../../common-local/font';
+import { colors } from '../../theme/runtimeTokens';
+import { fonts } from '../../theme/runtimeTokens';
 
 export const Typography = ({
     variant = 'body',
@@ -79,3 +79,5 @@ const styles = StyleSheet.create({
         letterSpacing: -0.08,
     }
 });
+
+export default Typography;

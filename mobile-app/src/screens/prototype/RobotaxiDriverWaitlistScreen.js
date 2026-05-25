@@ -1,0 +1,392 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { fonts } from '../../theme/runtimeTokens';
+import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
+import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
+import {
+  PrototypeMenuCloseButton,
+  PrototypeMenuInfoRow,
+  PrototypeMenuSection,
+  PrototypeMenuStatRow,
+  PrototypeMenuSurface,
+} from '../../components/prototype/PrototypeMenuSurface';
+import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/prototype/LeafRideUI';
+import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
+import { isPilotFeatureEnabled } from '../../config/pilotLaunchProfile';
+import { createReferralInvite, loadMyReferralInvites } from '../../services/runtime/referralProgramService';
+import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../../services/runtime/driverWaitlistService';
+
+const SURFACE_TOP_PADDING = 16;
+const SURFACE_BOTTOM_PADDING = 18;
+const DRIVER_INVITE_BASE_URL = 'https://leaf.app.br/motorista/convite';
+
+function buildDriverInviteLink(code) {
+  const safeCode = String(code || '').trim();
+  return `${DRIVER_INVITE_BASE_URL}/${encodeURIComponent(safeCode || 'leaf')}`;
+}
+
+function resolveInviteTarget(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return {};
+  }
+  if (text.includes('@')) {
+    return { inviteeEmail: text };
+  }
+  return { inviteePhone: text.replace(/[^\d+]/g, '') || text };
+}
+
+function resolveWaitlistStatusLabel(status) {
+  const safeStatus = String(status || '').toLowerCase();
+  if (safeStatus === 'pending') return 'Na fila';
+  if (safeStatus === 'approved') return 'Aprovado';
+  if (safeStatus === 'rejected') return 'Revisar';
+  return 'Disponível';
+}
+
+export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const [panelHeight, setPanelHeight] = useState(windowHeight);
+  const [loading, setLoading] = useState(true);
+  const [waitlistStatus, setWaitlistStatus] = useState(null);
+  const [sentInvites, setSentInvites] = useState([]);
+  const [inviteTarget, setInviteTarget] = useState('');
+  const [city, setCity] = useState('Rio de Janeiro');
+  const [createdInvite, setCreatedInvite] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const referralProgramsEnabled = isPilotFeatureEnabled('referralProgramsEnabled', true);
+
+  usePrototypeMapOcclusion({
+    routeKey: route?.key,
+    layerId: route?.key || 'prototype-driver-waitlist',
+    occludedBottom: panelHeight,
+  });
+
+  const driverInvites = useMemo(
+    () => sentInvites.filter((invite) => String(invite.type || '').toLowerCase() === 'driver_referral'),
+    [sentInvites],
+  );
+  const latestInvite = createdInvite || driverInvites[0] || null;
+  const latestCode = latestInvite?.code || '';
+  const latestLink = useMemo(() => buildDriverInviteLink(latestCode), [latestCode]);
+  const statusLabel = resolveWaitlistStatusLabel(waitlistStatus?.waitListStatus);
+  const positionLabel = waitlistStatus?.position ? `#${waitlistStatus.position}` : '--';
+  const cityLabel =
+    waitlistStatus?.city?.cityLabel ||
+    waitlistStatus?.city?.cityKey ||
+    city ||
+    'Rio de Janeiro';
+  const shareMessage = useMemo(
+    () =>
+      `Dirija comigo na Leaf. Use o convite ${latestCode || ''} para entrar na lista: ${latestLink}`,
+    [latestCode, latestLink],
+  );
+
+  const handleDismiss = useCallback(() => {
+    if (navigation.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate('RobotaxiPrototype');
+  }, [navigation]);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [statusResult, invitesResult] = await Promise.all([
+        loadDriverWaitlistStatus().catch(() => null),
+        referralProgramsEnabled
+          ? loadMyReferralInvites().catch(() => ({ sent: [] }))
+          : Promise.resolve({ sent: [] }),
+      ]);
+      if (statusResult) {
+        setWaitlistStatus(statusResult);
+        setCity(statusResult?.city?.cityLabel || statusResult?.city?.cityKey || 'Rio de Janeiro');
+      }
+      setSentInvites(invitesResult?.sent || []);
+    } finally {
+      setLoading(false);
+    }
+  }, [referralProgramsEnabled]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handlePanelLayout = useCallback((event) => {
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+      setPanelHeight(nextHeight);
+    }
+  }, []);
+
+  const handleJoinWaitlist = useCallback(async () => {
+    setBusy(true);
+    try {
+      const result = await joinDriverWaitlist({ city });
+      setWaitlistStatus((current) => ({
+        ...(current || {}),
+        waitListStatus: 'pending',
+        position: result.position || current?.position || null,
+        estimatedWaitTime: result.estimatedWaitTime || current?.estimatedWaitTime || null,
+        city: result.city || current?.city || { cityLabel: city },
+      }));
+    } catch (error) {
+      Alert.alert('Waitlist', error?.message || 'Não foi possível entrar na fila agora.');
+    } finally {
+      setBusy(false);
+    }
+  }, [city]);
+
+  const handleCreateDriverInvite = useCallback(async () => {
+    const target = resolveInviteTarget(inviteTarget);
+    if (!referralProgramsEnabled) {
+      Alert.alert('Convites', 'Convites de motoristas ficam desativados durante o piloto controlado.');
+      return;
+    }
+    if (!target.inviteeEmail && !target.inviteePhone) {
+      Alert.alert('Convites', 'Informe telefone ou email do motorista convidado.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const result = await createReferralInvite({
+        type: 'driver',
+        ...target,
+      });
+      if (result.invite?.code) {
+        setCreatedInvite(result.invite);
+        setSentInvites((current) => [result.invite, ...current]);
+        setInviteTarget('');
+      }
+    } catch (error) {
+      Alert.alert('Convites', error?.message || 'Não foi possível criar o convite agora.');
+    } finally {
+      setBusy(false);
+    }
+  }, [inviteTarget, referralProgramsEnabled]);
+
+  const handleCopy = useCallback(async () => {
+    await Clipboard.setStringAsync(latestLink);
+    setCopied(true);
+  }, [latestLink]);
+
+  const handleShare = useCallback(async () => {
+    try {
+      await Share.share({ message: shareMessage, url: latestLink });
+    } catch (error) {
+      Alert.alert('Convites', error?.message || 'Não foi possível compartilhar agora.');
+    }
+  }, [latestLink, shareMessage]);
+
+  return (
+    <PrototypeScreenTransition>
+      <View style={styles.container} pointerEvents="box-none" testID="robotaxi-driver-waitlist-screen">
+        <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+        <PrototypeDismissibleSheet
+          onClose={handleDismiss}
+          backdropColor="transparent"
+          dragEnabled={false}
+          sheetStyle={styles.sheetWrap}
+        >
+          <PrototypeMenuSurface
+            onLayout={handlePanelLayout}
+            eyebrow="Motoristas"
+            title="Waitlist e convites"
+            subtitle="Acompanhe sua posição e convide motoristas para a próxima leva da Leaf."
+            fullScreen
+            style={{
+              paddingTop: insets.top + SURFACE_TOP_PADDING,
+              paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
+            }}
+            headerAccessory={(
+              <PrototypeMenuCloseButton
+                onPress={handleDismiss}
+                testID="robotaxi-driver-waitlist-close-button"
+                accessibilityLabel="robotaxi-driver-waitlist-close-button"
+              />
+            )}
+          >
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+              <PrototypeMenuStatRow
+                items={[
+                  { key: 'status', label: 'status', value: statusLabel, loading },
+                  { key: 'position', label: 'posição', value: positionLabel, loading },
+                  {
+                    key: 'invites',
+                    label: 'convites',
+                    value: referralProgramsEnabled ? String(driverInvites.length) : 'off',
+                    loading,
+                  },
+                ]}
+              />
+
+              <View style={styles.inputBlock}>
+                <Text style={styles.inputLabel}>Cidade de operação</Text>
+                <TextInput
+                  value={city}
+                  onChangeText={setCity}
+                  placeholder="Rio de Janeiro"
+                  placeholderTextColor="rgba(93,106,99,0.55)"
+                  style={styles.input}
+                  testID="robotaxi-driver-waitlist-city-input"
+                  accessibilityLabel="robotaxi-driver-waitlist-city-input"
+                />
+                <LeafButton
+                  label={busy ? 'Atualizando...' : 'Entrar na waitlist'}
+                  icon="hourglass-outline"
+                  tone="primary"
+                  onPress={handleJoinWaitlist}
+                  disabled={busy || waitlistStatus?.waitListStatus === 'pending'}
+                  style={styles.fullButton}
+                />
+              </View>
+
+              <PrototypeMenuSection title="Status da cidade">
+                <PrototypeMenuInfoRow label="Cidade" value={cityLabel} />
+                <PrototypeMenuInfoRow
+                  label="Motoristas na fila"
+                  value={String(waitlistStatus?.city?.pendingDrivers ?? '--')}
+                  loading={loading}
+                />
+                <PrototypeMenuInfoRow
+                  label="Ativos"
+                  value={String(waitlistStatus?.city?.approvedDrivers ?? waitlistStatus?.currentActiveDrivers ?? '--')}
+                  loading={loading}
+                  last
+                />
+              </PrototypeMenuSection>
+
+              {referralProgramsEnabled ? (
+                <View style={styles.inputBlock}>
+                  <Text style={styles.inputLabel}>Convidar motorista</Text>
+                  <TextInput
+                    value={inviteTarget}
+                    onChangeText={setInviteTarget}
+                    placeholder="Telefone ou email"
+                    placeholderTextColor="rgba(93,106,99,0.55)"
+                    style={styles.input}
+                    autoCapitalize="none"
+                    testID="robotaxi-driver-invite-target-input"
+                    accessibilityLabel="robotaxi-driver-invite-target-input"
+                  />
+                  <LeafButton
+                    label={busy ? 'Criando...' : 'Criar convite'}
+                    icon="person-add-outline"
+                    tone="leaf"
+                    onPress={handleCreateDriverInvite}
+                    disabled={busy}
+                    style={styles.fullButton}
+                  />
+                </View>
+              ) : (
+                <LeafEmptyState
+                  icon="people-outline"
+                  title="Convites fora do piloto"
+                  message="A waitlist segue ativa, mas convites de motoristas ficam bloqueados neste perfil de lançamento."
+                  testID="robotaxi-driver-invites-disabled-state"
+                />
+              )}
+
+              {referralProgramsEnabled && latestInvite ? (
+                <PrototypeMenuSection title="Último convite">
+                  <PrototypeMenuInfoRow label="Código" value={latestCode || 'Aguardando'} />
+                  <PrototypeMenuInfoRow label="Status" value={latestInvite.status || 'pending'} last />
+                  <View style={styles.actionGrid}>
+                    <LeafButton
+                      label={copied ? 'Copiado' : 'Copiar'}
+                      icon={copied ? 'checkmark-outline' : 'copy-outline'}
+                      tone="ghost"
+                      onPress={handleCopy}
+                      style={styles.actionButton}
+                    />
+                    <LeafButton
+                      label="Compartilhar"
+                      icon="share-outline"
+                      tone="ghost"
+                      onPress={handleShare}
+                      style={styles.actionButton}
+                    />
+                  </View>
+                </PrototypeMenuSection>
+              ) : referralProgramsEnabled ? (
+                <LeafEmptyState
+                  icon="car-outline"
+                  title="Convites de motorista"
+                  message="Crie convites para acompanhar quem entrou, quem qualificou e quando liberar recompensa."
+                  testID="robotaxi-driver-invites-empty-state"
+                />
+              ) : null}
+            </ScrollView>
+          </PrototypeMenuSurface>
+        </PrototypeDismissibleSheet>
+      </View>
+    </PrototypeScreenTransition>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  sheetWrap: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  content: {
+    paddingTop: 18,
+    paddingBottom: 30,
+    gap: 18,
+  },
+  inputBlock: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(221,232,225,0.85)',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  inputLabel: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  input: {
+    marginTop: 8,
+    minHeight: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E9E2D8',
+    paddingHorizontal: 13,
+    color: leafRideColors.text,
+    fontFamily: fonts.Medium,
+    fontSize: 14,
+  },
+  fullButton: {
+    marginTop: 12,
+  },
+  actionGrid: {
+    marginTop: 14,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionButton: {
+    flex: 1,
+  },
+});

@@ -17,7 +17,7 @@ fi
 # Configurações
 APP_USER="leaf"
 APP_DIR="/home/$APP_USER"
-PRIMARY_IP="216.238.107.59"  # Vultr como servidor principal
+PRIMARY_IP="147.182.204.181"  # Vultr como servidor principal
 
 echo "📦 Atualizando sistema..."
 apt update && apt upgrade -y
@@ -46,7 +46,7 @@ fi
 echo "🔴 Configurando Redis para fallback..."
 cat > /etc/redis/redis.conf << 'EOF'
 # Redis Configuration for Leaf App Fallback
-bind 216.238.107.59
+bind 147.182.204.181
 port 6379
 timeout 300
 tcp-keepalive 60
@@ -179,7 +179,7 @@ RATE_LIMIT_MAX=100
 
 # Fallback Configuration
 FALLBACK_MODE=true
-PRIMARY_SERVER=216.238.107.59
+PRIMARY_SERVER=147.182.204.181
 FAILOVER_ENABLED=true
 BACKUP_ONLY=true
 EOF
@@ -259,7 +259,7 @@ cat > /usr/local/bin/fallback-monitor.sh << 'EOF'
 # Monitoramento para servidor de fallback
 LOG_FILE="/var/log/leaf-app/fallback-monitor.log"
 ALERT_EMAIL="admin@leafapp.com"
-PRIMARY_IP="216.238.107.59"
+PRIMARY_IP="147.182.204.181"
 
 # Função de logging
 log_message() {
@@ -327,7 +327,7 @@ sleep 5
 cp /var/lib/redis/dump.rdb $BACKUP_DIR/redis-fallback-$DATE.rdb
 
 # Criar backup da aplicação
-tar -czf $BACKUP_DIR/app-fallback-$DATE.tar.gz /home/leaf/leaf-websocket-backend/
+tar -czf $BACKUP_DIR/app-fallback-$DATE.tar.gz /opt/leaf-app/
 
 # Limpar backups antigos (manter últimos 3 dias)
 find $BACKUP_DIR -name "*.rdb" -mtime +3 -delete

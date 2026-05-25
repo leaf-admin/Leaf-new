@@ -191,31 +191,30 @@ async function run() {
 
   const service = require(path.join(__dirname, '..', '..', 'services', 'daily-subscription-service'));
 
-  // Cenário 1: saldo insuficiente => grace period
+  // Cenário 1: cobrança diária acumula pendência para liquidar no saque
   const r1 = await service.processDailyCharge('driver_grace', fakeState.users.driver_grace);
-  assert(r1.success === false, 'Cenário 1 deveria falhar por saldo insuficiente');
+  assert(r1.success === true, 'Cenário 1 deveria processar com sucesso');
   const s1 = fakeState.subscriptions.driver_grace;
-  assert(s1.status === 'grace_period', 'Cenário 1 deveria entrar em grace_period');
+  assert(s1.status === 'active', 'Cenário 1 deveria manter assinatura ativa');
   assert((s1.pendingFeeCents || 0) > 0, 'Cenário 1 deveria acumular pendingFeeCents');
   assert(fakeState.users.driver_grace.billing_status === 'overdue', 'Cenário 1 deveria marcar billing_status=overdue');
 
-  // Cenário 2: grace expirado + novo débito insuficiente => bloqueado
+  // Cenário 2: estado legado grace_period expirado não bloqueia no novo modelo
   const r2 = await service.processDailyCharge('driver_block', fakeState.users.driver_block);
-  assert(r2.success === false, 'Cenário 2 deveria falhar por saldo insuficiente');
+  assert(r2.success === true, 'Cenário 2 deveria processar com sucesso');
   const s2 = fakeState.subscriptions.driver_block;
-  assert(s2.status === 'blocked', 'Cenário 2 deveria bloquear assinatura');
-  assert(fakeState.users.driver_block.billing_status === 'suspended', 'Cenário 2 deveria marcar billing_status=suspended');
-  assert(fakeState.users.driver_block.driverActiveStatus === false, 'Cenário 2 deveria forçar driverActiveStatus=false');
+  assert(s2.status === 'active', 'Cenário 2 deveria voltar para active (sem bloqueio automático)');
+  assert(fakeState.users.driver_block.billing_status === 'overdue', 'Cenário 2 deveria manter billing_status=overdue');
 
-  // Cenário 3: bloqueado com pendência + saldo suficiente => regulariza e ativa
+  // Cenário 3: status bloqueado legado permanece bloqueado até ação manual/admin
   const r3 = await service.processDailyCharge('driver_recover', fakeState.users.driver_recover);
   assert(r3.success === true, 'Cenário 3 deveria processar com sucesso');
   const s3 = fakeState.subscriptions.driver_recover;
-  assert(s3.status === 'active', 'Cenário 3 deveria voltar para active');
-  assert((s3.pendingFeeCents || 0) === 0, 'Cenário 3 deveria zerar pendingFeeCents');
-  assert(fakeState.users.driver_recover.billing_status === 'active', 'Cenário 3 deveria marcar billing_status=active');
+  assert(s3.status === 'blocked', 'Cenário 3 deveria manter status bloqueado');
+  assert((s3.pendingFeeCents || 0) > 0, 'Cenário 3 deveria manter/acumular pendingFeeCents');
+  assert(fakeState.users.driver_recover.billing_status === 'suspended', 'Cenário 3 deveria manter billing_status=suspended');
 
-  console.log('✅ TESTE OK: assinatura/grace/bloqueio/regularização validados com mock');
+  console.log('✅ TESTE OK: assinatura diária com cobrança no saque validada com mock');
   console.log(JSON.stringify({
     scenario1: { status: s1.status, pendingFeeCents: s1.pendingFeeCents, billing: fakeState.users.driver_grace.billing_status },
     scenario2: { status: s2.status, pendingFeeCents: s2.pendingFeeCents, billing: fakeState.users.driver_block.billing_status },

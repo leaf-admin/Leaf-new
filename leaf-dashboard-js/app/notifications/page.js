@@ -7,12 +7,39 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+
+function summarizeSendResponse(response) {
+  const data = response?.data || response || {};
+  const summary = data?.summary || response?.summary || {};
+  const sent = Number(summary.success ?? data.sent ?? data.successful ?? response?.sent ?? response?.successful ?? 0);
+  const failed = Number(summary.failed ?? data.failed ?? response?.failed ?? 0);
+  const target = Number(data.sentTo ?? summary.total ?? data.total ?? response?.total ?? sent + failed);
+
+  return {
+    sent,
+    failed,
+    target,
+    filteredOutByType: Number(data.filteredOutByType || 0),
+    filteredOutByRule: Number(data.filteredOutByRule || 0),
+  };
+}
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState(null);
   const [stats, setStats] = useState(null);
   const [error, setError] = useState("");
+  const [sendStatus, setSendStatus] = useState("");
   const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [toDrivers, setToDrivers] = useState(true);
+  const [toPassengers, setToPassengers] = useState(true);
+  const [registeredWithinHours, setRegisteredWithinHours] = useState("");
+  const [registeredWithinDays, setRegisteredWithinDays] = useState("");
+  const [registeredMoreThanMonths, setRegisteredMoreThanMonths] = useState("");
+  const [endpointFilter, setEndpointFilter] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -50,13 +77,76 @@ export default function NotificationsPage() {
     return Number(((ok / total) * 100).toFixed(1));
   }, [stats]);
 
-  const endpoints = notifications?.data?.endpoints || {};
+  const endpoints = useMemo(() => notifications?.data?.endpoints || {}, [notifications]);
+  const endpointEntries = useMemo(() => {
+    const term = endpointFilter.trim().toLowerCase();
+    const entries = Object.entries(endpoints);
+    if (!term) return entries;
+    return entries.filter(([name, value]) =>
+      `${name} ${String(value || "")}`.toLowerCase().includes(term),
+    );
+  }, [endpoints, endpointFilter]);
+
+  const sendNotification = async () => {
+    if (!title.trim() || !body.trim()) {
+      setSendStatus("");
+      setError("Informe título e mensagem");
+      return;
+    }
+
+    const userTypes = [];
+    if (toDrivers) userTypes.push("driver");
+    if (toPassengers) userTypes.push("customer");
+    if (userTypes.length === 0) {
+      setSendStatus("");
+      setError("Selecione pelo menos um público");
+      return;
+    }
+
+    const filters = {};
+    if (registeredWithinHours) filters.registeredWithinHours = Number(registeredWithinHours);
+    if (registeredWithinDays) filters.registeredWithinDays = Number(registeredWithinDays);
+    if (registeredMoreThanMonths) filters.registeredMoreThanMonths = Number(registeredMoreThanMonths);
+
+    try {
+      setSending(true);
+      setError("");
+      setSendStatus("");
+
+      const response = await leafAPI.sendPushNotification({
+        title: title.trim(),
+        body: body.trim(),
+        userTypes,
+        filters,
+        data: {
+          source: "dashboard_notifications",
+          sentAt: new Date().toISOString(),
+        },
+      });
+      const result = summarizeSendResponse(response);
+
+      setSendStatus(
+        `Envio concluído: ${result.sent} enviados de ${result.target} alvo(s)` +
+        `${result.failed ? `, ${result.failed} falhas` : ""}` +
+        `${result.filteredOutByType || result.filteredOutByRule
+          ? `, ${result.filteredOutByType + result.filteredOutByRule} filtrados`
+          : ""}`
+      );
+    } catch (err) {
+      setError(err?.message || "Falha ao enviar notificação");
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
-          <h1>Notificacoes</h1>
+          <div>
+            <h1>Notificações</h1>
+            <p>Envio segmentado, saúde de entrega e canais configurados.</p>
+          </div>
         </header>
         <AppNav />
         {loading ? <LoadingState message="Carregando notificacoes..." /> : null}
@@ -73,54 +163,124 @@ export default function NotificationsPage() {
         </section>
 
         <section className="grid">
-          <Panel title="Estatisticas do servico">
-            <table className="table">
-              <tbody>
-                <tr>
-                  <td>Total enviadas</td>
-                  <td>{stats?.totalSent || 0}</td>
-                </tr>
-                <tr>
-                  <td>Sucesso</td>
-                  <td>{stats?.successful || 0}</td>
-                </tr>
-                <tr>
-                  <td>Falhas</td>
-                  <td>{stats?.failed || 0}</td>
-                </tr>
-                <tr>
-                  <td>Taxa de sucesso</td>
-                  <td>{successRate}%</td>
-                </tr>
-              </tbody>
-            </table>
+          <Panel title="Enviar notificação" subtitle="Mensagem curta com segmentação por perfil e janela de cadastro.">
+            <div className="form-grid">
+              <label className="form-field">
+                Título
+                <input
+                  placeholder="Título"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </label>
+              <label className="form-field">
+                Mensagem
+                <input
+                  placeholder="Mensagem"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                />
+              </label>
+              <label className="form-field form-field-checkbox">
+                Drivers
+                <input type="checkbox" checked={toDrivers} onChange={(e) => setToDrivers(e.target.checked)} />
+              </label>
+              <label className="form-field form-field-checkbox">
+                Passageiros
+                <input type="checkbox" checked={toPassengers} onChange={(e) => setToPassengers(e.target.checked)} />
+              </label>
+              <label className="form-field">
+                Últimas horas
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Ex.: 24"
+                  value={registeredWithinHours}
+                  onChange={(e) => setRegisteredWithinHours(e.target.value)}
+                />
+              </label>
+              <label className="form-field">
+                Últimos dias
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Ex.: 7"
+                  value={registeredWithinDays}
+                  onChange={(e) => setRegisteredWithinDays(e.target.value)}
+                />
+              </label>
+              <label className="form-field">
+                Mais de X meses
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Ex.: 3"
+                  value={registeredMoreThanMonths}
+                  onChange={(e) => setRegisteredMoreThanMonths(e.target.value)}
+                />
+              </label>
+              <button onClick={sendNotification} disabled={sending}>
+                {sending ? "Enviando..." : "Enviar"}
+              </button>
+            </div>
+            {sendStatus ? <p className="status-ok">{sendStatus}</p> : null}
           </Panel>
 
           <Panel title="Endpoints disponiveis">
-            {Object.keys(endpoints).length === 0 ? (
+            <div className="filters">
+              <input
+                placeholder="Filtrar endpoint/canal"
+                value={endpointFilter}
+                onChange={(e) => setEndpointFilter(e.target.value)}
+              />
+            </div>
+            {endpointEntries.length === 0 ? (
               <p className="text-muted">Nenhum endpoint informado pelo backend.</p>
             ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Canal</th>
-                    <th>Endpoint</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(endpoints).map(([name, value]) => (
-                    <tr key={name}>
-                      <td>{name}</td>
-                      <td><code>{String(value)}</code></td>
+              <div className="table-shell">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Canal</th>
+                      <th>Endpoint</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {endpointEntries.map(([name, value]) => (
+                      <tr key={name}>
+                        <td>{name}</td>
+                        <td><code>{String(value)}</code></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Panel>
 
-          <Panel title="Payload bruto">
-            <pre>{JSON.stringify({ stats, notifications }, null, 2)}</pre>
+          <Panel title="Saúde de entregas">
+            <KeyValueGrid
+              data={{
+                totalSent: stats?.totalSent || 0,
+                successful: stats?.successful || 0,
+                failed: stats?.failed || 0,
+                successRate: `${successRate}%`,
+                endpointsConfigured: Object.keys(endpoints).length,
+                queues: notifications?.data?.queues || notifications?.queues || "-",
+              }}
+              labels={{
+                totalSent: "Envios totais",
+                successful: "Envios com sucesso",
+                failed: "Falhas",
+                successRate: "Taxa de sucesso",
+                endpointsConfigured: "Canais configurados",
+                queues: "Filas de envio",
+              }}
+            />
+            <TechnicalDetails
+              title="Ver payload técnico de notificações"
+              data={{ stats, notifications }}
+            />
           </Panel>
         </section>
         <ErrorText message={error} />

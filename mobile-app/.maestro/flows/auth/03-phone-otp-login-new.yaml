@@ -1,0 +1,67 @@
+appId: br.com.leaf.ride
+env:
+  TEST_PHONE: "21102938475"
+  TEST_OTP: "992111"
+---
+- launchApp:
+    clearState: true
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "DEVELOPMENT SERVERS"
+    commands:
+      - tapOn: "http://localhost:8081"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 20000
+
+- tapOn:
+    id: "auth-phone-input"
+- eraseText
+- inputText: ${TEST_PHONE}
+- pressKey: Enter
+
+- extendedWaitUntil:
+    visible: "Verificação"
+    timeout: 20000
+
+- inputText: ${TEST_OTP}
+
+- extendedWaitUntil:
+    notVisible: "Verificação"
+    timeout: 25000
+
+- takeScreenshot: "auth-login-success"

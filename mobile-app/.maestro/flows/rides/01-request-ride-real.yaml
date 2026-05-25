@@ -1,114 +1,143 @@
-# Teste Real: Solicitar Corrida Completa
-# Baseado na NewMapScreen.js
+# Teste Real: Solicitar Corrida Completa (estado resiliente)
 appId: br.com.leaf.ride
 ---
-# Assumindo que ja esta logado como customer
-- launchApp
-- takeScreenshot: "01-app-opened"
+- assertNotVisible:
+    id: "auth-phone-input"
 
-# Aguardar mapa carregar
-- waitForAnimationToEnd
-- takeScreenshot: "02-map-loaded"
+# Limpeza leve de overlays que bloqueiam a interação com home
+- runFlow:
+    when:
+      notVisible:
+        id: "passenger-home-destination-input"
+    commands:
+      - runFlow:
+          when:
+            visible: "Avalie a viagem"
+          commands:
+            - pressKey: Back
+            - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible: "Suporte"
+          commands:
+            - pressKey: Back
+            - waitForAnimationToEnd
+      - runFlow:
+          when:
+            notVisible: "Para onde vamos\\?"
+          commands:
+            - tapOn:
+                point: "50%,93%"
+            - waitForAnimationToEnd
 
-# Procurar campo de origem (varias variantes de UI)
+# Caminho principal: iniciar da home
 - runFlow:
     when:
-      visible: "Origem"
+      visible:
+        id: "passenger-home-destination-input"
     commands:
-      - tapOn: "Origem"
-      - takeScreenshot: "03-origin-tapped-origem"
-- runFlow:
-    when:
-      visible: "De onde"
-    commands:
-      - tapOn: "De onde"
-      - takeScreenshot: "03-origin-tapped-de-onde"
-- runFlow:
-    when:
-      visible: "Onde você está?"
-    commands:
-      - tapOn: "Onde você está?"
-      - takeScreenshot: "03-origin-tapped"
+      - takeScreenshot: "01-home-ready"
+      - tapOn:
+          id: "passenger-home-destination-input"
+      - extendedWaitUntil:
+          visible:
+            id: "passenger-destination-search-input"
+          timeout: 45000
+      - takeScreenshot: "02-destination-sheet-open"
 
-# Preencher origem
-- inputText: "Avenida Paulista, 1000, Sao Paulo"
-- waitForAnimationToEnd
-- takeScreenshot: "04-origin-entered"
+      - tapOn:
+          id: "passenger-destination-search-input"
+      - eraseText
+      - inputText: "Copacabana Palace"
+      - waitForAnimationToEnd
+      - takeScreenshot: "03-destination-typed"
 
-# Selecionar primeira sugestao (se aparecer)
-- runFlow:
-    when:
-      visible: "Avenida Paulista"
-    commands:
-      - tapOn: "Avenida Paulista"
-      - takeScreenshot: "05-origin-selected"
+      - runFlow:
+          when:
+            visible:
+              id: "passenger-destination-result-0"
+          commands:
+            - tapOn:
+                id: "passenger-destination-result-0"
+      - tapOn:
+          point: "50%,47%"
+          optional: true
 
-# Procurar campo de destino (varias variantes de UI)
-- runFlow:
-    when:
-      visible: "Destino"
-    commands:
-      - tapOn: "Destino"
-      - takeScreenshot: "06-destination-tapped-destino"
-- runFlow:
-    when:
-      visible: "Para onde"
-    commands:
-      - tapOn: "Para onde"
-      - takeScreenshot: "06-destination-tapped-para-onde"
-- runFlow:
-    when:
-      visible: "Para onde você vai?"
-    commands:
-      - tapOn: "Para onde você vai?"
-      - takeScreenshot: "06-destination-tapped"
+      - extendedWaitUntil:
+          visible:
+            id: "passenger-destination-confirm-button"
+          timeout: 45000
+      - tapOn:
+          id: "passenger-destination-confirm-button"
+      - waitForAnimationToEnd
+      - takeScreenshot: "04-booking-request-submitted"
 
-# Preencher destino
-- inputText: "Rua das Flores, 123, Sao Paulo"
-- waitForAnimationToEnd
-- takeScreenshot: "07-destination-entered"
-
-# Selecionar primeira sugestao (se aparecer)
+# Caminho alternativo (UI atual): busca por destino via campo textual
 - runFlow:
     when:
-      visible: "Rua das Flores"
+      visible: "Para onde vamos\\?"
     commands:
-      - tapOn: "Rua das Flores"
-      - takeScreenshot: "08-destination-selected"
+      - takeScreenshot: "01-home-ready"
+      - tapOn: "Para onde vamos?"
+      - extendedWaitUntil:
+          visible: "Para onde você quer ir\\?"
+          timeout: 45000
+      - takeScreenshot: "02-destination-sheet-open"
+      - tapOn: "Para onde você quer ir?"
+      - eraseText
+      - inputText: "Copacabana Palace"
+      - waitForAnimationToEnd
+      - takeScreenshot: "03-destination-typed"
+      - tapOn:
+          point: "50%,73%"
+      - waitForAnimationToEnd
+      - takeScreenshot: "04-booking-request-submitted"
 
-# Aguardar calculo de preco
-- waitForAnimationToEnd
-- takeScreenshot: "09-estimate-calculating"
-
-# Procurar botao de solicitar/agendar (varias variantes de UI)
+# Caminho alternativo: já iniciou no card de confirmação da corrida
 - runFlow:
     when:
-      visible: "Agendar Agora"
+      visible: "Confirme sua viagem"
     commands:
-      - takeScreenshot: "10-booking-button-agendar"
-      - tapOn: "Agendar Agora"
-- runFlow:
-    when:
-      visible: "Solicitar Corrida"
-    commands:
-      - takeScreenshot: "10-booking-button-solicitar"
-      - tapOn: "Solicitar Corrida"
-- runFlow:
-    when:
-      visible: "Pedir Agora"
-    commands:
-      - takeScreenshot: "10-booking-button-pedir"
-      - tapOn: "Pedir Agora"
-- runFlow:
-    when:
-      visible: "Confirmar"
-    commands:
-      - takeScreenshot: "10-booking-button-confirmar"
-      - tapOn: "Confirmar"
+      - takeScreenshot: "04-booking-request-existing-state"
 
-# Aguardar processamento
-- waitForAnimationToEnd
-- takeScreenshot: "11-ride-requested"
+- runFlow:
+    when:
+      visible:
+        id: "payment-modal-confirmed"
+    commands:
+      - takeScreenshot: "05-payment-confirmed"
 
-# Captura estado final (mensagem pode variar por build)
-- takeScreenshot: "12-driver-search"
+- runFlow:
+    when:
+      visible: "Realize seu pagamento"
+    commands:
+      - takeScreenshot: "05-payment-required"
+
+- runFlow:
+    when:
+      visible: "Gerando cobrança PIX..."
+    commands:
+      - takeScreenshot: "05-payment-generating"
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-driver-search-elapsed"
+    commands:
+      - takeScreenshot: "06-driver-search"
+
+- runFlow:
+    when:
+      visible: "Região indisponível"
+    commands:
+      - takeScreenshot: "05-region-unavailable"
+
+- runFlow:
+    when:
+      visible: "Regiao indisponivel"
+    commands:
+      - takeScreenshot: "05-region-unavailable-no-accent"
+
+- assertVisible: ".*(Procurando motorista|Procurando motoristas|Realize seu pagamento|Gerando cobrança PIX...|Categoria indisponível|Categoria indisponivel|Nao há motoristas disponíveis|Não há motoristas disponíveis|Nao ha motoristas disponiveis|Indisponível|Destino fora da area de cobertura da Leaf|Confirme sua viagem).*"
+
+- assertNotVisible: "Origem e destino inconsistentes para a área de operação da Leaf"

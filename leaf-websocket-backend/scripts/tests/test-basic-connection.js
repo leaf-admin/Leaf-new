@@ -6,7 +6,11 @@ const io = require('socket.io-client');
 
 console.log('🧪 TESTE BÁSICO - APENAS CONECTAR E VER EVENTOS');
 
-const socket = io('http://localhost:3001');
+// O backend roda websocket-only em produção por padrão.
+// Forçamos websocket para evitar erro "Transport unknown" via polling.
+const socket = io('http://127.0.0.1:3001', {
+    transports: ['websocket']
+});
 
 socket.on('connect', () => {
     console.log('✅ Conectado:', socket.id);
@@ -34,7 +38,6 @@ setTimeout(() => {
     console.log('⏰ Timeout');
     process.exit(1);
 }, 10000);
-
 
 
 

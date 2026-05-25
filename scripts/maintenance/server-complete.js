@@ -11,9 +11,13 @@ const server = http.createServer(app);
 
 // Configurações
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'leaf-secret-key-vps';
-const REDIS_HOST = process.env.REDIS_HOST || '216.238.107.59';
+const JWT_SECRET = process.env.JWT_SECRET;
+const REDIS_HOST = process.env.REDIS_HOST || '147.182.204.181';
 const REDIS_PORT = process.env.REDIS_PORT || 6379;
+
+if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET é obrigatório para iniciar server-complete.js');
+}
 
 // Middleware de segurança
 app.use(helmet());
@@ -498,9 +502,9 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
     console.log('🚀 Servidor Leaf WebSocket rodando na porta ' + PORT);
-    console.log('🔌 WebSocket: ws://216.238.107.59:' + PORT);
-    console.log('📊 APIs: http://216.238.107.59:' + PORT + '/api');
-    console.log('❤️ Health: http://216.238.107.59:' + PORT + '/health');
+    console.log('🔌 WebSocket: ws://147.182.204.181:' + PORT);
+    console.log('📊 APIs: http://147.182.204.181:' + PORT + '/api');
+    console.log('❤️ Health: http://147.182.204.181:' + PORT + '/health');
     
     // Inicializar monitoramento (se disponível)
     if (latencyMonitor) {
@@ -566,7 +570,6 @@ process.on('SIGTERM', () => {
         process.exit(0);
     });
 });
-
 
 
 

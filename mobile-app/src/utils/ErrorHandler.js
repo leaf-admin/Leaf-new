@@ -2,6 +2,7 @@ import Logger from './Logger';
 // ErrorHandler.js - Sistema centralizado de tratamento de erros
 import { Alert } from 'react-native';
 import languageManager from '../locales';
+import { toUserFriendlyMessage } from './friendlyErrorMessages';
 
 
 // Tipos de erro
@@ -110,8 +111,11 @@ class ErrorHandler {
       messageKey = ERROR_MESSAGES[errorInfo.code];
     }
     
-    // Usar languageManager para traduzir
-    return languageManager.t(messageKey);
+    // Usar languageManager como fallback, mas priorizar normalizacao amigavel.
+    return toUserFriendlyMessage(errorInfo?.originalError || errorInfo?.message, {
+      context: (errorInfo?.type || '').toLowerCase(),
+      fallbackMessage: languageManager.t(messageKey)
+    });
   }
 
   // Registrar erro no log

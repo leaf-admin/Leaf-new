@@ -1,0 +1,172 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+# Dismiss defensivo do Dev Menu (quando aparece sem árvore de acessibilidade)
+- tapOn:
+    point: "84%,58%"
+- tapOn:
+    point: "50%,87%"
+
+- runFlow:
+    when:
+      visible: 'Abrir com ".*Leaf.*"\?'
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: 'Open with ".*Leaf.*"\?'
+    commands:
+      - tapOn: "Open"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- waitForAnimationToEnd
+
+- takeScreenshot: "e2e-passenger-02-home-ready"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Para onde vamos?"
+    commands:
+      - tapOn: "Para onde vamos?"
+
+- runFlow:
+    when:
+      visible: "Para onde vamos?"
+    commands:
+      - tapOn:
+          point: "30%,80%"
+
+- waitForAnimationToEnd
+
+- takeScreenshot: "e2e-passenger-03-destination-input"
+
+- runFlow:
+    when:
+      visible: "Para onde você quer ir?"
+    commands:
+      - tapOn: "Para onde você quer ir?"
+
+- runFlow:
+    when:
+      visible: "Buscar destino"
+    commands:
+      - tapOn: "Buscar destino"
+
+- runFlow:
+    when:
+      visible: "Destinos recentes"
+    commands:
+      - tapOn:
+          point: "50%,24%"
+
+- runFlow:
+    when:
+      visible: "Para onde vamos?"
+    commands:
+      - tapOn: "Para onde vamos?"
+- tapOn:
+    point: "26%,80%"
+- tapOn:
+    point: "26%,80%"
+- eraseText
+- inputText: "Copacabana Palace"
+
+- tapOn:
+    point: "35%,58%"
+- waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: ".*(Copacabana|Av\\. Atlântica|Avenida Atlantica|Rio de Janeiro).*"
+    commands:
+      - tapOn: ".*(Copacabana|Av\\. Atlântica|Avenida Atlantica|Rio de Janeiro).*"
+
+- runFlow:
+    when:
+      visible: "Nomade"
+    commands:
+      - tapOn: "Nomade"
+
+- runFlow:
+    when:
+      visible: 'Abrir com ".*Leaf.*"\?'
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: 'Open with ".*Leaf.*"\?'
+    commands:
+      - tapOn: "Open"
+
+- extendedWaitUntil:
+    visible: "Confirme sua viagem"
+    timeout: 30000
+
+- takeScreenshot: "e2e-passenger-04-quote"
+
+- runFlow:
+    when:
+      visible: "Solicitar .*"
+    commands:
+      - tapOn: "Solicitar .*"
+
+- runFlow:
+    when:
+      visible: "Confirme sua viagem"
+    commands:
+      - tapOn:
+          point: "50%,93%"
+
+- extendedWaitUntil:
+    visible: ".*(Realize seu pagamento|Pagamento PIX|Gerando cobrança PIX...|Gerando cobrança PIX).*"
+    timeout: 45000
+
+- takeScreenshot: "e2e-passenger-05-pix-modal"
+
+- extendedWaitUntil:
+    visible: ".*(Pagamento confirmado!|Procurando motorista|Corrida criada com sucesso|Continuar para busca).*"
+    timeout: 240000
+
+- runFlow:
+    when:
+      visible: "Continuar para busca"
+    commands:
+      - tapOn: "Continuar para busca"
+
+- extendedWaitUntil:
+    visible: "Procurando motorista"
+    timeout: 60000
+
+- takeScreenshot: "e2e-passenger-06-searching-driver"

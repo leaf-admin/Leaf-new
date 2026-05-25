@@ -55,7 +55,7 @@ export const acceptTask = (task) => (dispatch) => {
     singleBookingRef(task.id).transaction((booking) => {
       let fleetCommission_fee= profile?.fleetadmin ? ((parseFloat(booking?.estimate) - parseFloat(booking?.convenience_fees)) * parseFloat(booking?.fleet_admin_comission) / 100).toFixed(2):0;
       
-      // Nova estrutura de cobrança operacional baseada no valor da corrida (3 faixas)
+      // Nova estrutura de cobrança operacional baseada no valor da corrida
       const rideValue = parseFloat(booking?.estimate);
       let operationalFee = 0;
       
@@ -63,8 +63,10 @@ export const acceptTask = (task) => (dispatch) => {
         operationalFee = 0.79; // Corridas até R$ 10,00
       } else if (rideValue <= 25.00) {
         operationalFee = 0.99; // Corridas acima de R$ 10,00 e abaixo de R$ 25,00
+      } else if (rideValue <= 50.00) {
+        operationalFee = 1.49; // Corridas acima de R$ 25,00 até R$ 50,00
       } else {
-        operationalFee = 1.49; // Corridas acima de R$ 25,00
+        operationalFee = rideValue * 0.03; // Corridas acima de R$ 50,00
       }
       
       // Taxa Woovi: 0,8% com mínimo de R$ 0,50

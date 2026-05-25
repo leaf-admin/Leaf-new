@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "title": "Leaf Master Validation Manifest",
+  "defaults": {
+    "screenshotDelaySec": 15,
+    "evidenceRule": "UI requires screenshot or video; business rule requires backend or persistence evidence; result must be pass, fail or blocked.",
+    "executionRule": "Frontend drives navigation and state. Do not force happy path through backend-only shortcuts."
+  },
+  "waves": [
+    {
+      "id": "wave0",
+      "title": "Preparação e Controle de Estado",
+      "priority": "P0",
+      "runner": "scripts/validation/run-wave0-preflight.sh",
+      "scenarios": [
+        { "id": "W0-001", "title": "Preflight de ambiente: API, websocket, key, simuladores", "mode": "automated", "priority": "P0" },
+        { "id": "W0-002", "title": "Garantia de usuários canônicos de teste", "mode": "automated", "priority": "P0" },
+        { "id": "W0-003", "title": "Smoke de dispatch readiness e booking básico", "mode": "automated", "priority": "P0" },
+        { "id": "W0-004", "title": "Autenticação do dashboard admin", "mode": "mixed", "priority": "P0" }
+      ]
+    },
+    {
+      "id": "wave1",
+      "title": "Cadastro, OTP, Onboarding, Documentos e KYC",
+      "priority": "P0",
+      "scenarios": [
+        { "id": "W1-REG-001", "title": "Cadastro de novo usuário", "mode": "manual", "priority": "P0" },
+        { "id": "W1-REG-002", "title": "Usuário existente, OTP inválido, expirado e reutilizado", "mode": "manual", "priority": "P0" },
+        { "id": "W1-REG-003", "title": "Persistência e recovery do onboarding", "mode": "manual", "priority": "P0" },
+        { "id": "W1-DOC-001", "title": "Upload e leitura de CNH", "mode": "mixed", "priority": "P0" },
+        { "id": "W1-DOC-002", "title": "Upload e leitura de CRLV e PDF", "mode": "mixed", "priority": "P0" },
+        { "id": "W1-DOC-003", "title": "Extração OCR, normalização e rejeição explícita", "mode": "mixed", "priority": "P0" },
+        { "id": "W1-KYC-001", "title": "KYC happy path com aprovação", "mode": "mixed", "priority": "P0" },
+        { "id": "W1-KYC-002", "title": "Mismatch, expirado, manual review e retry", "mode": "mixed", "priority": "P0" },
+        { "id": "W1-KYC-003", "title": "KYC realmente governa ativação e online", "mode": "mixed", "priority": "P0" }
+      ]
+    },
+    {
+      "id": "wave2",
+      "title": "Ativação do Motorista, Geofence e Elegibilidade",
+      "priority": "P0",
+      "scenarios": [
+        { "id": "W2-ACT-001", "title": "Ativação e bloqueio por aprovação ou KYC", "mode": "manual", "priority": "P0" },
+        { "id": "W2-ACT-002", "title": "Online offline rápido e recovery após relaunch", "mode": "mixed", "priority": "P0" },
+        { "id": "W2-GEO-001", "title": "Elegibilidade dentro e fora do geofence", "mode": "mixed", "priority": "P0" },
+        { "id": "W2-GEO-002", "title": "Borda de geofence e pós-corrida em outra área", "mode": "mixed", "priority": "P0" },
+        { "id": "W2-GEO-003", "title": "Quote do passageiro respeita disponibilidade regional por categoria", "mode": "manual", "priority": "P0" }
+      ]
+    },
+    {
+      "id": "wave3",
+      "title": "Corrida Ideal de Ponta a Ponta",
+      "priority": "P0",
+      "runner": "scripts/validation/run-wave3-ideal.sh",
+      "scenarios": [
+        { "id": "W3-001", "title": "Motorista online e elegível", "mode": "automated", "priority": "P0" },
+        { "id": "W3-002", "title": "Passageiro abre quote e paga via mock", "mode": "mixed", "priority": "P0" },
+        { "id": "W3-003", "title": "Booking nasce com snapshot financeiro fixo", "mode": "automated", "priority": "P0" },
+        { "id": "W3-004", "title": "Driver offer, aceite, chegada, início e conclusão", "mode": "mixed", "priority": "P0" },
+        { "id": "W3-005", "title": "Receipt, rating e persistência final", "mode": "mixed", "priority": "P0" }
+      ]
+    },
+    {
+      "id": "wave4",
+      "title": "Exceções do Lifecycle",
+      "priority": "P0",
+      "scenarios": [
+        { "id": "W4-CONN-001", "title": "Perda de conexão do passageiro em quote, search, accepted e started", "mode": "manual", "priority": "P0" },
+        { "id": "W4-CONN-002", "title": "Perda de conexão do motorista antes e durante a corrida", "mode": "manual", "priority": "P0" },
+        { "id": "W4-CONN-003", "title": "Relaunch dos dois lados em estados críticos", "mode": "mixed", "priority": "P0" },
+        { "id": "W4-DISP-001", "title": "Ignore, rejeição uma vez, rejeição duas vezes e reoferta", "mode": "mixed", "priority": "P0" },
+        { "id": "W4-DISP-002", "title": "Busca aberta com chegada tardia de motorista elegível", "mode": "mixed", "priority": "P0" },
+        { "id": "W4-OPS-001", "title": "Cancelamentos e interrupção operacional", "mode": "mixed", "priority": "P0" },
+        { "id": "W4-OPS-002", "title": "Reassignment, término antecipado e extensão de destino", "mode": "mixed", "priority": "P0" }
+      ]
+    },
+    {
+      "id": "wave5",
+      "title": "Passageiro, Motorista, Menus, Avaliações e Utilidades",
+      "priority": "P1",
+      "scenarios": [
+        { "id": "W5-PAX-001", "title": "Passageiro: home, quote, payment, search, trip, receipt, rating", "mode": "manual", "priority": "P1" },
+        { "id": "W5-DRV-001", "title": "Motorista: home, online, activation, offer, trip, ganhos", "mode": "manual", "priority": "P1" },
+        { "id": "W5-MENU-001", "title": "Menus e submenus dos dois lados", "mode": "manual", "priority": "P1" },
+        { "id": "W5-RATE-001", "title": "Rating único, complaint path e reflexo no backend", "mode": "mixed", "priority": "P1" },
+        { "id": "W5-UTIL-001", "title": "Suporte, chat e histórico", "mode": "manual", "priority": "P1" }
+      ]
+    },
+    {
+      "id": "wave6",
+      "title": "Convites, Saque, Taxa Diária e Soft Ban",
+      "priority": "P0",
+      "scenarios": [
+        { "id": "W6-INV-001", "title": "Convites para motoristas e atribuição", "mode": "mixed", "priority": "P1" },
+        { "id": "W6-WD-001", "title": "Saque: saldo, limite, falha, duplicidade e sucesso", "mode": "mixed", "priority": "P0" },
+        { "id": "W6-FEE-001", "title": "Débito da taxa diária após grace period", "mode": "mixed", "priority": "P0" },
+        { "id": "W6-BAN-001", "title": "Soft ban por avaliação negativa recorrente", "mode": "mixed", "priority": "P1" }
+      ]
+    },
+    {
+      "id": "wave7",
+      "title": "Dashboard Admin e Observabilidade",
+      "priority": "P1",
+      "scenarios": [
+        { "id": "W7-001", "title": "Login, RBAC e dashboard principal", "mode": "mixed", "priority": "P1" },
+        { "id": "W7-002", "title": "Usuários, motoristas, suporte, notificações e mapas", "mode": "manual", "priority": "P1" },
+        { "id": "W7-003", "title": "Subscriptions, programs, reports e métricas ao vivo", "mode": "manual", "priority": "P1" },
+        { "id": "W7-004", "title": "Ações administrativas com trilha e consistência", "mode": "mixed", "priority": "P1" }
+      ]
+    },
+    {
+      "id": "wave8",
+      "title": "Auditoria de Design, Zoom, Motion, Timeout e Abusos",
+      "priority": "P1",
+      "scenarios": [
+        { "id": "W8-ZOOM-001", "title": "Zoom behavior do passageiro em home, quote, searching, a caminho e em viagem", "mode": "manual", "priority": "P1" },
+        { "id": "W8-ZOOM-002", "title": "Zoom behavior do motorista em home, offer e corrida ativa", "mode": "manual", "priority": "P1" },
+        { "id": "W8-UX-001", "title": "Design, tipografia, contraste e motion", "mode": "manual", "priority": "P1" },
+        { "id": "W8-TIME-001", "title": "Timeout visual versus timeout real", "mode": "mixed", "priority": "P1" },
+        { "id": "W8-ABUSE-001", "title": "Proteção contra taps, requests e eventos duplicados", "mode": "mixed", "priority": "P0" }
+      ]
+    }
+  ]
+}

@@ -54,7 +54,7 @@ for device in $(adb devices | grep -v "List" | grep -v "daemon" | awk '{print $1
         kill $LOG_PID 2>/dev/null
         
         echo "📤 Enviando notificação de teste..."
-        curl -X POST http://216.238.107.59:3003/api/send-notification \
+        curl -X POST http://147.182.204.181:3003/api/send-notification \
           -H "Content-Type: application/json" \
           -d '{
             "token": "fDajP2vQS-qIOINIWb3mE-:APA91bGSrfhJCxKksYiQOqk0Ypi7uGuJYK1BbZrxGGAQ4Q0lh1ce7zoYQfmGp8PqoY6W3xS9zB2xXBEMmAqEhscsoUQzcBcXUaQaHg4KUgSJPTZ8fMSqfCM",

@@ -3,12 +3,13 @@
  */
 
 const dotenv = require('dotenv');
+const path = require('path');
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const axios = require('axios');
 
-dotenv.config({ path: '.env' });
+dotenv.config({ path: process.env.ENV_FILE || path.resolve(__dirname, '../../../.env') });
 process.env.NODE_ENV = 'test';
 
 let testServer = null;
@@ -47,7 +48,7 @@ function buildTestApp() {
     });
   });
 
-  app.get('/api/stats', (_req, res) => {
+  app.get('/api/app/stats', (_req, res) => {
     res.status(200).json({
       redis: { connected: true, operations: 0 },
       memory: process.memoryUsage(),

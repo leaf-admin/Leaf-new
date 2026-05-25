@@ -21,8 +21,8 @@ MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # Conectar via SSH e monitorar logs
-ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@216.238.107.59 << 'EOF' 2>/dev/null | grep --line-buffered -iE "(authenticate|createBooking|QueueWorker|Dispatcher|newRideRequest|updateLocation|Motorista|Driver|test_driver|test-user-dev|booking_|corrida|notificar|error|Error|❌|✅|⚠️|Fase 7|GradualRadiusExpander|Servidor|WebSocket|porta)" | while IFS= read -r line; do
-    cd /home/leaf/leaf-websocket-backend 2>/dev/null || cd /root/leaf-websocket-backend 2>/dev/null
+ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@147.182.204.181 << 'EOF' 2>/dev/null | grep --line-buffered -iE "(authenticate|createBooking|QueueWorker|Dispatcher|newRideRequest|updateLocation|Motorista|Driver|test_driver|test-user-dev|booking_|corrida|notificar|error|Error|❌|✅|⚠️|Fase 7|GradualRadiusExpander|Servidor|WebSocket|porta)" | while IFS= read -r line; do
+    cd /opt/leaf-app 2>/dev/null || cd /opt/leaf-app 2>/dev/null
     
     if [ -f server.log ]; then
         tail -f server.log

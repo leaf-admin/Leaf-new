@@ -17,15 +17,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
-import { fonts } from '../../common-local/font';
-import { useTheme } from '../../common-local/theme';
+import { fonts, useTheme } from '../../theme/runtimeTokens';
 import Typography from '../design-system/Typography';
 import AnimatedButton from '../design-system/AnimatedButton';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import WebSocketManager from '../../services/WebSocketManager';
 import TripDataService from '../../services/TripDataService';
 import * as Location from 'expo-location';
-import { GetDistance } from '../../common-local/other/GeoFunctions';
+import { GetDistance } from '../../services/runtime/mapGeoService';
 import { Animated } from 'react-native';
 import NetworkStatusBanner from '../NetworkStatusBanner';
 
@@ -591,8 +590,9 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
       // Verificar se Waze está instalado
       const isWazeInstalled = await Linking.canOpenURL('waze://');
+      const isAppleMapsAvailable = Platform.OS === 'ios';
 
-      if (!isGoogleMapsInstalled && !isWazeInstalled) {
+      if (!isAppleMapsAvailable && !isGoogleMapsInstalled && !isWazeInstalled) {
         // Nenhum app de navegação instalado, abrir no navegador
         const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
         await Linking.openURL(url);
@@ -601,6 +601,22 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
 
       // Mostrar opções de navegação
       const navigationOptions = [];
+
+      if (isAppleMapsAvailable) {
+        navigationOptions.push({
+          text: 'Mapas da Apple',
+          onPress: async () => {
+            try {
+              const url = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
+              await Linking.openURL(url);
+            } catch (error) {
+              Logger.error('Erro ao abrir Mapas da Apple:', error);
+              const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+              await Linking.openURL(webUrl);
+            }
+          }
+        });
+      }
 
       if (isGoogleMapsInstalled) {
         navigationOptions.push({

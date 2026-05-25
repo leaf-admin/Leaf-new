@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const redisPool = require('../utils/redis-pool');
 const driverLockManager = require('../services/driver-lock-manager');
+const PaymentService = require('../services/payment-service');
 const { logger } = require('../utils/logger');
+const paymentService = new PaymentService();
 
 // Firebase integration
 let firebaseConfig = null;
@@ -23,6 +25,43 @@ const requireFirebase = (req, res, next) => {
   next();
 };
 
+async function runRealtimeDbQuery(executor) {
+  if (!firebaseConfig || typeof firebaseConfig.getRealtimeDB !== 'function') {
+    return null;
+  }
+
+  return executor(firebaseConfig.getRealtimeDB());
+}
+
+async function readRealtime(path) {
+  if (firebaseConfig && typeof firebaseConfig.getFromRealtimeDB === 'function') {
+    return firebaseConfig.getFromRealtimeDB(path);
+  }
+
+  const snapshot = await runRealtimeDbQuery((db) => db.ref(path).once('value'));
+  if (!snapshot || !snapshot.exists()) {
+    return null;
+  }
+
+  return snapshot.val();
+}
+
+async function updateRealtime(path, payload) {
+  if (firebaseConfig && typeof firebaseConfig.updateRealtimeDB === 'function') {
+    return firebaseConfig.updateRealtimeDB(path, payload);
+  }
+
+  return runRealtimeDbQuery((db) => db.ref(path).update(payload));
+}
+
+async function updateRealtimeRoot(updates) {
+  if (firebaseConfig && typeof firebaseConfig.updateRealtimeDBRoot === 'function') {
+    return firebaseConfig.updateRealtimeDBRoot(updates);
+  }
+
+  return runRealtimeDbQuery((db) => db.ref().update(updates));
+}
+
 // 🚗 DRIVER APPROVAL APIs
 
 // GET /api/drivers/applications - Listar aplicações de motoristas
@@ -32,12 +71,10 @@ router.get('/api/drivers/applications', requireFirebase, async (req, res) => {
 
     logStructured('info', '📋 Buscando aplicações de motoristas:', { page, limit, status, search }, { service: 'drivers-routes' });
 
-    const db = firebaseConfig.getRealtimeDB();
     const storage = firebaseConfig.getStorage();
 
     // Buscar usuários do Firebase
-    const usersSnapshot = await db.ref('users').once('value');
-    const users = usersSnapshot.val() || {};
+    const users = await readRealtime('users') || {};
 
     // Filtrar apenas motoristas
     let driverApplications = Object.keys(users)
@@ -77,12 +114,10 @@ router.get('/api/drivers/applications', requireFirebase, async (req, res) => {
       paginatedApplications.map(async (driver) => {
         try {
           // Buscar documentos do usuário
-          const documentsSnapshot = await db.ref(`users/${driver.uid}/documents`).once('value');
-          const documents = documentsSnapshot.val() || {};
+          const documents = await readRealtime(`users/${driver.uid}/documents`) || {};
 
           // Buscar dados do veículo
-          const vehicleSnapshot = await db.ref(`users/${driver.uid}/vehicles/current`).once('value');
-          const vehicle = vehicleSnapshot.val() || {};
+          const vehicle = await readRealtime(`users/${driver.uid}/vehicles/current`) || {};
 
           // Determinar status da aplicação
           let applicationStatus = 'pending';
@@ -107,7 +142,9 @@ router.get('/api/drivers/applications', requireFirebase, async (req, res) => {
               email: driver.email || 'Email não informado',
               phone: driver.phone || 'Telefone não informado',
               cpf: driver.cpf || 'CPF não informado',
-              birthDate: driver.dateOfBirth || '1990-01-01',
+              birthDate: driver.birthDate || driver.dateOfBirth || driver.dob || null,
+              motherName: driver.motherName || driver.nomeMae || null,
+              gender: driver.gender || driver.genero || null,
               address: {
                 street: driver.address?.street || 'Endereço não informado',
                 city: driver.city || 'Cidade não informada',
@@ -199,10 +236,8 @@ router.post('/api/drivers/applications/:id/approve', requireFirebase, async (req
 
     logStructured('info', `✅ Aprovando motorista ${id}:`, { notes, adminNotes }, { service: 'drivers-routes' });
 
-    const db = firebaseConfig.getRealtimeDB();
-
     // Atualizar status do motorista
-    await db.ref(`users/${id}`).update({
+    await updateRealtime(`users/${id}`, {
       isApproved: true,
       isRejected: false,
       reviewDate: new Date().toISOString(),
@@ -212,8 +247,7 @@ router.post('/api/drivers/applications/:id/approve', requireFirebase, async (req
     });
 
     // Atualizar status dos documentos para aprovados
-    const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-    const documents = documentsSnapshot.val() || {};
+    const documents = await readRealtime(`users/${id}/documents`) || {};
 
     const documentUpdates = {};
     Object.keys(documents).forEach(docType => {
@@ -223,13 +257,13 @@ router.post('/api/drivers/applications/:id/approve', requireFirebase, async (req
     });
 
     if (Object.keys(documentUpdates).length > 0) {
-      await db.ref().update(documentUpdates);
+      await updateRealtimeRoot(documentUpdates);
     }
 
     // Atualizar status do veículo se existir
-    const vehicleSnapshot = await db.ref(`users/${id}/vehicles/current`).once('value');
-    if (vehicleSnapshot.exists()) {
-      await db.ref(`users/${id}/vehicles/current`).update({
+    const vehicle = await readRealtime(`users/${id}/vehicles/current`);
+    if (vehicle) {
+      await updateRealtime(`users/${id}/vehicles/current`, {
         status: 'approved',
         reviewedAt: new Date().toISOString(),
         reviewedBy: 'admin'
@@ -272,10 +306,8 @@ router.post('/api/drivers/applications/:id/reject', requireFirebase, async (req,
 
     logStructured('info', `❌ Rejeitando motorista ${id}:`, { notes, rejectionReasons, adminNotes }, { service: 'drivers-routes' });
 
-    const db = firebaseConfig.getRealtimeDB();
-
     // Atualizar status do motorista
-    await db.ref(`users/${id}`).update({
+    await updateRealtime(`users/${id}`, {
       isApproved: false,
       isRejected: true,
       reviewDate: new Date().toISOString(),
@@ -286,8 +318,7 @@ router.post('/api/drivers/applications/:id/reject', requireFirebase, async (req,
     });
 
     // Atualizar status dos documentos para rejeitados
-    const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-    const documents = documentsSnapshot.val() || {};
+    const documents = await readRealtime(`users/${id}/documents`) || {};
 
     const documentUpdates = {};
     Object.keys(documents).forEach(docType => {
@@ -298,13 +329,13 @@ router.post('/api/drivers/applications/:id/reject', requireFirebase, async (req,
     });
 
     if (Object.keys(documentUpdates).length > 0) {
-      await db.ref().update(documentUpdates);
+      await updateRealtimeRoot(documentUpdates);
     }
 
     // Atualizar status do veículo se existir
-    const vehicleSnapshot = await db.ref(`users/${id}/vehicles/current`).once('value');
-    if (vehicleSnapshot.exists()) {
-      await db.ref(`users/${id}/vehicles/current`).update({
+    const vehicle = await readRealtime(`users/${id}/vehicles/current`);
+    if (vehicle) {
+      await updateRealtime(`users/${id}/vehicles/current`, {
         status: 'rejected',
         reviewedAt: new Date().toISOString(),
         reviewedBy: 'admin',
@@ -348,26 +379,20 @@ router.get('/api/drivers/applications/:id', requireFirebase, async (req, res) =>
 
     logStructured('info', `📋 Buscando aplicação do motorista ${id}`, { service: 'drivers-routes' });
 
-    const db = firebaseConfig.getRealtimeDB();
-
     // Buscar dados do motorista
-    const userSnapshot = await db.ref(`users/${id}`).once('value');
-    if (!userSnapshot.exists()) {
+    const user = await readRealtime(`users/${id}`);
+    if (!user) {
       return res.status(404).json({
         error: 'Motorista não encontrado',
         message: 'ID do motorista inválido'
       });
     }
 
-    const user = userSnapshot.val();
-
     // Buscar documentos
-    const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-    const documents = documentsSnapshot.val() || {};
+    const documents = await readRealtime(`users/${id}/documents`) || {};
 
     // Buscar veículo
-    const vehicleSnapshot = await db.ref(`users/${id}/vehicles/current`).once('value');
-    const vehicle = vehicleSnapshot.val() || {};
+    const vehicle = await readRealtime(`users/${id}/vehicles/current`) || {};
 
     // Determinar status
     let applicationStatus = 'pending';
@@ -383,7 +408,9 @@ router.get('/api/drivers/applications/:id', requireFirebase, async (req, res) =>
         email: user.email || 'Email não informado',
         phone: user.phone || 'Telefone não informado',
         cpf: user.cpf || 'CPF não informado',
-        birthDate: user.dateOfBirth || '1990-01-01',
+        birthDate: user.birthDate || user.dateOfBirth || user.dob || null,
+        motherName: user.motherName || user.nomeMae || null,
+        gender: user.gender || user.genero || null,
         address: {
           street: user.address?.street || 'Endereço não informado',
           city: user.city || 'Cidade não informada',
@@ -470,7 +497,12 @@ router.get('/api/drivers/nearby', async (req, res) => {
       });
     }
 
-    logger.info(`🔍 [DriversRoute] Buscando motoristas próximos: lat=${latitude}, lng=${longitude}, radius=${radiusKm}km, limit=${limitNum}`);
+    const eligibleDriverGeoKey = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+    const allDriverGeoKey = process.env.ALL_DRIVER_GEO_KEY || 'driver_locations';
+    const allowFallbackPool = process.env.NEARBY_ALLOW_FALLBACK_POOL === 'true';
+    let activeGeoKey = eligibleDriverGeoKey;
+
+    logger.info(`🔍 [DriversRoute] Buscando motoristas próximos: lat=${latitude}, lng=${longitude}, radius=${radiusKm}km, limit=${limitNum}, geoKey=${activeGeoKey}`);
 
     const redis = redisPool.getConnection();
 
@@ -481,12 +513,12 @@ router.get('/api/drivers/nearby', async (req, res) => {
     }
 
     // ✅ Verificar total de motoristas no GEO antes da busca
-    const totalDriversBefore = await redis.zcard('driver_locations');
-    logger.info(`📊 [DriversRoute] Total de motoristas no Redis GEO antes da busca: ${totalDriversBefore}`);
+    const totalDriversBefore = await redis.zcard(activeGeoKey);
+    logger.info(`📊 [DriversRoute] Total de motoristas no Redis GEO (${activeGeoKey}) antes da busca: ${totalDriversBefore}`);
 
     // 1. Buscar motoristas próximos usando Redis GEO
-    const nearbyDrivers = await redis.georadius(
-      'driver_locations',
+    let nearbyDrivers = await redis.georadius(
+      activeGeoKey,
       longitude,
       latitude,
       radiusKm,
@@ -506,33 +538,54 @@ router.get('/api/drivers/nearby', async (req, res) => {
     });
 
     if (!nearbyDrivers || nearbyDrivers.length === 0) {
-      logger.warn(`⚠️ [DriversRoute] Nenhum motorista encontrado em ${radiusKm}km`);
-      // ✅ Verificar se há motoristas no Redis GEO (debug)
-      const totalDrivers = await redis.zcard('driver_locations');
-      logger.info(`📊 [DriversRoute] Total de motoristas no Redis GEO: ${totalDrivers}`);
+      logger.warn(`⚠️ [DriversRoute] Nenhum motorista encontrado em ${radiusKm}km no pool ${activeGeoKey}`);
 
-      // ✅ Testar georadius sem COUNT para ver se retorna algo
-      const testResult = await redis.georadius(
-        'driver_locations',
-        longitude,
-        latitude,
-        radiusKm,
-        'km',
-        'WITHCOORD',
-        'WITHDIST'
-      );
-      logger.info(`🧪 [DriversRoute] Teste sem COUNT retornou: ${testResult?.length || 0} motoristas`);
+      let testResult = [];
+      if (allowFallbackPool && activeGeoKey !== allDriverGeoKey) {
+        activeGeoKey = allDriverGeoKey;
+        logger.warn(`⚠️ [DriversRoute] Fallback habilitado. Reexecutando busca em ${activeGeoKey}`);
+        testResult = await redis.georadius(
+          activeGeoKey,
+          longitude,
+          latitude,
+          radiusKm,
+          'km',
+          'WITHCOORD',
+          'WITHDIST',
+          'COUNT',
+          limitNum * 2
+        );
+        nearbyDrivers = Array.isArray(testResult) ? testResult : [];
+      }
 
-      return res.json({
-        drivers: [],
-        count: 0,
-        source: 'redis_geo',
-        debug: {
-          totalDriversInRedis: totalDrivers,
-          searchRadius: radiusKm,
-          testWithoutCount: testResult?.length || 0
-        }
-      });
+      if (!nearbyDrivers || nearbyDrivers.length === 0) {
+        const totalDrivers = await redis.zcard(activeGeoKey);
+        logger.info(`📊 [DriversRoute] Total de motoristas no Redis GEO (${activeGeoKey}): ${totalDrivers}`);
+
+        // ✅ Testar georadius sem COUNT para ver se retorna algo
+        testResult = await redis.georadius(
+          activeGeoKey,
+          longitude,
+          latitude,
+          radiusKm,
+          'km',
+          'WITHCOORD',
+          'WITHDIST'
+        );
+        logger.info(`🧪 [DriversRoute] Teste sem COUNT em ${activeGeoKey} retornou: ${testResult?.length || 0} motoristas`);
+
+        return res.json({
+          drivers: [],
+          count: 0,
+          source: 'redis_geo',
+          geoKey: activeGeoKey,
+          debug: {
+            totalDriversInRedis: totalDrivers,
+            searchRadius: radiusKm,
+            testWithoutCount: testResult?.length || 0
+          }
+        });
+      }
     }
 
     // 2. Filtrar motoristas disponíveis (status + lock)
@@ -571,10 +624,8 @@ router.get('/api/drivers/nearby', async (req, res) => {
         logger.debug(`⚠️ [DriversRoute] Driver ${driverId} não tem dados no Redis, buscando Firebase...`);
         if (firebaseConfig) {
           try {
-            const db = firebaseConfig.getRealtimeDB();
-            const userSnapshot = await db.ref(`users/${driverId}`).once('value');
-            if (userSnapshot.exists()) {
-              const user = userSnapshot.val();
+            const user = await readRealtime(`users/${driverId}`);
+            if (user) {
               driverInfo = {
                 id: driverId,
                 firstName: user.firstName || user.name || '',
@@ -644,7 +695,8 @@ router.get('/api/drivers/nearby', async (req, res) => {
         rating: driverInfo.rating,
         carType: driverInfo.carType,
         vehicleNumber: driverInfo.vehicleNumber,
-        source: 'redis_geo'
+        source: 'redis_geo',
+        geoKey: activeGeoKey
       });
 
       // Limitar ao número solicitado
@@ -662,6 +714,7 @@ router.get('/api/drivers/nearby', async (req, res) => {
       drivers: availableDrivers,
       count: availableDrivers.length,
       source: 'redis_geo',
+      geoKey: activeGeoKey,
       query: {
         lat: latitude,
         lng: longitude,
@@ -700,49 +753,134 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
     // 3. Buscar viagens
     const bookingsSnapshot = await db.ref('bookings').orderByChild('driver').equalTo(id).once('value');
     const bookings = bookingsSnapshot.val() || {};
-    const driverBookings = Object.values(bookings).filter(b => b.status === 'COMPLETED');
+    const allDriverBookings = Object.values(bookings);
 
-    // Mapeamentos de datas locais (usando UTC/Timezone do servidor como base)
     const now = new Date();
-
-    // Zera horas de hoje
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dailyWindowDays = 30;
+    const safeNumber = value => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : NaN;
+    };
 
-    // Corridas de Hoje
-    let tripsTodayCount = 0;
+    const toDateKey = date => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
 
-    // Ganhos diários dos últimos 7 dias
-    const dailyEarningsMap = {};
-    for (let i = 6; i >= 0; i--) {
+    const dailySeriesMap = {};
+    for (let i = dailyWindowDays - 1; i >= 0; i--) {
       const targetDate = new Date(startOfToday);
       targetDate.setDate(targetDate.getDate() - i);
-      const dayStr = String(targetDate.getDate()).padStart(2, '0');
-      dailyEarningsMap[dayStr] = {
-        day: dayStr,
+      const dateKey = toDateKey(targetDate);
+      dailySeriesMap[dateKey] = {
+        date: dateKey,
+        day: String(targetDate.getDate()).padStart(2, '0'),
         amount: 0,
+        grossAmount: 0,
+        feeAmount: 0,
+        completedCount: 0,
+        cancelledCount: 0,
         color: '#A5D6A7'
       };
     }
 
-    driverBookings.forEach(booking => {
-      const tripDate = booking.tripdate ? new Date(booking.tripdate) : null;
-      if (!tripDate) return;
+    let tripsTodayCount = 0;
+    let totalCompletedRides = 0;
+    let totalCancellations = 0;
+    let totalGrossAmount = 0;
+    let totalNetAmount = 0;
+    let totalFeeAmount = 0;
 
-      const tripAmount = parseFloat(booking.driver_share || booking.estimate * 0.85 || booking.fare || 0);
-
-      // É de hoje?
-      if (tripDate >= startOfToday) {
-        tripsTodayCount++;
+    allDriverBookings.forEach(booking => {
+      const status = String(booking?.status || '').toUpperCase();
+      const isCompleted = status === 'COMPLETED';
+      const isCancelled = status.includes('CANCEL');
+      if (!isCompleted && !isCancelled) {
+        return;
       }
 
-      // Adicionar no mapa dos 7 dias, se cair no range
-      const dayStr = String(tripDate.getDate()).padStart(2, '0');
-      if (dailyEarningsMap[dayStr]) {
-        dailyEarningsMap[dayStr].amount += tripAmount;
+      const rawDate =
+        booking?.tripdate ||
+        booking?.updatedAt ||
+        booking?.createdAt ||
+        booking?.created_on ||
+        booking?.timestamp ||
+        null;
+      const tripDate = rawDate ? new Date(rawDate) : null;
+      if (!tripDate || Number.isNaN(tripDate.getTime())) {
+        return;
+      }
+
+      const dateKey = toDateKey(tripDate);
+      const seriesSlot = dailySeriesMap[dateKey];
+      if (!seriesSlot) {
+        return;
+      }
+
+      if (isCancelled) {
+        seriesSlot.cancelledCount += 1;
+        totalCancellations += 1;
+        return;
+      }
+
+      const grossAmountRaw = safeNumber(
+        booking?.estimate ??
+          booking?.finalFare ??
+          booking?.fare ??
+          booking?.grossAmount ??
+          booking?.totalAmount ??
+          booking?.trip_cost ??
+          booking?.amount ??
+          booking?.customer_paid ??
+          booking?.finalPrice ??
+          0
+      );
+      const grossAmount = Number.isFinite(grossAmountRaw) ? Math.max(0, grossAmountRaw) : 0;
+      const tollFeeRaw = safeNumber(booking?.tollFee ?? booking?.toll_fee ?? booking?.pedagio ?? 0);
+      const tollFee = Number.isFinite(tollFeeRaw) ? Math.max(0, tollFeeRaw) : 0;
+
+      let netAmount = safeNumber(booking?.driverNetAmount ?? booking?.driver_share ?? booking?.netAmount);
+      let feeAmount = safeNumber(booking?.totalFees ?? booking?.feeAmount ?? booking?.fees?.total);
+
+      if (!Number.isFinite(netAmount) || !Number.isFinite(feeAmount)) {
+        const breakdown = paymentService.calculateFareBreakdownFromReais(grossAmount, tollFee);
+        if (!Number.isFinite(netAmount)) {
+          netAmount = safeNumber(breakdown?.driverNetAmount);
+        }
+        if (!Number.isFinite(feeAmount)) {
+          feeAmount = safeNumber(breakdown?.totalFees);
+        }
+      }
+
+      netAmount = Number.isFinite(netAmount) ? Math.max(0, netAmount) : 0;
+      feeAmount = Number.isFinite(feeAmount) ? Math.max(0, feeAmount) : 0;
+      const effectiveGrossAmount = grossAmount > 0 ? grossAmount : Math.max(0, netAmount + feeAmount);
+
+      seriesSlot.amount += netAmount;
+      seriesSlot.grossAmount += effectiveGrossAmount;
+      seriesSlot.feeAmount += feeAmount;
+      seriesSlot.completedCount += 1;
+
+      totalCompletedRides += 1;
+      totalGrossAmount += effectiveGrossAmount;
+      totalNetAmount += netAmount;
+      totalFeeAmount += feeAmount;
+
+      if (tripDate >= startOfToday) {
+        tripsTodayCount += 1;
       }
     });
 
-    const dailyEarningsArray = Object.values(dailyEarningsMap);
+    const dailySeries = Object.values(dailySeriesMap).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const dailyEarningsArray = dailySeries.slice(-7).map(item => ({
+      day: item.day,
+      amount: item.amount,
+      color: item.color
+    }));
+    const effectiveFeePct = totalGrossAmount > 0 ? (totalFeeAmount / totalGrossAmount) * 100 : 0;
 
     const report = {
       balance: parseFloat(user.walletBalance || 0),
@@ -755,7 +893,15 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
         year: driverCar.carYear || '',
         engine: driverCar.carType || ''
       } : null,
-      dailyEarnings: dailyEarningsArray
+      dailyEarnings: dailyEarningsArray,
+      dailySeries,
+      totalCompletedRides,
+      totalCancellations,
+      totalGrossAmount,
+      totalNetAmount,
+      totalFeeAmount,
+      effectiveFeePct,
+      dailySeriesWindowDays: dailyWindowDays
     };
 
     res.json({ success: true, report });

@@ -9,10 +9,11 @@ function calculateDriverShare(tripCost, tollFee = 0, decimalPrecision = 2) {
     let opFee = 0;
     if (rawFare <= 10.00) opFee = 0.79;
     else if (rawFare <= 25.00) opFee = 0.99;
-    else opFee = 1.49;
+    else if (rawFare <= 50.00) opFee = 1.49;
+    else opFee = rawFare * 0.03;
 
     // Taxa Woovi sobre toda a transação
-    let wooviFee = grandTotal * 0.0008; // 0.08%
+    let wooviFee = grandTotal * 0.008; // 0.8%
     if (wooviFee < 0.50) wooviFee = 0.50;
 
     const driverShare = grandTotal - opFee - wooviFee;
@@ -38,6 +39,5 @@ console.log("\n=== SIMULAÇÃO 2: Corrida com Pedágio (R$ 30,00 Tarifa + R$ 8.9
 const sim2 = calculateDriverShare(38.95, 8.95);
 console.log(`Valor Pago p/ Passageiro: R$ ${sim2.tripCost}`);
 console.log(`- Taxa Operacional Aplicada sobre Tarifa Limpa de R$ ${sim2.rawFare} (Tier >25): R$ ${sim2.opFee}`);
-console.log(`- Taxa Woovi Aplicada sobre Tarifa Total de R$ ${sim2.tripCost} (0.08%): R$ ${sim2.wooviFee}`);
+console.log(`- Taxa Woovi Aplicada sobre Tarifa Total de R$ ${sim2.tripCost} (0.8%): R$ ${sim2.wooviFee}`);
 console.log(`Líquido do Motorista: R$ ${sim2.driverShare}`);
-

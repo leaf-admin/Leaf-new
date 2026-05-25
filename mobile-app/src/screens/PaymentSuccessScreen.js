@@ -12,6 +12,7 @@ import {
 import { Icon } from 'react-native-elements';
 import LottieView from 'lottie-react-native';
 import BottomSheetWrapper from '../components/BottomSheetWrapper';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 const { width, height } = Dimensions.get('window');
 
@@ -90,7 +91,10 @@ const PaymentSuccessScreen = ({ navigation, route }) => {
           
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Método:</Text>
-            <Text style={styles.detailValue}>PIX</Text>
+            <View style={styles.detailValueGroup}>
+              <Text style={styles.detailValue}>PIX</Text>
+              <SecurePaymentBadge style={styles.securePaymentBadge} color="#7F8C8D" />
+            </View>
           </View>
           
           <View style={styles.detailRow}>
@@ -272,6 +276,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2c3e50',
   },
+  detailValueGroup: {
+    alignItems: 'flex-end',
+  },
+  securePaymentBadge: {
+    marginTop: 2,
+  },
   bottomSheetContent: {
     padding: 20,
   },
@@ -344,4 +354,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PaymentSuccessScreen; 
+export default PaymentSuccessScreen;

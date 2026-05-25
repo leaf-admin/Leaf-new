@@ -92,7 +92,7 @@ LOG_LEVEL=info
 
 # Backup Configuration
 BACKUP_MODE=true
-PRIMARY_SERVER=147.93.66.253
+PRIMARY_SERVER=147.182.204.181
 EOF
 
 # Criar serviço systemd
@@ -136,7 +136,7 @@ cat > /usr/local/bin/backup-health-check.sh << 'EOF'
 
 # Health check para VPS de backup
 BACKUP_IP=$(hostname -I | awk '{print $1}')
-PRIMARY_IP="147.93.66.253"
+PRIMARY_IP="147.182.204.181"
 
 # Verificar se serviços estão rodando
 if ! systemctl is-active --quiet leaf-backup; then

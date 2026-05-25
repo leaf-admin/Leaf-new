@@ -5,11 +5,40 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MOBILE_DIR="$ROOT_DIR/mobile-app"
 BACKEND_DIR="$ROOT_DIR/leaf-websocket-backend"
 
-BACKEND_URL="${BACKEND_URL:-http://147.182.204.181:3001}"
+BACKEND_URL="${BACKEND_URL:-https://api.147.182.204.181.sslip.io}"
 APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
 SEED_TEST_USERS="${SEED_TEST_USERS:-true}"
 OPEN_APP="${OPEN_APP:-false}"
-REQUIRE_EXPO="${REQUIRE_EXPO:-true}"
+CHECK_RUNTIME_ENDPOINTS="${CHECK_RUNTIME_ENDPOINTS:-true}"
+REQUIRE_EXPO="${REQUIRE_EXPO:-false}"
+NODE_BIN="${NODE_BIN:-$(command -v node || command -v nodejs || true)}"
+ADB_BIN="${ADB_BIN:-$(command -v adb || true)}"
+FIREBASE_API_KEY="${FIREBASE_API_KEY:-${EXPO_PUBLIC_FIREBASE_API_KEY:-}}"
+
+if [[ -z "$NODE_BIN" ]]; then
+  for candidate in \
+    $(ls -1d "$HOME/.nvm/versions/node"/*/bin/node 2>/dev/null | sort -Vr) \
+    "/opt/homebrew/bin/node" \
+    "/usr/local/bin/node"; do
+    if [[ -x "$candidate" ]]; then
+      NODE_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$ADB_BIN" ]]; then
+  for candidate in \
+    "$ROOT_DIR/platform-tools/adb" \
+    "$ROOT_DIR/android-sdk/platform-tools/adb" \
+    "$HOME/Library/Android/sdk/platform-tools/adb" \
+    "$HOME/Android/Sdk/platform-tools/adb"; do
+    if [[ -x "$candidate" ]]; then
+      ADB_BIN="$candidate"
+      break
+    fi
+  done
+fi
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 ARTIFACTS_DIR="$MOBILE_DIR/test-results/qa_run_${TIMESTAMP}"
@@ -34,16 +63,44 @@ check_cmd() {
   fi
 }
 
-check_cmd adb
 check_cmd curl
-check_cmd node
 
-if ! adb get-state >/dev/null 2>&1; then
+if [[ -z "$NODE_BIN" ]]; then
+  echo "[qa][error] Missing command: node (or nodejs)"
+  exit 1
+fi
+
+if [[ -z "$ADB_BIN" ]]; then
+  echo "[qa][error] Missing command: adb (or ADB_BIN path)"
+  exit 1
+fi
+
+if [[ "$CHECK_RUNTIME_ENDPOINTS" == "true" ]]; then
+  echo "[qa] checking runtime endpoint hardcodes..."
+  bash "$MOBILE_DIR/scripts/check-runtime-endpoints.sh"
+fi
+
+if [[ -z "$FIREBASE_API_KEY" ]] && [[ -f "$MOBILE_DIR/google-services.json" ]]; then
+  FIREBASE_API_KEY="$(grep -m1 -Eo '"current_key"[[:space:]]*:[[:space:]]*"[^"]+"' "$MOBILE_DIR/google-services.json" | sed -E 's/.*"current_key"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+fi
+
+if [[ -z "$FIREBASE_API_KEY" ]] && [[ -f "$MOBILE_DIR/google-services.example.json" ]]; then
+  FIREBASE_API_KEY="$(grep -m1 -Eo '"current_key"[[:space:]]*:[[:space:]]*"[^"]+"' "$MOBILE_DIR/google-services.example.json" | sed -E 's/.*"current_key"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+fi
+
+if [[ -n "$FIREBASE_API_KEY" ]]; then
+  export FIREBASE_API_KEY
+  export EXPO_PUBLIC_FIREBASE_API_KEY="$FIREBASE_API_KEY"
+else
+  echo "[qa][warn] Firebase API key ausente; simulação de corrida pode falhar em autenticação."
+fi
+
+if ! "$ADB_BIN" get-state >/dev/null 2>&1; then
   echo "[qa][error] No Android device connected via adb."
   exit 1
 fi
 
-if ! adb shell pm list packages | grep -q "$APP_PACKAGE"; then
+if ! "$ADB_BIN" shell pm list packages | grep -q "$APP_PACKAGE"; then
   echo "[qa][error] App package not installed: $APP_PACKAGE"
   exit 1
 fi
@@ -51,9 +108,9 @@ fi
 echo "[qa] artifacts: $ARTIFACTS_DIR"
 echo "[qa] backend: $BACKEND_URL"
 
-adb devices > "$ARTIFACTS_DIR/adb-devices.txt"
-adb shell getprop ro.product.model > "$ARTIFACTS_DIR/device-model.txt" || true
-adb shell getprop ro.build.version.release > "$ARTIFACTS_DIR/android-version.txt" || true
+"$ADB_BIN" devices > "$ARTIFACTS_DIR/adb-devices.txt"
+"$ADB_BIN" shell getprop ro.product.model > "$ARTIFACTS_DIR/device-model.txt" || true
+"$ADB_BIN" shell getprop ro.build.version.release > "$ARTIFACTS_DIR/android-version.txt" || true
 
 if [[ "$REQUIRE_EXPO" == "true" ]]; then
   if ! curl -fsS --max-time 3 "http://127.0.0.1:8081/status" >/dev/null 2>&1; then
@@ -64,18 +121,18 @@ if [[ "$REQUIRE_EXPO" == "true" ]]; then
 fi
 
 if [[ "$OPEN_APP" == "true" ]]; then
-  adb shell am force-stop "$APP_PACKAGE" >/dev/null 2>&1 || true
-  adb shell am start -n "$APP_PACKAGE/.MainActivity" >/dev/null 2>&1 \
-    || adb shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+  "$ADB_BIN" shell am force-stop "$APP_PACKAGE" >/dev/null 2>&1 || true
+  "$ADB_BIN" shell am start -n "$APP_PACKAGE/.MainActivity" >/dev/null 2>&1 \
+    || "$ADB_BIN" shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 fi
 
-adb logcat -c >/dev/null 2>&1 || true
-adb logcat -v time > "$LOGCAT_FILE" 2>&1 &
+"$ADB_BIN" logcat -c >/dev/null 2>&1 || true
+"$ADB_BIN" logcat -v time > "$LOGCAT_FILE" 2>&1 &
 LOGCAT_PID=$!
 
 echo "[qa] running backend checks..."
 curl -sS --max-time 12 "$BACKEND_URL/health" > "$ARTIFACTS_DIR/backend-health.json"
-node - "$BACKEND_URL" "$ARTIFACTS_DIR/backend-socketio-handshake.json" <<'NODE'
+"$NODE_BIN" - "$BACKEND_URL" "$ARTIFACTS_DIR/backend-socketio-handshake.json" <<'NODE'
 const fs = require('fs');
 const io = require('socket.io-client');
 const [,, backendUrl, out] = process.argv;
@@ -105,7 +162,7 @@ if [[ "$SEED_TEST_USERS" == "true" ]] && [[ -f "$BACKEND_DIR/scripts/criar-usuar
   echo "[qa] seeding test users..."
   (
     cd "$BACKEND_DIR"
-    node scripts/criar-usuarios-teste-completo.js > "$ARTIFACTS_DIR/seed-test-users.log" 2>&1
+    "$NODE_BIN" scripts/criar-usuarios-teste-completo.js > "$ARTIFACTS_DIR/seed-test-users.log" 2>&1
   ) || {
     echo "[qa][warn] seed script failed, continuing"
   }
@@ -114,7 +171,7 @@ fi
 echo "[qa] running websocket ride simulation (real test users)..."
 (
   cd "$MOBILE_DIR"
-  node scripts/qa-simulate-ride-flow.cjs \
+  "$NODE_BIN" scripts/qa-simulate-ride-flow.cjs \
     --url "$BACKEND_URL" \
     --out "$SIM_JSON"
 ) > "$SIM_LOG" 2>&1 || true

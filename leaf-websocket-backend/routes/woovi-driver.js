@@ -1,16 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const wooviDriverService = require('../services/woovi-driver-service');
+const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logStructured, logError } = require('../utils/logger');
 
-// Middleware para autenticação (implementar conforme necessário)
-const authenticateDriver = (req, res, next) => {
-  // TODO: Implementar autenticação do motorista
-  next();
-};
+const WOOVI_DRIVER_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
+const DRIVER_ROUTE_MIDDLEWARE = [authenticateJWT, requireRole(WOOVI_DRIVER_ADMIN_ROLES)];
 
 // Criar cliente Woovi para motorista aprovado
-router.post('/driver/create-client', authenticateDriver, async (req, res) => {
+router.post('/driver/create-client', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { name, email, phone, cpf, driverId } = req.body;
     
@@ -52,7 +50,7 @@ router.post('/driver/create-client', authenticateDriver, async (req, res) => {
 });
 
 // Criar cobrança de ganhos para motorista
-router.post('/driver/create-earnings', authenticateDriver, async (req, res) => {
+router.post('/driver/create-earnings', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { wooviClientId, value, description, rideId } = req.body;
     
@@ -92,7 +90,7 @@ router.post('/driver/create-earnings', authenticateDriver, async (req, res) => {
 });
 
 // Listar cobranças de um motorista
-router.get('/driver/:wooviClientId/charges', authenticateDriver, async (req, res) => {
+router.get('/driver/:wooviClientId/charges', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { wooviClientId } = req.params;
     
@@ -119,7 +117,7 @@ router.get('/driver/:wooviClientId/charges', authenticateDriver, async (req, res
 });
 
 // Verificar saldo de um motorista
-router.get('/driver/:wooviClientId/balance', authenticateDriver, async (req, res) => {
+router.get('/driver/:wooviClientId/balance', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { wooviClientId } = req.params;
     
@@ -148,7 +146,7 @@ router.get('/driver/:wooviClientId/balance', authenticateDriver, async (req, res
 });
 
 // Atualizar dados do cliente Woovi
-router.put('/driver/:wooviClientId/update', authenticateDriver, async (req, res) => {
+router.put('/driver/:wooviClientId/update', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { wooviClientId } = req.params;
     const updateData = req.body;
@@ -177,7 +175,7 @@ router.put('/driver/:wooviClientId/update', authenticateDriver, async (req, res)
 });
 
 // Simular pagamento (apenas para testes)
-router.post('/driver/simulate-payment', authenticateDriver, async (req, res) => {
+router.post('/driver/simulate-payment', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
     const { chargeId } = req.body;
     
@@ -212,7 +210,6 @@ router.post('/driver/simulate-payment', authenticateDriver, async (req, res) => 
 });
 
 module.exports = router;
-
 
 
 

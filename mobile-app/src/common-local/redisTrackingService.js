@@ -1,11 +1,19 @@
 import Logger from '../utils/Logger';
 import { Platform } from 'react-native';
 
+const API_BASE_URL = String(
+    process.env.EXPO_PUBLIC_API_URL ||
+    process.env.EXPO_PUBLIC_BACKEND_URL ||
+    'https://api.leaf.app.br'
+)
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
 
 class RedisTrackingService {
     constructor() {
         this.isAvailable = Platform.OS === 'web';
-        this.baseUrl = 'http://147.182.204.181:3001';
+        this.baseUrl = API_BASE_URL;
     }
 
     // Inicializar serviço

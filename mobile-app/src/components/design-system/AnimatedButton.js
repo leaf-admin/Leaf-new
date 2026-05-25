@@ -7,7 +7,7 @@ import Animated, {
     interpolateColor
 } from 'react-native-reanimated';
 import { Typography } from './Typography';
-import { colors } from '../../common-local/theme';
+import { colors } from '../../theme/runtimeTokens';
 
 export const AnimatedButton = ({
     onPress,
@@ -145,3 +145,5 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     }
 });
+
+export default AnimatedButton;

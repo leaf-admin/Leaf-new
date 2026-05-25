@@ -17,7 +17,7 @@ const WOOVI_CONFIG = require(configPath);
 // Mas a API real é 'https://api.woovi-sandbox.com/api/v1'
 const WOOVI_API_BASE_URL = process.env.WOOVI_BASE_URL || 'https://api.woovi-sandbox.com/api/v1';
 
-const VPS_WEBHOOK_URL = process.env.WOOVI_WEBHOOK_URL || 'http://147.93.66.253/api/woovi/webhook';
+const VPS_WEBHOOK_URL = process.env.WOOVI_WEBHOOK_URL || 'http://147.182.204.181/api/woovi/webhook';
 
 async function updateWooviWebhook(webhookUrl) {
   try {
@@ -101,7 +101,7 @@ async function updateWooviWebhook(webhookUrl) {
         // Verificar se já existe webhook com a URL da VPS
         const vpsWebhook = webhooks.find(w => {
           const url = w.url || w.webhookUrl || '';
-          return url && url.includes('147.93.66.253');
+          return url && url.includes('147.182.204.181');
         });
         
         if (vpsWebhook) {
@@ -218,4 +218,3 @@ main().catch(error => {
   console.error('❌ Erro fatal:', error);
   process.exit(1);
 });
-

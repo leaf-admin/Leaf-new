@@ -109,10 +109,6 @@ class EventBus {
             const publishTime = Date.now();
             await eventSourcing.recordEvent(event.eventType, event.data);
 
-            // ✅ OBSERVABILIDADE: Métrica já registrada em event-sourcing.js via recordEventPublished
-            // Mas também registrar aqui para eventos publicados diretamente via EventBus
-            metrics.recordEventPublished(event.eventType);
-
             // Notificar listeners locais (mesmo processo)
             await this.notifyListeners(event, publishTime);
 
@@ -171,4 +167,3 @@ module.exports = {
     EventBus,
     getEventBus
 };
-

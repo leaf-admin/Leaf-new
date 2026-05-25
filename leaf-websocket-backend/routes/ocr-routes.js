@@ -6,6 +6,7 @@
 const express = require('express');
 const multer = require('multer');
 const ocrService = require('../services/ocr-service');
+const documentAIExtractionService = require('../services/document-ai-extraction-service');
 const { logger } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
 
@@ -66,6 +67,28 @@ const ocrLimiter = rateLimit({
   }
 });
 
+function hasUsefulCnhText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (raw.length < 700) return false;
+
+  const upper = raw.toUpperCase();
+  const markers = ['CPF', 'REGISTRO', 'VALIDADE', 'CATEGORIA', 'NOME', 'HABILIT'];
+  const hitCount = markers.reduce((acc, marker) => (upper.includes(marker) ? acc + 1 : acc), 0);
+  return hitCount >= 2;
+}
+
+function hasUsefulVehicleText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (raw.length < 350) return false;
+
+  const upper = raw.toUpperCase();
+  const markers = ['PLACA', 'RENAVAM', 'CHASSI', 'MUNICIPIO', 'MARCA', 'MODELO'];
+  const hitCount = markers.reduce((acc, marker) => (upper.includes(marker) ? acc + 1 : acc), 0);
+  return hitCount >= 2;
+}
+
 /**
  * POST /api/ocr/cnh
  * Extrai dados da CNH (Carteira Nacional de Habilitação)
@@ -114,6 +137,119 @@ router.post('/cnh', ocrLimiter, upload.single('image'), async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Erro ao processar imagem da CNH',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * POST /api/ocr/cnh/pdf
+ * Extrai dados da CNH a partir de PDF (CNH Digital).
+ * Fluxo: OCR/PDF text -> GPT-5.4-mini (ou multimodal com imagem).
+ */
+router.post('/cnh/pdf', ocrLimiter, upload.single('pdf'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'Arquivo PDF da CNH é obrigatório'
+      });
+    }
+
+    if (req.file.mimetype !== 'application/pdf') {
+      return res.status(400).json({
+        success: false,
+        error: 'Arquivo deve ser um PDF'
+      });
+    }
+
+    if (!ocrService.initialized) {
+      return res.status(503).json({
+        success: false,
+        error: 'Serviço de OCR ainda não inicializado. Tente novamente em alguns segundos.',
+        retryAfter: 5
+      });
+    }
+
+    logger.info('📄 Processando PDF da CNH', {
+      fileSize: req.file.size,
+      mimetype: req.file.mimetype,
+      userId: req.body?.userId || null
+    });
+
+    if (!documentAIExtractionService.enabled) {
+      return res.status(503).json({
+        success: false,
+        error: 'Extração por IA indisponível. Configure OPENAI_API_KEY para processar CNH em PDF.',
+        source: 'openai_not_configured'
+      });
+    }
+
+    let extractedText = '';
+    try {
+      extractedText = await ocrService.extractTextFromPDF(req.file.buffer);
+    } catch (textExtractionError) {
+      logger.warn('⚠️ Extração textual nativa da CNH falhou, tentando rota multimodal', {
+        message: textExtractionError?.message || textExtractionError
+      });
+    }
+
+    let data = null;
+    let model = 'gpt-5.4-mini';
+    let extractionSource = 'pdf_text';
+
+    try {
+      if (hasUsefulCnhText(extractedText)) {
+        data = await documentAIExtractionService.extractCNHFromText(extractedText, {
+          source: 'pdf_text',
+          textLength: extractedText.length
+        });
+        extractionSource = 'pdf_text';
+      } else {
+        logger.info('🧾 Texto da CNH insuficiente, migrando para extração multimodal por imagem', {
+          textLength: Number(extractedText?.length || 0)
+        });
+        const imageBuffer = await ocrService.convertPDFToImage(req.file.buffer);
+        data = await documentAIExtractionService.extractCNHFromImageBuffer(imageBuffer, {
+          source: 'pdf_image',
+          imageBytes: imageBuffer.length
+        });
+        extractionSource = 'pdf_image';
+      }
+      model = data?.extractedBy || model;
+    } catch (aiError) {
+      logger.warn('⚠️ IA indisponível para extração da CNH', {
+        message: aiError?.message || aiError
+      });
+      if (!extractedText || !extractedText.trim()) {
+        return res.status(422).json({
+          success: false,
+          error: 'Não foi possível extrair dados da CNH com IA. Tente enviar outro PDF da CNH-e.',
+          source: 'openai_failed'
+        });
+      }
+      return res.status(422).json({
+        success: false,
+        error: 'Não foi possível extrair dados da CNH com IA a partir do texto do PDF. Tente outro arquivo.',
+        source: 'openai_failed',
+        details: process.env.NODE_ENV === 'development' ? aiError.message : undefined
+      });
+    }
+
+    return res.json({
+      success: true,
+      source: 'openai',
+      model,
+      textLength: extractedText.length,
+      extractionSource,
+      data,
+      message: 'Dados da CNH extraídos com IA com sucesso'
+    });
+  } catch (error) {
+    logger.error('❌ Erro ao processar PDF da CNH:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Erro ao processar PDF da CNH',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -254,6 +390,119 @@ router.post('/vehicle', ocrLimiter, upload.single('image'), async (req, res) => 
 });
 
 /**
+ * POST /api/ocr/vehicle/pdf
+ * Extrai dados do documento do veículo (CRLV) via PDF.
+ * Fluxo: OCR/PDF text -> GPT-5.4-mini (ou multimodal com imagem).
+ */
+router.post('/vehicle/pdf', ocrLimiter, upload.single('pdf'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'Arquivo PDF do documento do veículo é obrigatório'
+      });
+    }
+
+    if (req.file.mimetype !== 'application/pdf') {
+      return res.status(400).json({
+        success: false,
+        error: 'Arquivo deve ser um PDF'
+      });
+    }
+
+    if (!ocrService.initialized) {
+      return res.status(503).json({
+        success: false,
+        error: 'Serviço de OCR ainda não inicializado. Tente novamente em alguns segundos.',
+        retryAfter: 5
+      });
+    }
+
+    logger.info('📄 Processando PDF do documento do veículo', {
+      fileSize: req.file.size,
+      mimetype: req.file.mimetype,
+      userId: req.body?.userId || null
+    });
+
+    if (!documentAIExtractionService.enabled) {
+      return res.status(503).json({
+        success: false,
+        error: 'Extração por IA indisponível. Configure OPENAI_API_KEY para processar CRLV em PDF.',
+        source: 'openai_not_configured'
+      });
+    }
+
+    let extractedText = '';
+    try {
+      extractedText = await ocrService.extractTextFromPDF(req.file.buffer);
+    } catch (textExtractionError) {
+      logger.warn('⚠️ Extração textual nativa do CRLV falhou, tentando rota multimodal', {
+        message: textExtractionError?.message || textExtractionError
+      });
+    }
+
+    let data = null;
+    let model = 'gpt-5.4-mini';
+    let extractionSource = 'pdf_text';
+
+    try {
+      if (hasUsefulVehicleText(extractedText)) {
+        data = await documentAIExtractionService.extractVehicleFromText(extractedText, {
+          source: 'pdf_text',
+          textLength: extractedText.length
+        });
+        extractionSource = 'pdf_text';
+      } else {
+        logger.info('🧾 Texto do CRLV insuficiente, migrando para extração multimodal por imagem', {
+          textLength: Number(extractedText?.length || 0)
+        });
+        const imageBuffer = await ocrService.convertPDFToImage(req.file.buffer);
+        data = await documentAIExtractionService.extractVehicleFromImageBuffer(imageBuffer, {
+          source: 'pdf_image',
+          imageBytes: imageBuffer.length
+        });
+        extractionSource = 'pdf_image';
+      }
+      model = data?.extractedBy || model;
+    } catch (aiError) {
+      logger.warn('⚠️ IA indisponível para extração de CRLV', {
+        message: aiError?.message || aiError
+      });
+      if (!extractedText || !extractedText.trim()) {
+        return res.status(422).json({
+          success: false,
+          error: 'Não foi possível extrair dados do CRLV com IA. Tente enviar outro PDF do CRLV-e.',
+          source: 'openai_failed'
+        });
+      }
+      return res.status(422).json({
+        success: false,
+        error: 'Não foi possível extrair dados do CRLV com IA a partir do texto do PDF. Tente outro arquivo.',
+        source: 'openai_failed',
+        details: process.env.NODE_ENV === 'development' ? aiError.message : undefined
+      });
+    }
+
+    return res.json({
+      success: true,
+      source: 'openai',
+      model,
+      textLength: extractedText.length,
+      extractionSource,
+      data,
+      message: 'Dados do veículo extraídos com IA com sucesso'
+    });
+  } catch (error) {
+    logger.error('❌ Erro ao processar PDF do veículo:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Erro ao processar PDF do veículo',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
  * GET /api/ocr/test
  * Teste simples para verificar se a rota está funcionando
  */
@@ -299,8 +548,10 @@ router.use((req, res) => {
     error: `Rota OCR não encontrada: ${req.method} ${req.path}`,
     availableRoutes: [
       'POST /api/ocr/cnh',
+      'POST /api/ocr/cnh/pdf',
       'POST /api/ocr/vehicle/extract-text',
       'POST /api/ocr/vehicle',
+      'POST /api/ocr/vehicle/pdf',
       'GET /api/ocr/test',
       'GET /api/ocr/health'
     ]
@@ -308,13 +559,6 @@ router.use((req, res) => {
 });
 
 module.exports = router;
-
-
-
-
-
-
-
 
 
 

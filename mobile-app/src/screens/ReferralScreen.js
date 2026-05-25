@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Icon } from 'react-native-elements';
 import { useSelector } from 'react-redux';
-import { api } from '../common-local';
+import { apiClient } from '../services/httpClient';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 
 
@@ -51,11 +51,11 @@ const ReferralScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      const response = await api.get(`/api/baas/referral/${currentUser.id}`);
+      const response = await apiClient.get(`/api/baas/referral/${currentUser.id}`);
       setReferralData(response.data);
       
       // Carregar convites existentes
-      const invitesResponse = await api.get(`/api/baas/referral/${currentUser.id}/invites`);
+      const invitesResponse = await apiClient.get(`/api/baas/referral/${currentUser.id}/invites`);
       setInvites(invitesResponse.data.invites || []);
       
     } catch (error) {
@@ -80,7 +80,7 @@ const ReferralScreen = ({ navigation, route }) => {
     try {
       setIsCreatingInvite(true);
       
-      const response = await api.post('/api/baas/referral/create-invite', {
+      const response = await apiClient.post('/api/baas/referral/create-invite', {
         inviter_id: currentUser.id,
         invitee_email: inviteeEmail,
         invitee_phone: inviteePhone
@@ -147,7 +147,7 @@ const ReferralScreen = ({ navigation, route }) => {
     try {
       setIsLoading(true);
       
-      const response = await api.post('/api/baas/referral/accept-invite', {
+      const response = await apiClient.post('/api/baas/referral/accept-invite', {
         inviter_id: currentUser.id, // Será obtido do convite
         invitee_id: currentUser.id,
         invite_code: inviteCode.trim()

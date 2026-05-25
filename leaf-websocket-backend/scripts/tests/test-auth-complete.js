@@ -10,7 +10,7 @@ console.log('=========================================');
 async function testLogin() {
     return new Promise((resolve) => {
         const postData = JSON.stringify({
-            phone: '+5511999999999',
+            phone: '+5521102938475',
             password: '123456',
             userType: 'CUSTOMER'
         });
@@ -329,7 +329,6 @@ async function runAllTests() {
 }
 
 runAllTests().catch(console.error);
-
 
 
 

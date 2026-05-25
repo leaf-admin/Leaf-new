@@ -1,8 +1,12 @@
 const jwt = require('jsonwebtoken');
 
 // Configurações JWT
-const JWT_SECRET = 'leaf-secret-key-2024-production';
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = '24h';
+
+if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET é obrigatório para executar este gerador');
+}
 
 // Função para gerar token JWT
 function generateJWT(payload) {
@@ -103,7 +107,6 @@ console.log('1. Use estes tokens para testar autenticação');
 console.log('2. No app mobile, gere tokens similares com os dados do usuário');
 console.log('3. Sempre valide tokens no backend antes de processar requisições');
 console.log('4. Tokens expiram em 24 horas por segurança');
-
 
 
 

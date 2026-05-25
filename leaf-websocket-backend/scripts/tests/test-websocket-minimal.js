@@ -2,7 +2,7 @@ const WebSocket = require('ws');
 
 console.log('Teste WebSocket minimo...');
 
-const ws = new WebSocket('ws://216.238.107.59:3001');
+const ws = new WebSocket('ws://147.182.204.181:3001');
 
 ws.on('open', () => {
     console.log('Conectado!');

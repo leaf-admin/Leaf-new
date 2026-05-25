@@ -1,5 +1,155 @@
+const { loadConfigEnv } = require('./config/loadConfigEnv');
+loadConfigEnv();
+
 const AppConfig = require('./config/AppConfig').AppConfig;
 const GoogleMapApiConfig = require('./config/GoogleMapApiConfig').GoogleMapApiConfig;
+const fs = require('fs');
+const path = require('path');
+const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const allowInsecureHttp = String(process.env.EXPO_PUBLIC_ALLOW_INSECURE_HTTP || 'false').toLowerCase() === 'true';
+const disableUpdatesForLocalSimulator =
+    String(process.env.LEAF_DISABLE_UPDATES_FOR_SIMULATOR || 'false').toLowerCase() === 'true';
+const normalizeFlag = (value, defaultValue = false) => {
+    if (value === undefined || value === null || value === '') {
+        return defaultValue;
+    }
+
+    return TRUTHY_VALUES.has(String(value).trim().toLowerCase());
+};
+const firstDefined = (...values) => values.find(value => value !== undefined && value !== null && value !== '');
+const resolveNumber = (value, defaultValue) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
+};
+const resolveLaunchProfile = () => {
+    const rawProfile = firstDefined(
+        process.env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE,
+        process.env.LEAF_LAUNCH_PROFILE
+    );
+
+    const normalized = String(rawProfile || 'full')
+        .trim()
+        .toLowerCase();
+
+    if (['pilot', 'pilot_controlled', 'controlled_pilot'].includes(normalized)) {
+        return 'pilot_controlled';
+    }
+
+    return normalized || 'full';
+};
+const launchProfile = resolveLaunchProfile();
+const otaUpdatesEnabled = normalizeFlag(
+    firstDefined(process.env.LEAF_ENABLE_OTA_UPDATES, process.env.EXPO_PUBLIC_LEAF_ENABLE_OTA_UPDATES),
+    true
+);
+const buildProfile = String(firstDefined(process.env.EAS_BUILD_PROFILE, process.env.LEAF_BUILD_PROFILE, '') || '')
+    .trim()
+    .toLowerCase();
+const updatesChannel = String(
+    firstDefined(
+        process.env.EXPO_UPDATE_CHANNEL,
+        process.env.EAS_UPDATE_CHANNEL,
+        process.env.LEAF_UPDATES_CHANNEL,
+        buildProfile.includes('production') ? 'production' : '',
+        buildProfile.includes('preview') ? 'preview' : ''
+    ) || ''
+).trim();
+const includeDevClient = normalizeFlag(
+    firstDefined(process.env.LEAF_INCLUDE_DEV_CLIENT, process.env.EXPO_PUBLIC_LEAF_INCLUDE_DEV_CLIENT),
+    buildProfile.includes('development')
+);
+const productionAutolinkingExcludes = includeDevClient
+    ? []
+    : [
+        'expo-dev-client',
+        'expo-dev-launcher',
+        'expo-dev-menu',
+        'expo-dev-menu-interface'
+    ];
+const canonicalInterFonts = [
+    '../node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf',
+    '../node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf',
+    '../node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf',
+    '../node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf',
+    '../node_modules/@expo-google-fonts/inter/300Light/Inter_300Light.ttf'
+];
+const expoUpdatesConfig = disableUpdatesForLocalSimulator || !otaUpdatesEnabled
+    ? {
+        enabled: false,
+        checkAutomatically: 'NEVER',
+        fallbackToCacheTimeout: 0
+    }
+    : {
+        fallbackToCacheTimeout: 0,
+        url: "https://u.expo.dev/" + AppConfig.expo_project_id,
+        requestHeaders: updatesChannel
+            ? {
+                'expo-channel-name': updatesChannel
+            }
+            : undefined,
+    };
+const pilotControlled =
+    launchProfile === 'pilot_controlled' ||
+    normalizeFlag(firstDefined(process.env.EXPO_PUBLIC_PILOT_CONTROLLED, process.env.LEAF_PILOT_CONTROLLED), false);
+const resolvePilotFeature = (publicKey, privateKey, enabledOutsidePilot = true) => {
+    const fallback = pilotControlled ? false : enabledOutsidePilot;
+    return normalizeFlag(firstDefined(process.env[publicKey], process.env[privateKey]), fallback);
+};
+const pilotFeatureFlags = {
+    driverWithdrawalsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DRIVER_WITHDRAWALS', 'LEAF_ENABLE_DRIVER_WITHDRAWALS', false),
+    referralProgramsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_REFERRAL_PROGRAMS', 'LEAF_ENABLE_REFERRAL_PROGRAMS', true),
+    leafDelasEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_LEAF_DELAS', 'LEAF_ENABLE_LEAF_DELAS', true),
+    driverDestinationModeEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DRIVER_DESTINATION_MODE', 'LEAF_ENABLE_DRIVER_DESTINATION_MODE', true),
+    dynamicPricingEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_DYNAMIC_PRICING', 'LEAF_ENABLE_DYNAMIC_PRICING', true),
+    smartPushEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_SMART_PUSH', 'LEAF_ENABLE_SMART_PUSH', false),
+    softBanEnforcementEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_SOFT_BAN_ENFORCEMENT', 'LEAF_ENABLE_SOFT_BAN_ENFORCEMENT', true),
+    adminMutationsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_ADMIN_MUTATIONS', 'LEAF_ENABLE_ADMIN_MUTATIONS', true),
+};
+const prototypePlayback = {
+    tickMs: resolveNumber(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_ROUTE_PLAYBACK_TICK_MS,
+            process.env.LEAF_PROTOTYPE_ROUTE_PLAYBACK_TICK_MS
+        ),
+        2500
+    ),
+    pickupSpeedMetersPerSecond: resolveNumber(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_PICKUP_SPEED_MPS,
+            process.env.LEAF_PROTOTYPE_PICKUP_SPEED_MPS
+        ),
+        8
+    ),
+    tripSpeedMetersPerSecond: resolveNumber(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_TRIP_SPEED_MPS,
+            process.env.LEAF_PROTOTYPE_TRIP_SPEED_MPS
+        ),
+        10
+    ),
+    qaMultiplier: resolveNumber(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_ROUTE_PLAYBACK_QA_MULTIPLIER,
+            process.env.LEAF_PROTOTYPE_ROUTE_PLAYBACK_QA_MULTIPLIER
+        ),
+        1.75
+    ),
+};
+const iosTransportSecurity = allowInsecureHttp
+    ? {
+        NSAllowsArbitraryLoads: true,
+        NSAllowsLocalNetworking: true,
+        NSExceptionDomains: {
+            "api.leaf.app.br": {
+                NSExceptionAllowsInsecureHTTPLoads: true,
+                NSIncludesSubdomains: true
+            }
+        }
+    }
+    : {
+        NSAllowsArbitraryLoads: false,
+        NSAllowsLocalNetworking: false
+    };
 
 module.exports = {
     name: AppConfig.app_name,
@@ -8,28 +158,46 @@ module.exports = {
     slug: "leafapp-reactnative",
     runtimeVersion: AppConfig.ios_app_version,
     scheme: "leafapp",
+    autolinking: productionAutolinkingExcludes.length
+        ? {
+            exclude: productionAutolinkingExcludes
+        }
+        : undefined,
     platforms: [
         "ios",
         "android"
     ],
     version: AppConfig.ios_app_version,
+    icon: "./assets/images/logo1024x1024.png",
     splash: {
         image: "./assets/images/splash.png",
-        resizeMode: "cover",
+        resizeMode: "contain",
         backgroundColor: "#003002"
     },
-    updates: {
-        "fallbackToCacheTimeout": 0,
-        "url": "https://u.expo.dev/" + AppConfig.expo_project_id,
-    },
+    updates: expoUpdatesConfig,
     extra: {
         eas: {
           projectId: AppConfig.expo_project_id
         },
         privacyPolicyUrl: AppConfig.privacy_policy_url,
         termsOfServiceUrl: AppConfig.terms_of_service_url,
+        refundPolicyUrl: AppConfig.refund_policy_url,
+        accountDeletionUrl: AppConfig.account_deletion_url,
         supportEmail: AppConfig.support_email,
-        isReview: process.env.APP_REVIEW === 'true'
+        isReview: process.env.APP_REVIEW === 'true',
+        e2eTest: process.env.EXPO_PUBLIC_E2E_TEST === 'true' || process.env.EXPO_PUBLIC_E2E_TEST === '1',
+        forcePaymentBypass:
+            process.env.EXPO_PUBLIC_FORCE_PAYMENT_BYPASS === 'true' ||
+            process.env.EXPO_PUBLIC_FORCE_PAYMENT_BYPASS === '1' ||
+            process.env.EXPO_PUBLIC_BYPASS_PAYMENTS === 'true' ||
+            process.env.EXPO_PUBLIC_BYPASS_PAYMENTS === '1',
+        enableTestUserTools:
+            process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS === 'true' ||
+            process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS === '1',
+        launchProfile,
+        pilotControlled,
+        pilotFeatureFlags,
+        prototypePlayback
     },
     assetBundlePatterns: [
         "**/*"
@@ -40,7 +208,7 @@ module.exports = {
     android: {
         package: "br.com.leaf.ride",
         versionCode: AppConfig.android_app_version,
-        googleServicesFile: "./google-services.json",
+        googleServicesFile: process.env.GOOGLE_SERVICES_JSON || (fs.existsSync("./google-services.json") ? "./google-services.json" : undefined),
         permissions: [
             "ACCESS_COARSE_LOCATION",
             "ACCESS_FINE_LOCATION",
@@ -48,20 +216,21 @@ module.exports = {
             "FOREGROUND_SERVICE",
             "FOREGROUND_SERVICE_LOCATION",
             "CAMERA",
+            "RECORD_AUDIO",
             "INTERNET",
+            "POST_NOTIFICATIONS",
             "VIBRATE"
         ],
         blockedPermissions: [
             "android.permission.SYSTEM_ALERT_WINDOW",
             "android.permission.READ_EXTERNAL_STORAGE",
             "android.permission.WRITE_EXTERNAL_STORAGE",
-            "android.permission.RECORD_AUDIO",
-            "android.permission.MODIFY_AUDIO_SETTINGS"
+            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
         ],
-        icon: "./assets/icon.png",
+        icon: "./assets/images/android-icon.png",
         adaptiveIcon: {
-            foregroundImage: "./assets/adaptive-icon.png",
-            backgroundColor: "#1A330E"
+            foregroundImage: "./assets/images/android-adaptive-foreground.png",
+            backgroundColor: "#002C00"
         },
         jsEngine: "hermes",
         intentFilters: [{
@@ -79,23 +248,66 @@ module.exports = {
     },
     ios: {
         bundleIdentifier: "br.com.leaf.ride",
-        googleServicesFile: "./GoogleService-Info.plist",
-        icon: "./assets/icon.png",
+        jsEngine: "hermes",
+        config: {
+            googleMapsApiKey: GoogleMapApiConfig.ios
+        },
+        googleServicesFile: process.env.GOOGLE_SERVICES_INFO_PLIST || (fs.existsSync("./GoogleService-Info.plist") ? "./GoogleService-Info.plist" : undefined),
+        icon: "./assets/images/logo1024x1024.png",
         buildNumber: AppConfig.ios_build_number,
+        deploymentTarget: "17.0",
         infoPlist: {
-            ITSAppUsesNonExemptEncryption: false
+            ITSAppUsesNonExemptEncryption: false,
+            NSAppTransportSecurity: iosTransportSecurity,
+            UIBackgroundModes: ["fetch", "location", "remote-notification"],
+            NSMicrophoneUsageDescription: "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
+            NSSpeechRecognitionUsageDescription: "A Leaf converte sua fala em texto para preencher o destino com mais rapidez."
         }
     },
     plugins: [
         "expo-asset",
-        "expo-font",
+        [
+            "expo-splash-screen",
+            {
+                android: {
+                    image: "./assets/images/splash_android_icon.png",
+                    resizeMode: "contain",
+                    backgroundColor: "#003002",
+                    imageWidth: 288
+                }
+            }
+        ],
+        [
+            "expo-font",
+            {
+                fonts: canonicalInterFonts
+            }
+        ],
+        [
+            "expo-audio",
+            {
+                "microphonePermission": false,
+                "recordAudioAndroid": false,
+                "enableBackgroundRecording": false
+            }
+        ],
+        [
+            "expo-speech-recognition",
+            {
+                "microphonePermission": "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
+                "speechRecognitionPermission": "A Leaf converte sua fala em texto para preencher o destino com mais rapidez.",
+                "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+            }
+        ],
         "expo-apple-authentication",
         "expo-localization",
         "@react-native-firebase/app",
         "@react-native-firebase/auth",
         "./plugins/withGoogleMapsApiKey",
         "./plugins/withDisableDevMenu",
-        "./plugins/withBoringSSLFix",
+        "./plugins/withDevLauncherPortScanFix",
+        "./plugins/withGradleNodeFix",
+        "./plugins/withExpoModulesCoreFix",
         "./plugins/withNetworkSecurityConfig",
         [
             "expo-notifications",
@@ -109,11 +321,17 @@ module.exports = {
         [
             "expo-build-properties",
             {
+              "android": {
+                "compileSdkVersion": 36,
+                "targetSdkVersion": 36
+              },
               "ios": {
-                "useFrameworks": "static"
+                "useFrameworks": "static",
+                "deploymentTarget": "17.0"
               },
             }
         ],
+        "./plugins/withBoringSSLFix",
         [
             "expo-image-picker",
             {

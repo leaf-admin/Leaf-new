@@ -1,0 +1,21 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/home"
+
+- runFlow: ../../_accept-open-prompt-no-launch.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible: "driver-home-toggle-online-offline"
+    commands:
+      - tapOn:
+          id: "driver-home-toggle-online"
+
+- extendedWaitUntil:
+    visible: "driver-home-toggle-online-online"
+    timeout: 45000

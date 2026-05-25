@@ -6,11 +6,12 @@
 set -e
 
 # ===== CONFIGURAÇÕES =====
-VPS_IP="147.93.66.253"
+VPS_IP="147.182.204.181"
 VPS_USER="root"
-VPS_SSH_KEY=""
+VPS_SSH_KEY="/Users/izaakdias/Documents/Leaf-new/digitaloceankey"
 APP_DIR="/opt/leaf-app"
 PROJECT_DIR="leaf-websocket-backend"
+CHECK_RUNTIME_PARITY="${CHECK_RUNTIME_PARITY:-true}"
 
 # Cores
 RED='\033[0;31m'
@@ -22,6 +23,7 @@ NC='\033[0m'
 echo -e "${BLUE}🚀 DEPLOY LEAF APP - HOSTINGER VPS${NC}"
 echo "=========================================="
 echo -e "📍 IP: ${YELLOW}$VPS_IP${NC}"
+echo -e "🔑 Key: ${YELLOW}${VPS_SSH_KEY:-"None"}${NC}"
 echo -e "📁 Diretório: ${YELLOW}$APP_DIR${NC}"
 echo ""
 
@@ -51,11 +53,23 @@ check_prerequisites() {
     echo ""
 }
 
+runtime_parity_precheck() {
+    if [[ "$CHECK_RUNTIME_PARITY" != "true" ]]; then
+        return
+    fi
+
+    if [[ -x "./scripts/ops/check-vps-runtime-parity.sh" ]]; then
+        echo -e "${BLUE}🧭 Verificando paridade de runtime (pré-deploy, informativo)...${NC}"
+        RUNTIME_MODE=vps STRICT=false FETCH_REMOTE=true ./scripts/ops/check-vps-runtime-parity.sh || true
+        echo ""
+    fi
+}
+
 # ===== FUNÇÃO: Instalar Docker na VPS =====
 install_docker() {
     echo -e "${BLUE}🐳 Instalando Docker na VPS...${NC}"
     
-    ssh $VPS_USER@$VPS_IP << 'EOF'
+    ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" << 'EOF'
         # Verificar se Docker já está instalado
         if command -v docker &> /dev/null; then
             echo "✅ Docker já está instalado: $(docker --version)"
@@ -100,7 +114,7 @@ EOF
 setup_directories() {
     echo -e "${BLUE}📁 Criando estrutura de diretórios...${NC}"
     
-    ssh $VPS_USER@$VPS_IP << EOF
+    ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" << EOF
         mkdir -p $APP_DIR
         mkdir -p $APP_DIR/logs
         mkdir -p $APP_DIR/ssl
@@ -130,15 +144,16 @@ copy_files() {
     
     # Copiar arquivos essenciais
     echo "📤 Copiando arquivos..."
-    scp docker-compose.hostinger.yml $VPS_USER@$VPS_IP:$APP_DIR/docker-compose.yml
-    scp Dockerfile $VPS_USER@$VPS_IP:$APP_DIR/
-    scp package.json $VPS_USER@$VPS_IP:$APP_DIR/
-    scp package-lock.json $VPS_USER@$VPS_IP:$APP_DIR/ 2>/dev/null || echo "⚠️  package-lock.json não encontrado, continuando..."
-    scp nginx.conf $VPS_USER@$VPS_IP:$APP_DIR/
+    scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null docker-compose.hostinger.yml "$VPS_USER@$VPS_IP:$APP_DIR/docker-compose.yml"
+    scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null Dockerfile "$VPS_USER@$VPS_IP:$APP_DIR/"
+    scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null package.json "$VPS_USER@$VPS_IP:$APP_DIR/"
+    scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null package-lock.json "$VPS_USER@$VPS_IP:$APP_DIR/" 2>/dev/null || echo "⚠️  package-lock.json não encontrado, continuando..."
+    scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null nginx.conf "$VPS_USER@$VPS_IP:$APP_DIR/"
     
     # Copiar .env se existir
     if [ -f ".env.production" ]; then
-        scp .env.production $VPS_USER@$VPS_IP:$APP_DIR/.env
+        echo -e "${BLUE}📝 Copiando .env.production...${NC}"
+        scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null .env.production "$VPS_USER@$VPS_IP:$APP_DIR/.env"
         echo "✅ .env copiado"
     else
         echo -e "${YELLOW}⚠️  .env.production não encontrado, você precisará criar manualmente${NC}"
@@ -146,7 +161,8 @@ copy_files() {
     
     # Copiar firebase-credentials.json se existir
     if [ -f "firebase-credentials.json" ]; then
-        scp firebase-credentials.json $VPS_USER@$VPS_IP:$APP_DIR/
+        echo -e "${BLUE}🔥 Copiando firebase-credentials.json...${NC}"
+        scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null firebase-credentials.json "$VPS_USER@$VPS_IP:$APP_DIR/"
         echo "✅ firebase-credentials.json copiado"
     else
         echo -e "${YELLOW}⚠️  firebase-credentials.json não encontrado${NC}"
@@ -195,11 +211,11 @@ DOCKERIGNOREEOF
         -czf /tmp/leaf-app-code.tar.gz .
     
     # Copiar para VPS
-    echo "📤 Enviando código para VPS..."
-    scp /tmp/leaf-app-code.tar.gz $VPS_USER@$VPS_IP:$APP_DIR/
+    echo -e "${BLUE}⬆️  Enviando código fonte para a VPS...${NC}"
+    scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/leaf-app-code.tar.gz "$VPS_USER@$VPS_IP:$APP_DIR/"
     
     # Extrair na VPS
-    ssh $VPS_USER@$VPS_IP << EOF
+    ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" << EOF
         cd $APP_DIR
         tar -xzf leaf-app-code.tar.gz
         rm leaf-app-code.tar.gz
@@ -217,7 +233,7 @@ EOF
 build_and_start() {
     echo -e "${BLUE}🔨 Construindo e iniciando containers...${NC}"
     
-    ssh $VPS_USER@$VPS_IP << EOF
+    ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" << EOF
         cd $APP_DIR
         
         # Parar containers existentes
@@ -254,12 +270,15 @@ EOF
 check_health() {
     echo -e "${BLUE}🏥 Verificando saúde dos serviços...${NC}"
     
-    ssh $VPS_USER@$VPS_IP << EOF
+    ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" << EOF
         cd $APP_DIR
         
         # Verificar Redis
         echo "🔴 Verificando Redis..."
-        if docker compose exec -T redis redis-cli -a leaf_redis_2024 ping 2>/dev/null | grep -q PONG || docker-compose exec -T redis redis-cli -a leaf_redis_2024 ping 2>/dev/null | grep -q PONG; then
+        REDIS_PASSWORD_VALUE="$(grep -E '^REDIS_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d '=' -f2-)"
+        if [ -z "$REDIS_PASSWORD_VALUE" ]; then
+            echo "❌ REDIS_PASSWORD não encontrado no .env"
+        elif docker compose exec -T redis env REDISCLI_AUTH="$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG || docker-compose exec -T redis env REDISCLI_AUTH="$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG; then
             echo "✅ Redis está respondendo"
         else
             echo "❌ Redis não está respondendo"
@@ -292,6 +311,19 @@ EOF
     echo ""
 }
 
+runtime_parity_postcheck() {
+    if [[ "$CHECK_RUNTIME_PARITY" != "true" ]]; then
+        return
+    fi
+
+    if [[ -x "./scripts/ops/check-vps-runtime-parity.sh" ]]; then
+        echo -e "${BLUE}🧭 Verificando paridade de runtime (pós-deploy, obrigatório)...${NC}"
+        RUNTIME_MODE=vps STRICT=true FETCH_REMOTE=false ./scripts/ops/check-vps-runtime-parity.sh
+        echo -e "${GREEN}✅ Runtime em paridade após deploy${NC}"
+        echo ""
+    fi
+}
+
 # ===== FUNÇÃO: Mostrar informações finais =====
 show_final_info() {
     echo ""
@@ -321,15 +353,16 @@ show_final_info() {
 # ===== EXECUÇÃO PRINCIPAL =====
 main() {
     check_prerequisites
+    runtime_parity_precheck
     install_docker
     setup_directories
     copy_files
     copy_application_code
     build_and_start
     check_health
+    runtime_parity_postcheck
     show_final_info
 }
 
 # Executar
 main
-

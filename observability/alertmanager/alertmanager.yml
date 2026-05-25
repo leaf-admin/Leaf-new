@@ -1,0 +1,20 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'service', 'severity']
+  group_wait: 10s
+  group_interval: 2m
+  repeat_interval: 30m
+  receiver: leaf-backend-webhook
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: leaf-backend-webhook
+      repeat_interval: 10m
+
+receivers:
+  - name: leaf-backend-webhook
+    webhook_configs:
+      - url: 'http://host.docker.internal:3001/api/alerts/webhook/prometheus'
+        send_resolved: true

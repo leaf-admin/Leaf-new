@@ -1,0 +1,67 @@
+{
+  "runId": "",
+  "reviewedBy": "",
+  "reviewedAt": "",
+  "environment": "staging-real",
+  "accounts": {
+    "passengerFresh": "",
+    "passengerExisting": "",
+    "driverFresh": "",
+    "driverExisting": "",
+    "adminReviewer": ""
+  },
+  "manualEvidence": {
+    "registration": {
+      "passengerFreshCompleted": false,
+      "driverFreshCompleted": false,
+      "invalidExpiredCodeValidated": false,
+      "restartRecoveryValidated": false,
+      "termsConsentValidated": false
+    },
+    "vehicles": {
+      "twoVehiclesRegistered": false,
+      "twoVehiclesApproved": false,
+      "vehicleOfDaySelectionValidated": false,
+      "deleteInactiveVehicleValidated": false,
+      "blockActiveVehicleDeletionDuringRideValidated": false
+    },
+    "incidents": {
+      "passengerConnectionLossValidated": false,
+      "driverConnectionLossValidated": false,
+      "appKillRestartValidated": false,
+      "duplicateOutOfOrderEventsValidated": false,
+      "driverStartedWithoutPassengerGpsComparisonValidated": false,
+      "driverStoppedAfterStartValidated": false,
+      "noDriverTimeoutValidated": false,
+      "passengerCancellationValidated": false,
+      "driverCancellationValidated": false
+    },
+    "finance": {
+      "fareSnapshotValidated": false,
+      "driverBalanceBeforeAfterValidated": false,
+      "ledgerByRideValidated": false,
+      "withdrawalFlowValidatedOrFlagBlocked": false,
+      "refundValidated": false,
+      "cancellationFeeValidated": false,
+      "apiCostByRideValidated": false
+    },
+    "support": {
+      "generalTicketValidated": false,
+      "rideLinkedTicketValidated": false,
+      "lostItemTicketValidated": false,
+      "refundTicketValidated": false,
+      "chatAndEscalationValidated": false,
+      "dashboardHistoryValidated": false
+    },
+    "stores": {
+      "appStorePrivacyLabelsReviewed": false,
+      "appStoreReviewNotesReady": false,
+      "playStoreDataSafetyReviewed": false,
+      "playStoreBackgroundLocationDisclosureReady": false,
+      "accountDeletionUrlValidated": false,
+      "screenshotsAndAssetsReady": false,
+      "legalTermsPrivacyRefundReviewed": false
+    }
+  },
+  "evidenceLinks": []
+}

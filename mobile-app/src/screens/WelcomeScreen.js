@@ -1,7 +1,10 @@
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, StatusBar, Animated, TouchableOpacity } from 'react-native';
+import { View, Image, StyleSheet, StatusBar, Animated, TouchableOpacity } from 'react-native';
+import { fonts } from '../theme/runtimeTokens';
+import onboardingTheme from '../components/auth/common/onboardingTheme';
 
+const { color, radius, spacing, elevation } = onboardingTheme;
 
 const translations = [
   { welcome: 'BEM VINDO A', start: 'Começar' },
@@ -17,117 +20,128 @@ const translations = [
 ];
 
 export default function WelcomeScreen({ navigation }) {
-  const [currentText, setCurrentText] = useState(translations[0].welcome);
-  const [currentBtn, setCurrentBtn] = useState(translations[0].start);
   const [currentIndex, setCurrentIndex] = useState(0);
-
-  // Animações separadas para texto e botão
   const welcomeFadeAnim = useRef(new Animated.Value(1)).current;
   const buttonFadeAnim = useRef(new Animated.Value(1)).current;
-
-  // Animação de entrada inicial
   const fadeInAnim = useRef(new Animated.Value(0)).current;
-
   const [buttonDisabled, setButtonDisabled] = useState(false);
-  const buttonAnim = useRef(new Animated.Value(1)).current;
+  const buttonScaleAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    Logger.log("WelcomeScreen - Componente montado");
+    Logger.log('WelcomeScreen - Componente montado');
 
-    // Animação de entrada inicial
     Animated.timing(fadeInAnim, {
       toValue: 1,
-      duration: 1000,
-      useNativeDriver: true,
+      duration: 700,
+      useNativeDriver: true
     }).start(() => {
-      Logger.log("WelcomeScreen - Animação de entrada concluída");
+      Logger.log('WelcomeScreen - Animacao de entrada concluida');
     });
   }, []);
 
   useEffect(() => {
     let idx = 0;
+
     const interval = setInterval(() => {
-      // Fade out simultâneo para texto e botão
       Animated.parallel([
         Animated.timing(welcomeFadeAnim, {
           toValue: 0,
-          duration: 500,
-          useNativeDriver: true,
+          duration: 260,
+          useNativeDriver: true
         }),
         Animated.timing(buttonFadeAnim, {
           toValue: 0,
-          duration: 500,
-          useNativeDriver: true,
+          duration: 260,
+          useNativeDriver: true
         })
       ]).start(() => {
-        // Atualiza os textos
         idx = (idx + 1) % translations.length;
         setCurrentIndex(idx);
-        setCurrentText(translations[idx].welcome);
-        setCurrentBtn(translations[idx].start);
 
-        // Fade in simultâneo para texto e botão
         Animated.parallel([
           Animated.timing(welcomeFadeAnim, {
             toValue: 1,
-            duration: 500,
-            useNativeDriver: true,
+            duration: 260,
+            useNativeDriver: true
           }),
           Animated.timing(buttonFadeAnim, {
             toValue: 1,
-            duration: 500,
-            useNativeDriver: true,
+            duration: 260,
+            useNativeDriver: true
           })
         ]).start();
       });
-    }, 4000); // 4 segundos para cada mudança
+    }, 3800);
 
     return () => clearInterval(interval);
   }, []);
 
   const handleStart = () => {
-    Logger.log("WelcomeScreen - Botão Start pressionado");
+    Logger.log('WelcomeScreen - Botao start pressionado');
     if (buttonDisabled) return;
+
     setButtonDisabled(true);
-    Animated.parallel([
-      Animated.timing(buttonAnim, {
-        toValue: 0,
-        duration: 400,
-        useNativeDriver: true,
+
+    Animated.sequence([
+      Animated.timing(buttonScaleAnim, {
+        toValue: 0.96,
+        duration: 110,
+        useNativeDriver: true
+      }),
+      Animated.timing(buttonScaleAnim, {
+        toValue: 1,
+        duration: 110,
+        useNativeDriver: true
       })
     ]).start(() => {
-      Logger.log("WelcomeScreen - Navegando para ProfileSelection");
+      Logger.log('WelcomeScreen - Navegando para ProfileSelectionScreen');
       navigation.navigate('ProfileSelectionScreen');
       setButtonDisabled(false);
-      buttonAnim.setValue(1);
     });
   };
 
   return (
-    <Animated.View style={[
-      { flex: 1, width: '100%', backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
-      { opacity: fadeInAnim }
-    ]}>
-      <StatusBar backgroundColor="#1A330E" barStyle="light-content" />
-      <View style={styles.logoWrapper}>
+    <Animated.View style={[styles.container, { opacity: fadeInAnim }]}>
+      <StatusBar backgroundColor={color.background} barStyle="dark-content" />
+      <View pointerEvents="none" style={styles.backgroundCanvas}>
+        <View style={[styles.routeLine, styles.routeLineTop]} />
+        <View style={[styles.routeLine, styles.routeLineMiddle]} />
+        <View style={[styles.routeLine, styles.routeLineBottom]} />
+        <View style={styles.routePin} />
+      </View>
+
+      <View style={styles.brandCluster}>
+        <View style={styles.leafMark}>
+          <View style={styles.leafMarkCore} />
+        </View>
         <Animated.Text style={[
           styles.welcomeText,
           { opacity: welcomeFadeAnim }
         ]}>
-          {currentText}
+          {translations[currentIndex].welcome}
         </Animated.Text>
+
         <Image
           source={require('../../assets/images/customcolor_logo_customcolor_background.png')}
           style={styles.logo}
           resizeMode="contain"
         />
       </View>
-      <TouchableOpacity style={styles.startButton} onPress={handleStart} disabled={buttonDisabled}>
+
+      <TouchableOpacity
+        style={styles.startButton}
+        onPress={handleStart}
+        disabled={buttonDisabled}
+        activeOpacity={0.9}
+      >
         <Animated.Text style={[
           styles.startButtonText,
-          { opacity: buttonFadeAnim }
+          {
+            opacity: buttonFadeAnim,
+            transform: [{ scale: buttonScaleAnim }]
+          }
         ]}>
-          {currentBtn}
+          {translations[currentIndex].start}
         </Animated.Text>
       </TouchableOpacity>
     </Animated.View>
@@ -137,65 +151,120 @@ export default function WelcomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
-    justifyContent: 'flex-start',
+    backgroundColor: color.background,
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxl + spacing.lg,
+    paddingBottom: spacing.xxl
   },
-  logoWrapper: {
+  backgroundCanvas: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    overflow: 'hidden'
+  },
+  routeLine: {
+    position: 'absolute',
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: color.mapLine
+  },
+  routeLineTop: {
+    width: 310,
+    top: 118,
+    right: -104,
+    transform: [{ rotate: '-23deg' }]
+  },
+  routeLineMiddle: {
+    width: 420,
+    top: 292,
+    left: -126,
+    backgroundColor: color.skyLine,
+    transform: [{ rotate: '18deg' }]
+  },
+  routeLineBottom: {
+    width: 360,
+    bottom: 152,
+    right: -108,
+    transform: [{ rotate: '-17deg' }]
+  },
+  routePin: {
+    position: 'absolute',
+    top: 194,
+    left: 38,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: color.accent,
+    opacity: 0.22
+  },
+  brandCluster: {
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
-    position: 'relative',
     flexDirection: 'column',
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl
+  },
+  leafMark: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: color.panelSoft,
+    borderWidth: 1,
+    borderColor: color.glassStroke,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+    shadowColor: color.accent,
+    ...elevation.soft
+  },
+  leafMarkCore: {
+    width: 18,
+    height: 24,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 18,
+    borderBottomLeftRadius: 4,
+    backgroundColor: color.accent,
+    transform: [{ rotate: '36deg' }]
   },
   welcomeText: {
-    color: '#1A330E',
-    fontSize: 28,
-    fontWeight: 'bold',
+    color: color.textPrimary,
+    fontSize: 14,
+    fontFamily: fonts.Bold,
     textAlign: 'center',
-    letterSpacing: 2,
+    letterSpacing: 1.4,
     width: '100%',
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '50%',
-    transform: [{ translateY: -80 }],
-    zIndex: 10,
+    marginBottom: spacing.md,
+    textTransform: 'uppercase'
   },
   logo: {
-    width: 215,
-    height: 215,
+    width: 212,
+    height: 212,
     alignSelf: 'center',
-    marginTop: 0,
+    marginTop: -spacing.sm
   },
   startButton: {
-    backgroundColor: '#2A4A1E',
-    borderRadius: 8,
-    paddingVertical: 16,
-    width: 215,
+    backgroundColor: color.accent,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.accent,
+    minHeight: 58,
+    width: '100%',
+    maxWidth: 340,
     alignItems: 'center',
-    position: 'absolute',
-    bottom: 50, // Elevado de 30 para 50 para evitar sobreposição com barra de navegação/home indicator
-    alignSelf: 'center',
+    justifyContent: 'center',
+    shadowColor: color.accent,
+    ...elevation.soft
   },
   startButtonText: {
-    color: '#F5F5F5',
-    fontSize: 18,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  card: {
-    backgroundColor: '#1A330E',
-    borderRadius: 16,
-    padding: 24,
-    width: 255,
-    alignItems: 'center',
-    marginTop: 32,
-    alignSelf: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-}); 
+    color: color.accentText,
+    fontSize: 16,
+    fontFamily: fonts.SemiBold,
+    textAlign: 'center'
+  }
+});

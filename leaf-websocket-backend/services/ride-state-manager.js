@@ -9,18 +9,75 @@ const { logger } = require('../utils/logger');
 const eventSourcing = require('./event-sourcing');
 
 class RideStateManager {
+    static _scheduleSideEffects(task) {
+        setImmediate(() => {
+            Promise.resolve()
+                .then(task)
+                .catch((error) => {
+                    logger.warn(`⚠️ Falha em side effect assíncrono de estado: ${error.message}`);
+                });
+        });
+    }
+
+    static async _runStateSideEffects(redis, { bookingId, currentState, newState, updateData }, options = {}) {
+        const { deferSideEffects = false } = options || {};
+        const payload = {
+            bookingId,
+            previousState: currentState || null,
+            newState,
+            updatedAt: updateData.updatedAt
+        };
+
+        const runSideEffects = async () => {
+            const sideEffects = [
+                eventSourcing.recordEvent(require('./event-sourcing').EVENT_TYPES.STATE_CHANGED, {
+                    bookingId,
+                    fromState: currentState || 'UNKNOWN',
+                    toState: newState,
+                    ...updateData
+                })
+            ];
+
+            try {
+                const { syncTrackedRideState } = require('./ride-health-monitor');
+                sideEffects.push(
+                    syncTrackedRideState(redis, payload)
+                );
+            } catch (monitoringError) {
+                logger.warn(`⚠️ Falha ao preparar ride health monitor para ${bookingId}: ${monitoringError.message}`);
+            }
+
+            await Promise.allSettled(sideEffects);
+        };
+
+        if (deferSideEffects) {
+            RideStateManager._scheduleSideEffects(runSideEffects);
+            return;
+        }
+
+        await runSideEffects();
+    }
+
     /**
      * Estados possíveis de uma corrida
      */
     static STATES = {
         PENDING: 'PENDING',
+        AWAITING_PAYMENT: 'AWAITING_PAYMENT',
         SEARCHING: 'SEARCHING',
         NOTIFIED: 'NOTIFIED', // ✅ NOVO: Motorista foi notificado, aguardando resposta
         AWAITING_RESPONSE: 'AWAITING_RESPONSE', // ✅ NOVO: Aguardando resposta do motorista (alias para NOTIFIED)
         MATCHED: 'MATCHED',
         ACCEPTED: 'ACCEPTED',
+        ARRIVED: 'ARRIVED',
         IN_PROGRESS: 'IN_PROGRESS',
+        REASSIGNED_IN_PROGRESS: 'REASSIGNED_IN_PROGRESS',
         COMPLETED: 'COMPLETED',
+        EARLY_ENDED_BY_RIDER: 'EARLY_ENDED_BY_RIDER',
+        INTERRUPTED_OPERATIONAL: 'INTERRUPTED_OPERATIONAL',
+        INTERRUPTED_OPERATIONAL_ENDED: 'INTERRUPTED_OPERATIONAL_ENDED',
+        REASSIGNMENT_PENDING: 'REASSIGNMENT_PENDING',
+        EARLY_ENDED_REVIEW: 'EARLY_ENDED_REVIEW',
         REJECTED: 'REJECTED',
         CANCELED: 'CANCELED',
         EXPANDED: 'EXPANDED' // Estado intermediário quando raio é expandido
@@ -32,11 +89,18 @@ class RideStateManager {
      */
     static VALID_TRANSITIONS = {
         [RideStateManager.STATES.PENDING]: [
+            RideStateManager.STATES.AWAITING_PAYMENT,
+            RideStateManager.STATES.SEARCHING,
+            RideStateManager.STATES.AWAITING_RESPONSE,
+            RideStateManager.STATES.CANCELED
+        ],
+        [RideStateManager.STATES.AWAITING_PAYMENT]: [
             RideStateManager.STATES.SEARCHING,
             RideStateManager.STATES.CANCELED
         ],
         [RideStateManager.STATES.SEARCHING]: [
             RideStateManager.STATES.NOTIFIED, // ✅ NOVO: Pode transitar para NOTIFIED quando motorista é notificado
+            RideStateManager.STATES.AWAITING_RESPONSE,
             RideStateManager.STATES.MATCHED,
             RideStateManager.STATES.CANCELED,
             RideStateManager.STATES.EXPANDED
@@ -54,6 +118,7 @@ class RideStateManager {
             RideStateManager.STATES.CANCELED
         ],
         [RideStateManager.STATES.EXPANDED]: [
+            RideStateManager.STATES.AWAITING_RESPONSE,
             RideStateManager.STATES.MATCHED,
             RideStateManager.STATES.CANCELED,
             RideStateManager.STATES.SEARCHING
@@ -63,11 +128,37 @@ class RideStateManager {
             RideStateManager.STATES.REJECTED
         ],
         [RideStateManager.STATES.ACCEPTED]: [
+            RideStateManager.STATES.ARRIVED,
+            RideStateManager.STATES.CANCELED,
+            RideStateManager.STATES.SEARCHING // ✅ Recuperação: motorista desconectou antes de iniciar
+        ],
+        [RideStateManager.STATES.ARRIVED]: [
             RideStateManager.STATES.IN_PROGRESS,
+            RideStateManager.STATES.REASSIGNED_IN_PROGRESS,
             RideStateManager.STATES.CANCELED
         ],
         [RideStateManager.STATES.IN_PROGRESS]: [
             RideStateManager.STATES.COMPLETED,
+            RideStateManager.STATES.EARLY_ENDED_BY_RIDER,
+            RideStateManager.STATES.INTERRUPTED_OPERATIONAL,
+            RideStateManager.STATES.EARLY_ENDED_REVIEW,
+            RideStateManager.STATES.CANCELED
+        ],
+        [RideStateManager.STATES.REASSIGNED_IN_PROGRESS]: [
+            RideStateManager.STATES.COMPLETED,
+            RideStateManager.STATES.EARLY_ENDED_BY_RIDER,
+            RideStateManager.STATES.INTERRUPTED_OPERATIONAL,
+            RideStateManager.STATES.EARLY_ENDED_REVIEW
+        ],
+        [RideStateManager.STATES.INTERRUPTED_OPERATIONAL]: [
+            RideStateManager.STATES.REASSIGNMENT_PENDING,
+            RideStateManager.STATES.INTERRUPTED_OPERATIONAL_ENDED,
+            RideStateManager.STATES.EARLY_ENDED_REVIEW
+        ],
+        [RideStateManager.STATES.REASSIGNMENT_PENDING]: [
+            RideStateManager.STATES.AWAITING_RESPONSE,
+            RideStateManager.STATES.ACCEPTED,
+            RideStateManager.STATES.EARLY_ENDED_REVIEW,
             RideStateManager.STATES.CANCELED
         ],
         [RideStateManager.STATES.REJECTED]: [
@@ -76,6 +167,9 @@ class RideStateManager {
         ],
         // Estados finais não podem transitar
         [RideStateManager.STATES.COMPLETED]: [],
+        [RideStateManager.STATES.EARLY_ENDED_BY_RIDER]: [],
+        [RideStateManager.STATES.INTERRUPTED_OPERATIONAL_ENDED]: [],
+        [RideStateManager.STATES.EARLY_ENDED_REVIEW]: [],
         [RideStateManager.STATES.CANCELED]: []
     };
 
@@ -104,12 +198,24 @@ class RideStateManager {
      * @param {Object} metadata - Metadados adicionais (driverId, reason, etc.)
      * @returns {Promise<boolean>} true se estado foi atualizado com sucesso
      */
-    static async updateBookingState(redis, bookingId, newState, metadata = {}) {
+    static async updateBookingState(redis, bookingId, newState, metadata = {}, options = {}) {
         try {
             const bookingKey = `booking:${bookingId}`;
             
             // Obter estado atual
             const currentState = await redis.hget(bookingKey, 'state');
+
+            // Idempotência sob concorrência: mesma transição não deve falhar.
+            // Evita erro espúrio SEARCHING -> SEARCHING em bursts de fila/expansão.
+            if (currentState && currentState === newState) {
+                const updateData = {
+                    updatedAt: new Date().toISOString(),
+                    ...metadata
+                };
+                await redis.hset(bookingKey, updateData);
+                logger.debug(`ℹ️ [RideStateManager] Transição idempotente ignorada: ${bookingId} (${currentState} -> ${newState})`);
+                return true;
+            }
             
             // Validar transição
             if (currentState && !RideStateManager.isValidTransition(currentState, newState)) {
@@ -127,13 +233,11 @@ class RideStateManager {
 
             await redis.hset(bookingKey, updateData);
 
-            // Registrar evento
-            await eventSourcing.recordEvent(require('./event-sourcing').EVENT_TYPES.STATE_CHANGED, {
-                bookingId,
-                fromState: currentState || 'UNKNOWN',
-                toState: newState,
-                ...metadata
-            });
+            await RideStateManager._runStateSideEffects(
+                redis,
+                { bookingId, currentState, newState, updateData },
+                options
+            );
 
             logger.info(`✅ Estado atualizado: ${bookingId} (${currentState || 'NEW'} → ${newState})`);
             return true;
@@ -180,6 +284,9 @@ class RideStateManager {
     static async isFinalState(redis, bookingId) {
         const currentState = await RideStateManager.getBookingState(redis, bookingId);
         return currentState === RideStateManager.STATES.COMPLETED ||
+               currentState === RideStateManager.STATES.EARLY_ENDED_BY_RIDER ||
+               currentState === RideStateManager.STATES.INTERRUPTED_OPERATIONAL_ENDED ||
+               currentState === RideStateManager.STATES.EARLY_ENDED_REVIEW ||
                currentState === RideStateManager.STATES.CANCELED;
     }
 
@@ -208,4 +315,3 @@ class RideStateManager {
 }
 
 module.exports = RideStateManager;
-

@@ -1,0 +1,52 @@
+appId: br.com.leaf.ride
+---
+- launchApp
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    notVisible: "Ativação pendente"
+    timeout: 60000
+
+- takeScreenshot: "e2e-passenger-09-nav-home"
+
+- tapOn:
+    point: "88%,11%"
+
+- extendedWaitUntil:
+    visible: ".*(Histórico de viagens|Configurações|Ajuda|Editar perfil|Mensagens).*"
+    timeout: 30000
+
+- takeScreenshot: "e2e-passenger-10-menu"
+
+- runFlow:
+    when:
+      visible: "Histórico de viagens"
+    commands:
+      - tapOn: "Histórico de viagens"
+      - extendedWaitUntil:
+          visible: ".*(Recibos|Ainda não há recibos).*"
+          timeout: 30000
+      - takeScreenshot: "e2e-passenger-11-history"
+      - tapOn:
+          point: "12%,11%"
+
+- runFlow:
+    when:
+      visible: "Configurações"
+    commands:
+      - tapOn: "Configurações"
+      - extendedWaitUntil:
+          visible: ".*(Configurações|Notificações|Tráfego ao vivo|Navegação por voz).*"
+          timeout: 30000
+      - takeScreenshot: "e2e-passenger-12-settings"

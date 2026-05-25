@@ -17,9 +17,9 @@ import {
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import VehicleService from '../services/VehicleService';
@@ -501,7 +501,11 @@ export default function AddVehicleScreen({ navigation }) {
     );
 
     return (
-        <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
+        <View
+            style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}
+            testID="driver-add-vehicle-screen"
+            accessibilityLabel="driver-add-vehicle-screen"
+        >
             <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? '#1a1a1a' : '#fff'} />
             
             {/* Header */}
@@ -533,6 +537,8 @@ export default function AddVehicleScreen({ navigation }) {
                         <TouchableOpacity 
                             style={[styles.uploadContainer, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
                             onPress={pickCrlvImage}
+                            testID="driver-add-vehicle-crlv-upload-button"
+                            accessibilityLabel="driver-add-vehicle-crlv-upload-button"
                         >
                             {crlvImage ? (
                                 <View style={styles.pdfContainer}>
@@ -570,6 +576,8 @@ export default function AddVehicleScreen({ navigation }) {
                         <TouchableOpacity 
                             style={[styles.pickerContainer, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
                             onPress={() => setShowBrandModal(true)}
+                            testID="driver-add-vehicle-brand-picker"
+                            accessibilityLabel="driver-add-vehicle-brand-picker"
                         >
                             <Text style={[styles.pickerText, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
                                 {selectedBrand ? BRANDS.find(b => b.id === selectedBrand)?.name : 'Selecione a marca'}
@@ -587,6 +595,8 @@ export default function AddVehicleScreen({ navigation }) {
                             }]}
                             onPress={() => selectedBrand && setShowModelModal(true)}
                             disabled={!selectedBrand}
+                            testID="driver-add-vehicle-model-picker"
+                            accessibilityLabel="driver-add-vehicle-model-picker"
                         >
                             <Text style={[styles.pickerText, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
                                 {selectedModel ? MODELS[selectedBrand]?.find(m => m.id === selectedModel)?.name : 'Selecione o modelo'}
@@ -600,6 +610,8 @@ export default function AddVehicleScreen({ navigation }) {
                         <TouchableOpacity 
                             style={[styles.pickerContainer, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
                             onPress={() => setShowYearModal(true)}
+                            testID="driver-add-vehicle-year-picker"
+                            accessibilityLabel="driver-add-vehicle-year-picker"
                         >
                             <Text style={[styles.pickerText, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
                                 {selectedYear || 'Selecione o ano'}
@@ -625,6 +637,8 @@ export default function AddVehicleScreen({ navigation }) {
                             placeholderTextColor={isDarkMode ? '#999' : '#999'}
                             maxLength={8}
                             autoCapitalize="characters"
+                            testID="driver-add-vehicle-plate-input"
+                            accessibilityLabel="driver-add-vehicle-plate-input"
                         />
                     </FormField>
 
@@ -640,6 +654,8 @@ export default function AddVehicleScreen({ navigation }) {
                             placeholder="Número de identificação do veículo"
                             placeholderTextColor={isDarkMode ? '#999' : '#999'}
                             autoCapitalize="characters"
+                            testID="driver-add-vehicle-vin-input"
+                            accessibilityLabel="driver-add-vehicle-vin-input"
                         />
                     </FormField>
 
@@ -648,6 +664,8 @@ export default function AddVehicleScreen({ navigation }) {
                         <TouchableOpacity 
                             style={[styles.pickerContainer, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
                             onPress={() => setShowColorModal(true)}
+                            testID="driver-add-vehicle-color-picker"
+                            accessibilityLabel="driver-add-vehicle-color-picker"
                         >
                             <Text style={[styles.pickerText, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
                                 {selectedColor ? COLORS.find(c => c.id === selectedColor)?.name : 'Selecione a cor'}
@@ -661,6 +679,8 @@ export default function AddVehicleScreen({ navigation }) {
                         <TouchableOpacity 
                             style={[styles.pickerContainer, { backgroundColor: isDarkMode ? '#333' : '#f8f8f8' }]}
                             onPress={() => setShowVehicleTypeModal(true)}
+                            testID="driver-add-vehicle-type-picker"
+                            accessibilityLabel="driver-add-vehicle-type-picker"
                         >
                             <Text style={[styles.pickerText, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
                                 {vehicleType === 'carro' ? 'Carro' : 
@@ -682,6 +702,8 @@ export default function AddVehicleScreen({ navigation }) {
                     ]}
                     onPress={handleSubmit}
                     disabled={loading}
+                    testID="driver-add-vehicle-submit-button"
+                    accessibilityLabel="driver-add-vehicle-submit-button"
                 >
                     {loading ? (
                         <ActivityIndicator color="#fff" size="small" />
@@ -711,6 +733,8 @@ export default function AddVehicleScreen({ navigation }) {
                                 <TouchableOpacity
                                     key={brand.id}
                                     style={styles.modalItem}
+                                    testID={`driver-add-vehicle-brand-option-${brand.id}`}
+                                    accessibilityLabel={`driver-add-vehicle-brand-option-${brand.id}`}
                                     onPress={() => {
                                         setSelectedBrand(brand.id);
                                         setSelectedModel(''); // Reset modelo
@@ -748,6 +772,8 @@ export default function AddVehicleScreen({ navigation }) {
                                 <TouchableOpacity
                                     key={model.id}
                                     style={styles.modalItem}
+                                    testID={`driver-add-vehicle-model-option-${model.id}`}
+                                    accessibilityLabel={`driver-add-vehicle-model-option-${model.id}`}
                                     onPress={() => {
                                         setSelectedModel(model.id);
                                         if (errors.model) setErrors(prev => ({ ...prev, model: null }));
@@ -784,6 +810,8 @@ export default function AddVehicleScreen({ navigation }) {
                                 <TouchableOpacity
                                     key={year}
                                     style={styles.modalItem}
+                                    testID={`driver-add-vehicle-year-option-${year}`}
+                                    accessibilityLabel={`driver-add-vehicle-year-option-${year}`}
                                     onPress={() => {
                                         setSelectedYear(year.toString());
                                         if (errors.year) setErrors(prev => ({ ...prev, year: null }));
@@ -824,6 +852,8 @@ export default function AddVehicleScreen({ navigation }) {
                                         selectedColor === color.id && styles.modalItemSelected,
                                         { borderBottomColor: isDarkMode ? '#444' : '#f0f0f0' }
                                     ]}
+                                    testID={`driver-add-vehicle-color-option-${color.id}`}
+                                    accessibilityLabel={`driver-add-vehicle-color-option-${color.id}`}
                                     onPress={() => {
                                         setSelectedColor(color.id);
                                         setShowColorModal(false);
@@ -866,6 +896,8 @@ export default function AddVehicleScreen({ navigation }) {
                                 <TouchableOpacity
                                     key={vehicleTypeOption.id}
                                     style={styles.modalItem}
+                                    testID={`driver-add-vehicle-type-option-${vehicleTypeOption.id}`}
+                                    accessibilityLabel={`driver-add-vehicle-type-option-${vehicleTypeOption.id}`}
                                     onPress={() => {
                                         setVehicleType(vehicleTypeOption.id);
                                         if (errors.vehicleType) setErrors(prev => ({ ...prev, vehicleType: null }));
@@ -1142,4 +1174,4 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Regular,
         marginTop: 2,
     },
-}); 
+});

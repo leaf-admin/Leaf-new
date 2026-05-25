@@ -12,17 +12,12 @@
 const { logger } = require('../utils/logger');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
+const PaymentService = require('./payment-service');
 
 class ReceiptService {
     constructor() {
         this.GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.GEO_KEY;
-        this.OPERATIONAL_FEES = {
-            low: 0.79,    // Corridas até R$ 10,00
-            medium: 0.99, // Corridas acima de R$ 10,00 e abaixo de R$ 25,00
-            high: 1.49    // Corridas acima de R$ 25,00
-        };
-        this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
-        this.WOOVI_FEE_MINIMUM = 0.50; // R$ 0,50 mínimo
+        this.paymentService = new PaymentService();
     }
 
     /**
@@ -38,6 +33,42 @@ class ReceiptService {
     }
 
     /**
+     * Parse resiliente de timestamp ISO/epoch/date-object.
+     * Retorna fallback quando o valor não é válido.
+     */
+    parseDateValue(value, fallback = null) {
+        if (value === null || value === undefined || value === '') {
+            return fallback;
+        }
+
+        if (value instanceof Date && !Number.isNaN(value.getTime())) {
+            return new Date(value.getTime());
+        }
+
+        const rawText = String(value).trim();
+        if (!rawText) {
+            return fallback;
+        }
+
+        const asNumber = Number(rawText);
+        if (Number.isFinite(asNumber)) {
+            // Heurística: segundos vs milissegundos
+            const millis = asNumber < 10_000_000_000 ? asNumber * 1000 : asNumber;
+            const parsedFromNumber = new Date(millis);
+            if (!Number.isNaN(parsedFromNumber.getTime())) {
+                return parsedFromNumber;
+            }
+        }
+
+        const parsedFromText = new Date(rawText);
+        if (!Number.isNaN(parsedFromText.getTime())) {
+            return parsedFromText;
+        }
+
+        return fallback;
+    }
+
+    /**
      * Formata data e horário para exibição
      * @param {string} dateString - Data em ISO string
      * @returns {Object} - Objeto com data e horário formatados
@@ -45,7 +76,9 @@ class ReceiptService {
     formatDateTime(dateString) {
         if (!dateString) return { date: 'N/A', time: 'N/A' };
 
-        const date = new Date(dateString);
+        const date = this.parseDateValue(dateString);
+        if (!date) return { date: 'N/A', time: 'N/A' };
+
         const dateFormatted = date.toLocaleDateString('pt-BR', {
             day: '2-digit',
             month: '2-digit',
@@ -82,7 +115,16 @@ class ReceiptService {
             const receiptHash = this.generateReceiptHash(rideId, rideData);
 
             // 5. Formatar data e horário
-            const tripDate = rideData.endTime || rideData.completedAt || rideData.tripStartTime || rideData.bookingDate;
+            const tripDate =
+                this.parseDateValue(
+                    rideData.endTime ||
+                    rideData.completedAt ||
+                    rideData.tripStartTime ||
+                    rideData.startedAt ||
+                    rideData.bookingDate ||
+                    rideData.createdAt,
+                    new Date()
+                )?.toISOString() || new Date().toISOString();
             const { date: tripDateFormatted, time: tripTimeFormatted } = this.formatDateTime(tripDate);
 
             // 6. Obter destino para título
@@ -109,24 +151,24 @@ class ReceiptService {
                     dateTime: tripDate,
 
                     // Local de partida
-                    pickup: {
-                        address: rideData.pickup?.add || 'Endereço de origem',
-                        coordinates: {
-                            lat: rideData.pickup?.lat || 0,
-                            lng: rideData.pickup?.lng || 0
+                        pickup: {
+                            address: rideData.pickup?.add || 'Endereço de origem',
+                            coordinates: {
+                                lat: rideData.pickup?.lat || 0,
+                                lng: rideData.pickup?.lng || 0
+                            },
+                            timestamp: this.parseDateValue(rideData.tripStartTime || rideData.startedAt || rideData.startTime)?.toISOString() || null
                         },
-                        timestamp: rideData.tripStartTime
-                    },
 
                     // Local de destino
-                    dropoff: {
-                        address: rideData.drop?.add || 'Endereço de destino',
-                        coordinates: {
-                            lat: rideData.drop?.lat || 0,
-                            lng: rideData.drop?.lng || 0
+                        dropoff: {
+                            address: rideData.drop?.add || 'Endereço de destino',
+                            coordinates: {
+                                lat: rideData.drop?.lat || 0,
+                                lng: rideData.drop?.lng || 0
+                            },
+                            timestamp: this.parseDateValue(rideData.endTime || rideData.completedAt || rideData.endDate)?.toISOString() || null
                         },
-                        timestamp: rideData.endTime
-                    },
 
                     // Tempo de viagem e distância
                     duration: tripMetrics.duration, // em minutos
@@ -209,25 +251,15 @@ class ReceiptService {
      */
     calculateFinancialBreakdown(rideData) {
         const totalFare = parseFloat(rideData.finalPrice || rideData.customer_paid || rideData.estimate || 0);
-
-        // Calcular taxa operacional baseada no valor (3 faixas)
-        let operationalFee;
-        if (totalFare <= 10.00) {
-            // Até R$ 10,00
-            operationalFee = this.OPERATIONAL_FEES.low;
-        } else if (totalFare <= 25.00) {
-            // Acima de R$ 10,00 e abaixo de R$ 25,00
-            operationalFee = this.OPERATIONAL_FEES.medium;
-        } else {
-            // Acima de R$ 25,00
-            operationalFee = this.OPERATIONAL_FEES.high;
-        }
-
-        // Taxa Woovi: 0,8% com mínimo de R$ 0,50
-        const wooviFee = Math.max(totalFare * this.WOOVI_FEE_PERCENTAGE, this.WOOVI_FEE_MINIMUM);
-
-        // Calcular valor líquido para o motorista
-        const driverAmount = Math.max(0, totalFare - operationalFee - wooviFee);
+        const tollFee = parseFloat(rideData.tollFee || rideData.toll_fee || rideData.pedagio || 0);
+        const breakdown = this.paymentService.calculateFareBreakdownFromReais(totalFare, tollFee);
+        const operationalFee = Number.isFinite(Number(breakdown?.operationalFee)) ? Number(breakdown.operationalFee) : 0;
+        const wooviFee = Number.isFinite(Number(breakdown?.paymentIntermediationFee))
+            ? Number(breakdown.paymentIntermediationFee)
+            : 0;
+        const driverAmount = Number.isFinite(Number(breakdown?.driverNetAmount))
+            ? Number(breakdown.driverNetAmount)
+            : Math.max(0, totalFare - operationalFee - wooviFee);
 
         return {
             // Valor pago pelo passageiro
@@ -273,11 +305,46 @@ class ReceiptService {
      * Calcula métricas da viagem
      */
     calculateTripMetrics(rideData) {
-        const startTime = new Date(rideData.tripStartTime || rideData.bookingDate);
-        const endTime = new Date(rideData.endTime || rideData.completedAt || Date.now());
+        const now = new Date();
+        const endTime = this.parseDateValue(
+            rideData.endTime || rideData.completedAt || rideData.endDate,
+            now
+        );
 
-        const durationMs = endTime.getTime() - startTime.getTime();
-        const durationMinutes = Math.round(durationMs / (1000 * 60));
+        const startTime = this.parseDateValue(
+            rideData.tripStartTime ||
+            rideData.startedAt ||
+            rideData.startTime ||
+            rideData.bookingDate ||
+            rideData.createdAt,
+            endTime
+        );
+        const normalizedStartTime = startTime.getTime() > endTime.getTime()
+            ? new Date(endTime.getTime())
+            : startTime;
+
+        let durationMinutes;
+
+        // Prioridade para duração explícita quando disponível
+        const explicitSeconds = Number(rideData.durationSeconds || rideData.routeDurationSecs || rideData.tripDurationSecs);
+        const explicitMinutes = Number(rideData.durationMinutes || rideData.tripDurationMinutes);
+        const fallbackDuration = Number(rideData.duration);
+
+        if (Number.isFinite(explicitSeconds) && explicitSeconds >= 0) {
+            durationMinutes = Math.round(explicitSeconds / 60);
+        } else if (Number.isFinite(explicitMinutes) && explicitMinutes >= 0) {
+            durationMinutes = Math.round(explicitMinutes);
+        } else if (Number.isFinite(fallbackDuration) && fallbackDuration >= 0) {
+            // No fluxo principal, `duration` costuma vir em segundos.
+            durationMinutes = Math.round(fallbackDuration / 60);
+        } else {
+            const durationMs = Math.max(0, endTime.getTime() - normalizedStartTime.getTime());
+            durationMinutes = Math.round(durationMs / (1000 * 60));
+        }
+
+        if (!Number.isFinite(durationMinutes) || durationMinutes < 0) {
+            durationMinutes = 0;
+        }
 
         // Formatar duração
         const hours = Math.floor(durationMinutes / 60);
@@ -289,7 +356,7 @@ class ReceiptService {
         return {
             duration: durationMinutes,
             durationFormatted,
-            startTime: startTime.toISOString(),
+            startTime: normalizedStartTime.toISOString(),
             endTime: endTime.toISOString()
         };
     }
@@ -462,11 +529,32 @@ class ReceiptService {
         try {
             // Gerar recibo
             const receipt = await this.generateReceipt(rideId, rideData);
+            let receiptTelemetry = {
+                firebase: {
+                    reads: 0,
+                    writes: 0
+                }
+            };
 
             // Salvar no Firestore se disponível
             if (firebaseDb) {
-                await this.saveReceiptToFirestore(receipt, firebaseDb);
+                const saved = await this.saveReceiptToFirestore(receipt, firebaseDb);
+                if (saved) {
+                    receiptTelemetry = {
+                        firebase: {
+                            reads: 0,
+                            writes: 2
+                        }
+                    };
+                }
             }
+
+            Object.defineProperty(receipt, '__telemetry', {
+                value: receiptTelemetry,
+                enumerable: false,
+                configurable: false,
+                writable: false
+            });
 
             return receipt;
 
@@ -568,7 +656,3 @@ class ReceiptService {
 }
 
 module.exports = ReceiptService;
-
-
-
-

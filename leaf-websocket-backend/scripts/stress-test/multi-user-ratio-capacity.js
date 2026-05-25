@@ -24,7 +24,7 @@ const arg = (name, fallback = '') => {
 const SERVER_URL = arg('--url', 'http://127.0.0.1:3001');
 const DRIVERS = Number.parseInt(arg('--drivers', '1000'), 10);
 const PASSENGERS = Number.parseInt(arg('--passengers', '100'), 10);
-const FIREBASE_API_KEY = arg('--api-key', process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'AIzaSyChYseG1IcmffYHHVYT7MqtLlzfdWKE_fc');
+const FIREBASE_API_KEY = arg('--api-key', process.env.FIREBASE_API_KEY || process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '');
 const TOKEN_CONCURRENCY = Number.parseInt(arg('--token-concurrency', '40'), 10);
 const SOCKET_CONCURRENCY = Number.parseInt(arg('--socket-concurrency', '120'), 10);
 const PICKUP_BASE_LAT = Number.parseFloat(arg('--pickup-lat', '-22.9068'));
@@ -302,4 +302,3 @@ runScenario().catch((error) => {
   console.error('FATAL:', error);
   process.exit(1);
 });
-

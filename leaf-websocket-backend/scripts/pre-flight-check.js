@@ -21,11 +21,16 @@ async function checkPort3001() {
 
 async function checkRedis() {
     console.log('🔍 Checking Redis connection...');
-    const redis = new Redis({
-        host: 'localhost',
-        port: 6380,
-        password: 'leaf_password_production_2025_secure' // Based on server.log observation
-    });
+    const redisOptions = {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT || 6380)
+    };
+
+    if (process.env.REDIS_PASSWORD) {
+        redisOptions.password = process.env.REDIS_PASSWORD;
+    }
+
+    const redis = new Redis(redisOptions);
 
     try {
         await redis.ping();

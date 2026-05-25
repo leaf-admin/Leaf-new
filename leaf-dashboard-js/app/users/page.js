@@ -17,6 +17,7 @@ const statusTone = {
   blocked: "status-bad",
   rejected: "status-bad",
 };
+const USERS_REFRESH_MS = 120000;
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
@@ -29,6 +30,10 @@ export default function UsersPage() {
   useEffect(() => {
     let mounted = true;
     const load = async () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+
       try {
         if (mounted) {
           setLoading(true);
@@ -50,7 +55,7 @@ export default function UsersPage() {
     };
 
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(load, USERS_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -116,45 +121,56 @@ export default function UsersPage() {
         </section>
 
         <section className="grid">
-          <Panel title="Usuarios">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Nome</th>
-                  <th>Email</th>
-                  <th>Tipo</th>
-                  <th>Status</th>
-                  <th>Acoes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user, idx) => {
-                  const userId = user.id || user.uid;
-                  const userType = String(user.type || user.usertype || "-").toLowerCase();
-                  const userStatus = String(user.status || "-").toLowerCase();
-                  const badgeClass = statusTone[userStatus] || "status-warn";
-
-                  return (
-                    <tr key={userId || `u-${idx}`}>
-                      <td>{user.name || user.displayName || "-"}</td>
-                      <td>{user.email || "-"}</td>
-                      <td>{userType}</td>
-                      <td>
-                        <span className={badgeClass}>{userStatus}</span>
-                      </td>
-                      <td>
-                        <div className="filters">
-                          {userId ? <Link href={`/users/${userId}`}>Detalhes</Link> : null}
-                          {userType === "driver" && userId ? (
-                            <Link href={`/drivers/${userId}/documents`}>Documentos</Link>
-                          ) : null}
-                        </div>
-                      </td>
+          <Panel title="Usuários" subtitle="Gestão de contas com atalhos para perfil e documentos do motorista.">
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Email</th>
+                    <th>Tipo</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.length === 0 ? (
+                    <tr>
+                      <td colSpan={5}>Nenhum usuário encontrado para os filtros atuais.</td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ) : (
+                    users.map((user, idx) => {
+                      const userId = user.id || user.uid;
+                      const userType = String(user.type || user.usertype || "-").toLowerCase();
+                      const userStatus = String(user.status || "-").toLowerCase();
+                      const badgeClass = statusTone[userStatus] || "status-warn";
+
+                      return (
+                        <tr key={userId || `u-${idx}`}>
+                          <td>
+                            <strong>{user.name || user.displayName || "-"}</strong>
+                            <span className="table-muted">{userId || "-"}</span>
+                          </td>
+                          <td>{user.email || "-"}</td>
+                          <td>{userType}</td>
+                          <td>
+                            <span className={badgeClass}>{userStatus}</span>
+                          </td>
+                          <td>
+                            <div className="actions-cell">
+                              {userId ? <Link href={`/users/${userId}`}>Detalhes</Link> : null}
+                              {userType === "driver" && userId ? (
+                                <Link href={`/drivers/${userId}/documents`}>Documentos</Link>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
             <div className="pager">
               <button onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
               <span>Pagina {page}</span>

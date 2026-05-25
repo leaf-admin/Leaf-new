@@ -5,6 +5,7 @@ import { colors } from './theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18n from '../i18n';
 import { api } from '../../common';
+import { getDirectionsApi as getDirectionsApiLocal, getDistanceMatrix as getDistanceMatrixLocal } from '../services/runtime/locationRouteBridge';
 import TaxiModal from '../components/TaxiModal';
 var { height, width } = Dimensions.get('window');
 import { fonts } from './font';
@@ -161,9 +162,17 @@ export const CarVertical = (props) =>{
 
 export const validateBookingObj = async (t, addBookingObj, instructionData, settings, bookingType, roundTrip, tripInstructions, tripdata, drivers, otherPerson) => {
     const {
-        getDistanceMatrix,
         GetDistance,
     } = api;
+    const getDistanceMatrix = typeof getDistanceMatrixLocal === 'function'
+        ? getDistanceMatrixLocal
+        : api?.getDistanceMatrix;
+    const MATRIX_DRIVER_LIMIT = 8;
+    const estimateArrivalFromDistance = (distanceKm) => {
+        const safeDistance = Number.isFinite(Number(distanceKm)) ? Number(distanceKm) : 2;
+        const minutes = Math.max(2, Math.round((safeDistance / 28) * 60));
+        return { timein_text: `${minutes} min`, found: true, source: 'approx' };
+    };
     if (settings.autoDispatch && bookingType == false) {
         if(otherPerson)addBookingObj['instructionData'] = instructionData;
         let preRequestedDrivers = {};
@@ -171,6 +180,7 @@ export const validateBookingObj = async (t, addBookingObj, instructionData, sett
         let driverEstimates = {};
         let startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
         let distArr = [];
+        let etaByDriverId = {};
         let allDrivers = [];
         if(drivers && drivers.length > 0){
             for (let i = 0; i < drivers.length; i++) {
@@ -184,29 +194,36 @@ export const validateBookingObj = async (t, addBookingObj, instructionData, sett
                     allDrivers.push(driver);
                 }
             }
-            const sortedDrivers = settings.useDistanceMatrix ? allDrivers.slice(0, 25) : allDrivers;
+            const sortedDrivers = [...allDrivers].sort(
+                (a, b) => (Number(a?.distance) || Number.MAX_SAFE_INTEGER) - (Number(b?.distance) || Number.MAX_SAFE_INTEGER)
+            );
+            const matrixCandidates = settings.useDistanceMatrix ? sortedDrivers.slice(0, MATRIX_DRIVER_LIMIT) : [];
             if (sortedDrivers.length > 0) {
-                let driverDest = "";
-                for (let i = 0; i < sortedDrivers.length; i++) {
-                    let driver = { ...sortedDrivers[i] };
-                    driverDest = driverDest + driver.location.lat + "," + driver.location.lng
-                    if (i < (sortedDrivers.length - 1)) {
-                        driverDest = driverDest + '|';
+                if (settings.useDistanceMatrix && matrixCandidates.length > 0 && typeof getDistanceMatrix === 'function') {
+                    let driverDest = "";
+                    for (let i = 0; i < matrixCandidates.length; i++) {
+                        let driver = { ...matrixCandidates[i] };
+                        driverDest = driverDest + driver.location.lat + "," + driver.location.lng
+                        if (i < (matrixCandidates.length - 1)) {
+                            driverDest = driverDest + '|';
+                        }
                     }
-                }
-                if (settings.useDistanceMatrix) {
                     distArr = await getDistanceMatrix(startLoc, driverDest);
-                } else {
-                    for (let i = 0; i < sortedDrivers.length; i++) {
-                        distArr.push({ timein_text: ((sortedDrivers[i].distance * 2) + 1).toFixed(0) + ' min', found: true })
+                    for (let i = 0; i < matrixCandidates.length; i++) {
+                        if (distArr[i] && distArr[i].found) {
+                            etaByDriverId[matrixCandidates[i].id] = distArr[i];
+                        }
                     }
+                } else if (settings.useDistanceMatrix && matrixCandidates.length > 0) {
+                    Logger.warn('⚠️ getDistanceMatrix indisponível, usando ETA aproximado por distância');
                 }
                 for (let i = 0; i < sortedDrivers.length; i++) {
-                    if (distArr[i].found) {
-                        let driver = {}
+                    const driverEta = etaByDriverId[sortedDrivers[i].id] || estimateArrivalFromDistance(sortedDrivers[i].distance);
+                    if (driverEta.found) {
+                        let driver = {};
                         driver.id = sortedDrivers[i].id;
                         driver.distance = sortedDrivers[i].distance;
-                        driver.timein_text = distArr[i].timein_text;
+                        driver.timein_text = driverEta.timein_text;
                         if(!settings.prepaid){
                             requestedDrivers[driver.id] = true;
                         }else{
@@ -232,9 +249,9 @@ export default function BookingModal(props){
 
 export const prepareEstimateObject =  async (tripdata, instructionData) => {
     const { t } = i18n;
-    const {
-        getDirectionsApi
-    } = api;
+    const getDirectionsApi = typeof getDirectionsApiLocal === 'function'
+        ? getDirectionsApiLocal
+        : api?.getDirectionsApi;
     
     // Log de entrada
     Logger.log('🚀 ===== prepareEstimateObject INICIADO =====');
@@ -243,6 +260,10 @@ export const prepareEstimateObject =  async (tripdata, instructionData) => {
     Logger.log('🔍 getDirectionsApi function:', getDirectionsApi?.toString?.()?.substring(0, 200));
     
     try {
+        if (typeof getDirectionsApi !== 'function') {
+            throw new Error('getDirectionsApi indisponível');
+        }
+
         const startLoc = tripdata.pickup.lat + ',' + tripdata.pickup.lng;
         const destLoc = tripdata.drop.lat + ',' + tripdata.drop.lng;
         Logger.log('📍 Coordenadas formatadas:', { startLoc, destLoc });

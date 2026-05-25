@@ -17,7 +17,7 @@ fi
 # Configurações
 BACKUP_DIR="/home/leaf/backups"
 DR_SCRIPT="/usr/local/bin/disaster-recovery.sh"
-PRIMARY_IP="147.93.66.253"
+PRIMARY_IP="147.182.204.181"
 BACKUP_IP="BACKUP_VPS_IP"
 
 # Criar diretórios de backup
@@ -36,7 +36,7 @@ cat > $DR_SCRIPT << 'EOF'
 set -e
 
 BACKUP_DIR="/home/leaf/backups"
-PRIMARY_IP="147.93.66.253"
+PRIMARY_IP="147.182.204.181"
 BACKUP_IP="BACKUP_VPS_IP"
 
 # Função de logging
@@ -56,7 +56,7 @@ full_backup() {
     
     # Backup da aplicação
     log_message "📦 Backup da aplicação..."
-    tar -czf $BACKUP_DIR/app/app-$(date +%Y%m%d-%H%M%S).tar.gz /home/leaf/leaf-websocket-backend/
+    tar -czf $BACKUP_DIR/app/app-$(date +%Y%m%d-%H%M%S).tar.gz /opt/leaf-app/
     
     # Backup das configurações
     log_message "📦 Backup das configurações..."
@@ -64,7 +64,7 @@ full_backup() {
     
     # Backup dos logs
     log_message "📦 Backup dos logs..."
-    tar -czf $BACKUP_DIR/logs/logs-$(date +%Y%m%d-%H%M%S).tar.gz /var/log/leaf-app/ /home/leaf/leaf-websocket-backend/logs/
+    tar -czf $BACKUP_DIR/logs/logs-$(date +%Y%m%d-%H%M%S).tar.gz /var/log/leaf-app/ /opt/leaf-app/logs/
     
     # Limpar backups antigos (manter últimos 7 dias)
     find $BACKUP_DIR -name "*.rdb" -mtime +7 -delete
@@ -166,7 +166,7 @@ failover() {
     log_message "🔴 VPS principal está down, ativando backup..."
     
     # Ativar modo backup
-    echo "BACKUP_MODE=true" >> /home/leaf/leaf-websocket-backend/config.env
+    echo "BACKUP_MODE=true" >> /opt/leaf-app/config.env
     
     # Reiniciar aplicação
     systemctl restart leaf-backup

@@ -1,328 +1,215 @@
-import Logger from '../utils/Logger';
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
   StyleSheet,
-  View,
   Text,
   TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-    Platform,
-    StatusBar,
-    Dimensions
+  View,
 } from 'react-native';
-import { Icon } from 'react-native-elements';
-import { colors } from '../common-local/theme';
-import i18n from '../i18n';
-import { useSelector, useDispatch } from 'react-redux';
-import { api } from '../common-local';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
-import { fonts } from '../common-local/font';
-import { PromoComp } from "../components";
-import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
-import { useResponsiveLayout } from '../components/ResponsiveLayout';
-import WebSocketManager from '../services/WebSocketManager';
-import useWebSocketListeners from '../hooks/useWebSocketListeners';
+import { Ionicons } from '@expo/vector-icons';
+import { fonts } from '../theme/runtimeTokens';
 
+const color = {
+  background: '#F6FAF6',
+  card: '#FFFFFF',
+  text: '#101C14',
+  muted: '#66756B',
+  line: '#DFE8E1',
+  leaf: '#1A330E',
+  softLeaf: '#EDF5EC',
+};
 
-export default function PaymentDetails(props) {
-    const { t } = i18n;
-    const { getPaymentMethods, addPaymentMethod, removePaymentMethod } = api;
-  const dispatch = useDispatch();
-  const auth = useSelector(state => state.auth);
-    const [loading, setLoading] = useState(true);
-    const [paymentMethods, setPaymentMethods] = useState([]);
-    const [isDarkMode, setIsDarkMode] = useState(false);
-    
-    // Responsive layout hook
-    const { config: responsiveConfig, isTablet, isMobile } = useResponsiveLayout();
+function formatCurrency(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    return null;
+  }
 
-    // ===== INTEGRAÇÃO WEBSOCKET =====
-    const wsManager = WebSocketManager.getInstance();
-    const currentUser = auth.profile;
-    const userType = currentUser?.userType || currentUser?.usertype;
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(numberValue);
+}
 
-    // Configurar listeners WebSocket para pagamentos
-    useWebSocketListeners('PaymentDetails', {
-        onPaymentConfirmed: (data) => {
-            Logger.log('💳 PaymentDetails - Pagamento confirmado:', data);
-            // Atualizar estado de pagamento
-            // Navegar para próxima tela se necessário
-        },
-        onBookingCreated: (data) => {
-            Logger.log('💳 PaymentDetails - Booking criado:', data);
-            // Atualizar estado da reserva
-        },
-        onConnect: () => {
-            Logger.log('💳 PaymentDetails - WebSocket conectado');
-        },
-        onDisconnect: (reason) => {
-            Logger.log('💳 PaymentDetails - WebSocket desconectado:', reason);
-        },
-        onConnectError: (error) => {
-            Logger.error('💳 PaymentDetails - Erro de conexão WebSocket:', error);
-        }
-    });
+export default function PaymentDetails({ navigation, route }) {
+  const booking = route?.params?.booking || route?.params?.tripData || {};
+  const amount =
+    booking?.totalAmount ??
+    booking?.amount ??
+    booking?.price ??
+    booking?.fare ??
+    booking?.selectedBid?.price;
+  const formattedAmount = formatCurrency(amount);
 
-    // Tema dinâmico baseado no modo escuro/claro
-    const theme = {
-        background: isDarkMode ? '#1A1A1A' : '#FFFFFF',
-        card: isDarkMode ? '#2A2A2A' : '#FFFFFF',
-        text: isDarkMode ? '#FFFFFF' : '#000000',
-        textSecondary: isDarkMode ? '#AAAAAA' : '#666666',
-        border: isDarkMode ? '#333333' : '#E0E0E0',
-        icon: isDarkMode ? '#FFFFFF' : '#000000',
-    };
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={color.background} />
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.iconButton}
+          activeOpacity={0.78}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar"
+        >
+          <Ionicons name="chevron-back" size={22} color={color.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Pagamento via PIX</Text>
+        <View style={styles.iconButtonPlaceholder} />
+      </View>
 
-  useEffect(() => {
-        loadPaymentMethods();
-    }, []);
-
-    const loadPaymentMethods = async () => {
-        try {
-            setLoading(true);
-            const response = await getPaymentMethods(auth.profile.uid);
-            if (response && response.length > 0) {
-                setPaymentMethods(response);
-            }
-        } catch (error) {
-            Logger.error('Erro ao carregar métodos de pagamento:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleAddPaymentMethod = () => {
-        props.navigation.navigate('AddPaymentMethod');
-    };
-
-    const handleRemovePaymentMethod = async (methodId) => {
-        try {
-            setLoading(true);
-            await removePaymentMethod(methodId);
-            await loadPaymentMethods();
-        } catch (error) {
-            Logger.error('Erro ao remover método de pagamento:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const renderPaymentMethod = (method) => (
-        <View style={[styles.paymentMethodCard, { backgroundColor: theme.card }]}>
-            <View style={[styles.iconContainer, { backgroundColor: isDarkMode ? '#333333' : '#F5F5F5' }]}>
-                <Icon
-                    name={method.type === 'credit_card' ? 'credit-card' : 'account-balance-wallet'}
-                    type="material"
-                    color={theme.icon}
-                    size={24}
-                />
-            </View>
-            <View style={styles.paymentMethodContent}>
-                <Text style={[styles.paymentMethodTitle, { color: theme.text }]}>
-                    {method.type === 'credit_card' ? 'Cartão de Crédito' : 'Carteira Digital'}
-                </Text>
-                <Text style={[styles.paymentMethodDetails, { color: theme.textSecondary }]}>
-                    {method.type === 'credit_card' 
-                        ? `**** **** **** ${method.last4}`
-                        : `Saldo: R$ ${method.balance.toFixed(2)}`}
-                </Text>
-            </View>
-            <TouchableOpacity
-                style={styles.removeButton}
-                onPress={() => handleRemovePaymentMethod(method.id)}
-            >
-                <Icon name="delete" type="material" color={theme.textSecondary} size={24} />
-            </TouchableOpacity>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.heroIcon}>
+          <Ionicons name="qr-code-outline" size={32} color={color.leaf} />
         </View>
-    );
 
-    return (
-        <View style={[styles.container, { backgroundColor: theme.background }]}>
-            <StatusBar hidden={true} />
-            
-            {/* Header */}
-            <View style={[styles.header, { backgroundColor: theme.card }]}>
-            <TouchableOpacity
-                    style={[styles.headerButton, { backgroundColor: theme.card }]}
-                    onPress={() => props.navigation.goBack()}
-            >
-                    <Icon name="arrow-back" type="material" color={theme.icon} size={24} />
-            </TouchableOpacity>
-                
-                <Text style={[styles.headerTitle, { color: theme.text }]}>Métodos de Pagamento</Text>
-                
-                <View style={styles.headerRightContainer}>
-            <TouchableOpacity
-                        style={[styles.headerButton, { backgroundColor: theme.card }]}
-                        onPress={() => setIsDarkMode(!isDarkMode)}
-                    >
-                        <Icon 
-                            name={isDarkMode ? "light-mode" : "dark-mode"} 
-                            type="material" 
-                            color={theme.icon} 
-                            size={24} 
-                        />
-                    </TouchableOpacity>
-                </View>
-            </View>
+        <Text style={styles.title}>PIX é o pagamento da Leaf</Text>
+        <Text style={styles.copy}>
+          A corrida é paga por PIX antes da busca pelo motorista. Isso mantém a cobrança simples,
+          segura e transparente para passageiro e motorista.
+        </Text>
 
-            <ScrollView style={styles.scrollView}>
-                {loading ? (
-                    <View style={styles.loadingContainer}>
-                        <LoadingSpinner 
-                            message="Carregando métodos de pagamento..." 
-                            color={MAIN_COLOR} 
-                        />
-                        <View style={styles.skeletonContainer}>
-                            <SkeletonLoader width="100%" height={60} style={styles.skeletonMethod} />
-                            <SkeletonLoader width="100%" height={60} style={styles.skeletonMethod} />
-                            <SkeletonLoader width="100%" height={60} style={styles.skeletonMethod} />
-                        </View>
-                    </View>
-                ) : (
-                    <View style={styles.contentContainer}>
-                        {paymentMethods.length > 0 ? (
-                            paymentMethods.map((method) => renderPaymentMethod(method))
-                        ) : (
-                            <View style={styles.emptyContainer}>
-                                <Icon
-                                    name="payment"
-                                    type="material"
-                                    color={theme.textSecondary}
-                                    size={64}
-                                />
-                                <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-                                    Nenhum método de pagamento cadastrado
-                </Text>
-              </View>
-                        )}
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Forma de pagamento</Text>
+            <Text style={styles.rowValue}>PIX</Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Quando cobra</Text>
+            <Text style={styles.rowValue}>Antes da busca</Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Valor</Text>
+            <Text style={styles.rowValue}>{formattedAmount || 'Definido na corrida'}</Text>
+          </View>
+        </View>
 
-            <TouchableOpacity
-                            style={[styles.addButton, { backgroundColor: MAIN_COLOR }]}
-                            onPress={handleAddPaymentMethod}
-            >
-                            <Icon name="add" type="material" color="#FFFFFF" size={24} />
-                            <Text style={styles.addButtonText}>Adicionar Método de Pagamento</Text>
-                        </TouchableOpacity>
-              </View>
-                )}
-            </ScrollView>
-    </View>
+        <View style={styles.note}>
+          <Ionicons name="shield-checkmark-outline" size={16} color={color.leaf} />
+          <Text style={styles.noteText}>
+            Se a corrida não seguir, o fluxo de estorno ou liberação do pagamento acontece pelo
+            próprio processo da Leaf.
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: color.background,
   },
-    header: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'ios' ? 50 : 40,
-        paddingBottom: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#E0E0E0',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingTop: Platform.OS === 'android' ? 18 : 8,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: color.line,
   },
-    headerButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    },
-    headerTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-    },
-    headerRightContainer: {
-        flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: color.card,
+    borderWidth: 1,
+    borderColor: color.line,
   },
-    scrollView: {
-        flex: 1,
-    },
-    contentContainer: {
-        padding: 16,
-    },
-    paymentMethodCard: {
-        flexDirection: 'row',
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    iconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-    justifyContent: 'center',
+  iconButtonPlaceholder: {
+    width: 42,
+    height: 42,
+  },
+  headerTitle: {
+    color: color.text,
+    fontFamily: fonts.Medium,
+    fontSize: 17,
+    lineHeight: 22,
+  },
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 34,
+    paddingBottom: 34,
+  },
+  heroIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
-        marginRight: 12,
-    },
-    paymentMethodContent: {
-        flex: 1,
-    },
-    paymentMethodTitle: {
-    fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 4,
-    },
-    paymentMethodDetails: {
-        fontSize: 14,
-    },
-    removeButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    addButton: {
+    justifyContent: 'center',
+    backgroundColor: color.softLeaf,
+    marginBottom: 18,
+  },
+  title: {
+    color: color.text,
+    fontFamily: fonts.Medium,
+    fontSize: 24,
+    lineHeight: 30,
+  },
+  copy: {
+    marginTop: 10,
+    color: color.muted,
+    fontFamily: fonts.Regular,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  card: {
+    marginTop: 28,
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    backgroundColor: color.card,
+    borderWidth: 1,
+    borderColor: color.line,
+  },
+  row: {
+    minHeight: 58,
     flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-        borderRadius: 12,
-        marginTop: 16,
-  },
-    addButtonText: {
-        color: '#FFFFFF',
-    fontSize: 16,
-        fontWeight: '600',
-        marginLeft: 8,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20,
-    },
-    skeletonContainer: {
-        width: '100%',
-        marginTop: 20,
-    },
-    skeletonMethod: {
-        marginBottom: 12,
-        borderRadius: 8,
-    },
-    emptyContainer: {
     alignItems: 'center',
-    justifyContent: 'center',
-        padding: 32,
-    },
-    emptyText: {
-        marginTop: 16,
-        fontSize: 16,
-        textAlign: 'center',
+    justifyContent: 'space-between',
+    gap: 18,
+  },
+  rowLabel: {
+    flex: 1,
+    color: color.muted,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  rowValue: {
+    color: color.text,
+    fontFamily: fonts.Medium,
+    fontSize: 14,
+    lineHeight: 19,
+    textAlign: 'right',
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: color.line,
+  },
+  note: {
+    marginTop: 18,
+    flexDirection: 'row',
+    gap: 9,
+    alignItems: 'flex-start',
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: color.softLeaf,
+  },
+  noteText: {
+    flex: 1,
+    color: color.muted,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
 });

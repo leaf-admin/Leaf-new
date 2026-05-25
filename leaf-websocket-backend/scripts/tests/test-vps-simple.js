@@ -3,7 +3,7 @@ const io = require('socket.io-client');
 console.log('🚀 TESTE VPS SIMPLES...\n');
 
 // Conectar ao WebSocket
-const socket = io('http://216.238.107.59:3001', {
+const socket = io('http://147.182.204.181:3001', {
     transports: ['polling', 'websocket'], // Polling primeiro como fallback
     timeout: 5000,
     forceNew: true

@@ -1,0 +1,278 @@
+appId: br.com.leaf.ride
+env:
+  TEST_PHONE: "21102938475"
+  TEST_OTP: "992111"
+  TEST_PHONE_FALLBACK: "21123456789"
+  TEST_OTP_FALLBACK: "992000"
+  EXISTING_ACCOUNT_PASSWORD: "Leaf12345"
+---
+- launchApp:
+    clearState: true
+
+- runFlow:
+    when:
+      visible: ".*Deseja Enviar Notificações.*"
+    commands:
+      - tapOn: "Não Permitir"
+
+- runFlow:
+    when:
+      visible: "Sign in to view updates"
+    commands:
+      - tapOn: "Home"
+
+- runFlow:
+    when:
+      visible: "http://.*:8081"
+    commands:
+      - tapOn: "http://.*:8081"
+
+- runFlow:
+    when:
+      visible: "http://.*:8081"
+    commands:
+      - tapOn: "http://.*:8081"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "No development servers found"
+    commands:
+      - tapOn: "Enter URL manually"
+      - inputText: "http://localhost:8081"
+      - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Connect"
+          commands:
+            - tapOn: "Connect"
+      - runFlow:
+          when:
+            visible: "Abrir"
+          commands:
+            - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- waitForAnimationToEnd
+
+- extendedWaitUntil:
+    visible:
+      id: "(auth-phone-input|passenger-home-destination-input)"
+    timeout: 30000
+
+- runFlow:
+    when:
+      notVisible:
+        id: "passenger-home-destination-input"
+    commands:
+      - tapOn:
+          id: "auth-phone-input"
+      - eraseText
+      - inputText: ${TEST_PHONE}
+      - runFlow:
+          when:
+            visible:
+              id: "auth-continue-btn"
+          commands:
+            - tapOn:
+                id: "auth-continue-btn"
+      - runFlow:
+          when:
+            notVisible:
+              id: "auth-continue-btn"
+          commands:
+            - pressKey: Enter
+      - waitForAnimationToEnd
+      - extendedWaitUntil:
+          visible:
+            id: "(auth-password-input|auth-otp-digit-0|passenger-home-destination-input)"
+          timeout: 60000
+      - runFlow:
+          when:
+            visible:
+              id: "auth-password-input"
+          commands:
+            - tapOn:
+                id: "auth-password-input"
+            - inputText: ${EXISTING_ACCOUNT_PASSWORD}
+            - swipe:
+                start: "50%,84%"
+                end: "50%,34%"
+            - runFlow:
+                when:
+                  visible:
+                    id: "auth-continue-btn"
+                commands:
+                  - tapOn:
+                      id: "auth-continue-btn"
+            - runFlow:
+                when:
+                  notVisible:
+                    id: "auth-continue-btn"
+                commands:
+                  - pressKey: Enter
+            - waitForAnimationToEnd
+      - runFlow:
+          when:
+            visible:
+              id: "auth-otp-digit-0"
+          commands:
+            - tapOn:
+                id: "auth-otp-digit-0"
+            - inputText: "9"
+            - tapOn:
+                id: "auth-otp-digit-1"
+            - inputText: "9"
+            - tapOn:
+                id: "auth-otp-digit-2"
+            - inputText: "2"
+            - tapOn:
+                id: "auth-otp-digit-3"
+            - inputText: "1"
+            - tapOn:
+                id: "auth-otp-digit-4"
+            - inputText: "1"
+            - tapOn:
+                id: "auth-otp-digit-5"
+            - inputText: "1"
+            - waitForAnimationToEnd
+            - runFlow:
+                when:
+                  visible: "Erro.*"
+                commands:
+                  - tapOn: "OK"
+                  - tapOn: "Voltar"
+                  - tapOn:
+                      id: "auth-phone-input"
+                  - eraseText
+                  - inputText: ${TEST_PHONE_FALLBACK}
+                  - runFlow:
+                      when:
+                        visible:
+                          id: "auth-continue-btn"
+                      commands:
+                        - tapOn:
+                            id: "auth-continue-btn"
+                  - runFlow:
+                      when:
+                        notVisible:
+                          id: "auth-continue-btn"
+                      commands:
+                        - pressKey: Enter
+                  - waitForAnimationToEnd
+                  - extendedWaitUntil:
+                      visible:
+                        id: "auth-otp-digit-0"
+                      timeout: 45000
+                  - tapOn:
+                      id: "auth-otp-digit-0"
+                  - inputText: "9"
+                  - tapOn:
+                      id: "auth-otp-digit-1"
+                  - inputText: "9"
+                  - tapOn:
+                      id: "auth-otp-digit-2"
+                  - inputText: "2"
+                  - tapOn:
+                      id: "auth-otp-digit-3"
+                  - inputText: "0"
+                  - tapOn:
+                      id: "auth-otp-digit-4"
+                  - inputText: "0"
+                  - tapOn:
+                      id: "auth-otp-digit-5"
+                  - inputText: "0"
+                  - waitForAnimationToEnd
+            - runFlow:
+                when:
+                  visible:
+                    id: "auth-otp-verify-btn"
+                commands:
+                  - tapOn:
+                      id: "auth-otp-verify-btn"
+            - extendedWaitUntil:
+                notVisible:
+                  id: "auth-otp-digit-0"
+                timeout: 60000
+      - runFlow:
+          when:
+            visible: "Como você quer usar a Leaf?"
+          commands:
+            - tapOn: "Quero viajar"
+            - tapOn: "Continuar"
+      - runFlow:
+          when:
+            visible: "Quero viajar"
+          commands:
+            - tapOn: "Quero viajar"
+            - tapOn: "Continuar"
+      - runFlow:
+          when:
+            visible: "Nome completo"
+          commands:
+            - inputText: "Teste Firebase Sandbox iOS"
+            - tapOn: "CPF"
+            - inputText: "12345678901"
+            - tapOn: "Cadastrar"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir ao usar o app"
+    commands:
+      - tapOn: "Permitir ao usar o app"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 120000
+- assertNotVisible:
+    id: "auth-phone-input"
+- takeScreenshot: "ios-auth-login-success"

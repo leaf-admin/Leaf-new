@@ -5,8 +5,8 @@ console.log('🚀 TESTE COMPLETO PONTA A PONTA - LEAF RIDE SYSTEM');
 console.log('=' .repeat(60));
 
 // Configurações
-const SERVER_URL = 'http://216.238.107.59:3001';
-const WEBSOCKET_URL = 'http://216.238.107.59:3001';
+const SERVER_URL = 'http://147.182.204.181:3001';
+const WEBSOCKET_URL = 'http://147.182.204.181:3001';
 
 // Dados de teste
 const testRide = {
@@ -281,7 +281,7 @@ async function runCompleteTest() {
     console.log('\n🔧 CONFIGURAÇÕES VALIDADAS:');
     console.log(`🌐 Servidor: ${SERVER_URL}`);
     console.log(`🔌 WebSocket: ${WEBSOCKET_URL}`);
-    console.log(`📊 Redis: redis://216.238.107.59:6379 (Pool otimizado)`);
+    console.log(`📊 Redis: redis://147.182.204.181:6379 (Pool otimizado)`);
     console.log(`💳 Pagamento: Sistema Woovi integrado`);
     console.log(`🚗 Corrida: Fluxo completo implementado`);
 }

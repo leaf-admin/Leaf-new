@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { View, TextInput, StyleSheet, Animated as RNAnimated, Platform } from 'react-native';
 import { Typography } from './Typography';
-import { colors } from '../../common-local/theme';
-import { fonts } from '../../common-local/font';
+import { colors } from '../../theme/runtimeTokens';
+import { fonts } from '../../theme/runtimeTokens';
 
 export const AnimatedInput = ({
     label,

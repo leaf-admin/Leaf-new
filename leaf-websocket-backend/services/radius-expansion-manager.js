@@ -19,6 +19,7 @@ const DriverNotificationDispatcher = require('./driver-notification-dispatcher')
 const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger } = require('../utils/logger');
+const { recordDispatchWave } = require('./dispatch-wave-trace-service');
 
 class RadiusExpansionManager {
     constructor(io) {
@@ -43,12 +44,71 @@ class RadiusExpansionManager {
             
             // Quantidade de motoristas para notificar após expansão (apenas UMA VEZ)
             // Nota: Apenas motoristas NOVOS serão notificados (já filtrado por ride_notifications)
-            driversPerWave: 10 // Mais motoristas após expansão (área maior)
+            driversPerWave: 10, // Mais motoristas após expansão (área maior)
+
+            // Hotfix de performance: limitar SCAN em loops de monitoramento.
+            redisScanCount: Math.max(
+                100,
+                Number.parseInt(
+                    process.env.RADIUS_EXPANSION_REDIS_SCAN_COUNT || process.env.REDIS_SCAN_COUNT || '1000',
+                    10
+                ) || 1000
+            ),
+            maxBookingsPerCycle: Math.max(
+                50,
+                Number.parseInt(process.env.RADIUS_EXPANSION_MAX_BOOKINGS_PER_CYCLE || '300', 10) || 300
+            )
         };
         
         // Instâncias dos serviços
         this.expander = new GradualRadiusExpander(io);
-        this.dispatcher = new DriverNotificationDispatcher(io);
+        this.dispatcher = new DriverNotificationDispatcher(this.redis, io);
+    }
+
+    safeJSONParse(data, defaultValue = {}) {
+        if (!data) return defaultValue;
+        if (typeof data === 'object') return data;
+        try {
+            return JSON.parse(data);
+        } catch (_error) {
+            return defaultValue;
+        }
+    }
+
+    async isBookingEligibleForExpansion(bookingId, bookingData = null) {
+        const snapshot = bookingData && Object.keys(bookingData).length > 0
+            ? bookingData
+            : await this.redis.hgetall(`booking:${bookingId}`);
+
+        if (!snapshot || Object.keys(snapshot).length === 0) {
+            return { ok: false, reason: 'BOOKING_NOT_FOUND' };
+        }
+
+        const state = await RideStateManager.getBookingState(this.redis, bookingId);
+        if (state !== RideStateManager.STATES.SEARCHING && state !== RideStateManager.STATES.EXPANDED) {
+            return { ok: false, reason: 'STATE_NOT_ELIGIBLE', state };
+        }
+
+        const status = String(snapshot.status || '').toUpperCase();
+        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+            return { ok: false, reason: 'STATUS_BLOCKED', state, status };
+        }
+
+        const customerId = snapshot.customerId;
+        if (customerId) {
+            const activeBookingId = await this.redis.get(`customer_active_booking:${customerId}`);
+            if (activeBookingId && activeBookingId !== bookingId) {
+                return {
+                    ok: false,
+                    reason: 'STALE_CUSTOMER_ACTIVE_BOOKING',
+                    state,
+                    status,
+                    activeBookingId
+                };
+            }
+        }
+
+        return { ok: true, state, status, bookingData: snapshot };
     }
 
     /**
@@ -185,6 +245,12 @@ class RadiusExpansionManager {
                 return;
             }
 
+            const eligibility = await this.isBookingEligibleForExpansion(bookingId, bookingData);
+            if (!eligibility.ok) {
+                logger.info(`ℹ️ [RadiusExpansionManager] Expansão ignorada para ${bookingId}: ${eligibility.reason}`);
+                return;
+            }
+
             // Parse seguro de pickupLocation
             let pickupLocation = {};
             if (bookingData.pickupLocation) {
@@ -223,10 +289,32 @@ class RadiusExpansionManager {
                 pickupLocation,
                 this.config.expandedMaxRadius,
                 this.config.driversPerWave,
-                bookingId
+                bookingId,
+                {
+                    pickupLocation,
+                    destinationLocation: this.safeJSONParse(
+                        bookingData.destinationLocation,
+                        {}
+                    ),
+                    preferences: this.safeJSONParse(
+                        bookingData.preferences,
+                        {}
+                    ),
+                    carType: bookingData.carType || null
+                }
             );
 
             if (driversIn5km.length === 0) {
+                await recordDispatchWave(this.redis, bookingId, {
+                    radiusKm: this.config.expandedMaxRadius,
+                    candidateCount: 0,
+                    notifiedCount: 0,
+                    failedCount: 0,
+                    limit: this.config.driversPerWave,
+                    bookingState: eligibility.state || 'EXPANDED',
+                    source: 'radius_expansion_manager',
+                    timestampMs: Date.now()
+                });
                 logger.info(`⚠️ [RadiusExpansionManager] Nenhum motorista encontrado em 5km para ${bookingId}`);
                 
                 // Notificar customer sobre expansão mesmo sem motoristas
@@ -265,7 +353,17 @@ class RadiusExpansionManager {
             const result = await this.dispatcher.notifyMultipleDrivers(
                 driversIn5km,
                 bookingId,
-                bookingInfo
+                bookingInfo,
+                this.config.driversPerWave,
+                {
+                    dispatchTrace: {
+                        type: 'wave',
+                        source: 'radius_expansion_manager',
+                        radiusKm: this.config.expandedMaxRadius,
+                        candidateCount: driversIn5km.length,
+                        bookingState: eligibility.state || 'EXPANDED'
+                    }
+                }
             );
 
             logger.info(`✅ [RadiusExpansionManager] ${result.notified} motorista(s) notificado(s) após expansão para 5km (${bookingId})`);
@@ -304,7 +402,12 @@ class RadiusExpansionManager {
         try {
             // ✅ CORRIGIDO: Usar SCAN ao invés de KEYS() (não bloqueante)
             const RedisScan = require('../utils/redis-scan');
-            const searchKeys = await RedisScan.scanKeys(this.redis, 'booking_search:*');
+            const searchKeys = await RedisScan.scanKeys(
+                this.redis,
+                'booking_search:*',
+                this.config.redisScanCount,
+                this.config.maxBookingsPerCycle
+            );
             const searchingBookings = [];
 
             for (const key of searchKeys) {
@@ -319,6 +422,10 @@ class RadiusExpansionManager {
                     if (state === RideStateManager.STATES.SEARCHING) {
                         searchingBookings.push(bookingId);
                     }
+                }
+
+                if (searchingBookings.length >= this.config.maxBookingsPerCycle) {
+                    break;
                 }
             }
 
@@ -354,4 +461,3 @@ class RadiusExpansionManager {
 }
 
 module.exports = RadiusExpansionManager;
-

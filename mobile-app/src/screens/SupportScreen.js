@@ -1,751 +1,823 @@
 import Logger from '../utils/Logger';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    ScrollView,
-    TouchableOpacity,
-    TextInput,
-    StatusBar,
-    Platform,
-    ActivityIndicator,
-    FlatList,
-    Alert,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  StatusBar,
+  Platform,
+  ActivityIndicator,
+  FlatList,
+  Alert,
+  ScrollView
 } from 'react-native';
-import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { fonts } from '../theme/runtimeTokens';
 import WebSocketManager from '../services/WebSocketManager';
 import SupportService from '../services/SupportService';
 import SupportChatService from '../services/SupportChatService';
+import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 
+const { color, typography } = robotaxiPrototypeTokens;
+
+const FALLBACK_FAQ = [
+  {
+    id: 'fallback-1',
+    question: 'Como entrar em contato com o suporte?',
+    answer: 'Use o chat em tempo real, tickets ou envie e-mail para suporte@leaf.com.br.'
+  },
+  {
+    id: 'fallback-2',
+    question: 'Qual o horário de atendimento?',
+    answer: 'Nosso suporte operacional funciona 24h por dia, 7 dias por semana.'
+  },
+  {
+    id: 'fallback-3',
+    question: 'Como abrir um ticket?',
+    answer: 'Na aba Tickets, toque no ticket desejado ou abra um novo chamado pelo suporte.'
+  }
+];
+
+function getCurrentUserId(profile) {
+  return profile?.uid || profile?.id || null;
+}
+
+function normalizeMessage(msg) {
+  return {
+    id: String(msg?.id || `msg-${Date.now()}`),
+    text: String(msg?.message || msg?.text || ''),
+    sender: msg?.senderType === 'user' || msg?.sender === 'user' ? 'user' : 'support',
+    timestamp: msg?.timestamp || new Date().toISOString()
+  };
+}
+
+function formatTimestamp(value) {
+  try {
+    return new Date(value).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch (error) {
+    return '--:--';
+  }
+}
 
 export default function SupportScreen({ navigation }) {
-    const [isDarkMode, setIsDarkMode] = useState(false);
-    const [selectedTab, setSelectedTab] = useState('chat');
-    const [message, setMessage] = useState('');
-    const [chatMessages, setChatMessages] = useState([]);
-    const [isTyping, setIsTyping] = useState(false);
-    const [tickets, setTickets] = useState([]);
-    const [faqs, setFaqs] = useState([]);
-    const [expandedFaq, setExpandedFaq] = useState(null);
-    const [isLoading, setIsLoading] = useState(false);
-    
-    const auth = useSelector(state => state.auth);
-    const currentUser = auth.profile;
-    const wsManager = WebSocketManager.getInstance();
-    const chatRef = useRef(null);
+  const [selectedTab, setSelectedTab] = useState('chat');
+  const [message, setMessage] = useState('');
+  const [chatMessages, setChatMessages] = useState([]);
+  const [tickets, setTickets] = useState([]);
+  const [faqs, setFaqs] = useState([]);
+  const [expandedFaq, setExpandedFaq] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-    useEffect(() => {
-        loadSupportData();
-        connectChat();
-        initializeSupportChat();
-        
-        // Cleanup ao desmontar
-        return () => {
-            SupportChatService.disconnect();
-        };
-    }, []);
+  const auth = useSelector(state => state.auth);
+  const currentUser = auth?.profile;
+  const wsManager = WebSocketManager.getInstance();
+  const chatRef = useRef(null);
 
-    const loadSupportData = async () => {
-        try {
-            setIsLoading(true);
-            const userId = currentUser?.uid || currentUser?.id;
-            
-            if (userId) {
-                // ✅ Carregar tickets (para problemas graves) e FAQ
-                // Chat em tempo real é carregado separadamente via initializeSupportChat
-                const [ticketsResult, faqResult] = await Promise.all([
-                    SupportService.getTickets(userId),
-                    SupportService.getFAQ()
-                ]);
-                
-                if (ticketsResult.success) {
-                    setTickets(ticketsResult.tickets || []);
-                }
-                if (faqResult.success) {
-                    setFaqs(faqResult.faqs || []);
-                }
-            }
-        } catch (error) {
-            Logger.error('❌ Erro ao carregar dados de suporte:', error);
-        } finally {
-            setIsLoading(false);
-        }
+  const faqItems = useMemo(() => {
+    if (Array.isArray(faqs) && faqs.length) {
+      return faqs.map((item, index) => ({
+        id: String(item?.id || `faq-${index}`),
+        question: String(item?.question || item?.title || 'Pergunta frequente'),
+        answer: String(item?.answer || item?.description || 'Resposta indisponível no momento.')
+      }));
+    }
+    return FALLBACK_FAQ;
+  }, [faqs]);
+
+  useEffect(() => {
+    let unsubscribe = null;
+    let isMounted = true;
+
+    const bootstrap = async () => {
+      await loadSupportData();
+      await connectChat();
+      unsubscribe = await initializeSupportChat();
     };
 
-    const connectChat = async () => {
-        try {
-            if (!wsManager.isConnected()) {
-                await wsManager.connect();
-            }
-        } catch (error) {
-            Logger.error('Erro ao conectar chat de suporte:', error);
-        }
+    bootstrap().catch(error => {
+      Logger.error('❌ [SupportScreen] Falha ao inicializar suporte:', error);
+    });
+
+    return () => {
+      isMounted = false;
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+      SupportChatService.disconnect();
     };
 
-    const initializeSupportChat = async () => {
-        try {
-            const userId = currentUser?.uid || currentUser?.id;
-            if (!userId) return;
-
-            // Inicializar chat de suporte
-            await SupportChatService.initialize(userId);
-
-            // Carregar mensagens existentes
-            const messages = await SupportChatService.getMessages(userId);
-            setChatMessages(messages.map(msg => ({
-                id: msg.id,
-                text: msg.message,
-                sender: msg.senderType === 'user' ? 'user' : 'support',
-                timestamp: msg.timestamp
-            })));
-
-            // Escutar novas mensagens em tempo real
-            const unsubscribe = SupportChatService.onNewMessage((newMessage) => {
-                Logger.log('💬 Nova mensagem recebida:', newMessage);
-                setChatMessages(prev => {
-                    // Evitar duplicatas
-                    if (prev.find(m => m.id === newMessage.id)) {
-                        return prev;
-                    }
-                    return [...prev, {
-                        id: newMessage.id,
-                        text: newMessage.message,
-                        sender: newMessage.senderType === 'user' ? 'user' : 'support',
-                        timestamp: newMessage.timestamp
-                    }];
-                });
-            }, userId);
-
-            // Armazenar função de cleanup
-            return unsubscribe;
-
-        } catch (error) {
-            Logger.error('❌ Erro ao inicializar chat de suporte:', error);
+    async function connectChat() {
+      try {
+        if (!wsManager.isConnected()) {
+          await wsManager.connect();
         }
-    };
-
-    const sendMessage = async () => {
-        if (!message.trim()) return;
-        
-        try {
-            const userId = currentUser?.uid || currentUser?.id;
-            if (!userId) {
-                Alert.alert('Erro', 'Usuário não identificado');
-                return;
-            }
-
-            const messageText = message.trim();
-            setMessage(''); // Limpar campo imediatamente para melhor UX
-
-            // ✅ Adicionar mensagem localmente primeiro (otimista)
-            const tempMessage = {
-                id: `temp-${Date.now()}`,
-                text: messageText,
-                sender: 'user',
-                timestamp: new Date().toISOString()
-            };
-            setChatMessages(prev => [...prev, tempMessage]);
-
-            // ✅ Enviar via SupportChatService (chat em tempo real)
-            Logger.log('💬 Enviando mensagem no chat de suporte...');
-            const result = await SupportChatService.sendMessage(messageText, userId);
-            
-            if (result.success) {
-                // Substituir mensagem temporária pela real
-                setChatMessages(prev => {
-                    const filtered = prev.filter(m => m.id !== tempMessage.id);
-                    return [...filtered, {
-                        id: result.messageId,
-                        text: result.message.message,
-                        sender: 'user',
-                        timestamp: result.message.timestamp
-                    }];
-                });
-
-                // Marcar como lida
-                await SupportChatService.markAsRead(userId);
-            } else {
-                // Remover mensagem temporária em caso de erro
-                setChatMessages(prev => prev.filter(m => m.id !== tempMessage.id));
-                Alert.alert('Erro', result.error || 'Não foi possível enviar a mensagem');
-                setMessage(messageText); // Restaurar mensagem
-            }
-        } catch (error) {
-            Logger.error('❌ Erro ao enviar mensagem:', error);
-            Alert.alert('Erro', error.message || 'Não foi possível enviar a mensagem');
-            setMessage(message.trim()); // Restaurar mensagem
-        }
-    };
-
-    const Header = () => (
-        <View style={[styles.header, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
-            <TouchableOpacity 
-                style={[
-                    styles.headerButton, 
-                    { 
-                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
-                        borderWidth: 1,
-                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
-                    }
-                ]}
-                onPress={() => navigation.goBack()}
-                activeOpacity={0.7}
-            >
-                <Ionicons 
-                    name="arrow-back" 
-                    color={isDarkMode ? '#fff' : '#1a1a1a'} 
-                    size={22} 
-                />
-            </TouchableOpacity>
-            <Text style={[styles.headerTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                Suporte
-            </Text>
-            <TouchableOpacity 
-                style={[
-                    styles.headerButton, 
-                    { 
-                        backgroundColor: isDarkMode ? '#2d2d2d' : '#e8e8e8',
-                        borderWidth: 1,
-                        borderColor: isDarkMode ? '#404040' : '#d0d0d0',
-                    }
-                ]}
-                onPress={() => navigation.navigate('Help')}
-                activeOpacity={0.7}
-            >
-                <Ionicons name="help-circle-outline" size={22} color={isDarkMode ? '#fff' : '#1a1a1a'} />
-            </TouchableOpacity>
-        </View>
-    );
-
-    const Tabs = () => (
-        <View style={[styles.tabsContainer, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
-            <TouchableOpacity
-                style={[
-                    styles.tab,
-                    selectedTab === 'chat' && styles.tabActive,
-                    { backgroundColor: selectedTab === 'chat' ? MAIN_COLOR : 'transparent' }
-                ]}
-                onPress={() => setSelectedTab('chat')}
-            >
-                <Ionicons 
-                    name="chatbubbles-outline" 
-                    size={20} 
-                    color={selectedTab === 'chat' ? '#fff' : (isDarkMode ? '#ccc' : colors.GRAY)} 
-                />
-                <Text style={[
-                    styles.tabText,
-                    { color: selectedTab === 'chat' ? '#fff' : (isDarkMode ? '#ccc' : colors.GRAY) }
-                ]}>
-                    Chat
-                </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-                style={[
-                    styles.tab,
-                    selectedTab === 'tickets' && styles.tabActive,
-                    { backgroundColor: selectedTab === 'tickets' ? MAIN_COLOR : 'transparent' }
-                ]}
-                onPress={() => setSelectedTab('tickets')}
-            >
-                <Ionicons 
-                    name="document-text-outline" 
-                    size={20} 
-                    color={selectedTab === 'tickets' ? '#fff' : (isDarkMode ? '#ccc' : colors.GRAY)} 
-                />
-                <Text style={[
-                    styles.tabText,
-                    { color: selectedTab === 'tickets' ? '#fff' : (isDarkMode ? '#ccc' : colors.GRAY) }
-                ]}>
-                    Tickets
-                </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-                style={[
-                    styles.tab,
-                    selectedTab === 'faq' && styles.tabActive,
-                    { backgroundColor: selectedTab === 'faq' ? MAIN_COLOR : 'transparent' }
-                ]}
-                onPress={() => setSelectedTab('faq')}
-            >
-                <Ionicons 
-                    name="help-circle-outline" 
-                    size={20} 
-                    color={selectedTab === 'faq' ? '#fff' : (isDarkMode ? '#ccc' : colors.GRAY)} 
-                />
-                <Text style={[
-                    styles.tabText,
-                    { color: selectedTab === 'faq' ? '#fff' : (isDarkMode ? '#ccc' : colors.GRAY) }
-                ]}>
-                    FAQ
-                </Text>
-            </TouchableOpacity>
-        </View>
-    );
-
-    const renderChat = () => (
-        <View style={styles.chatContainer}>
-            <View style={[styles.chatHeader, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
-                <View style={styles.supportInfo}>
-                    <View style={[styles.avatarContainer, { backgroundColor: MAIN_COLOR }]}>
-                        <Ionicons name="headset-outline" size={24} color="#fff" />
-                    </View>
-                    <View style={styles.supportDetails}>
-                        <Text style={[styles.supportName, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                            Suporte Leaf
-                        </Text>
-                        <Text style={[styles.supportStatus, { color: '#4CAF50' }]}>Online</Text>
-                    </View>
-                </View>
-            </View>
-            
-            <FlatList
-                ref={chatRef}
-                data={chatMessages}
-                keyExtractor={(item) => item.id.toString()}
-                renderItem={({ item }) => (
-                    <View style={[
-                        styles.messageContainer,
-                        item.sender === 'user' ? styles.userMessage : styles.supportMessage
-                    ]}>
-                        <Text style={[
-                            styles.messageText,
-                            item.sender === 'user' ? styles.userMessageText : styles.supportMessageText
-                        ]}>
-                            {item.text}
-                        </Text>
-                        <Text style={styles.messageTime}>
-                            {new Date(item.timestamp).toLocaleTimeString('pt-BR', { 
-                                hour: '2-digit', 
-                                minute: '2-digit' 
-                            })}
-                        </Text>
-                    </View>
-                )}
-                style={styles.messagesList}
-                contentContainerStyle={styles.messagesContent}
-                onContentSizeChange={() => chatRef.current?.scrollToEnd()}
-            />
-            
-            {isTyping && (
-                <View style={styles.typingIndicator}>
-                    <Text style={[styles.typingText, { color: isDarkMode ? '#999' : colors.GRAY }]}>
-                        Suporte está digitando...
-                    </Text>
-                </View>
-            )}
-            
-            <View style={[styles.inputContainer, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
-                <TextInput
-                    style={[styles.messageInput, { 
-                        backgroundColor: isDarkMode ? '#333' : '#f8f8f8',
-                        color: isDarkMode ? '#fff' : colors.BLACK
-                    }]}
-                    value={message}
-                    onChangeText={setMessage}
-                    placeholder="Digite sua mensagem..."
-                    placeholderTextColor={isDarkMode ? '#666' : colors.GRAY}
-                    multiline
-                    maxLength={500}
-                />
-                <TouchableOpacity
-                    style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
-                    onPress={sendMessage}
-                    disabled={!message.trim()}
-                >
-                    <Ionicons name="send" size={20} color="#fff" />
-                </TouchableOpacity>
-            </View>
-        </View>
-    );
-
-    const renderTickets = () => (
-        <View style={styles.ticketsContainer}>
-            {tickets.length > 0 ? (
-                <FlatList
-                    data={tickets}
-                    keyExtractor={(item) => item.id.toString()}
-                    renderItem={({ item }) => (
-                        <TouchableOpacity
-                            style={[styles.ticketCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}
-                            onPress={() => navigation.navigate('TicketDetails', { ticket: item })}
-                        >
-                            <View style={styles.ticketHeader}>
-                                <Text style={[styles.ticketTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                                    {item.title || 'Ticket #' + item.id}
-                                </Text>
-                                <View style={[styles.statusBadge, { backgroundColor: '#4CAF50' }]}>
-                                    <Text style={styles.statusText}>{item.status || 'Aberto'}</Text>
-                                </View>
-                            </View>
-                            <Text style={[styles.ticketDescription, { color: isDarkMode ? '#999' : colors.GRAY }]}>
-                                {item.description || 'Sem descrição'}
-                            </Text>
-                        </TouchableOpacity>
-                    )}
-                />
-            ) : (
-                <View style={styles.emptyState}>
-                    <Ionicons name="document-text-outline" size={64} color={isDarkMode ? '#666' : colors.GRAY} />
-                    <Text style={[styles.emptyTitle, { color: isDarkMode ? '#999' : colors.GRAY }]}>
-                        Nenhum ticket encontrado
-                    </Text>
-                    <Text style={[styles.emptySubtitle, { color: isDarkMode ? '#666' : colors.GRAY }]}>
-                        Crie um novo ticket para obter ajuda
-                    </Text>
-                </View>
-            )}
-        </View>
-    );
-
-    const faqData = [
-        { question: 'Como entrar em contato com o suporte?', answer: 'Você pode entrar em contato através do chat em tempo real, criando um ticket ou enviando um e-mail para suporte@leaf.com.br' },
-        { question: 'Qual o horário de atendimento?', answer: 'Nosso suporte está disponível 24 horas por dia, 7 dias por semana.' },
-        { question: 'Como criar um ticket?', answer: 'Na aba "Tickets", toque em "Novo Ticket" e preencha as informações solicitadas.' },
-    ];
-
-    const renderFAQ = () => (
-        <View style={styles.faqContainer}>
-            <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                Perguntas Frequentes
-            </Text>
-            
-            {faqData.map((item, index) => (
-                <View 
-                    key={index}
-                    style={[styles.faqCard, { backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}
-                >
-                    <TouchableOpacity
-                        style={styles.faqHeader}
-                        onPress={() => setExpandedFaq(expandedFaq === index ? null : index)}
-                        activeOpacity={0.7}
-                    >
-                        <Text style={[styles.faqQuestion, { color: isDarkMode ? '#fff' : colors.BLACK }]}>
-                            {item.question}
-                        </Text>
-                        <Ionicons 
-                            name={expandedFaq === index ? "chevron-up" : "chevron-down"} 
-                            size={20} 
-                            color={isDarkMode ? '#999' : colors.GRAY} 
-                        />
-                    </TouchableOpacity>
-                    {expandedFaq === index && (
-                        <Text style={[styles.faqAnswer, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
-                            {item.answer}
-                        </Text>
-                    )}
-                </View>
-            ))}
-        </View>
-    );
-
-    if (isLoading) {
-        return (
-            <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
-                <Header />
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={MAIN_COLOR} />
-                </View>
-            </View>
-        );
+      } catch (error) {
+        Logger.error('Erro ao conectar chat de suporte:', error);
+      }
     }
 
-    return (
-        <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
-            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor={isDarkMode ? '#1a1a1a' : '#fff'} />
-            
-            <Header />
-            <Tabs />
+    async function initializeSupportChat() {
+      try {
+        const userId = getCurrentUserId(currentUser);
+        if (!userId || !isMounted) {
+          return null;
+        }
 
-            <View style={styles.content}>
-                {selectedTab === 'chat' && renderChat()}
-                {selectedTab === 'tickets' && renderTickets()}
-                {selectedTab === 'faq' && renderFAQ()}
-            </View>
+        await SupportChatService.initialize(userId);
+
+        const existingMessages = await SupportChatService.getMessages(userId);
+        if (isMounted && Array.isArray(existingMessages)) {
+          setChatMessages(existingMessages.map(normalizeMessage));
+        }
+
+        return SupportChatService.onNewMessage(newMessage => {
+          if (!isMounted) {
+            return;
+          }
+
+          setChatMessages(previous => {
+            const normalized = normalizeMessage(newMessage);
+            if (previous.some(item => item.id === normalized.id)) {
+              return previous;
+            }
+            return [...previous, normalized];
+          });
+        }, userId);
+      } catch (error) {
+        Logger.error('❌ Erro ao inicializar chat de suporte:', error);
+        return null;
+      }
+    }
+
+    async function loadSupportData() {
+      try {
+        setIsLoading(true);
+
+        const userId = getCurrentUserId(currentUser);
+        if (!userId) {
+          return;
+        }
+
+        const [ticketsResult, faqResult] = await Promise.all([
+          SupportService.getTickets(userId),
+          SupportService.getFAQ()
+        ]);
+
+        if (ticketsResult?.success) {
+          setTickets(Array.isArray(ticketsResult.tickets) ? ticketsResult.tickets : []);
+        }
+
+        if (faqResult?.success) {
+          setFaqs(Array.isArray(faqResult.faqs) ? faqResult.faqs : []);
+        }
+      } catch (error) {
+        Logger.error('❌ Erro ao carregar dados de suporte:', error);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+  }, [currentUser?.uid, currentUser?.id]);
+
+  useEffect(() => {
+    if (!chatRef.current || !chatMessages.length) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      chatRef.current?.scrollToEnd?.({ animated: true });
+    }, 50);
+
+    return () => clearTimeout(timeout);
+  }, [chatMessages]);
+
+  const sendMessage = async () => {
+    const messageText = message.trim();
+    if (!messageText) {
+      return;
+    }
+
+    const userId = getCurrentUserId(currentUser);
+    if (!userId) {
+      Alert.alert('Erro', 'Usuário não identificado.');
+      return;
+    }
+
+    const tempMessage = {
+      id: `temp-${Date.now()}`,
+      text: messageText,
+      sender: 'user',
+      timestamp: new Date().toISOString()
+    };
+
+    setMessage('');
+    setChatMessages(previous => [...previous, tempMessage]);
+
+    try {
+      const result = await SupportChatService.sendMessage(messageText, userId);
+
+      if (!result?.success) {
+        throw new Error(result?.error || 'Não foi possível enviar a mensagem.');
+      }
+
+      setChatMessages(previous => {
+        const withoutTemp = previous.filter(item => item.id !== tempMessage.id);
+        const normalized = normalizeMessage({ ...result.message, id: result.messageId, senderType: 'user' });
+        return [...withoutTemp, normalized];
+      });
+
+      await SupportChatService.markAsRead(userId);
+    } catch (error) {
+      setChatMessages(previous => previous.filter(item => item.id !== tempMessage.id));
+      setMessage(messageText);
+      Logger.error('❌ Erro ao enviar mensagem de suporte:', error);
+      Alert.alert('Falha no envio', error?.message || 'Tente novamente em instantes.');
+    }
+  };
+
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()} activeOpacity={0.86}>
+        <Ionicons name="arrow-back" color={color.text.primary} size={18} />
+      </TouchableOpacity>
+      <Text style={styles.headerTitle}>Suporte</Text>
+      <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate('Help')} activeOpacity={0.86}>
+        <Ionicons name="help-circle-outline" color={color.text.primary} size={18} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderSummaryCard = () => (
+    <View style={styles.summaryCard}>
+      <View style={styles.summaryIcon}>
+        <Ionicons name="headset-outline" size={16} color={color.text.primary} />
+      </View>
+      <View style={styles.summaryTextWrap}>
+        <Text style={styles.summaryTitle}>Central de atendimento Leaf</Text>
+        <Text style={styles.summarySubtitle}>Chat em tempo real, tickets e base de respostas em um só lugar.</Text>
+      </View>
+    </View>
+  );
+
+  const renderTabs = () => (
+    <View style={styles.tabsRow}>
+      {[
+        { id: 'chat', label: 'Chat', icon: 'chatbubble-ellipses-outline' },
+        { id: 'tickets', label: 'Tickets', icon: 'document-text-outline' },
+        { id: 'faq', label: 'FAQ', icon: 'help-circle-outline' }
+      ].map(tab => {
+        const active = selectedTab === tab.id;
+        return (
+          <TouchableOpacity
+            key={tab.id}
+            style={[styles.tabButton, active && styles.tabButtonActive]}
+            onPress={() => setSelectedTab(tab.id)}
+            activeOpacity={0.86}
+            testID={`support-tab-${tab.id}`}
+            accessibilityLabel={`support-tab-${tab.id}`}
+          >
+            <Ionicons name={tab.icon} size={15} color={active ? '#FFFFFF' : color.text.secondary} />
+            <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
+  const renderChatTab = () => (
+    <View style={styles.tabPanel}>
+      <View style={styles.chatHeaderCard}>
+        <View style={styles.chatBadge}>
+          <Ionicons name="chatbubbles-outline" size={14} color={color.text.primary} />
         </View>
-    );
+        <View style={styles.chatHeaderTextWrap}>
+          <Text style={styles.chatHeaderTitle}>Atendimento online</Text>
+          <Text style={styles.chatHeaderSubtitle}>Respostas rápidas para ocorrências de corrida e conta.</Text>
+        </View>
+      </View>
+
+      <View style={styles.chatMessagesWrap}>
+        <FlatList
+          ref={chatRef}
+          data={chatMessages}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.messagesContent}
+          renderItem={({ item }) => {
+            const isUser = item.sender === 'user';
+            return (
+              <View style={[styles.messageBubble, isUser ? styles.messageBubbleUser : styles.messageBubbleSupport]}>
+                <Text style={[styles.messageText, isUser ? styles.messageTextUser : styles.messageTextSupport]}>{item.text}</Text>
+                <Text style={styles.messageTimestamp}>{formatTimestamp(item.timestamp)}</Text>
+              </View>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={styles.emptyChatWrap}>
+              <Ionicons name="chatbox-ellipses-outline" size={24} color={color.text.muted} />
+              <Text style={styles.emptyChatText}>Nenhuma mensagem ainda. Escreva para começar.</Text>
+            </View>
+          }
+          showsVerticalScrollIndicator={false}
+        />
+      </View>
+
+      <View style={styles.inputRow}>
+        <TextInput
+          value={message}
+          onChangeText={setMessage}
+          placeholder="Digite sua mensagem"
+          placeholderTextColor={color.text.muted}
+          style={styles.input}
+          multiline
+          maxLength={500}
+          testID="support-chat-message-input"
+          accessibilityLabel="support-chat-message-input"
+        />
+        <TouchableOpacity
+          style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
+          onPress={sendMessage}
+          disabled={!message.trim()}
+          activeOpacity={0.86}
+          testID="support-chat-send-button"
+          accessibilityLabel="support-chat-send-button"
+        >
+          <Ionicons name="send" size={14} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const renderTicketsTab = () => (
+    <ScrollView style={styles.tabPanel} contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+      {!tickets.length ? (
+        <View style={styles.emptyStateCard}>
+          <Ionicons name="document-text-outline" size={24} color={color.text.muted} />
+          <Text style={styles.emptyStateTitle}>Nenhum ticket encontrado</Text>
+          <Text style={styles.emptyStateSubtitle}>Quando houver chamados, eles aparecem aqui para acompanhamento.</Text>
+        </View>
+      ) : (
+        tickets.map((ticket, index) => {
+          const title = ticket?.title || `Ticket #${ticket?.id || index + 1}`;
+          const description = ticket?.description || 'Sem descrição detalhada.';
+          const statusLabel = ticket?.status || 'Aberto';
+          return (
+            <TouchableOpacity
+              key={String(ticket?.id || index)}
+              style={styles.ticketCard}
+              activeOpacity={0.86}
+              onPress={() => navigation.navigate('SupportTicket', { ticket })}
+              testID={`support-ticket-card-${index}`}
+              accessibilityLabel={`support-ticket-card-${index}`}
+            >
+              <View style={styles.ticketHeader}>
+                <Text style={styles.ticketTitle}>{title}</Text>
+                <View style={styles.ticketStatusBadge}>
+                  <Text style={styles.ticketStatusText}>{statusLabel}</Text>
+                </View>
+              </View>
+              <Text style={styles.ticketDescription}>{description}</Text>
+              <View style={styles.ticketFooter}>
+                <Text style={styles.ticketActionText}>Ver detalhes</Text>
+                <Ionicons name="chevron-forward" size={15} color={color.text.secondary} />
+              </View>
+            </TouchableOpacity>
+          );
+        })
+      )}
+    </ScrollView>
+  );
+
+  const renderFaqTab = () => (
+    <ScrollView style={styles.tabPanel} contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+      {faqItems.map((item, index) => {
+        const expanded = expandedFaq === item.id;
+        return (
+          <View key={item.id} style={styles.faqCard}>
+            <TouchableOpacity
+              style={styles.faqHeader}
+              onPress={() => setExpandedFaq(expanded ? null : item.id)}
+              activeOpacity={0.86}
+              testID={`support-faq-item-${index}`}
+              accessibilityLabel={`support-faq-item-${index}`}
+            >
+              <Text style={styles.faqQuestion}>{item.question}</Text>
+              <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={color.text.secondary} />
+            </TouchableOpacity>
+            {expanded ? <Text style={styles.faqAnswer}>{item.answer}</Text> : null}
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+
+  return (
+    <View
+      style={styles.container}
+      testID="support-screen"
+      accessibilityLabel="support-screen"
+    >
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor="transparent"
+        translucent={Platform.OS === 'android'}
+      />
+
+      {renderHeader()}
+      {renderSummaryCard()}
+      {renderTabs()}
+
+      {isLoading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={color.accent.primary} />
+          <Text style={styles.loadingText}>Carregando suporte...</Text>
+        </View>
+      ) : (
+        <View style={styles.body}>
+          {selectedTab === 'chat' ? renderChatTab() : null}
+          {selectedTab === 'tickets' ? renderTicketsTab() : null}
+          {selectedTab === 'faq' ? renderFaqTab() : null}
+        </View>
+      )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingTop: Platform.OS === 'ios' ? 50 : 24,
-        paddingBottom: 16,
-        borderBottomWidth: 0.5,
-        borderBottomColor: '#f0f0f0',
-    },
-    headerButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 1,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        fontFamily: fonts.Bold,
-    },
-    tabsContainer: {
-        flexDirection: 'row',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 0.5,
-        borderBottomColor: '#f0f0f0',
-        gap: 8,
-    },
-    tab: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        borderRadius: 20,
-        gap: 6,
-    },
-    tabActive: {
-        // backgroundColor já definido inline
-    },
-    tabText: {
-        fontSize: 14,
-        fontFamily: fonts.Medium,
-    },
-    content: {
-        flex: 1,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingVertical: 40,
-    },
-    chatContainer: {
-        flex: 1,
-    },
-    chatHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: 16,
-        borderBottomWidth: 0.5,
-        borderBottomColor: '#f0f0f0',
-    },
-    supportInfo: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    avatarContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    supportDetails: {
-        flex: 1,
-    },
-    supportName: {
-        fontSize: 16,
-        fontFamily: fonts.Bold,
-    },
-    supportStatus: {
-        fontSize: 12,
-        fontFamily: fonts.Regular,
-    },
-    messagesList: {
-        flex: 1,
-    },
-    messagesContent: {
-        padding: 16,
-    },
-    messageContainer: {
-        marginBottom: 12,
-        maxWidth: '80%',
-    },
-    userMessage: {
-        alignSelf: 'flex-end',
-        backgroundColor: MAIN_COLOR,
-        borderRadius: 16,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-    },
-    supportMessage: {
-        alignSelf: 'flex-start',
-        backgroundColor: '#f0f0f0',
-        borderRadius: 16,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-    },
-    messageText: {
-        fontSize: 14,
-        fontFamily: fonts.Regular,
-        marginBottom: 4,
-    },
-    userMessageText: {
-        color: '#fff',
-    },
-    supportMessageText: {
-        color: colors.BLACK,
-    },
-    messageTime: {
-        fontSize: 10,
-        fontFamily: fonts.Regular,
-        color: colors.GRAY,
-        alignSelf: 'flex-end',
-    },
-    typingIndicator: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-    },
-    typingText: {
-        fontSize: 12,
-        fontFamily: fonts.Regular,
-        fontStyle: 'italic',
-    },
-    inputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        borderTopWidth: 0.5,
-        borderTopColor: '#f0f0f0',
-        gap: 8,
-    },
-    messageInput: {
-        flex: 1,
-        borderRadius: 20,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        maxHeight: 100,
-        fontSize: 14,
-        fontFamily: fonts.Regular,
-    },
-    sendButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: MAIN_COLOR,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    sendButtonDisabled: {
-        backgroundColor: '#ccc',
-    },
-    ticketsContainer: {
-        flex: 1,
-        padding: 16,
-    },
-    ticketCard: {
-        padding: 16,
-        borderRadius: 16,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    ticketHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 8,
-    },
-    ticketTitle: {
-        flex: 1,
-        fontSize: 16,
-        fontFamily: fonts.Bold,
-    },
-    statusBadge: {
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 12,
-    },
-    statusText: {
-        fontSize: 10,
-        fontFamily: fonts.Bold,
-        color: '#fff',
-    },
-    ticketDescription: {
-        fontSize: 14,
-        fontFamily: fonts.Regular,
-        lineHeight: 20,
-    },
-    emptyState: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingVertical: 60,
-    },
-    emptyTitle: {
-        fontSize: 18,
-        fontFamily: fonts.Bold,
-        marginTop: 16,
-        marginBottom: 8,
-    },
-    emptySubtitle: {
-        fontSize: 14,
-        fontFamily: fonts.Regular,
-        textAlign: 'center',
-    },
-    faqContainer: {
-        flex: 1,
-        padding: 16,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontFamily: fonts.Bold,
-        marginBottom: 16,
-    },
-    faqCard: {
-        borderRadius: 16,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-        overflow: 'hidden',
-    },
-    faqHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 16,
-    },
-    faqQuestion: {
-        flex: 1,
-        fontSize: 15,
-        fontFamily: fonts.Medium,
-        marginRight: 12,
-    },
-    faqAnswer: {
-        fontSize: 14,
-        fontFamily: fonts.Regular,
-        lineHeight: 20,
-        paddingHorizontal: 16,
-        paddingBottom: 16,
-    },
+  container: {
+    flex: 1,
+    backgroundColor: color.bg.app,
+    paddingTop: Platform.OS === 'ios' ? 54 : 34
+  },
+  header: {
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  headerButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.primary,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  headerTitle: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: typography.subtitle.size,
+    lineHeight: typography.subtitle.lineHeight
+  },
+  summaryCard: {
+    marginHorizontal: 14,
+    marginBottom: 10,
+    minHeight: 74,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  summaryIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.surface.secondary,
+    borderWidth: 1,
+    borderColor: color.border.subtle
+  },
+  summaryTextWrap: {
+    flex: 1,
+    marginLeft: 10
+  },
+  summaryTitle: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: typography.body.size,
+    lineHeight: typography.body.lineHeight
+  },
+  summarySubtitle: {
+    marginTop: 1,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  tabsRow: {
+    marginHorizontal: 14,
+    marginBottom: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.primary,
+    padding: 6,
+    flexDirection: 'row',
+    gap: 6
+  },
+  tabButton: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.secondary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6
+  },
+  tabButtonActive: {
+    borderColor: color.accent.primary,
+    backgroundColor: color.accent.primary
+  },
+  tabText: {
+    color: color.text.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight
+  },
+  tabTextActive: {
+    color: '#FFFFFF',
+    fontFamily: fonts.SemiBold
+  },
+  body: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingBottom: 12
+  },
+  tabPanel: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.primary,
+    overflow: 'hidden'
+  },
+  chatHeaderCard: {
+    minHeight: 62,
+    borderBottomWidth: 1,
+    borderBottomColor: color.border.subtle,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  chatBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.surface.secondary,
+    borderWidth: 1,
+    borderColor: color.border.subtle
+  },
+  chatHeaderTextWrap: {
+    flex: 1,
+    marginLeft: 10
+  },
+  chatHeaderTitle: {
+    color: color.text.primary,
+    fontFamily: fonts.Medium,
+    fontSize: typography.body.size,
+    lineHeight: typography.body.lineHeight
+  },
+  chatHeaderSubtitle: {
+    marginTop: 1,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  chatMessagesWrap: {
+    flex: 1,
+    minHeight: 260,
+    backgroundColor: color.surface.secondary
+  },
+  messagesContent: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 8
+  },
+  messageBubble: {
+    maxWidth: '84%',
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  messageBubbleUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: color.accent.primary,
+    borderColor: 'rgba(0,0,0,0.08)'
+  },
+  messageBubbleSupport: {
+    alignSelf: 'flex-start',
+    backgroundColor: color.surface.primary,
+    borderColor: color.border.subtle
+  },
+  messageText: {
+    fontFamily: fonts.Regular,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight
+  },
+  messageTextUser: {
+    color: '#FFFFFF'
+  },
+  messageTextSupport: {
+    color: color.text.primary
+  },
+  messageTimestamp: {
+    marginTop: 3,
+    color: color.text.muted,
+    fontFamily: fonts.Regular,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+    alignSelf: 'flex-end'
+  },
+  emptyChatWrap: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6
+  },
+  emptyChatText: {
+    color: color.text.muted,
+    fontFamily: fonts.Regular,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight
+  },
+  inputRow: {
+    borderTopWidth: 1,
+    borderTopColor: color.border.subtle,
+    backgroundColor: color.surface.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  input: {
+    flex: 1,
+    minHeight: 38,
+    maxHeight: 110,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.secondary,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: color.text.primary,
+    fontFamily: fonts.Regular,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight
+  },
+  sendButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.accent.primary
+  },
+  sendButtonDisabled: {
+    opacity: 0.4
+  },
+  scrollBody: {
+    padding: 10,
+    gap: 8
+  },
+  ticketCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.secondary,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    gap: 6
+  },
+  ticketHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  ticketTitle: {
+    flex: 1,
+    marginRight: 8,
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight
+  },
+  ticketStatusBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: 'rgba(17,98,41,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(17,98,41,0.28)'
+  },
+  ticketStatusText: {
+    color: '#116229',
+    fontFamily: fonts.SemiBold,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  ticketDescription: {
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  ticketFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  ticketActionText: {
+    color: color.text.primary,
+    fontFamily: fonts.Medium,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  faqCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.secondary,
+    paddingHorizontal: 11,
+    paddingVertical: 10
+  },
+  faqHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  faqQuestion: {
+    flex: 1,
+    marginRight: 8,
+    color: color.text.primary,
+    fontFamily: fonts.Medium,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight
+  },
+  faqAnswer: {
+    marginTop: 6,
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  emptyStateCard: {
+    minHeight: 180,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.secondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    gap: 6
+  },
+  emptyStateTitle: {
+    color: color.text.primary,
+    fontFamily: fonts.SemiBold,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight
+  },
+  emptyStateSubtitle: {
+    textAlign: 'center',
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8
+  },
+  loadingText: {
+    color: color.text.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight
+  }
 });

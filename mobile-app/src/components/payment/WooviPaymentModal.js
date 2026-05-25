@@ -9,20 +9,41 @@ import {
     Alert,
     ActivityIndicator,
     Dimensions,
-    Image
+    Image,
+    Linking
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Icon } from 'react-native-elements';
-import { useTheme } from '../../common-local/theme';
 import WooviService from '../../services/WooviService';
 import WebSocketManager from '../../services/WebSocketManager';
-import { QRCode } from 'react-native-qrcode-svg';
+import PaymentBypassService from '../../services/PaymentBypassService';
+import QRCode from 'react-native-qrcode-svg';
+import { fonts } from '../../theme/runtimeTokens';
+import { allowForcedPaymentBypass } from '../../config/runtimeAccessPolicy';
+import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
+import { formatCurrencyBRL } from '../../screens/prototype/tripFinancialSummary';
+import SecurePaymentBadge from './SecurePaymentBadge';
 
 
 const { width, height } = Dimensions.get('window');
+const { color, typography, radius, spacing, elevation } = robotaxiPrototypeTokens;
 
 // Tempo de expiração: 5 minutos (300 segundos)
 const PAYMENT_TIMEOUT = 300;
+const CONFIRMED_PAYMENT_STATUSES = new Set(['completed', 'confirmed', 'paid', 'in_holding']);
+const PIX_SURFACE = {
+    bg: '#F8FBF9',
+    sheet: 'rgba(255,255,255,0.97)',
+    text: '#101C14',
+    secondary: '#66756B',
+    muted: '#5F6B62',
+    line: '#DFE8E1',
+    leaf: '#0F3B16',
+    leafLight: '#EAF6EE',
+    soft: '#F3F8F4',
+    danger: '#B5533E',
+    progress: '#1FA76F'
+};
 
 export default function WooviPaymentModal({ 
     visible, 
@@ -32,27 +53,126 @@ export default function WooviPaymentModal({
     onPaymentConfirmed,
     passengerId,
     passengerName,
-    passengerEmail
+    passengerEmail,
+    prefilledPaymentData = null,
+    preserveChargeOnClose = false,
+    paymentTitle = 'Pagamento PIX',
+    qaAutoConfirm = false
 }) {
-    const theme = useTheme();
-    
+    const qaAutoConfirmEnabled = Boolean(qaAutoConfirm);
     // Estados
     const [loading, setLoading] = useState(false);
     const [paymentData, setPaymentData] = useState(null);
+    const [paymentGenerationError, setPaymentGenerationError] = useState(null);
     const [countdown, setCountdown] = useState(PAYMENT_TIMEOUT); // 5 minutos
     const [isCheckingPayment, setIsCheckingPayment] = useState(false);
     const [paymentStatus, setPaymentStatus] = useState('pending'); // pending, confirmed, expired, cancelled
+    const [qaDebugStatus, setQaDebugStatus] = useState('idle');
     
     // Refs
     const countdownIntervalRef = useRef(null);
     const paymentCheckIntervalRef = useRef(null);
     const timeoutRef = useRef(null);
     const paymentStatusRef = useRef(paymentStatus); // ✅ Ref para acessar status atualizado no intervalo
+    const paymentConfirmedRef = useRef(false);
+    const autoConfirmTimerRef = useRef(null);
+    const qaAutoConfirmStartedRef = useRef(false);
 
     // ✅ Sincronizar ref com estado
     useEffect(() => {
         paymentStatusRef.current = paymentStatus;
     }, [paymentStatus]);
+
+    const clearAutoConfirmTimer = () => {
+        if (autoConfirmTimerRef.current) {
+            clearTimeout(autoConfirmTimerRef.current);
+            autoConfirmTimerRef.current = null;
+        }
+    };
+
+    const cleanup = () => {
+        if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+        }
+        if (paymentCheckIntervalRef.current) {
+            clearInterval(paymentCheckIntervalRef.current);
+            paymentCheckIntervalRef.current = null;
+        }
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+        }
+        clearAutoConfirmTimer();
+    };
+
+    const shouldBypassPayment = async () => {
+        if (allowForcedPaymentBypass()) {
+            return true;
+        }
+
+        if (qaAutoConfirmEnabled) {
+            return false;
+        }
+
+        try {
+            return await PaymentBypassService.shouldUseBypass();
+        } catch (_error) {
+            return false;
+        }
+    };
+
+    const confirmPaymentOnce = (confirmationPayload = null, source = 'unknown') => {
+        if (paymentConfirmedRef.current) {
+            Logger.log(`ℹ️ [WooviPaymentModal] Confirmação duplicada ignorada (${source})`);
+            return false;
+        }
+
+        const normalizedPayload =
+            confirmationPayload && typeof confirmationPayload === 'object'
+                ? confirmationPayload
+                : paymentData;
+
+        if (!normalizedPayload?.chargeId || !normalizedPayload?.rideId) {
+            Logger.warn(`⚠️ [WooviPaymentModal] confirmação sem payload válido (${source})`, normalizedPayload);
+            return false;
+        }
+
+        paymentConfirmedRef.current = true;
+        paymentStatusRef.current = 'confirmed';
+
+        cleanup();
+        setPaymentStatus('confirmed');
+        setQaDebugStatus('confirmed');
+
+        const confirmationResult = {
+            chargeId: normalizedPayload.chargeId,
+            rideId: normalizedPayload.rideId,
+            amount: normalizedPayload.amount,
+            amountInCents: normalizedPayload.amountInCents,
+            bypassed: normalizedPayload.bypassed === true,
+            mockPayment:
+                normalizedPayload.mockPayment === true ||
+                normalizedPayload.bypassed === true ||
+                String(normalizedPayload.chargeId || '').startsWith('qa_bypass_')
+        };
+
+        const notifyDelay = String(source || '').includes('qa') || source === 'bypass'
+            ? 900
+            : 350;
+
+        setTimeout(() => {
+            if (onPaymentConfirmed) {
+                onPaymentConfirmed(confirmationResult);
+            }
+        }, notifyDelay);
+
+        setTimeout(() => {
+            onClose();
+        }, notifyDelay + 1200);
+
+        return true;
+    };
 
     // Resetar quando modal abre - SEMPRE gerar novo QR code
     useEffect(() => {
@@ -60,13 +180,49 @@ export default function WooviPaymentModal({
             Logger.log('🔄 [WooviPaymentModal] Modal aberto, resetando estado e gerando NOVO pagamento...');
             // ✅ Limpar estado anterior completamente
             cleanup();
+            paymentConfirmedRef.current = false;
+            qaAutoConfirmStartedRef.current = false;
+            setQaDebugStatus(qaAutoConfirmEnabled ? 'opening' : 'disabled');
             setPaymentData(null);
+            setPaymentGenerationError(null);
             setPaymentStatus('pending');
             paymentStatusRef.current = 'pending'; // ✅ Atualizar ref também
             setCountdown(PAYMENT_TIMEOUT);
-            setLoading(false);
+            setLoading(true);
             setIsCheckingPayment(false);
-            
+
+            if (prefilledPaymentData?.chargeId) {
+                const amountValue = Number(prefilledPaymentData?.amount ?? estimates?.estimateFare ?? tripData?.estimatedFare ?? 0);
+                const amountInCentsValue = Number(prefilledPaymentData?.amountInCents);
+                const normalizedPaymentInfo = {
+                    chargeId: prefilledPaymentData.chargeId,
+                    rideId: prefilledPaymentData.rideId || tripData?.rideId || `prefilled-${Date.now()}`,
+                    qrCodeImage: prefilledPaymentData.qrCodeImage || null,
+                    qrCodeText:
+                        prefilledPaymentData.qrCodeText ||
+                        prefilledPaymentData.brCode ||
+                        prefilledPaymentData.pixQRCode ||
+                        prefilledPaymentData.paymentLink ||
+                        '',
+                    paymentLink: prefilledPaymentData.paymentLink || null,
+                    amount: Number.isFinite(amountValue) ? amountValue : 0,
+                    amountInCents:
+                        Number.isFinite(amountInCentsValue) && amountInCentsValue > 0
+                            ? Math.round(amountInCentsValue)
+                            : Math.round((Number.isFinite(amountValue) ? amountValue : 0) * 100),
+                    expiresAt:
+                        prefilledPaymentData.expiresAt ||
+                        new Date(Date.now() + PAYMENT_TIMEOUT * 1000)
+                };
+
+                Logger.log('💳 [WooviPaymentModal] Usando cobrança PIX pré-gerada:', normalizedPaymentInfo.chargeId);
+                setPaymentData(normalizedPaymentInfo);
+                setCountdown(PAYMENT_TIMEOUT);
+                setPaymentStatus('pending');
+                setLoading(false);
+                return undefined;
+            }
+
             // ✅ SEMPRE gerar novo pagamento quando modal abre
             // Delay para garantir que o estado foi limpo antes de gerar novo pagamento
             const generateTimer = setTimeout(() => {
@@ -81,14 +237,34 @@ export default function WooviPaymentModal({
             // Limpar tudo quando modal fecha
             Logger.log('🔄 [WooviPaymentModal] Modal fechado, limpando recursos...');
             cleanup();
+            paymentConfirmedRef.current = false;
+            qaAutoConfirmStartedRef.current = false;
+            setQaDebugStatus('closed');
             setPaymentData(null);
+            setPaymentGenerationError(null);
             setPaymentStatus('pending');
+            setLoading(false);
         }
         
         return () => {
             cleanup();
         };
-    }, [visible]);
+    }, [
+        estimates?.estimateFare,
+        prefilledPaymentData?.amount,
+        prefilledPaymentData?.amountInCents,
+        prefilledPaymentData?.brCode,
+        prefilledPaymentData?.chargeId,
+        prefilledPaymentData?.expiresAt,
+        prefilledPaymentData?.paymentLink,
+        prefilledPaymentData?.pixQRCode,
+        prefilledPaymentData?.qrCodeImage,
+        prefilledPaymentData?.qrCodeText,
+        prefilledPaymentData?.rideId,
+        tripData?.estimatedFare,
+        tripData?.rideId,
+        visible
+    ]);
 
     // Countdown timer
     useEffect(() => {
@@ -170,6 +346,51 @@ export default function WooviPaymentModal({
         };
     }, [visible, paymentData, paymentStatus]);
 
+    useEffect(() => {
+        if (
+            !qaAutoConfirmEnabled ||
+            !visible ||
+            !paymentData?.chargeId ||
+            !paymentData?.rideId ||
+            paymentStatus !== 'pending' ||
+            qaAutoConfirmStartedRef.current
+        ) {
+            return;
+        }
+
+        qaAutoConfirmStartedRef.current = true;
+        setQaDebugStatus('scheduled');
+
+        autoConfirmTimerRef.current = setTimeout(async () => {
+            if (
+                String(paymentData.chargeId || '').startsWith('mock_review_') ||
+                String(paymentData.chargeId || '').startsWith('qa_bypass_')
+            ) {
+                return;
+            }
+
+            try {
+                setQaDebugStatus('confirming');
+                await WooviService.simulateTestWebhook({
+                    chargeId: paymentData.chargeId,
+                    rideId: paymentData.rideId,
+                    passengerId: paymentData.passengerId || passengerId,
+                    amountInCents: paymentData.amountInCents
+                });
+                setQaDebugStatus('awaiting_backend');
+                await checkPaymentStatus();
+            } catch (error) {
+                qaAutoConfirmStartedRef.current = false;
+                setQaDebugStatus('webhook_error');
+                Logger.warn('⚠️ [WooviPaymentModal] qaAutoConfirm webhook falhou:', error?.message || error);
+            }
+        }, 900);
+
+        return () => {
+            clearAutoConfirmTimer();
+        };
+    }, [passengerId, paymentData, paymentStatus, qaAutoConfirmEnabled, visible]);
+
     // WebSocket listener para confirmação server-side
     useEffect(() => {
         if (!visible || !paymentData) {
@@ -178,7 +399,7 @@ export default function WooviPaymentModal({
 
         const webSocketManager = WebSocketManager.getInstance();
         const handleServerPaymentConfirmed = (payload) => {
-            if (!payload || paymentStatus === 'confirmed') {
+            if (!payload || paymentStatusRef.current === 'confirmed') {
                 return;
             }
 
@@ -193,52 +414,22 @@ export default function WooviPaymentModal({
             }
 
             Logger.log('⚡️ [WooviPaymentModal] Evento paymentConfirmed recebido via WebSocket:', payload);
-            
-            // ✅ PARAR TIMER IMEDIATAMENTE
-            if (countdownIntervalRef.current) {
-                clearInterval(countdownIntervalRef.current);
-                countdownIntervalRef.current = null;
-                Logger.log('🛑 [Timer] Timer parado após confirmação via WebSocket');
-            }
-            
-            setPaymentStatus('confirmed');
-            cleanup();
-
-            if (onPaymentConfirmed) {
-                onPaymentConfirmed({
+            confirmPaymentOnce(
+                {
                     chargeId: paymentData.chargeId,
                     rideId: paymentData.rideId,
                     amount: paymentData.amount,
                     amountInCents: paymentData.amountInCents
-                });
-            }
-
-            setTimeout(() => {
-                onClose();
-            }, 3000);
+                },
+                'websocket'
+            );
         };
 
         webSocketManager.on('paymentConfirmed', handleServerPaymentConfirmed);
         return () => {
             webSocketManager.off('paymentConfirmed', handleServerPaymentConfirmed);
         };
-    }, [visible, paymentData, paymentStatus, onPaymentConfirmed, onClose]);
-
-    // Limpar recursos
-    const cleanup = () => {
-        if (countdownIntervalRef.current) {
-            clearInterval(countdownIntervalRef.current);
-            countdownIntervalRef.current = null;
-        }
-        if (paymentCheckIntervalRef.current) {
-            clearInterval(paymentCheckIntervalRef.current);
-            paymentCheckIntervalRef.current = null;
-        }
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
-        }
-    };
+    }, [visible, paymentData, onPaymentConfirmed, onClose]);
 
     // Formatar tempo
     const formatTime = (seconds) => {
@@ -247,10 +438,45 @@ export default function WooviPaymentModal({
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const getPixSnippet = () => {
+        const pixCode = String(paymentData?.qrCodeText || '').trim();
+        if (!pixCode) {
+            return 'Codigo PIX indisponivel';
+        }
+
+        if (pixCode.length <= 18) {
+            return pixCode;
+        }
+
+        return `${pixCode.slice(0, 8)}...${pixCode.slice(-4)}`;
+    };
+
+    const openPaymentLink = async () => {
+        const targetUrl = String(paymentData?.paymentLink || '').trim();
+        if (!targetUrl) {
+            Alert.alert('Abrir banco', 'Copie o código PIX e cole no app do seu banco.');
+            return;
+        }
+
+        try {
+            const canOpen = await Linking.canOpenURL(targetUrl);
+            if (canOpen) {
+                await Linking.openURL(targetUrl);
+                return;
+            }
+        } catch (error) {
+            Logger.warn('⚠️ [WooviPaymentModal] Falha ao abrir link de pagamento:', error?.message || error);
+        }
+
+        Alert.alert('Abrir banco', 'Não foi possível abrir o link automaticamente. Copie o código PIX e cole no app do banco.');
+    };
+
     // Função para gerar pagamento via Woovi Sandbox
     const generatePayment = async () => {
+        let paymentRequest = null;
         try {
             setLoading(true);
+            setPaymentGenerationError(null);
             Logger.log('💳 Gerando pagamento PIX via Woovi Sandbox...');
             
             // Calcular valor em centavos - usar o mesmo valor do card selecionado
@@ -274,9 +500,36 @@ export default function WooviPaymentModal({
             
             Logger.log('🆔 [WooviPaymentModal] Gerando NOVO tempRideId único:', tempRideId);
             Logger.log('🆔 [WooviPaymentModal] Timestamp:', timestamp, '| Random:', randomSuffix, nanoRandom);
+
+            const bypassEnabled = await shouldBypassPayment();
+            if (bypassEnabled) {
+                const bypassPaymentInfo = {
+                    chargeId: `qa_bypass_${timestamp}_${randomSuffix}`,
+                    rideId: tempRideId,
+                    qrCodeImage: null,
+                    qrCodeText: 'BYPASS_PAYMENT_ENABLED',
+                    paymentLink: null,
+                    amount: amount,
+                    amountInCents: amountInCents,
+                    expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
+                    passengerId,
+                    bypassed: true,
+                    mockPayment: true
+                };
+
+                Logger.log('🧪 [WooviPaymentModal] BYPASS de pagamento habilitado para teste E2E.');
+                setPaymentData(bypassPaymentInfo);
+                setCountdown(PAYMENT_TIMEOUT);
+                setPaymentStatus('pending');
+
+                autoConfirmTimerRef.current = setTimeout(() => {
+                    confirmPaymentOnce(bypassPaymentInfo, 'bypass');
+                }, 900);
+                return;
+            }
             
             // Preparar dados do pagamento
-            const paymentRequest = {
+            paymentRequest = {
                 passengerId: passengerId,
                 amount: amountInCents,
                 rideId: tempRideId,
@@ -306,13 +559,14 @@ export default function WooviPaymentModal({
                 paymentLink: result.paymentLink,
                 amount: amount,
                 amountInCents: amountInCents,
-                expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000))
+                expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
+                passengerId
             };
             
             setPaymentData(paymentInfo);
             setCountdown(PAYMENT_TIMEOUT);
             setPaymentStatus('pending');
-            
+
             // Agendar timeout automático
             timeoutRef.current = setTimeout(() => {
                 handleTimeout();
@@ -321,14 +575,12 @@ export default function WooviPaymentModal({
         } catch (error) {
             const serverResponse = error?.response?.data;
             Logger.error('❌ Erro ao gerar pagamento:', serverResponse || error);
-            Logger.log('📦 Payload enviado para /api/payment/advance:', paymentRequest);
-            Alert.alert(
-                'Erro ao Gerar Pagamento',
-                error.message || 'Não foi possível gerar o pagamento. Tente novamente.',
-                [
-                    { text: 'Cancelar', onPress: onClose },
-                    { text: 'Tentar Novamente', onPress: generatePayment }
-                ]
+            if (paymentRequest) {
+                Logger.log('📦 Payload enviado para /api/payment/advance:', paymentRequest);
+            }
+            setPaymentData(null);
+            setPaymentGenerationError(
+                error?.message || 'Não foi possível gerar o pagamento PIX no momento.'
             );
         } finally {
             setLoading(false);
@@ -360,65 +612,79 @@ export default function WooviPaymentModal({
 
     // Função para verificar status do pagamento
     const checkPaymentStatus = async () => {
-        if (!paymentData?.chargeId || isCheckingPayment || paymentStatus !== 'pending') {
+        if ((!paymentData?.chargeId && !paymentData?.rideId) || isCheckingPayment || paymentStatus !== 'pending') {
             return;
         }
         
         try {
             setIsCheckingPayment(true);
             
-            Logger.log('🔍 [Woovi] Verificando status do pagamento:', paymentData.chargeId);
-            
-            // Verificar status via backend usando chargeId
-            const statusResult = await WooviService.getPaymentStatus(paymentData.chargeId);
-            
-            Logger.log('📊 [Woovi] Status recebido:', statusResult);
-            
-            // ✅ CORREÇÃO: Aceitar tanto 'COMPLETED' quanto 'in_holding' como pagamento confirmado
-            // O backend retorna 'in_holding' quando o status na Woovi é 'COMPLETED'
-            const isPaymentCompleted = statusResult.success && (
-                statusResult.status === 'COMPLETED' || 
-                statusResult.status === 'in_holding' ||
-                statusResult.status === 'IN_HOLDING'
+            const resolveStatus = async (reference, source) => {
+                if (!reference) {
+                    return null;
+                }
+
+                Logger.log(`🔍 [Woovi] Verificando status do pagamento via ${source}:`, reference);
+                const statusResult = await WooviService.getPaymentStatus(reference);
+                const normalizedStatus = String(statusResult?.status || '').trim().toLowerCase();
+
+                Logger.log('📊 [Woovi] Status recebido:', {
+                    source,
+                    reference,
+                    statusResult,
+                });
+
+                return {
+                    source,
+                    reference,
+                    statusResult,
+                    normalizedStatus,
+                    isPaymentCompleted:
+                        statusResult?.success === true &&
+                        CONFIRMED_PAYMENT_STATUSES.has(normalizedStatus),
+                };
+            };
+
+            const chargeStatus = await resolveStatus(paymentData.chargeId, 'chargeId');
+            const rideStatus =
+                !chargeStatus?.isPaymentCompleted &&
+                paymentData?.rideId &&
+                paymentData.rideId !== paymentData.chargeId
+                    ? await resolveStatus(paymentData.rideId, 'rideId')
+                    : null;
+            const confirmedStatus = [chargeStatus, rideStatus].find(
+                (entry) => entry?.isPaymentCompleted,
             );
-            
-            if (isPaymentCompleted) {
+
+            if (confirmedStatus) {
                 // Pagamento confirmado!
                 Logger.log('✅ [WooviPaymentModal] Pagamento confirmado via checkPaymentStatus!', {
-                    status: statusResult.status,
-                    chargeId: paymentData.chargeId
+                    status: confirmedStatus.normalizedStatus,
+                    source: confirmedStatus.source,
+                    chargeId: paymentData.chargeId,
+                    rideId: paymentData.rideId,
                 });
-                
-                // ✅ PARAR TIMER IMEDIATAMENTE
-                if (countdownIntervalRef.current) {
-                    clearInterval(countdownIntervalRef.current);
-                    countdownIntervalRef.current = null;
-                    Logger.log('🛑 [Timer] Timer parado após confirmação de pagamento');
-                }
-                
-                setPaymentStatus('confirmed');
-                cleanup();
-                
-                // Chamar callback de confirmação (vai iniciar busca e abrir bottomsheet)
-                if (onPaymentConfirmed) {
-                    onPaymentConfirmed({
+
+                confirmPaymentOnce(
+                    {
                         chargeId: paymentData.chargeId,
                         rideId: paymentData.rideId,
                         amount: paymentData.amount,
                         amountInCents: paymentData.amountInCents
-                    });
-                }
-                
-                // Fechar modal após 3 segundos mostrando "Pagamento confirmado"
-                setTimeout(() => {
-                    onClose();
-                }, 3000);
+                    },
+                    'polling'
+                );
+            } else if (qaAutoConfirmEnabled) {
+                setQaDebugStatus('awaiting_backend');
             }
             
         } catch (error) {
             const serverResponse = error?.response?.data;
             Logger.error('❌ Erro ao verificar pagamento:', serverResponse || error);
-            Logger.log('🔍 [Woovi] ChargeId usado:', paymentData.chargeId);
+            Logger.log('🔍 [Woovi] Referências usadas:', {
+                chargeId: paymentData?.chargeId,
+                rideId: paymentData?.rideId,
+            });
             // Não mostrar erro para o usuário (verificação silenciosa)
         } finally {
             setIsCheckingPayment(false);
@@ -433,12 +699,24 @@ export default function WooviPaymentModal({
         
         // Tentar cancelar cobrança na Woovi
         if (paymentData?.chargeId) {
+            if (preserveChargeOnClose) {
+                Logger.log('ℹ️ [WooviPaymentModal] Preservando cobrança ao expirar:', paymentData.chargeId);
+            } else {
             try {
                 Logger.log('🚫 Cancelando cobrança na Woovi:', paymentData.chargeId);
-                await WooviService.cancelPayment(paymentData.chargeId);
-                Logger.log('✅ Cobrança cancelada na Woovi');
+                const cancelResult = await WooviService.cancelPayment(paymentData.chargeId);
+                if (cancelResult?.success) {
+                    if (cancelResult?.alreadyFinalized) {
+                        Logger.log('ℹ️ Cobrança já finalizada/indisponível para cancelamento na Woovi');
+                    } else {
+                        Logger.log('✅ Cobrança cancelada na Woovi');
+                    }
+                } else {
+                    Logger.warn('⚠️ Falha ao cancelar cobrança na Woovi:', cancelResult?.error || cancelResult);
+                }
             } catch (error) {
                 Logger.error('⚠️ Erro ao cancelar cobrança na Woovi:', error);
+            }
             }
         }
         
@@ -475,6 +753,11 @@ export default function WooviPaymentModal({
         }
         
         if (countdown > 0 && paymentStatus === 'pending') {
+            if (preserveChargeOnClose) {
+                Logger.log('🚪 [WooviPaymentModal] Fechando modal e preservando cobrança ativa');
+                onClose();
+                return;
+            }
             Alert.alert(
                 'Cancelar Pagamento',
                 'Tem certeza que deseja cancelar o pagamento?',
@@ -492,8 +775,16 @@ export default function WooviPaymentModal({
                             if (paymentData?.chargeId) {
                                 try {
                                     Logger.log('🔄 [WooviPaymentModal] Cancelando cobrança na Woovi:', paymentData.chargeId);
-                                    await WooviService.cancelPayment(paymentData.chargeId);
-                                    Logger.log('✅ [WooviPaymentModal] Cobrança cancelada na Woovi');
+                                    const cancelResult = await WooviService.cancelPayment(paymentData.chargeId);
+                                    if (cancelResult?.success) {
+                                        if (cancelResult?.alreadyFinalized) {
+                                            Logger.log('ℹ️ [WooviPaymentModal] Cobrança já finalizada/indisponível para cancelamento');
+                                        } else {
+                                            Logger.log('✅ [WooviPaymentModal] Cobrança cancelada na Woovi');
+                                        }
+                                    } else {
+                                        Logger.warn('⚠️ [WooviPaymentModal] Falha ao cancelar cobrança:', cancelResult?.error || cancelResult);
+                                    }
                                 } catch (error) {
                                     Logger.error('⚠️ [WooviPaymentModal] Erro ao cancelar cobrança:', error);
                                     Logger.error('⚠️ [WooviPaymentModal] Detalhes do erro:', error?.response?.data || error.message);
@@ -518,9 +809,13 @@ export default function WooviPaymentModal({
     const renderContent = () => {
         if (loading) {
             return (
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={theme.primary} />
-                    <Text style={[styles.loadingText, { color: theme.text }]}>
+                <View
+                    style={styles.loadingContainer}
+                    testID="payment-modal-loading"
+                    accessibilityLabel="payment-modal-loading"
+                >
+                    <ActivityIndicator size="large" color={color.accent.primary} />
+                    <Text style={[styles.loadingText, { color: color.text.primary }]}>
                         Processando pagamento...
                     </Text>
                 </View>
@@ -528,121 +823,190 @@ export default function WooviPaymentModal({
         }
 
         if (!paymentData) {
-            return (
-                <View style={styles.generateContainer}>
-                    <Icon 
-                        name="payment" 
-                        type="material" 
-                        color={theme.primary} 
-                        size={64} 
-                    />
-                    <Text style={[styles.generateTitle, { color: theme.text }]}>
-                        Gerar Pagamento PIX
-                    </Text>
-                    <Text style={[styles.generateSubtitle, { color: theme.textSecondary }]}>
-                        Clique no botão abaixo para gerar o QR Code do PIX
-                    </Text>
-                    
-                    <TouchableOpacity
-                        style={[styles.generateButton, { backgroundColor: theme.primary }]}
-                        onPress={generatePayment}
-                        activeOpacity={0.8}
-                    >
-                        <Text style={styles.generateButtonText}>
-                            Gerar PIX
+            if (paymentGenerationError) {
+                return (
+                    <View style={styles.errorContainer}>
+                        <Icon 
+                            name="error-outline" 
+                            type="material" 
+                            color={color.feedback.danger} 
+                            size={56} 
+                        />
+                        <Text style={[styles.errorTitle, { color: color.text.primary }]}>
+                            Falha ao gerar pagamento
                         </Text>
-                    </TouchableOpacity>
+                        <Text style={[styles.errorSubtitle, { color: color.text.secondary }]}>
+                            {paymentGenerationError}
+                        </Text>
+
+                        <View style={styles.errorActions}>
+                            <TouchableOpacity
+                                style={[styles.retryButton, { backgroundColor: color.accent.primary }]}
+                                onPress={generatePayment}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={styles.retryButtonText}>
+                                    Tentar novamente
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.dismissButton}
+                                onPress={onClose}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={[styles.dismissButtonText, { color: color.text.secondary }]}>
+                                    Fechar
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                );
+            }
+
+            return (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={color.accent.primary} />
+                    <Text style={[styles.loadingText, { color: color.text.primary }]}>
+                        Gerando cobrança PIX...
+                    </Text>
+                    <Text style={[styles.loadingSubtext, { color: color.text.secondary }]}>
+                        Aguarde um instante, já vamos abrir o QR Code.
+                    </Text>
                 </View>
             );
         }
 
         return (
-            <View style={styles.paymentContainer}>
-                {/* Header */}
+            <View
+                style={styles.paymentContainer}
+                testID="payment-modal-content"
+                accessibilityLabel="payment-modal-content"
+            >
                 <View style={styles.paymentHeader}>
-                    <Text style={[styles.paymentTitle, { color: theme.text }]}>
-                        Pagamento PIX
-                    </Text>
-                    <Text style={[styles.paymentAmount, { color: theme.primary }]}>
-                        R$ {paymentData.amount}
-                    </Text>
+                    <View>
+                        <Text style={styles.paymentTitle}>
+                            Pague com PIX
+                        </Text>
+                        <SecurePaymentBadge style={styles.securePaymentBadge} color={PIX_SURFACE.muted} />
+                        <View style={styles.statusChip}>
+                            <Text style={styles.statusChipText}>
+                                {paymentStatus === 'confirmed'
+                                    ? 'PIX confirmado'
+                                    : paymentStatus === 'expired'
+                                        ? 'Tempo esgotado'
+                                        : 'Aguardando PIX'}
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.paymentRightColumn}>
+                        <Text style={styles.paymentAmount}>
+                            {formatCurrencyBRL(paymentData.amount)}
+                        </Text>
+                        <Text
+                            style={[
+                                styles.expiryText,
+                                countdown <= 60 && paymentStatus === 'pending' && styles.expiryTextDanger,
+                            ]}
+                        >
+                            {paymentStatus === 'pending'
+                                ? `Expira em ${formatTime(countdown)}`
+                                : paymentStatus === 'confirmed'
+                                    ? 'Confirmado'
+                                    : 'Expirado'}
+                        </Text>
+                    </View>
                 </View>
 
-                {/* QR Code */}
+                <View style={styles.timerRail}>
+                    <View
+                        style={[
+                            styles.timerFill,
+                            {
+                                width: `${Math.max(
+                                    6,
+                                    Math.min(100, (countdown / PAYMENT_TIMEOUT) * 100),
+                                )}%`,
+                            },
+                        ]}
+                    />
+                </View>
+
                 <View style={styles.qrContainer}>
                     {paymentData?.qrCodeImage ? (
-                        <Image 
-                            source={{ uri: paymentData.qrCodeImage }} 
+                        <Image
+                            source={{ uri: paymentData.qrCodeImage }}
                             style={styles.qrCodeImage}
                             resizeMode="contain"
                         />
                     ) : paymentData?.qrCodeText ? (
                         <QRCode
                             value={paymentData.qrCodeText}
-                            size={200}
+                            size={145}
                             backgroundColor="#FFFFFF"
-                            color="#000000"
+                            color="#080A09"
                         />
                     ) : (
-                        <View style={[styles.qrCode, { backgroundColor: '#FFFFFF' }]}>
+                        <View style={styles.qrCode}>
                             <Text style={styles.qrCodeText}>QR Code</Text>
-                            <Text style={styles.qrCodeSubtext}>200x200px</Text>
+                            <Text style={styles.qrCodeSubtext}>145px</Text>
                         </View>
                     )}
                 </View>
 
-                {/* Código PIX */}
-                <View style={styles.pixCodeContainer}>
-                    <Text style={[styles.pixCodeLabel, { color: theme.textSecondary }]}>
-                        Código PIX:
+                <Text style={styles.qrInstruction}>
+                    Escaneie o QR Code ou copie o código PIX abaixo.
+                </Text>
+
+                <TouchableOpacity
+                    style={styles.pixCopyField}
+                    onPress={copyPixCode}
+                    activeOpacity={0.86}
+                    testID="payment-modal-copy-pix-button"
+                    accessibilityLabel="payment-modal-copy-pix-button"
+                >
+                    <Text style={styles.pixCodeText} numberOfLines={1}>
+                        {getPixSnippet()}
                     </Text>
+                    <Text style={styles.pixCopyText}>
+                        Copiar
+                    </Text>
+                </TouchableOpacity>
+
+                <View style={styles.actionButtons}>
                     <TouchableOpacity
-                        style={[styles.pixCodeButton, { backgroundColor: theme.card }]}
+                        style={styles.primaryAction}
                         onPress={copyPixCode}
-                        activeOpacity={0.8}
+                        activeOpacity={0.88}
                     >
-                        <Text style={[styles.pixCodeText, { color: theme.text }]}>
-                            {paymentData.qrCodeText}
-                        </Text>
-                        <Icon name="content-copy" type="material" color={theme.icon} size={20} />
+                        <Text style={styles.primaryActionText}>Copiar código</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.secondaryAction}
+                        onPress={openPaymentLink}
+                        activeOpacity={0.88}
+                    >
+                        <Text style={styles.secondaryActionText}>Abrir banco</Text>
                     </TouchableOpacity>
                 </View>
 
-                {/* Countdown */}
                 <View style={styles.countdownContainer}>
-                    {paymentStatus === 'pending' && (
-                        <>
-                            <Text style={[styles.countdownLabel, { color: theme.textSecondary }]}>
-                                Expira em:
-                            </Text>
-                            <Text style={[
-                                styles.countdownText, 
-                                { 
-                                    color: countdown <= 60 ? '#FF3B30' : theme.primary 
-                                }
-                            ]}>
-                                {formatTime(countdown)}
-                            </Text>
-                        </>
-                    )}
-                    {paymentStatus === 'expired' && (
-                        <Text style={[styles.countdownLabel, { color: theme.error }]}>
-                            Tempo esgotado
-                        </Text>
-                    )}
                     {paymentStatus === 'confirmed' && (
-                        <View style={styles.confirmedContainer}>
-                            <Icon name="check-circle" type="material" color="#4CAF50" size={32} />
-                            <Text style={[styles.confirmedText, { color: '#4CAF50' }]}>
+                        <View
+                            style={styles.confirmedContainer}
+                            testID="payment-modal-confirmed"
+                            accessibilityLabel="payment-modal-confirmed"
+                        >
+                            <Icon name="check-circle" type="material" color={color.feedback.success} size={32} />
+                            <Text style={[styles.confirmedText, { color: color.feedback.success }]}>
                                 Pagamento confirmado!
                             </Text>
                         </View>
                     )}
-                </View>
-
-                {/* Botões */}
-                <View style={styles.actionButtons}>
-                    {/* ✅ Botão Cancelar removido - usuário pode fechar pelo X no header */}
+                    {paymentStatus !== 'confirmed' ? (
+                        <Text style={styles.automaticText}>
+                            A confirmação é automática.
+                        </Text>
+                    ) : null}
                 </View>
             </View>
         );
@@ -656,22 +1020,29 @@ export default function WooviPaymentModal({
             onRequestClose={handleCancel}
         >
             <View style={styles.modalOverlay}>
-                <View style={[styles.modalContent, { backgroundColor: theme.background }]}>
-                    {/* Header do modal */}
+                <View style={styles.modalContent}>
+                    <View style={styles.handle} />
                     <View style={styles.modalHeader}>
-                        <Text style={[styles.modalHeaderTitle, { color: theme.text }]}>
-                            Realize seu pagamento
-                        </Text>
+                        {qaAutoConfirmEnabled ? (
+                            <Text
+                                style={[styles.qaDebugBadge, { color: color.feedback.success }]}
+                                testID="payment-modal-qa-debug"
+                                accessibilityLabel="payment-modal-qa-debug"
+                            >
+                                QA {qaDebugStatus}
+                            </Text>
+                        ) : null}
                         <TouchableOpacity
                             style={styles.closeButton}
                             onPress={handleCancel}
                             activeOpacity={0.7}
+                            testID="payment-modal-close-button"
+                            accessibilityLabel="payment-modal-close-button"
                         >
-                            <Icon name="close" type="material" color={theme.icon} size={24} />
+                            <Icon name="close" type="material" color={color.text.secondary} size={22} />
                         </TouchableOpacity>
                     </View>
 
-                    {/* Conteúdo */}
                     {renderContent()}
                 </View>
             </View>
@@ -682,38 +1053,63 @@ export default function WooviPaymentModal({
 const styles = StyleSheet.create({
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        justifyContent: 'center',
+        backgroundColor: 'rgba(248,251,249,0.42)',
+        justifyContent: 'flex-end',
         alignItems: 'center',
     },
     modalContent: {
-        width: width * 0.9,
-        maxHeight: height * 0.8,
-        borderRadius: 20,
-        padding: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
+        width: Math.min(width - 32, 358),
+        minHeight: 506,
+        maxHeight: Math.min(height - 64, 560),
+        borderRadius: 28,
+        paddingHorizontal: 27,
+        paddingTop: 17,
+        paddingBottom: 12,
+        marginBottom: 32,
+        backgroundColor: PIX_SURFACE.sheet,
+        borderWidth: 1,
+        borderColor: PIX_SURFACE.line,
+        shadowColor: '#12261A',
+        shadowOffset: { width: 0, height: 18 },
+        shadowOpacity: 0.1,
+        shadowRadius: 42,
         elevation: 8,
     },
-    
-    // Header do modal
+    handle: {
+        width: 54,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: PIX_SURFACE.line,
+    },
     modalHeader: {
+        position: 'absolute',
+        top: 11,
+        right: 11,
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-end',
         alignItems: 'center',
-        marginBottom: 20,
-        paddingBottom: 15,
-        borderBottomWidth: 1,
-        borderBottomColor: '#E0E0E0',
+        zIndex: 3,
     },
     modalHeaderTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
+        fontFamily: fonts.SemiBold,
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight
+    },
+    qaDebugBadge: {
+        marginLeft: spacing.sm,
+        fontFamily: fonts.Medium,
+        fontSize: typography.micro.size,
+        lineHeight: typography.micro.lineHeight,
     },
     closeButton: {
-        padding: 5,
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        borderWidth: 0,
+        borderColor: 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'transparent'
     },
 
     // Container de geração
@@ -750,33 +1146,146 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
     },
+    errorContainer: {
+        alignItems: 'center',
+        paddingVertical: 24,
+    },
+    errorTitle: {
+        fontFamily: fonts.SemiBold,
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
+        marginTop: 12,
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    errorSubtitle: {
+        fontFamily: fonts.Regular,
+        fontSize: typography.body.size,
+        lineHeight: typography.body.lineHeight,
+        textAlign: 'center',
+        marginBottom: 20,
+        paddingHorizontal: 20,
+    },
+    errorActions: {
+        width: '100%',
+        alignItems: 'center',
+    },
+    retryButton: {
+        paddingVertical: 14,
+        paddingHorizontal: 30,
+        borderRadius: radius.pill,
+        shadowColor: color.shadow.base,
+        shadowOffset: elevation.soft.shadowOffset,
+        shadowOpacity: elevation.soft.shadowOpacity,
+        shadowRadius: elevation.soft.shadowRadius,
+        elevation: elevation.soft.elevation,
+    },
+    retryButtonText: {
+        color: '#FFFFFF',
+        fontFamily: fonts.SemiBold,
+        fontSize: typography.body.size,
+        lineHeight: typography.body.lineHeight
+    },
+    dismissButton: {
+        marginTop: 10,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+    },
+    dismissButtonText: {
+        fontFamily: fonts.Medium,
+        fontSize: typography.body.size,
+        lineHeight: typography.body.lineHeight
+    },
 
     // Container de pagamento
     paymentContainer: {
-        alignItems: 'center',
+        alignItems: 'stretch',
     },
     paymentHeader: {
-        alignItems: 'center',
-        marginBottom: 20,
+        marginTop: 22,
+        minHeight: 66,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: 12,
     },
     paymentTitle: {
+        color: PIX_SURFACE.text,
+        fontFamily: fonts.Medium,
         fontSize: 20,
-        fontWeight: 'bold',
-        marginBottom: 5,
+        lineHeight: 31,
+    },
+    securePaymentBadge: {
+        marginTop: 1,
+    },
+    statusChip: {
+        width: 150,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 6,
+        backgroundColor: PIX_SURFACE.leafLight,
+    },
+    statusChipText: {
+        color: PIX_SURFACE.leaf,
+        fontFamily: fonts.Medium,
+        fontSize: 10,
+        lineHeight: 15,
+        textAlign: 'center',
+    },
+    paymentRightColumn: {
+        alignItems: 'flex-end',
+        paddingRight: 2,
     },
     paymentAmount: {
-        fontSize: 32,
-        fontWeight: 'bold',
+        color: PIX_SURFACE.text,
+        fontFamily: fonts.Medium,
+        fontSize: 20,
+        lineHeight: 31,
+        textAlign: 'right',
+    },
+    expiryText: {
+        marginTop: 8,
+        color: PIX_SURFACE.danger,
+        fontFamily: fonts.Medium,
+        fontSize: 11,
+        lineHeight: 18,
+        textAlign: 'right',
+    },
+    expiryTextDanger: {
+        color: color.feedback.danger,
+    },
+    timerRail: {
+        width: '100%',
+        height: 5,
+        borderRadius: 2.5,
+        backgroundColor: PIX_SURFACE.line,
+        overflow: 'hidden',
+        marginTop: 10,
+    },
+    timerFill: {
+        height: 5,
+        borderRadius: 2.5,
+        backgroundColor: PIX_SURFACE.progress,
     },
 
-    // QR Code
     qrContainer: {
-        marginBottom: 20,
+        alignSelf: 'center',
+        width: 174,
+        height: 174,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: PIX_SURFACE.line,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 26,
     },
     qrCode: {
-        width: 200,
-        height: 200,
-        borderRadius: 12,
+        width: 145,
+        height: 145,
+        borderRadius: 8,
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 2,
@@ -784,8 +1293,8 @@ const styles = StyleSheet.create({
         borderStyle: 'dashed',
     },
     qrCodeText: {
-        fontSize: 18,
-        fontWeight: 'bold',
+        fontFamily: fonts.SemiBold,
+        fontSize: 15,
         color: '#666',
     },
     qrCodeSubtext: {
@@ -794,66 +1303,102 @@ const styles = StyleSheet.create({
         marginTop: 5,
     },
 
-    // Código PIX
-    pixCodeContainer: {
-        width: '100%',
-        marginBottom: 20,
-    },
-    pixCodeLabel: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 8,
+    qrInstruction: {
+        alignSelf: 'center',
+        marginTop: 14,
+        width: 294,
+        color: PIX_SURFACE.secondary,
+        fontFamily: fonts.Regular,
+        fontSize: 12,
+        lineHeight: 18,
         textAlign: 'center',
     },
-    pixCodeButton: {
+    pixCopyField: {
+        height: 44,
+        borderRadius: 22,
+        borderWidth: 1,
+        borderColor: PIX_SURFACE.line,
+        backgroundColor: PIX_SURFACE.soft,
+        marginTop: 0,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#E0E0E0',
+        paddingHorizontal: 20,
     },
     pixCodeText: {
-        fontSize: 14,
-        fontFamily: 'monospace',
+        color: PIX_SURFACE.text,
+        fontFamily: fonts.Medium,
+        fontSize: 12,
+        lineHeight: 19,
         flex: 1,
-        marginRight: 10,
+        marginRight: 12,
+    },
+    pixCopyText: {
+        color: PIX_SURFACE.leaf,
+        fontFamily: fonts.Medium,
+        fontSize: 12,
+        lineHeight: 19,
+        textAlign: 'right',
     },
 
-    // Countdown
     countdownContainer: {
         alignItems: 'center',
-        marginBottom: 20,
+        marginTop: 8,
+        width: '100%',
+        minHeight: 18,
+        justifyContent: 'center',
+        paddingVertical: 0,
     },
     countdownLabel: {
-        fontSize: 16,
+        fontFamily: fonts.Medium,
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
         marginBottom: 5,
     },
     countdownText: {
-        fontSize: 24,
-        fontWeight: 'bold',
+        fontFamily: fonts.Bold,
+        fontSize: 28,
+        lineHeight: 32
     },
 
     // Botões de ação
     actionButtons: {
         width: '100%',
+        marginTop: 18,
+        flexDirection: 'row',
+        gap: 14,
     },
-    actionButton: {
-        paddingVertical: 15,
-        borderRadius: 25,
+    primaryAction: {
+        flex: 1,
+        height: 46,
+        borderRadius: 23,
+        backgroundColor: PIX_SURFACE.leaf,
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-        elevation: 5,
+        justifyContent: 'center',
     },
-    actionButtonText: {
+    primaryActionText: {
         color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: fonts.Medium,
+        fontSize: 12,
+        lineHeight: 19,
+        textAlign: 'center',
+    },
+    secondaryAction: {
+        flex: 1,
+        height: 46,
+        borderRadius: 23,
+        borderWidth: 1,
+        borderColor: PIX_SURFACE.line,
+        backgroundColor: PIX_SURFACE.soft,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    secondaryActionText: {
+        color: PIX_SURFACE.leaf,
+        fontFamily: fonts.Medium,
+        fontSize: 12,
+        lineHeight: 19,
+        textAlign: 'center',
     },
 
     // Loading
@@ -862,27 +1407,44 @@ const styles = StyleSheet.create({
         paddingVertical: 40,
     },
     loadingText: {
-        fontSize: 16,
+        fontFamily: fonts.Medium,
+        fontSize: typography.body.size,
+        lineHeight: typography.body.lineHeight,
         marginTop: 15,
+        textAlign: 'center',
+    },
+    loadingSubtext: {
+        fontFamily: fonts.Regular,
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
+        marginTop: 8,
         textAlign: 'center',
     },
     
     // QR Code Image
     qrCodeImage: {
-        width: 200,
-        height: 200,
-        borderRadius: 12,
+        width: 145,
+        height: 145,
+        borderRadius: 8,
     },
     
     // Confirmed
     confirmedContainer: {
         alignItems: 'center',
-        marginTop: 10,
+        marginTop: 0,
     },
     confirmedText: {
-        fontSize: 18,
-        fontWeight: 'bold',
+        fontFamily: fonts.SemiBold,
+        fontSize: typography.body.size,
+        lineHeight: typography.body.lineHeight,
         marginTop: 8,
+    },
+    automaticText: {
+        color: PIX_SURFACE.muted,
+        fontFamily: fonts.Regular,
+        fontSize: 11,
+        lineHeight: 18,
+        textAlign: 'center',
     },
     searchingContainer: {
         marginTop: 12,

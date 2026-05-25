@@ -6,23 +6,16 @@ import Logger from '../../../utils/Logger';
  */
 
 import React, { useState, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { fonts } from '../../../common-local/font';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { fonts } from '../../../theme/runtimeTokens';
 import { Ionicons } from '@expo/vector-icons';
 import ContinueButton from '../common/ContinueButton';
 import UserAuthService from '../../../services/UserAuthService';
+import onboardingTheme from '../common/onboardingTheme';
 
-const colors = {
-    black: '#000000',
-    grey80: '#333333',
-    greyPlaceholder: '#BDBDBD',
-    leafGreen: '#1A330E',
-    white: '#FFFFFF',
-    lightGrey: '#F5F5F5',
-    error: '#FF3B30'
-};
+const { color, radius, spacing, elevation } = onboardingTheme;
 
-const PasswordLoginStep = ({ phoneNumber, existingUser, onLoginSuccess, onForgotPassword, onBack }) => {
+const PasswordLoginStep = ({ phoneNumber, onLoginSuccess, onForgotPassword, onBack }) => {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
@@ -75,37 +68,39 @@ const PasswordLoginStep = ({ phoneNumber, existingUser, onLoginSuccess, onForgot
                 Digite sua senha para continuar
             </Text>
 
-            {/* Campo de senha */}
-            <View style={styles.passwordContainer}>
-                <TextInput
-                    style={[styles.passwordInput, error && styles.inputError]}
-                    value={password}
-                    onChangeText={(text) => {
-                        setPassword(text);
-                        setError(''); // Limpar erro ao digitar
-                    }}
-                    placeholder="Digite sua senha"
-                    placeholderTextColor={colors.greyPlaceholder}
-                    secureTextEntry={!showPassword}
-                    autoCapitalize="none"
-                    autoFocus
-                    onSubmitEditing={handleLogin}
-                />
-                <TouchableOpacity
-                    style={styles.eyeButton}
-                    onPress={() => setShowPassword(!showPassword)}
-                >
-                    <Ionicons 
-                        name={showPassword ? 'eye-off' : 'eye'} 
-                        size={24} 
-                        color={colors.greyPlaceholder} 
+            <View style={styles.card}>
+                {/* Campo de senha */}
+                <View style={styles.passwordContainer}>
+                    <TextInput
+                        style={[styles.passwordInput, error && styles.inputError]}
+                        value={password}
+                        onChangeText={(text) => {
+                            setPassword(text);
+                            setError('');
+                        }}
+                        placeholder="Digite sua senha"
+                        placeholderTextColor={color.textMuted}
+                        secureTextEntry={!showPassword}
+                        autoCapitalize="none"
+                        autoFocus
+                        onSubmitEditing={handleLogin}
                     />
-                </TouchableOpacity>
-            </View>
+                    <TouchableOpacity
+                        style={styles.eyeButton}
+                        onPress={() => setShowPassword(!showPassword)}
+                    >
+                        <Ionicons 
+                            name={showPassword ? 'eye-off' : 'eye'} 
+                            size={22} 
+                            color={color.textMuted} 
+                        />
+                    </TouchableOpacity>
+                </View>
 
-            {error ? (
-                <Text style={styles.errorText}>{error}</Text>
-            ) : null}
+                {error ? (
+                    <Text style={styles.errorText}>{error}</Text>
+                ) : null}
+            </View>
 
             {/* Botão de login */}
             <ContinueButton
@@ -138,76 +133,94 @@ const PasswordLoginStep = ({ phoneNumber, existingUser, onLoginSuccess, onForgot
 const styles = StyleSheet.create({
     container: {
         width: '100%',
-        paddingVertical: 20,
+        paddingHorizontal: spacing.lg,
+        paddingVertical: spacing.sm
     },
     title: {
-        fontSize: 24,
-        color: colors.black,
+        fontSize: 22,
+        lineHeight: 28,
+        color: color.textPrimary,
         fontFamily: fonts.Bold,
         textAlign: 'left',
-        marginBottom: 8,
+        marginBottom: 6
     },
     subtitle: {
-        fontSize: 17,
-        color: colors.grey80,
-        fontFamily: fonts.Medium,
-        marginBottom: 32,
-        lineHeight: 22,
+        fontSize: 13,
+        lineHeight: 19,
+        color: color.textSecondary,
+        fontFamily: fonts.Regular,
+        marginBottom: spacing.sm
+    },
+    card: {
+        borderWidth: 1,
+        borderColor: color.glassStroke,
+        borderRadius: radius.lg,
+        backgroundColor: color.panelSoft,
+        padding: spacing.sm,
+        shadowColor: '#0E1522',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.16,
+        shadowRadius: 20,
+        elevation: 9
     },
     passwordContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        borderWidth: 2,
-        borderColor: colors.lightGrey,
-        borderRadius: 8,
-        backgroundColor: colors.white,
-        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: color.border,
+        borderRadius: radius.md,
+        backgroundColor: color.surfaceMuted,
+        marginBottom: 8,
+        minHeight: 46
     },
     passwordInput: {
         flex: 1,
-        paddingHorizontal: 16,
-        paddingVertical: 16,
-        fontSize: 17,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 14,
+        lineHeight: 18,
         fontFamily: fonts.Medium,
-        color: colors.black,
+        color: color.textPrimary
     },
     inputError: {
-        borderColor: colors.error,
+        borderColor: color.error
     },
     eyeButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 10
     },
     errorText: {
-        color: colors.error,
-        fontSize: 14,
+        color: color.error,
+        fontSize: 12,
+        lineHeight: 16,
         fontFamily: fonts.Medium,
-        marginBottom: 16,
-        textAlign: 'left',
+        marginBottom: 2,
+        textAlign: 'left'
     },
     forgotPasswordButton: {
         alignItems: 'center',
-        paddingVertical: 12,
-        marginTop: 8,
+        paddingVertical: 10,
+        marginTop: 6
     },
     forgotPasswordText: {
-        color: colors.leafGreen,
-        fontSize: 17,
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
         fontFamily: fonts.Medium,
-        textDecorationLine: 'underline',
+        textDecorationLine: 'underline'
     },
     backButton: {
         alignItems: 'center',
-        paddingVertical: 12,
-        marginTop: 8,
+        paddingVertical: 10,
+        marginTop: 2
     },
     backButtonText: {
-        color: colors.leafGreen,
-        fontSize: 17,
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
         fontFamily: fonts.Medium,
-        textDecorationLine: 'underline',
-    },
+        textDecorationLine: 'underline'
+    }
 });
 
 export default PasswordLoginStep;
-

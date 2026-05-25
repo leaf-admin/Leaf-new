@@ -20,21 +20,26 @@ import {
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
-import { colors } from '../common-local/theme';
-import { fonts } from '../common-local/font';
+import { colors } from '../theme/runtimeTokens';
+import { fonts } from '../theme/runtimeTokens';
 import { cardTypography } from '../common-local/typography';
-import { MAIN_COLOR } from '../common-local/sharedFunctions';
+import { MAIN_COLOR } from '../common/sharedFunctions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
 import { useResponsiveLayout } from '../components/ResponsiveLayout';
-import { signOff } from '../common-local/actions/authactions';
+import { signOff } from '../services/runtime/profileActionsBridge';
+import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
+const { color, typography } = robotaxiPrototypeTokens;
 
 const { width, height } = Dimensions.get('window');
 
 export default function ProfileScreen({ navigation }) {
     const auth = useSelector(state => state.auth);
     const dispatch = useDispatch();
+    const insets = useSafeAreaInsets();
     const [isDarkMode, setIsDarkMode] = useState(false);
     
     // Loading states
@@ -362,7 +367,7 @@ export default function ProfileScreen({ navigation }) {
 
     // Header com botão voltar e título
     const Header = () => (
-        <View style={[styles.header, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
+        <View style={[styles.header, { paddingTop: insets.top + 10, backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}>
             <TouchableOpacity 
                 style={[
                     styles.headerButton, 
@@ -433,7 +438,11 @@ export default function ProfileScreen({ navigation }) {
                     <SkeletonLoader width="100%" height={80} style={styles.skeletonCard} />
                 </View>
             ) : (
-                <ScrollView style={[styles.content, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                    style={[styles.content, { backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }]}
+                    contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+                    showsVerticalScrollIndicator={false}
+                >
                     {/* Seção do perfil */}
                     <View style={styles.profileSection}>
                         <View style={styles.profileImageContainer}>
@@ -760,6 +769,7 @@ export default function ProfileScreen({ navigation }) {
                                     autoCapitalize="none"
                                     autoCorrect={false}
                                 />
+                                <SecurePaymentBadge style={styles.withdrawSecurePaymentBadge} color={isDarkMode ? '#A9B8AD' : '#6E7D72'} />
                                 {/* Checkbox para salvar chave PIX */}
                                 <View style={styles.savePixKeyContainer}>
                                     <Switch
@@ -805,6 +815,20 @@ export default function ProfileScreen({ navigation }) {
                                 <Text style={[cardTypography.helper, styles.withdrawTaxText, { color: isDarkMode ? '#ccc' : '#E65100' }]}>
                                     *Saques abaixo de R$ 500,00 possuem taxa de R$ 1,00
                                 </Text>
+                            </View>
+
+                            <View style={[styles.withdrawSubscriptionInfo, { backgroundColor: isDarkMode ? '#243126' : '#EEF8F0' }]}>
+                                <Text style={[cardTypography.subtitle, styles.withdrawSubscriptionLabel, { color: isDarkMode ? '#BFE6C7' : '#1F6B37' }]}>
+                                    Taxa diária
+                                </Text>
+                                <View style={styles.withdrawSubscriptionValues}>
+                                    <Text style={[styles.withdrawSubscriptionStruck, { color: isDarkMode ? '#9DB2A2' : '#6E7D72' }]}>
+                                        R$ 9,90
+                                    </Text>
+                                    <Text style={[styles.withdrawSubscriptionFree, { color: isDarkMode ? '#DDF7E4' : MAIN_COLOR }]}>
+                                        R$ 0,00 neste momento
+                                    </Text>
+                                </View>
                             </View>
 
                             {/* Botão Continuar */}
@@ -877,6 +901,20 @@ export default function ProfileScreen({ navigation }) {
                                         </Text>
                                     </View>
                                 )}
+
+                                <View style={styles.confirmRow}>
+                                    <Text style={[cardTypography.subtitle, styles.confirmRowLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
+                                        Taxa diária:
+                                    </Text>
+                                    <View style={styles.confirmSubscriptionValues}>
+                                        <Text style={[styles.confirmSubscriptionStruck, { color: isDarkMode ? '#999' : colors.GRAY }]}>
+                                            R$ 9,90
+                                        </Text>
+                                        <Text style={[cardTypography.title, styles.confirmRowValue, { color: MAIN_COLOR }]}>
+                                            R$ 0,00
+                                        </Text>
+                                    </View>
+                                </View>
                                 
                                 <View style={[styles.confirmRow, styles.confirmRowTotal]}>
                                     <Text style={[cardTypography.subtitle, styles.confirmRowLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
@@ -902,6 +940,7 @@ export default function ProfileScreen({ navigation }) {
                                         {pixKey}
                                     </Text>
                                 </View>
+                                <SecurePaymentBadge style={styles.confirmSecurePaymentBadge} color={isDarkMode ? '#A9B8AD' : '#6E7D72'} />
                             </View>
 
                             <TouchableOpacity
@@ -942,88 +981,88 @@ export default function ProfileScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: color.bg.app
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingTop: 45,
-        paddingBottom: 16,
+        paddingHorizontal: 14,
+        paddingTop: Platform.OS === 'ios' ? 54 : 34,
+        paddingBottom: 10
     },
     headerButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 1,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
+        backgroundColor: color.surface.primary,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
         color: colors.BLACK,
-        fontFamily: fonts.Bold,
+        fontFamily: fonts.SemiBold
     },
     headerRightContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 8
     },
     themeSwitchTouchable: {
-        width: 72,
-        height: 40,
-        borderRadius: 20,
+        width: 52,
+        height: 32,
+        borderRadius: 16,
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'center'
     },
     themeSwitchTrack: {
-        width: 72,
-        height: 40,
-        borderRadius: 20,
-        borderWidth: 1.5,
+        width: 52,
+        height: 32,
+        borderRadius: 16,
+        borderWidth: 1,
         flexDirection: 'row',
         alignItems: 'center',
         position: 'relative',
         justifyContent: 'space-between',
-        paddingHorizontal: 6,
-        backgroundColor: '#fff',
-        borderColor: '#ddd',
+        paddingHorizontal: 4,
+        backgroundColor: color.surface.primary,
+        borderColor: color.border.subtle
     },
     themeSwitchIconBubble: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#111',
+        backgroundColor: '#1A1A1A'
     },
     content: {
         flex: 1,
-        paddingHorizontal: 20,
-        paddingTop: 10,
+        paddingHorizontal: 14,
+        paddingTop: 8
     },
     profileSection: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 25,
-        marginBottom: 20,
+        marginTop: 10,
+        marginBottom: 12,
+        backgroundColor: color.surface.primary,
+        borderWidth: 1,
+        borderColor: color.border.subtle,
+        borderRadius: 18,
+        padding: 12
     },
     profileImageContainer: {
         marginRight: 16,
     },
     profileImage: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+        width: 64,
+        height: 64,
+        borderRadius: 32
     },
     profileInfo: {
         flex: 1,
@@ -1032,11 +1071,12 @@ const styles = StyleSheet.create({
         // Usa cardTypography.subtitle via style prop
     },
     userName: {
-        fontSize: 20,
+        fontSize: typography.subtitle.size,
+        lineHeight: typography.subtitle.lineHeight,
         fontWeight: 'bold',
         color: colors.BLACK,
-        fontFamily: fonts.Bold,
-        marginBottom: 2,
+        fontFamily: fonts.SemiBold,
+        marginBottom: 1
     },
     partnerInfoRow: {
         flexDirection: 'row',
@@ -1069,16 +1109,22 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
     menuContainer: {
-        marginBottom: 15,
+        marginBottom: 12,
+        backgroundColor: color.surface.primary,
+        borderWidth: 1,
+        borderColor: color.border.subtle,
+        borderRadius: 18,
+        overflow: 'hidden'
     },
     menuItem: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 0,
+        minHeight: 52,
+        paddingVertical: 0,
+        paddingHorizontal: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#e8e8e8',
+        borderBottomColor: color.border.subtle
     },
     menuItemLeft: {
         flexDirection: 'row',
@@ -1086,7 +1132,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     menuIcon: {
-        marginRight: 12,
+        marginRight: 10
     },
     menuItemText: {
         // Usa cardTypography.title via style prop
@@ -1094,8 +1140,8 @@ const styles = StyleSheet.create({
     },
     logoutContainer: {
         alignItems: 'center',
-        marginTop: 20,
-        marginBottom: 40,
+        marginTop: 10,
+        marginBottom: 30
     },
     skeletonContainer: {
         flex: 1,
@@ -1113,35 +1159,32 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#FFF5F5',
+        backgroundColor: 'rgba(138,42,42,0.08)',
         borderWidth: 1,
-        borderColor: '#FFE5E5',
-        borderRadius: 12,
-        paddingVertical: 14,
-        paddingHorizontal: 24,
-        minWidth: 140,
+        borderColor: 'rgba(138,42,42,0.25)',
+        borderRadius: 14,
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        minWidth: 160
     },
     logoutIcon: {
         marginRight: 8,
     },
     logoutText: {
-        fontSize: 16,
-        color: '#FF3B30',
-        fontFamily: fonts.Bold,
-        fontWeight: '600',
+        fontSize: typography.caption.size,
+        lineHeight: typography.caption.lineHeight,
+        color: '#8A2A2A',
+        fontFamily: fonts.SemiBold
     },
     // Card de Saldo
     balanceCard: {
-        marginHorizontal: 20,
-        marginTop: 20,
+        marginHorizontal: 0,
+        marginTop: 8,
         marginBottom: 10,
-        padding: 20,
+        padding: 14,
         borderRadius: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
+        borderWidth: 1,
+        borderColor: color.border.subtle
     },
     balanceCardHeader: {
         flexDirection: 'row',
@@ -1149,15 +1192,16 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     balanceCardTitle: {
-        fontSize: 18,
+        fontSize: typography.body.size,
+        lineHeight: typography.body.lineHeight,
         fontFamily: fonts.Bold,
-        marginLeft: 12,
+        marginLeft: 10
     },
     balanceCardAmount: {
-        fontSize: 32,
+        fontSize: 30,
         fontFamily: fonts.Bold,
         color: '#1A330E',
-        marginBottom: 8,
+        marginBottom: 6
     },
     balanceCardSubtitle: {
         fontSize: 14,
@@ -1375,6 +1419,30 @@ const styles = StyleSheet.create({
         marginLeft: 8,
         flex: 1,
     },
+    withdrawSubscriptionInfo: {
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 24,
+    },
+    withdrawSubscriptionLabel: {
+        fontSize: 12,
+        fontFamily: fonts.Medium,
+        marginBottom: 4,
+    },
+    withdrawSubscriptionValues: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    withdrawSubscriptionStruck: {
+        fontSize: 13,
+        fontFamily: fonts.Medium,
+        textDecorationLine: 'line-through',
+    },
+    withdrawSubscriptionFree: {
+        fontSize: 14,
+        fontFamily: fonts.Bold,
+    },
     withdrawContinueButton: {
         backgroundColor: MAIN_COLOR,
         paddingVertical: 16,
@@ -1402,6 +1470,16 @@ const styles = StyleSheet.create({
         padding: 16,
         borderRadius: 12,
         marginBottom: 16,
+    },
+    confirmSubscriptionValues: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    confirmSubscriptionStruck: {
+        fontSize: 13,
+        fontFamily: fonts.Medium,
+        textDecorationLine: 'line-through',
     },
     confirmRow: {
         flexDirection: 'row',
@@ -1471,6 +1549,14 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Regular,
         color: '#FF9800',
         marginLeft: 6,
+    },
+    withdrawSecurePaymentBadge: {
+        marginTop: 7,
+        marginLeft: 2,
+    },
+    confirmSecurePaymentBadge: {
+        marginTop: 8,
+        alignSelf: 'flex-end',
     },
     savePixKeyContainer: {
         flexDirection: 'row',

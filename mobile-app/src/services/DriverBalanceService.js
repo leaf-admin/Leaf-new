@@ -1,5 +1,7 @@
 import Logger from '../utils/Logger';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
+import { isPilotFeatureEnabled } from '../config/pilotLaunchProfile';
+import auth from '@react-native-firebase/auth';
 
 
 /**
@@ -11,6 +13,29 @@ class DriverBalanceService {
     Logger.log('🔗 DriverBalanceService baseUrl:', this.baseUrl);
     this.WITHDRAW_FEE_THRESHOLD = 500;
     this.WITHDRAW_FEE_BELOW_THRESHOLD = 1;
+    this.SUBSCRIPTION_DAILY_FEE_NOMINAL = 9.90;
+  }
+
+  async getAuthHeaders(extraHeaders = {}) {
+    const user = auth().currentUser;
+    const token = user ? await user.getIdToken() : null;
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders
+    };
+  }
+
+  buildWithdrawalRequestId(driverId, amount, pixKey, explicitRequestId = null) {
+    const provided = String(explicitRequestId || '').trim();
+    if (provided.length >= 8) {
+      return provided;
+    }
+
+    const safeDriverId = String(driverId || 'driver').trim();
+    const amountToken = String(amount || '0').replace(/[^0-9.]/g, '');
+    const pixToken = String(pixKey || '').trim().slice(-12);
+    return `wd_${safeDriverId}_${amountToken}_${pixToken}_${Date.now()}`;
   }
 
   /**
@@ -31,9 +56,7 @@ class DriverBalanceService {
       
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: await this.getAuthHeaders(),
         signal: controller.signal
       });
       
@@ -56,9 +79,28 @@ class DriverBalanceService {
         return {
           success: true,
           balance: data.balance || 0,
+          balanceCents: data.balanceCents || 0,
           totalEarnings: data.totalEarnings || 0,
           lastUpdated: data.lastUpdated,
-          lastRideId: data.lastRideId
+          lastRideId: data.lastRideId,
+          subscriptionPendingFeeCents: data.subscriptionPendingFeeCents || 0,
+          subscriptionPendingFee: data.subscriptionPendingFee || 0,
+          subscriptionPendingFeeRawCents: data.subscriptionPendingFeeRawCents || 0,
+          subscriptionPendingFeeRaw: data.subscriptionPendingFeeRaw || 0,
+          subscriptionStatus: data.subscriptionStatus || 'active',
+          billingStatus: data.billingStatus || 'active',
+          subscriptionCollectionMode: data.subscriptionCollectionMode || 'withdrawal',
+          subscriptionDailyFeeCents: data.subscriptionDailyFeeCents || 0,
+          subscriptionDailyFee: data.subscriptionDailyFee || 0,
+          subscriptionDailyFeeNominalCents: data.subscriptionDailyFeeNominalCents || Math.round(this.SUBSCRIPTION_DAILY_FEE_NOMINAL * 100),
+          subscriptionDailyFeeNominal: data.subscriptionDailyFeeNominal || this.SUBSCRIPTION_DAILY_FEE_NOMINAL,
+          subscriptionDailyFeeEffectiveCents: data.subscriptionDailyFeeEffectiveCents || data.subscriptionDailyFeeCents || 0,
+          subscriptionDailyFeeEffective: data.subscriptionDailyFeeEffective || data.subscriptionDailyFee || 0,
+          subscriptionDailyFeeSuspended: data.subscriptionDailyFeeSuspended !== false,
+          subscriptionDailyBillingEnabled: data.subscriptionDailyBillingEnabled === true,
+          subscriptionWaveId: data.subscriptionWaveId || null,
+          availableAfterSubscriptionCents: data.availableAfterSubscriptionCents || 0,
+          availableAfterSubscription: data.availableAfterSubscription || 0
         };
       } else {
         return {
@@ -104,9 +146,7 @@ class DriverBalanceService {
       
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: await this.getAuthHeaders(),
         signal: controller.signal
       });
       
@@ -171,24 +211,51 @@ class DriverBalanceService {
    * @param {string} driverId
    * @param {number} amount
    * @param {string} pixKey
+   * @param {string} appPassword
    */
-  async requestWithdrawal(driverId, amount, pixKey) {
+  async requestWithdrawal(driverId, amount, pixKey, appPassword, options = {}) {
     const controller = new AbortController();
     let timeoutId;
 
     try {
+      if (!isPilotFeatureEnabled('driverWithdrawalsEnabled', false)) {
+        return {
+          success: false,
+          error: 'Saque indisponivel neste piloto controlado',
+          code: 'FEATURE_DISABLED_IN_LAUNCH_PROFILE',
+          statusCode: 503
+        };
+      }
+
+      if (!String(appPassword || '').trim()) {
+        return {
+          success: false,
+          error: 'Informe sua senha do app para solicitar saque',
+          code: 'WITHDRAWAL_PASSWORD_REQUIRED',
+          statusCode: 400
+        };
+      }
+
       const url = `${this.baseUrl}/driver-balance/${driverId}/withdraw`;
+      const requestId = this.buildWithdrawalRequestId(
+        driverId,
+        amount,
+        pixKey,
+        options?.requestId || options?.idempotencyKey
+      );
       timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: await this.getAuthHeaders({
+          'Idempotency-Key': requestId
+        }),
         signal: controller.signal,
         body: JSON.stringify({
           amount,
-          pixKey
+          pixKey,
+          appPassword,
+          requestId
         })
       });
 
@@ -209,7 +276,11 @@ class DriverBalanceService {
 
       return {
         success: false,
-        error: data.error || 'Falha ao solicitar saque'
+        error: data.error || 'Falha ao solicitar saque',
+        code: data.code || null,
+        statusCode: response.status,
+        kyc: data.kyc || null,
+        details: data.details || null
       };
     } catch (error) {
       Logger.error('❌ Erro ao solicitar saque:', error);
