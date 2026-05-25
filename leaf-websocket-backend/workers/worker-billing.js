@@ -27,6 +27,35 @@ function normalizeMoneyToCents(value) {
     return Math.round(numeric * 100);
 }
 
+function firstPresent(...values) {
+    return values.find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function unwrapCanonicalEventPayload(event = {}) {
+    const payload = event?.data || {};
+    const nestedPayload =
+        payload &&
+        typeof payload === 'object' &&
+        payload.data &&
+        typeof payload.data === 'object'
+            ? payload.data
+            : {};
+
+    return {
+        ...payload,
+        ...nestedPayload,
+        eventId: event.eventId || payload.eventId || nestedPayload.eventId || null,
+        bookingId: firstPresent(event.bookingId, payload.bookingId, nestedPayload.bookingId),
+        driverId: firstPresent(event.driverId, payload.driverId, nestedPayload.driverId),
+        customerId: firstPresent(event.customerId, payload.customerId, nestedPayload.customerId),
+        finalFare: firstPresent(payload.finalFare, nestedPayload.finalFare, payload.totalFare, nestedPayload.totalFare),
+        tollFee: firstPresent(payload.tollFee, nestedPayload.tollFee, 0),
+        rideLegSettlements: Array.isArray(nestedPayload.rideLegSettlements)
+            ? nestedPayload.rideLegSettlements
+            : (Array.isArray(payload.rideLegSettlements) ? payload.rideLegSettlements : [])
+    };
+}
+
 function buildRideBillingIdempotencyScope(bookingId, eventId = null) {
     const normalizedBookingId = String(bookingId || '').trim();
     if (normalizedBookingId) {
@@ -56,8 +85,9 @@ const workerManager = new WorkerManager({
 });
 
 workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
-    const { bookingId, driverId, finalFare, tollFee } = event.data;
-    const eventId = event.eventId || bookingId; // Fallback to bookingId if eventId is missing
+    const rideCompleted = unwrapCanonicalEventPayload(event);
+    const { bookingId, driverId, finalFare, tollFee } = rideCompleted;
+    const eventId = rideCompleted.eventId || event.eventId || bookingId; // Fallback to bookingId if eventId is missing
 
     logStructured('info', 'Iniciando processamento contábil (Billing) da corrida', {
         bookingId,
@@ -87,8 +117,8 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
     }
 
     const paymentService = new PaymentService();
-    const rideLegSettlements = Array.isArray(event.data?.rideLegSettlements)
-        ? event.data.rideLegSettlements.filter(Boolean)
+    const rideLegSettlements = Array.isArray(rideCompleted.rideLegSettlements)
+        ? rideCompleted.rideLegSettlements.filter(Boolean)
         : [];
 
     if (rideLegSettlements.length > 1) {

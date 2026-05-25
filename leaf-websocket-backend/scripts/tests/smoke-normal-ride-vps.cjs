@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
+const { getIdTokenForUid } = require('../../tests/e2e/backend/__helpers__/firebase-id-token');
 
 const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
 const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
@@ -40,13 +42,13 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
 function nowIso() { return new Date().toISOString(); }
 function buildReportPath() { return path.join(__dirname, '..', '..', 'reports', `normal-ride-smoke-vps-${Date.now()}.json`); }
 function writeReport(report, reportPath) { fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`); }
-async function postJson(url, body, timeoutMs = 20000) {
+async function postJson(url, body, timeoutMs = 20000, extraHeaders = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...extraHeaders },
       body: JSON.stringify(body),
       signal: controller.signal
     });
@@ -109,25 +111,34 @@ async function ensureDriverOnline(driverClient) {
   return { success: false, attempts: ONLINE_MAX_ATTEMPTS, error: { code: 'ONLINE_RETRY_EXHAUSTED', error: 'Tentativas para ficar online esgotadas' } };
 }
 function createBookingWithTimeout(passengerClient, payload, timeoutMs = 60000) {
-  if (typeof passengerClient?.createBooking === 'function') {
-    return passengerClient.createBooking(payload, { timeoutMs, lateEventGraceMs: 400 });
-  }
-
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('create_booking_timeout')), timeoutMs);
-    const successHandler = (response) => {
-      clearTimeout(timeout);
+    const startedAt = Date.now();
+    let timeout = null;
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout);
+      passengerClient.socket.removeListener('bookingCreated', successHandler);
       passengerClient.socket.removeListener('bookingError', errorHandler);
+    };
+    const successHandler = (response) => {
+      const eventBookingId = String(response?.bookingId || response?.data?.bookingId || '').trim();
+      if (!eventBookingId) return;
+      cleanup();
       resolve(response);
     };
     const errorHandler = (error) => {
-      clearTimeout(timeout);
-      passengerClient.socket.removeListener('bookingCreated', successHandler);
+      cleanup();
       reject(new Error(error?.error || error?.message || 'create_booking_error'));
     };
-    passengerClient.socket.once('bookingCreated', successHandler);
-    passengerClient.socket.once('bookingError', errorHandler);
-    passengerClient.socket.emit('createBooking', payload);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('create_booking_timeout'));
+    }, timeoutMs);
+    passengerClient.socket.on('bookingCreated', successHandler);
+    passengerClient.socket.on('bookingError', errorHandler);
+    passengerClient.socket.emit('createBooking', {
+      ...payload,
+      canaryStartedAt: startedAt
+    });
   });
 }
 function emitAndWait(client, {
@@ -242,6 +253,7 @@ async function cleanupPreExistingActiveRide(passengerClient, driverClient) {
 }
 async function createPaymentAdvance(amountInCents = 2750) {
   const rideId = `ride_normal_${Date.now()}`;
+  const passengerIdToken = await getIdTokenForUid(PASSENGER_UID);
   const paymentAdvance = await postJson(`${API_BASE_URL}/api/payment/advance`, {
     passengerId: PASSENGER_UID,
     amount: amountInCents,
@@ -249,13 +261,60 @@ async function createPaymentAdvance(amountInCents = 2750) {
     rideDetails: { origin: PICKUP.address, destination: DESTINATION.address },
     passengerName: 'Leaf Passageiro Teste',
     passengerEmail: 'qa@leaf.local'
-  }, 20000);
+  }, 20000, {
+    authorization: `Bearer ${passengerIdToken}`
+  });
   const chargeId = String(paymentAdvance?.data?.chargeId || '').trim();
   assert(paymentAdvance.ok, `payment_advance_failed:${paymentAdvance?.data?.message || paymentAdvance.status}`);
   assert(chargeId, 'payment_advance_missing_charge');
   return { rideId, chargeId, amountInCents };
 }
 async function confirmAdvancePaymentByWebhook({ rideId, chargeId, amountInCents, passengerId = PASSENGER_UID }) {
+  if (String(process.env.CANARY_DIRECT_PAYMENT_CONFIRMATION || '').toLowerCase() === 'true') {
+    const PaymentService = require('../../services/payment-service');
+    const paymentService = new PaymentService();
+    const paidAt = nowIso();
+    const metadata = {
+      event: 'CANARY:DIRECT_PAYMENT_CONFIRMED',
+      correlationID: `ride_${rideId}_direct_canary`,
+      paidAt,
+      source: 'smoke-normal-ride-vps'
+    };
+
+    const storeResult = await paymentService.storeConfirmedPayment({
+      rideId,
+      chargeId,
+      amount: amountInCents,
+      passengerId,
+      metadata
+    });
+    assert(storeResult.success, `direct_payment_store_failed:${storeResult.error || 'unknown'}`);
+
+    const holdingResult = await paymentService.savePaymentHolding(rideId, {
+      status: 'in_holding',
+      amount: amountInCents,
+      paymentMethod: 'pix',
+      paymentId: chargeId,
+      chargeId,
+      passengerId,
+      paidAt,
+      confirmedAt: paidAt,
+      temporaryRideId: rideId,
+      source: 'smoke_normal_ride_direct_canary'
+    });
+    assert(holdingResult.success, `direct_payment_holding_failed:${holdingResult.error || 'unknown'}`);
+    return {
+      ok: true,
+      status: 200,
+      data: {
+        success: true,
+        method: 'direct_canary_payment_confirmation',
+        rideId,
+        chargeId
+      }
+    };
+  }
+
   const webhookPayload = {
     event: 'OPENPIX:CHARGE_COMPLETED',
     charge: {
@@ -272,7 +331,36 @@ async function confirmAdvancePaymentByWebhook({ rideId, chargeId, amountInCents,
     },
     pix: { status: 'COMPLETED' }
   };
-  const webhookResponse = await postJson(`${API_BASE_URL}/api/woovi/webhook`, webhookPayload, 20000);
+  const webhookHeaders = {};
+  const webhookAuthorization = String(
+    process.env.WOOVI_WEBHOOK_AUTHORIZATION ||
+    process.env.OPENPIX_WEBHOOK_AUTHORIZATION ||
+    process.env.WOOVI_WEBHOOK_AUTH_TOKEN ||
+    process.env.OPENPIX_WEBHOOK_AUTH_TOKEN ||
+    ''
+  ).trim();
+  if (webhookAuthorization) {
+    webhookHeaders.authorization = webhookAuthorization.startsWith('Bearer ')
+      ? webhookAuthorization
+      : `Bearer ${webhookAuthorization}`;
+  }
+
+  const webhookSignatureSecret = String(
+    process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET ||
+    process.env.OPENPIX_WEBHOOK_SIGNATURE_SECRET ||
+    process.env.WOOVI_WEBHOOK_HMAC_SECRET ||
+    process.env.OPENPIX_WEBHOOK_HMAC_SECRET ||
+    ''
+  ).trim();
+  if (webhookSignatureSecret) {
+    const rawBody = JSON.stringify(webhookPayload);
+    webhookHeaders['x-webhook-signature'] = `sha256=${crypto
+      .createHmac('sha256', webhookSignatureSecret)
+      .update(rawBody)
+      .digest('hex')}`;
+  }
+
+  const webhookResponse = await postJson(`${API_BASE_URL}/api/woovi/webhook`, webhookPayload, 20000, webhookHeaders);
   assert(webhookResponse.ok, `advance_payment_webhook_failed:${webhookResponse.status}`);
   await sleep(400);
   return webhookResponse;
@@ -417,9 +505,7 @@ async function main() {
         endLocation: { lat: DESTINATION.lat, lng: DESTINATION.lng },
         fare: 27.5,
         distance: 6200,
-        duration: 900,
-        mockPayment: true,
-        __mockPayment: true
+        duration: 900
       },
       successEvent: 'tripCompleted',
       errorEvent: 'tripCompleteError',
