@@ -10,14 +10,17 @@ const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 
-const REQUIRED_COMMON = [
-  'NODE_ENV',
+const REQUIRED_BASE = [
+  'NODE_ENV'
+];
+
+const REQUIRED_PAYMENT_PROVIDER = [
   'WOOVI_ENVIRONMENT',
   'WOOVI_BASE_URL',
   'WOOVI_API_TOKEN'
 ];
 
-const REQUIRED_PROD = [
+const REQUIRED_PROD_PAYMENT_PROVIDER = [
   'LEAF_PIX_KEY'
 ];
 
@@ -25,14 +28,47 @@ const OPTIONAL_RECOMMENDED = [
   'OTEL_EXPORTER_OTLP_ENDPOINT',
   'CORS_ORIGIN',
   'ALLOW_PRIVATE_CORS',
-  'ALLOW_NGROK_CORS'
+  'ALLOW_NGROK_CORS',
+  'REQUIRE_SOCKETIO_REDIS_ADAPTER'
 ];
 
-function mask(value) {
-  const raw = String(value || '');
+const WEBHOOK_VERIFIER_KEYS = [
+  'WOOVI_WEBHOOK_PUBLIC_KEY',
+  'OPENPIX_WEBHOOK_PUBLIC_KEY',
+  'WOOVI_WEBHOOK_SIGNATURE_SECRET',
+  'OPENPIX_WEBHOOK_SIGNATURE_SECRET',
+  'WOOVI_WEBHOOK_HMAC_SECRET',
+  'OPENPIX_WEBHOOK_HMAC_SECRET'
+];
+
+const PAYMENT_BYPASS_FLAGS = [
+  'PAYMENT_BYPASS_ON_WOOVI_FAILURE',
+  'PAYMENT_FORCE_BYPASS',
+  'FORCE_PAYMENT_BYPASS',
+  'EXPO_PUBLIC_FORCE_PAYMENT_BYPASS',
+  'EXPO_PUBLIC_BYPASS_PAYMENTS'
+];
+
+const LEGACY_RUNTIME_FLAGS = [
+  'ENABLE_LEGACY_RUNTIME_ENDPOINTS',
+  'ENABLE_LEGACY_SOCKET_BRIDGE',
+  'ENABLE_LEGACY_SOCKET_NOTIFICATIONS',
+  'ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT',
+  'ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT',
+  'ENABLE_LEGACY_DRIVER_BAAS_FALLBACK'
+];
+
+const PAYMENT_PROVIDER_ROLES = new Set([
+  'gateway',
+  'billing',
+  'payment',
+  'payments'
+]);
+
+function presence(value) {
+  const raw = String(value || '').trim();
   if (!raw) return '(empty)';
-  if (raw.length <= 8) return '********';
-  return `${raw.slice(0, 4)}...${raw.slice(-4)}`;
+  return 'present';
 }
 
 function checkRequired(keys) {
@@ -54,16 +90,29 @@ function boolEnv(name, fallback = false) {
   return fallback;
 }
 
-function hasAnyEnv(keys) {
-  return keys.some((key) => String(process.env[key] || '').trim().length > 0);
-}
-
 function readBooleanLike(value, fallback = false) {
   if (value == null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
   if (['true', '1', 'yes', 'y', 'on', 'sim'].includes(normalized)) return true;
   if (['false', '0', 'no', 'n', 'off', 'nao', 'não'].includes(normalized)) return false;
   return fallback;
+}
+
+function booleanDiagnostic(name, fallback = false) {
+  const raw = process.env[name];
+  const configured = raw != null && String(raw).trim() !== '';
+
+  return {
+    value: readBooleanLike(raw, fallback),
+    source: configured ? 'env' : 'default'
+  };
+}
+
+function requiresPaymentProviderConfig(runtimeRole) {
+  if (boolEnv('RUNTIME_REQUIRES_PAYMENT_CONFIG', false)) {
+    return true;
+  }
+  return PAYMENT_PROVIDER_ROLES.has(String(runtimeRole || '').trim().toLowerCase());
 }
 
 function resolveEnvPath(filePath) {
@@ -101,45 +150,59 @@ function main() {
   const nodeEnv = String(process.env.NODE_ENV || 'development').toLowerCase();
   const wooviEnv = String(process.env.WOOVI_ENVIRONMENT || '').toLowerCase();
   const baseUrl = String(process.env.WOOVI_BASE_URL || '');
+  const runtimeRole = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+  const paymentProviderConfigRequired = requiresPaymentProviderConfig(runtimeRole);
 
-  const missingCommon = checkRequired(REQUIRED_COMMON);
-  const missingProd = nodeEnv === 'production' ? checkRequired(REQUIRED_PROD) : [];
+  const missingCommon = checkRequired([
+    ...REQUIRED_BASE,
+    ...(paymentProviderConfigRequired ? REQUIRED_PAYMENT_PROVIDER : [])
+  ]);
+  const missingProd = nodeEnv === 'production' && paymentProviderConfigRequired
+    ? checkRequired(REQUIRED_PROD_PAYMENT_PROVIDER)
+    : [];
   const warnings = [];
   const blockers = [];
+  const webhookVerifierKeysPresent = WEBHOOK_VERIFIER_KEYS.filter((key) => String(process.env[key] || '').trim());
+  const hasWebhookVerifier = webhookVerifierKeysPresent.length > 0;
+  const webhookRequireSignature = booleanDiagnostic(
+    'WOOVI_WEBHOOK_REQUIRE_SIGNATURE',
+    hasWebhookVerifier
+  );
+  const webhookAllowUnsigned = booleanDiagnostic(
+    'WOOVI_WEBHOOK_ALLOW_UNSIGNED',
+    !hasWebhookVerifier
+  );
+  const webhookProviderVerificationRequired = booleanDiagnostic(
+    'WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED',
+    true
+  );
+  const paymentBypassDiagnostics = PAYMENT_BYPASS_FLAGS.reduce((acc, key) => {
+    acc[key] = booleanDiagnostic(key, false);
+    return acc;
+  }, {});
+  const legacyRuntimeDiagnostics = LEGACY_RUNTIME_FLAGS.reduce((acc, key) => {
+    acc[key] = booleanDiagnostic(key, false);
+    return acc;
+  }, {});
+  const socketRedisAdapterDiagnostic = booleanDiagnostic('ENABLE_SOCKETIO_REDIS_ADAPTER', true);
+  const socketRedisAdapterRequiredDiagnostic = booleanDiagnostic(
+    'REQUIRE_SOCKETIO_REDIS_ADAPTER',
+    nodeEnv === 'production' && runtimeRole === 'gateway'
+  );
 
-  if (wooviEnv === 'sandbox' && /api\.woovi\.com/i.test(baseUrl) && !/sandbox/i.test(baseUrl)) {
+  if (paymentProviderConfigRequired && wooviEnv === 'sandbox' && /api\.woovi\.com/i.test(baseUrl) && !/sandbox/i.test(baseUrl)) {
     warnings.push('WOOVI_ENVIRONMENT=sandbox com base URL de produção detectada');
   }
 
-  if (wooviEnv === 'production' && /sandbox/i.test(baseUrl)) {
+  if (paymentProviderConfigRequired && wooviEnv === 'production' && /sandbox/i.test(baseUrl)) {
     warnings.push('WOOVI_ENVIRONMENT=production com base URL sandbox detectada');
   }
 
-  if (nodeEnv === 'production' && wooviEnv !== 'production') {
+  if (nodeEnv === 'production' && paymentProviderConfigRequired && wooviEnv !== 'production') {
     warnings.push('NODE_ENV=production está usando WOOVI_ENVIRONMENT diferente de production');
   }
 
   if (nodeEnv === 'production') {
-    const hasWebhookVerifier = hasAnyEnv([
-      'WOOVI_WEBHOOK_PUBLIC_KEY',
-      'OPENPIX_WEBHOOK_PUBLIC_KEY',
-      'WOOVI_WEBHOOK_SIGNATURE_SECRET',
-      'OPENPIX_WEBHOOK_SIGNATURE_SECRET',
-      'WOOVI_WEBHOOK_HMAC_SECRET',
-      'OPENPIX_WEBHOOK_HMAC_SECRET'
-    ]);
-    const webhookRequireSignature = readBooleanLike(
-      process.env.WOOVI_WEBHOOK_REQUIRE_SIGNATURE,
-      hasWebhookVerifier
-    );
-    const webhookAllowUnsigned = readBooleanLike(
-      process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED,
-      !hasWebhookVerifier
-    );
-    const webhookProviderVerificationRequired = readBooleanLike(
-      process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED,
-      true
-    );
     const geofenceRadiusKm = Number.parseFloat(process.env.GEOFENCE_RADIUS_KM || '');
     const corsOrigin = String(process.env.CORS_ORIGIN || '').trim();
 
@@ -152,16 +215,16 @@ function main() {
     if (Number.isFinite(geofenceRadiusKm) && geofenceRadiusKm >= 100) {
       blockers.push(`GEOFENCE_RADIUS_KM=${geofenceRadiusKm} abre demais a operação em produção`);
     }
-    if (!hasWebhookVerifier) {
-      blockers.push('Webhook Woovi/OpenPix em produção exige WOOVI_WEBHOOK_PUBLIC_KEY ou WOOVI_WEBHOOK_SIGNATURE_SECRET');
+    if (paymentProviderConfigRequired && !hasWebhookVerifier) {
+      blockers.push('Webhook Woovi/OpenPix em produção exige ao menos um verificador de assinatura: WOOVI_WEBHOOK_PUBLIC_KEY, OPENPIX_WEBHOOK_PUBLIC_KEY, WOOVI_WEBHOOK_SIGNATURE_SECRET, OPENPIX_WEBHOOK_SIGNATURE_SECRET, WOOVI_WEBHOOK_HMAC_SECRET ou OPENPIX_WEBHOOK_HMAC_SECRET');
     }
-    if (!webhookRequireSignature) {
+    if (paymentProviderConfigRequired && !webhookRequireSignature.value) {
       blockers.push('WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true obrigatório em produção');
     }
-    if (webhookAllowUnsigned) {
+    if (paymentProviderConfigRequired && webhookAllowUnsigned.value) {
       blockers.push('WOOVI_WEBHOOK_ALLOW_UNSIGNED=false obrigatório em produção');
     }
-    if (!webhookProviderVerificationRequired) {
+    if (paymentProviderConfigRequired && !webhookProviderVerificationRequired.value) {
       warnings.push('WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=false remove conferência complementar no provedor');
     }
     if (boolEnv('ENABLE_MANUAL_PAYMENT_CONFIRMATION')) {
@@ -173,8 +236,21 @@ function main() {
     if (boolEnv('ENABLE_DASHBOARD_MOCK_ENDPOINTS')) {
       blockers.push('ENABLE_DASHBOARD_MOCK_ENDPOINTS=true bloqueado em produção');
     }
-    if (boolEnv('PAYMENT_BYPASS_ON_WOOVI_FAILURE') || boolEnv('PAYMENT_FORCE_BYPASS')) {
-      blockers.push('Bypass de pagamento ativado bloqueado em produção');
+    if (runtimeRole === 'gateway' && !socketRedisAdapterDiagnostic.value) {
+      blockers.push('ENABLE_SOCKETIO_REDIS_ADAPTER=false bloqueado em produção para runtime gateway');
+    }
+    if (runtimeRole === 'gateway' && !socketRedisAdapterRequiredDiagnostic.value) {
+      warnings.push('REQUIRE_SOCKETIO_REDIS_ADAPTER=false reduz garantia de escala horizontal do websocket');
+    }
+    for (const key of PAYMENT_BYPASS_FLAGS) {
+      if (paymentBypassDiagnostics[key].value) {
+        blockers.push(`${key}=true bloqueado em produção`);
+      }
+    }
+    for (const key of LEGACY_RUNTIME_FLAGS) {
+      if (legacyRuntimeDiagnostics[key].value) {
+        blockers.push(`${key}=true bloqueado em produção`);
+      }
     }
     if (boolEnv('MOCK_PAYMENT_FOR_TESTS')) {
       blockers.push('MOCK_PAYMENT_FOR_TESTS=true bloqueado em produção');
@@ -218,17 +294,44 @@ function main() {
       blockers,
       warnings
     },
-    masked: {
-      WOOVI_API_TOKEN: mask(process.env.WOOVI_API_TOKEN),
-      WOOVI_WEBHOOK_PUBLIC_KEY: mask(process.env.WOOVI_WEBHOOK_PUBLIC_KEY || process.env.OPENPIX_WEBHOOK_PUBLIC_KEY),
-      WOOVI_WEBHOOK_SIGNATURE_SECRET: mask(process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET || process.env.OPENPIX_WEBHOOK_SIGNATURE_SECRET),
-      WOOVI_WEBHOOK_HMAC_SECRET: mask(process.env.WOOVI_WEBHOOK_HMAC_SECRET || process.env.OPENPIX_WEBHOOK_HMAC_SECRET),
-      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: mask(process.env.WOOVI_WEBHOOK_REQUIRE_SIGNATURE),
-      WOOVI_WEBHOOK_ALLOW_UNSIGNED: mask(process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED),
-      WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: mask(process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED),
-      LEAF_PIX_KEY: mask(process.env.LEAF_PIX_KEY),
-      CORS_ORIGIN: mask(process.env.CORS_ORIGIN),
-      OTEL_EXPORTER_OTLP_ENDPOINT: mask(process.env.OTEL_EXPORTER_OTLP_ENDPOINT)
+    sensitivePresence: {
+      WOOVI_API_TOKEN: presence(process.env.WOOVI_API_TOKEN),
+      WOOVI_WEBHOOK_PUBLIC_KEY: presence(process.env.WOOVI_WEBHOOK_PUBLIC_KEY || process.env.OPENPIX_WEBHOOK_PUBLIC_KEY),
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: presence(process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET || process.env.OPENPIX_WEBHOOK_SIGNATURE_SECRET),
+      WOOVI_WEBHOOK_HMAC_SECRET: presence(process.env.WOOVI_WEBHOOK_HMAC_SECRET || process.env.OPENPIX_WEBHOOK_HMAC_SECRET),
+      LEAF_PIX_KEY: presence(process.env.LEAF_PIX_KEY)
+    },
+    diagnostics: {
+      webhookSignature: {
+        verifierKeysPresent: webhookVerifierKeysPresent,
+        hasVerifier: hasWebhookVerifier,
+        requireSignature: {
+          ...webhookRequireSignature,
+          expected: true
+        },
+        allowUnsigned: {
+          ...webhookAllowUnsigned,
+          expected: false
+        },
+        providerVerificationRequired: {
+          ...webhookProviderVerificationRequired,
+          expected: true
+        }
+      },
+      paymentBypass: paymentBypassDiagnostics,
+      legacyRuntime: legacyRuntimeDiagnostics,
+      runtime: {
+        runtimeRole,
+        paymentProviderConfigRequired,
+        socketRedisAdapter: {
+          ...socketRedisAdapterDiagnostic,
+          expected: true
+        },
+        requireSocketRedisAdapter: {
+          ...socketRedisAdapterRequiredDiagnostic,
+          expected: nodeEnv === 'production' && runtimeRole === 'gateway'
+        }
+      }
     },
     optionalRecommended: OPTIONAL_RECOMMENDED.filter((k) => !String(process.env[k] || '').trim())
   };

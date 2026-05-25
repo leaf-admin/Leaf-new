@@ -244,15 +244,20 @@ function registerSocketAuthenticateHandler({
             // Política: Bloquear sessão simultânea (conforme PARAMETROS_DEFINIDOS.md)
             // ✅ DESABILITADO para testes - permitir múltiplas conexões de teste
             const SESSION_SIMULTANEA_BLOCKED = process.env.ALLOW_MULTIPLE_SESSIONS !== 'true'; // Permitir em testes
+            const normalizedSessionUserType = String(socket.userType || '').trim().toLowerCase();
+            const shouldEnforceSingleSession =
+                SESSION_SIMULTANEA_BLOCKED &&
+                ['driver', 'motorista', 'partner', 'parceiro'].includes(normalizedSessionUserType);
 
             // Verificar se usuário já está conectado em outro socket
             const existingSocket = io.connectedUsers.get(authUserId);
-            if (existingSocket && existingSocket.id !== socket.id && SESSION_SIMULTANEA_BLOCKED) {
+            if (existingSocket && existingSocket.id !== socket.id && shouldEnforceSingleSession) {
                 // Avisar a sessão anterior antes de desconectar, para o app mostrar o modal de sessão encerrada.
                 existingSocket.emit('sessionTerminated', {
                     code: 'SESSION_REPLACED',
                     reason: 'Nova sessão iniciada em outro dispositivo',
                     userId: authUserId,
+                    userType: socket.userType,
                     newSocketId: socket.id,
                     previousSocketId: existingSocket.id,
                     timestamp: new Date().toISOString()
@@ -266,13 +271,15 @@ function registerSocketAuthenticateHandler({
                 logStructured('info', 'Desconectando sessão anterior', {
                     service: 'websocket',
                     userId: authUserId,
+                    userType: socket.userType,
                     previousSocketId: existingSocket.id,
                     newSocketId: socket.id
                 });
             } else if (existingSocket && existingSocket.id !== socket.id) {
-                logStructured('warn', 'Múltiplas sessões permitidas (modo teste)', {
+                logStructured('info', 'Múltiplas sessões permitidas para este tipo de usuário', {
                     service: 'websocket',
                     userId: authUserId,
+                    userType: socket.userType,
                     socketId: socket.id
                 });
             }

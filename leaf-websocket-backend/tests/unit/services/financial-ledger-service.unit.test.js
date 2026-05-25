@@ -211,6 +211,33 @@ describe('FinancialLedgerService', () => {
     ]));
   });
 
+  it('records a balanced settlement without zero-value ledger lines', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    const result = await service.recordRideSettlement({
+      rideId: 'ride_tiny_1',
+      driverId: 'driver_1',
+      totalAmountCents: 80,
+      netAmountCents: 0,
+      operationalFeeCents: 79,
+      wooviFeeCents: 1
+    });
+
+    const event = firestore.docs.get(`financial_ledger_events/${result.eventId}`);
+
+    expect(result).toMatchObject({
+      success: true,
+      totalDebitCents: 80,
+      totalCreditCents: 80
+    });
+    expect(event.lines).toHaveLength(3);
+    expect(event.lines).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ amountCents: 0 })
+    ]));
+  });
+
   it('reconciles ride payment and distribution against ledger events', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);

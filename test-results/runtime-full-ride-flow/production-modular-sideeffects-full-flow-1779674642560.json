@@ -1,0 +1,416 @@
+{
+  "startedAt": "2026-05-25T02:03:56.470Z",
+  "completedAt": "2026-05-25T02:04:02.560Z",
+  "mode": "existing-runtime",
+  "targetUrl": "http://127.0.0.1:3001",
+  "redis": {
+    "host": "redis",
+    "port": "6379",
+    "db": "0",
+    "urlConfigured": true
+  },
+  "runtimes": [
+    {
+      "runtime": "production-modular-sideeffects",
+      "socketUrl": "http://127.0.0.1:3001",
+      "readiness": {
+        "status": "healthy",
+        "timestamp": "2026-05-25T02:03:56.550Z",
+        "checks": {
+          "redis": {
+            "status": "healthy",
+            "source": "dedicated",
+            "responseTime": "0ms",
+            "latency": 0,
+            "minLatency": 0,
+            "maxLatency": 1,
+            "samples": [
+              1,
+              0,
+              0
+            ],
+            "thresholds": {
+              "warningMs": 300,
+              "unhealthyMs": 1500
+            },
+            "message": "Redis está saudável"
+          },
+          "socketRedisAdapter": {
+            "status": "healthy",
+            "state": "ready",
+            "enabled": true,
+            "required": true,
+            "runtimeRole": "gateway",
+            "updatedAt": "2026-05-25T01:58:45.624Z",
+            "error": null,
+            "message": "Socket.IO Redis Adapter pronto"
+          }
+        }
+      },
+      "flow": {
+        "runtime": "production-modular-sideeffects",
+        "ok": true,
+        "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+        "passengerId": "runtime-full-passenger-prod-sideeffects-20260525020351",
+        "driverId": "runtime-full-driver-prod-sideeffects-20260525020351",
+        "timings": {
+          "authenticatedMs": 115,
+          "driverOnlineMs": 636,
+          "bookingCreatedMs": 1413,
+          "paymentConfirmedMs": 1413,
+          "driverNotifiedMs": 1531,
+          "rideAcceptedMs": 3520,
+          "arrivedAtPickupMs": 3567,
+          "tripStartedMs": 3896,
+          "locationUpdatesSentMs": 5153,
+          "tripCompletedMs": 5220
+        },
+        "events": {
+          "bookingCreated": true,
+          "paymentConfirmed": true,
+          "driverReceivedNewRideRequest": true,
+          "driverRideAccepted": true,
+          "passengerRideAccepted": true,
+          "driverArrivedAtPickup": true,
+          "passengerArrivedAtPickup": true,
+          "driverTripStarted": true,
+          "passengerTripStarted": true,
+          "passengerLocationEvent": true,
+          "driverTripCompleted": true,
+          "passengerTripCompleted": true,
+          "paymentDistributed": true
+        },
+        "redisAssertions": {
+          "status": "completed",
+          "paymentStatus": "in_holding",
+          "finalFare": "27.5",
+          "tollFee": "0",
+          "driverNetAmount": "25.51",
+          "activeBookingCleared": true,
+          "activeDriverTripCleared": true
+        },
+        "samples": {
+          "newRideRequest": {
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "estimatedFare": 27.5,
+            "pickupAddress": "Copacabana Palace, Rio de Janeiro, RJ",
+            "destinationAddress": "Leblon, Rio de Janeiro, RJ"
+          },
+          "tripCompleted": {
+            "passengerFare": "27.5",
+            "driverNetAmount": 25.51,
+            "tollFee": "0"
+          }
+        },
+        "eventLog": [
+          {
+            "at": 1779674636683,
+            "side": "passenger",
+            "eventName": "authenticated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674636686,
+            "side": "driver",
+            "eventName": "authenticated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674636720,
+            "side": "driver",
+            "eventName": "locationUpdated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674636720,
+            "side": "driver",
+            "eventName": "map_h3_refresh",
+            "bookingId": null,
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674636720,
+            "side": "passenger",
+            "eventName": "map_h3_refresh",
+            "bookingId": null,
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674637921,
+            "side": "driver",
+            "eventName": "locationUpdated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674637922,
+            "side": "passenger",
+            "eventName": "map_h3_refresh",
+            "bookingId": null,
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674637922,
+            "side": "driver",
+            "eventName": "map_h3_refresh",
+            "bookingId": null,
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674637984,
+            "side": "passenger",
+            "eventName": "bookingCreated",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674638102,
+            "side": "driver",
+            "eventName": "newRideRequest",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674639121,
+            "side": "driver",
+            "eventName": "locationUpdated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674639122,
+            "side": "driver",
+            "eventName": "map_h3_refresh",
+            "bookingId": null,
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674639122,
+            "side": "passenger",
+            "eventName": "map_h3_refresh",
+            "bookingId": null,
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674639888,
+            "side": "driver",
+            "eventName": "rideAccepted",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674639888,
+            "side": "passenger",
+            "eventName": "rideAccepted",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640121,
+            "side": "passenger",
+            "eventName": "arrivedAtPickup",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640126,
+            "side": "passenger",
+            "eventName": "driverArrived",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640136,
+            "side": "passenger",
+            "eventName": "activeRideSync",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640137,
+            "side": "driver",
+            "eventName": "arrivedAtPickup",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640137,
+            "side": "passenger",
+            "eventName": "map_h3_refresh",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674640138,
+            "side": "driver",
+            "eventName": "notificationActionSuccess",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640138,
+            "side": "driver",
+            "eventName": "map_h3_refresh",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674640336,
+            "side": "driver",
+            "eventName": "locationUpdated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640461,
+            "side": "driver",
+            "eventName": "tripStarted",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640467,
+            "side": "passenger",
+            "eventName": "tripStarted",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640510,
+            "side": "passenger",
+            "eventName": "driverLocation",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674640510,
+            "side": "driver",
+            "eventName": "locationUpdated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674640759,
+            "side": "passenger",
+            "eventName": "driverLocation",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674640760,
+            "side": "driver",
+            "eventName": "locationUpdated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674641003,
+            "side": "passenger",
+            "eventName": "driverLocation",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674641004,
+            "side": "driver",
+            "eventName": "locationUpdated",
+            "bookingId": null,
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674641038,
+            "side": "passenger",
+            "eventName": "map_h3_refresh",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674641038,
+            "side": "driver",
+            "eventName": "map_h3_refresh",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674641779,
+            "side": "driver",
+            "eventName": "tripCompleted",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674641790,
+            "side": "passenger",
+            "eventName": "tripCompleted",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674641791,
+            "side": "driver",
+            "eventName": "paymentDistributed",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": true
+          },
+          {
+            "at": 1779674641943,
+            "side": "passenger",
+            "eventName": "map_h3_refresh",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          },
+          {
+            "at": 1779674641943,
+            "side": "driver",
+            "eventName": "map_h3_refresh",
+            "bookingId": "booking_1779674637950_runtime-full-passenger-prod-sideeffects-20260525020351",
+            "code": null,
+            "success": null
+          }
+        ]
+      }
+    }
+  ],
+  "artifactsDir": "/tmp/runtime-full-ride-flow",
+  "socketClient": "raw-ws"
+}

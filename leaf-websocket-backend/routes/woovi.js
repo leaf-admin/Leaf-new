@@ -58,6 +58,36 @@ function readBooleanEnv(name, fallback = false) {
   return fallback;
 }
 
+function parseTimestampMs(value) {
+  const ms = new Date(value || '').getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function resolveWebhookStaleProcessingMs() {
+  return Math.max(
+    1000,
+    Number.parseInt(process.env.WOOVI_WEBHOOK_STALE_PROCESSING_MS || '300000', 10)
+  );
+}
+
+function isRetryableWebhookEvent(existing = {}) {
+  const status = String(existing.status || '').trim().toLowerCase();
+  if (status === 'failed') {
+    return true;
+  }
+
+  if (!['received', 'processing'].includes(status)) {
+    return false;
+  }
+
+  const updatedAtMs = parseTimestampMs(existing.updatedAtIso || existing.createdAtIso);
+  if (!updatedAtMs) {
+    return false;
+  }
+
+  return Date.now() - updatedAtMs >= resolveWebhookStaleProcessingMs();
+}
+
 function normalizeBearerToken(value) {
   const token = String(value || '').trim();
   if (!token) return '';
@@ -414,11 +444,33 @@ async function beginWooviWebhookIdempotency({ event, chargeId, amount }) {
       const durableClaim = await firestore.runTransaction(async (transaction) => {
         const eventDoc = await transaction.get(eventRef);
         if (eventDoc.exists) {
+          const existing = eventDoc.data() || {};
+          if (isRetryableWebhookEvent(existing)) {
+            const nowIso = new Date().toISOString();
+            transaction.set(eventRef, {
+              status: 'processing',
+              retryOfStatus: existing.status || null,
+              attempts: Number(existing.attempts || 1) + 1,
+              lastRetryAt: admin.firestore.FieldValue.serverTimestamp(),
+              lastRetryAtIso: nowIso,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAtIso: nowIso
+            }, { merge: true });
+
+            return {
+              duplicate: false,
+              retry: true,
+              source: 'firestore',
+              docId,
+              existing
+            };
+          }
+
           return {
             duplicate: true,
             source: 'firestore',
             docId,
-            existing: eventDoc.data() || {}
+            existing
           };
         }
 
@@ -427,7 +479,8 @@ async function beginWooviWebhookIdempotency({ event, chargeId, amount }) {
           event: normalizeEventName(event),
           chargeId: String(chargeId),
           amount: Number.isFinite(Number(amount)) ? Math.round(Number(amount)) : 0,
-          status: 'received',
+          status: 'processing',
+          attempts: 1,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           createdAtIso: new Date().toISOString(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -436,6 +489,7 @@ async function beginWooviWebhookIdempotency({ event, chargeId, amount }) {
 
         return {
           duplicate: false,
+          retry: false,
           source: 'firestore',
           docId
         };
@@ -467,6 +521,7 @@ async function beginWooviWebhookIdempotency({ event, chargeId, amount }) {
 
       return {
         duplicate: false,
+        retry: Boolean(durableClaim.retry),
         key,
         source: durableClaim.source,
         durableEventId: durableClaim.docId
@@ -486,7 +541,10 @@ async function beginWooviWebhookIdempotency({ event, chargeId, amount }) {
     await redisPool.ensureConnection();
     const redis = redisPool.getConnection();
     const ttlSeconds = Number.parseInt(process.env.WOOVI_WEBHOOK_IDEMPOTENCY_TTL_SECONDS || '172800', 10);
-    const result = await redis.set(key, new Date().toISOString(), 'NX', 'EX', ttlSeconds);
+    const result = await redis.set(key, JSON.stringify({
+      status: 'processing',
+      startedAt: new Date().toISOString()
+    }), 'NX', 'EX', ttlSeconds);
     return {
       duplicate: result !== 'OK',
       key,
@@ -501,6 +559,82 @@ async function beginWooviWebhookIdempotency({ event, chargeId, amount }) {
     });
     return { duplicate: false, key: null, error: idempotencyError.message };
   }
+}
+
+async function completeWooviWebhookIdempotency(decision = {}, outcome = 'processed', metadata = {}) {
+  if (!decision?.key && !decision?.durableEventId) {
+    return { updated: false, skipped: true, reason: 'IDEMPOTENCY_KEY_MISSING' };
+  }
+
+  const normalizedOutcome = ['processed', 'failed', 'rejected'].includes(String(outcome || '').toLowerCase())
+    ? String(outcome).toLowerCase()
+    : 'processed';
+  const nowIso = new Date().toISOString();
+
+  if (decision?.durableEventId) {
+    try {
+      const firebaseConfig = require('../firebase-config');
+      const admin = require('firebase-admin');
+      const firestore = firebaseConfig.getFirestore();
+      if (firestore) {
+        const eventRef = firestore.collection('woovi_webhook_events').doc(decision.durableEventId);
+        const timestampField = normalizedOutcome === 'processed'
+          ? 'processedAt'
+          : normalizedOutcome === 'rejected'
+            ? 'rejectedAt'
+            : 'failedAt';
+        const timestampIsoField = `${timestampField}Iso`;
+        await eventRef.set({
+          status: normalizedOutcome,
+          outcome: normalizedOutcome,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAtIso: nowIso,
+          [timestampField]: admin.firestore.FieldValue.serverTimestamp(),
+          [timestampIsoField]: nowIso,
+          result: metadata?.result || null,
+          error: metadata?.error || null,
+          responseStatus: metadata?.responseStatus || null
+        }, { merge: true });
+      }
+    } catch (durableUpdateError) {
+      logStructured('warn', 'Falha ao atualizar status durável do webhook Woovi', {
+        service: 'woovi-routes',
+        idempotencyKey: decision.key || null,
+        durableEventId: decision.durableEventId,
+        outcome: normalizedOutcome,
+        error: durableUpdateError.message
+      });
+    }
+  }
+
+  if (decision?.key) {
+    try {
+      const redisPool = require('../utils/redis-pool');
+      await redisPool.ensureConnection();
+      const redis = redisPool.getConnection();
+      if (normalizedOutcome === 'failed' && typeof redis.del === 'function') {
+        await redis.del(decision.key);
+      } else {
+        const ttlSeconds = Number.parseInt(process.env.WOOVI_WEBHOOK_IDEMPOTENCY_TTL_SECONDS || '172800', 10);
+        await redis.set(decision.key, JSON.stringify({
+          status: normalizedOutcome,
+          completedAt: nowIso
+        }), 'XX', 'EX', ttlSeconds);
+      }
+    } catch (redisUpdateError) {
+      logStructured('debug', 'Falha ao atualizar cache Redis de idempotência Woovi', {
+        service: 'woovi-routes',
+        idempotencyKey: decision.key,
+        outcome: normalizedOutcome,
+        error: redisUpdateError.message
+      });
+    }
+  }
+
+  return {
+    updated: true,
+    outcome: normalizedOutcome
+  };
 }
 
 function parseAmountCandidateToCents(value, keyHint = '') {
@@ -1101,6 +1235,7 @@ router.post('/woovi/test-webhook', authenticateJWT, requireRole(WOOVI_ADMIN_ROLE
 router.post('/woovi/webhook', async (req, res) => {
   // ✅ Armazenar io no req para uso nas funções de handler
   req.io = req.app.get('io');
+  let idempotencyDecision = null;
   try {
     const signatureDecision = verifyWooviWebhookSignature(req);
     // ✅ Log resumido do webhook recebido
@@ -1135,7 +1270,7 @@ router.post('/woovi/webhook', async (req, res) => {
       });
     }
 
-    const idempotencyDecision = await beginWooviWebhookIdempotency({
+    idempotencyDecision = await beginWooviWebhookIdempotency({
       event,
       chargeId,
       amount
@@ -1180,6 +1315,7 @@ router.post('/woovi/webhook', async (req, res) => {
     });
     req.body._webhookSignatureMethod = signatureDecision.method;
     req.body._webhookProviderVerificationRequired = Boolean(signatureDecision.providerVerificationRequired);
+    let processingResult = null;
 
     logStructured('info', 'Webhook recebido', {
       service: 'woovi-routes',
@@ -1201,7 +1337,7 @@ router.post('/woovi/webhook', async (req, res) => {
       // Mesmo sem evento, tentar processar se houver charge com status COMPLETED
       if (charge && (charge.identifier || charge.id) && charge.status === 'COMPLETED') {
         logStructured('info', 'Processando sem evento, mas com charge COMPLETED', { service: 'woovi-routes', chargeId: charge.identifier || charge.id });
-        await handleChargeCompleted(req.body, req.io);
+        processingResult = await handleChargeCompleted(req.body, req.io);
       }
     } else {
       logStructured('info', 'Evento recebido', { service: 'woovi-routes', event });
@@ -1220,12 +1356,12 @@ router.post('/woovi/webhook', async (req, res) => {
         case 'Leaf-charge.confirmed':
         case 'Leaf-charge.completed': // ✅ Variação Leaf
           logStructured('info', 'Cobrança confirmada/paga', { service: 'woovi-routes', event });
-          await handleChargeCompleted(req.body, req.io);
+          processingResult = await handleChargeCompleted(req.body, req.io);
           break;
 
         case 'OPENPIX:CHARGE_COMPLETED_NOT_SAME_CUSTOMER_PAYER': // ✅ Cobrança paga por pagador diferente
           logStructured('warn', 'Cobrança paga por pagador diferente do cliente', { service: 'woovi-routes', event });
-          await handleChargeCompletedDifferentPayer(req.body);
+          processingResult = await handleChargeCompletedDifferentPayer(req.body);
           break;
 
         case 'OPENPIX:CHARGE_CREATED': // ✅ Nova cobrança criada
@@ -1233,7 +1369,7 @@ router.post('/woovi/webhook', async (req, res) => {
         case 'charge.created':
         case 'Leaf-charge.created':
           logStructured('info', 'Nova cobrança criada', { service: 'woovi-routes', event });
-          await handleChargeCreated(req.body);
+          processingResult = await handleChargeCreated(req.body);
           break;
 
         case 'OPENPIX:CHARGE_EXPIRED': // ✅ Cobrança expirada
@@ -1241,35 +1377,35 @@ router.post('/woovi/webhook', async (req, res) => {
         case 'charge.expired':
         case 'Leaf-charge.expired':
           logStructured('info', 'Cobrança expirada', { service: 'woovi-routes', event });
-          await handleChargeExpired({ ...req.body, io: req.io });
+          processingResult = await handleChargeExpired({ ...req.body, io: req.io });
           break;
 
         // ==================== EVENTOS DE TRANSAÇÃO ====================
         case 'OPENPIX:TRANSACTION_RECEIVED': // ✅ Transação recebida (cobrança ou QR code estático)
           logStructured('info', 'Transação recebida', { service: 'woovi-routes', event });
-          await handleTransactionReceived(req.body, req.io);
+          processingResult = await handleTransactionReceived(req.body, req.io);
           break;
 
         // ==================== EVENTOS DE REEMBOLSO ====================
         case 'PIX_TRANSACTION_REFUND_RECEIVED_CONFIRMED': // ✅ Reembolso recebido e confirmado
           logStructured('info', 'Reembolso recebido e confirmado', { service: 'woovi-routes', event });
-          await handleRefundReceivedConfirmed(req.body);
+          processingResult = await handleRefundReceivedConfirmed(req.body);
           break;
 
         case 'PIX_TRANSACTION_REFUND_RECEIVED_REJECTED': // ✅ Reembolso recebido mas rejeitado
           logStructured('warn', 'Reembolso recebido mas rejeitado', { service: 'woovi-routes', event });
-          await handleRefundReceivedRejected(req.body);
+          processingResult = await handleRefundReceivedRejected(req.body);
           break;
 
         case 'PIX_TRANSACTION_REFUND_SENT_CONFIRMED': // ✅ Reembolso enviado e confirmado
           logStructured('info', 'Reembolso enviado e confirmado', { service: 'woovi-routes', event });
-          await handleRefundSentConfirmed(req.body);
+          processingResult = await handleRefundSentConfirmed(req.body);
           break;
 
         // ==================== EVENTOS DE CONTA BaaS ====================
         case 'ACCOUNT_REGISTER_APPROVED': // ✅ Conta BaaS aprovada
           logStructured('info', 'Conta BaaS aprovada', { service: 'woovi-routes', event });
-          await handleAccountApproved(charge || req.body);
+          processingResult = await handleAccountApproved(charge || req.body);
           break;
 
         // ==================== EVENTOS LEGADOS (compatibilidade) ====================
@@ -1277,7 +1413,7 @@ router.post('/woovi/webhook', async (req, res) => {
         case 'refund.received':
         case 'Leaf-refund.received':
           logStructured('info', 'Reembolso recebido (legado)', { service: 'woovi-routes', event });
-          await handleRefundReceivedConfirmed(req.body);
+          processingResult = await handleRefundReceivedConfirmed(req.body);
           break;
 
         default:
@@ -1285,10 +1421,18 @@ router.post('/woovi/webhook', async (req, res) => {
           // ✅ Fallback: Se não reconhecer o evento mas tiver charge COMPLETED, processar mesmo assim
           if (charge && charge.status === 'COMPLETED') {
             logStructured('info', 'Processando charge COMPLETED mesmo com evento desconhecido', { service: 'woovi-routes', event });
-            await handleChargeCompleted(req.body, req.io);
+            processingResult = await handleChargeCompleted(req.body, req.io);
           }
       }
     }
+
+    const idempotencyOutcome = processingResult?.success === false && processingResult?.status === 'REJECTED'
+      ? 'rejected'
+      : 'processed';
+    await completeWooviWebhookIdempotency(idempotencyDecision, idempotencyOutcome, {
+      result: processingResult || { handled: true },
+      responseStatus: 200
+    });
 
     // Sempre responder 200 OK para a Woovi
     res.status(200).json({
@@ -1299,6 +1443,10 @@ router.post('/woovi/webhook', async (req, res) => {
 
   } catch (error) {
     logError(error, 'Erro no webhook', { service: 'woovi-routes' });
+    await completeWooviWebhookIdempotency(idempotencyDecision, 'failed', {
+      error: error.message,
+      responseStatus: 500
+    });
     res.status(500).json({
       success: false,
       error: error.message
@@ -2100,8 +2248,10 @@ async function handleChargeCompletedDifferentPayer(data) {
 router.__private = {
   verifyWooviWebhookSignature,
   beginWooviWebhookIdempotency,
+  completeWooviWebhookIdempotency,
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking,
+  isRetryableWebhookEvent,
   normalizeEventName,
   normalizePaymentStatus
 };

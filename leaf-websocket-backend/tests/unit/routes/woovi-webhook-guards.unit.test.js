@@ -1,6 +1,7 @@
 jest.unmock('express');
 
 const mockRedisSet = jest.fn();
+const mockRedisDel = jest.fn();
 
 jest.mock('axios', () => ({}));
 
@@ -30,7 +31,8 @@ jest.mock('../../../utils/logger', () => ({
 jest.mock('../../../utils/redis-pool', () => ({
   ensureConnection: jest.fn().mockResolvedValue(true),
   getConnection: jest.fn(() => ({
-    set: mockRedisSet
+    set: mockRedisSet,
+    del: mockRedisDel
   }))
 }));
 
@@ -50,8 +52,10 @@ const wooviRoutes = require('../../../routes/woovi');
 const {
   verifyWooviWebhookSignature,
   beginWooviWebhookIdempotency,
+  completeWooviWebhookIdempotency,
   extractExpectedBookingAmountInCents,
-  validateWebhookAmountAgainstBooking
+  validateWebhookAmountAgainstBooking,
+  isRetryableWebhookEvent
 } = wooviRoutes.__private;
 const firebaseConfig = require('../../../firebase-config');
 
@@ -131,6 +135,7 @@ describe('woovi webhook guards', () => {
     delete process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED;
     process.env.NODE_ENV = 'test';
     firebaseConfig.getFirestore.mockReturnValue(null);
+    mockRedisDel.mockResolvedValue(1);
   });
 
   afterAll(() => {
@@ -293,6 +298,83 @@ describe('woovi webhook guards', () => {
       source: 'firestore'
     });
     expect(firestore.docs.size).toBe(1);
+  });
+
+  it('allows retry for durable webhook events previously marked as failed', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockRedisSet.mockResolvedValue('OK');
+
+    const first = await beginWooviWebhookIdempotency({
+      event: 'charge.completed',
+      chargeId: 'charge_retry_123',
+      amount: 1590
+    });
+    await completeWooviWebhookIdempotency(first, 'failed', {
+      error: 'store failed',
+      responseStatus: 500
+    });
+    const second = await beginWooviWebhookIdempotency({
+      event: 'charge.completed',
+      chargeId: 'charge_retry_123',
+      amount: 1590
+    });
+
+    expect(first.duplicate).toBe(false);
+    expect(second).toMatchObject({
+      duplicate: false,
+      retry: true,
+      source: 'firestore'
+    });
+    const stored = Array.from(firestore.docs.values())[0];
+    expect(stored.status).toBe('processing');
+    expect(stored.retryOfStatus).toBe('failed');
+    expect(stored.attempts).toBe(2);
+  });
+
+  it('does not retry fresh processing webhook events', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockRedisSet.mockResolvedValue('OK');
+
+    await beginWooviWebhookIdempotency({
+      event: 'charge.completed',
+      chargeId: 'charge_processing_123',
+      amount: 1590
+    });
+    const second = await beginWooviWebhookIdempotency({
+      event: 'charge.completed',
+      chargeId: 'charge_processing_123',
+      amount: 1590
+    });
+
+    expect(second.duplicate).toBe(true);
+    expect(second.source).toBe('firestore');
+  });
+
+  it('treats stale received webhook events as retryable', () => {
+    expect(isRetryableWebhookEvent({
+      status: 'received',
+      updatedAtIso: new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    })).toBe(true);
+  });
+
+  it('releases redis idempotency key when webhook processing fails without Firestore', async () => {
+    firebaseConfig.getFirestore.mockReturnValue(null);
+    mockRedisSet.mockResolvedValue('OK');
+    mockRedisDel.mockResolvedValue(1);
+
+    const decision = await beginWooviWebhookIdempotency({
+      event: 'charge.completed',
+      chargeId: 'charge_redis_retry_123',
+      amount: 1590
+    });
+    await completeWooviWebhookIdempotency(decision, 'failed', {
+      error: 'temporary failure',
+      responseStatus: 500
+    });
+
+    expect(mockRedisDel).toHaveBeenCalledWith(decision.key);
   });
 
   it('extracts expected booking amount from canonical cent fields first', () => {

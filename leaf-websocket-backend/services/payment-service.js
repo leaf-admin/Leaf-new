@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const circuitBreakerService = require('./circuit-breaker-service');
 const subscriptionStateService = require('./subscription-state-service');
 const FinancialLedgerService = require('./financial-ledger-service');
+const { buildRideFinancialContract } = require('./ride-financial-contract');
 const { logStructured, logError } = require('../utils/logger');
 const traceContext = require('../utils/trace-context');
 const redisPool = require('../utils/redis-pool');
@@ -1584,57 +1585,59 @@ class PaymentService {
   }
 
   /**
+   * Constroi o contrato financeiro canonico da corrida.
+   * O pedágio é passthrough do motorista e as taxas são calculadas sobre a corrida sem pedágio.
+   */
+  buildRideFinancialContract({ passengerPaidCents, tollFeeCents = 0, subscriptionRetainedFeeCents = 0 } = {}) {
+    return buildRideFinancialContract({
+      passengerPaidCents,
+      tollFeeCents,
+      subscriptionRetainedFeeCents,
+      policy: {
+        operationalFeeUpTo10Cents: this.OPERATIONAL_FEE_UP_TO_10,
+        operationalFee10To25Cents: this.OPERATIONAL_FEE_10_TO_25,
+        operationalFee25To50Cents: this.OPERATIONAL_FEE_25_TO_50,
+        operationalFeeAbove50Percentage: this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE,
+        threshold10Cents: this.THRESHOLD_10,
+        threshold25Cents: this.THRESHOLD_25,
+        threshold50Cents: this.THRESHOLD_50,
+        paymentIntermediationPercentage: this.WOOVI_FEE_PERCENTAGE,
+        paymentIntermediationMinimumCents: this.WOOVI_FEE_MINIMUM
+      }
+    });
+  }
+
+  /**
    * Calcula valor líquido para o motorista (Imunizando Pedágio)
    * @param {number} totalAmount - Valor total da corrida em centavos
    * @param {number} tollFee - Valor do pedágio em centavos (padrão 0)
    * @returns {Object} - Cálculo detalhado
    */
   calculateNetAmount(totalAmount, tollFee = 0) {
-    const grossFare = Math.max(0, totalAmount - tollFee);
-
-    // Calcular taxa operacional baseada no valor da corrida (sem o pedágio)
-    let operationalFee;
-    let operationalFeeType;
-
-    if (grossFare <= this.THRESHOLD_10) {
-      // Até R$ 10,00
-      operationalFee = this.OPERATIONAL_FEE_UP_TO_10;
-      operationalFeeType = 'up_to_10';
-    } else if (grossFare <= this.THRESHOLD_25) {
-      // Acima de R$ 10,00 até R$ 25,00
-      operationalFee = this.OPERATIONAL_FEE_10_TO_25;
-      operationalFeeType = '10_to_25';
-    } else if (grossFare <= this.THRESHOLD_50) {
-      // Acima de R$ 25,00 até R$ 50,00
-      operationalFee = this.OPERATIONAL_FEE_25_TO_50;
-      operationalFeeType = '25_to_50';
-    } else {
-      // Acima de R$ 50,00
-      operationalFee = Math.round(grossFare * this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE);
-      operationalFeeType = 'above_50_percent';
-    }
-
-    // Taxa Woovi: 0,8% com mínimo de R$ 0,50 (calculada livre de pedágio)
-    const wooviFeePercentage = Math.round(grossFare * this.WOOVI_FEE_PERCENTAGE);
-    const wooviFee = Math.max(wooviFeePercentage, this.WOOVI_FEE_MINIMUM);
-
-    // Retenho do lucro da plataforma, o pedágio volta 100% pro motorista
-    const netGross = grossFare - operationalFee - wooviFee;
-    const netAmount = Math.max(0, netGross) + tollFee;
+    const financialContract = this.buildRideFinancialContract({
+      passengerPaidCents: totalAmount,
+      tollFeeCents: tollFee
+    });
+    const totalAmountCents = financialContract.passengerPaidCents;
+    const operationalFee = financialContract.leafOperationalFeeCents;
+    const wooviFee = financialContract.paymentIntermediationFeeCents;
+    const netAmount = financialContract.driverNetAmountCents;
+    const tollFeeCents = financialContract.tollFeeCents;
 
     return {
-      totalAmount: totalAmount,
-      tollFee: tollFee,
+      totalAmount: totalAmountCents,
+      tollFee: tollFeeCents,
       operationalFee: operationalFee,
       wooviFee: wooviFee,
-      netAmount: Math.max(0, netAmount), // Não pode ser negativo
+      netAmount: netAmount, // Não pode ser negativo
+      financialContract,
       breakdown: {
-        total: (totalAmount / 100).toFixed(2),
-        tollFee: (tollFee / 100).toFixed(2),
-        operationalFeeType: operationalFeeType,
+        total: (totalAmountCents / 100).toFixed(2),
+        tollFee: (tollFeeCents / 100).toFixed(2),
+        operationalFeeType: financialContract.feePolicy.operationalFeeType,
         operationalFee: (operationalFee / 100).toFixed(2),
         wooviFee: (wooviFee / 100).toFixed(2),
-        net: (Math.max(0, netAmount) / 100).toFixed(2)
+        net: (netAmount / 100).toFixed(2)
       }
     };
   }
@@ -1773,6 +1776,19 @@ class PaymentService {
         } catch (err) {
           logStructured('warn', 'Falha ao processar Split Punitivo', { service: 'PaymentService', error: err.message });
         }
+      }
+
+      if (retainedFees > 0) {
+        const finalContract = this.buildRideFinancialContract({
+          passengerPaidCents: netCalculation.totalAmount,
+          tollFeeCents: netCalculation.tollFee,
+          subscriptionRetainedFeeCents: retainedFees
+        });
+        netCalculation.operationalFee = finalContract.leafOperationalFeeCents;
+        netCalculation.wooviFee = finalContract.paymentIntermediationFeeCents;
+        netCalculation.netAmount = finalContract.driverNetAmountCents;
+        netCalculation.financialContract = finalContract;
+        netCalculation.breakdown.net = (finalContract.driverNetAmountCents / 100).toFixed(2);
       }
 
       // 2. Buscar chave Pix do motorista (necessária para transferência)

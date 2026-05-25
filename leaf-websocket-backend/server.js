@@ -43,11 +43,13 @@ const registerSocketAcceptRideHandler = require('./bootstrap/register-socket-acc
 const registerSocketRejectRideHandler = require('./bootstrap/register-socket-reject-ride-handler');
 const registerSocketStartTripHandler = require('./bootstrap/register-socket-start-trip-handler');
 const registerSocketCompleteTripHandler = require('./bootstrap/register-socket-complete-trip-handler');
+const registerSocketEndTripEarlyHandler = require('./bootstrap/register-socket-end-trip-early-handler');
 const registerSocketDriverHeartbeatHandler = require('./bootstrap/register-socket-driver-heartbeat-handler');
 const registerSocketUpdateLocationHandler = require('./bootstrap/register-socket-update-location-handler');
 const registerSocketSearchDriversHandler = require('./bootstrap/register-socket-search-drivers-handler');
 const registerSocketCancelDriverSearchHandler = require('./bootstrap/register-socket-cancel-driver-search-handler');
 const registerSocketUpdateTripLocationHandler = require('./bootstrap/register-socket-update-trip-location-handler');
+const registerSocketTripIntegrityHandlers = require('./bootstrap/register-socket-trip-integrity-handlers');
 const registerSocketCancelRideHandler = require('./bootstrap/register-socket-cancel-ride-handler');
 const registerSocketSafetySupportHandlers = require('./bootstrap/register-socket-safety-support-handlers');
 const registerSocketEngagementChatHandlers = require('./bootstrap/register-socket-engagement-chat-handlers');
@@ -95,6 +97,7 @@ const AcceptRideCommand = require('./commands/AcceptRideCommand');
 const StartTripCommand = require('./commands/StartTripCommand');
 const CompleteTripCommand = require('./commands/CompleteTripCommand');
 const CancelRideCommand = require('./commands/CancelRideCommand');
+const EndRideEarlyByRiderCommand = require('./commands/EndRideEarlyByRiderCommand');
 // =======================================================================================
 
 // ==================== IMPORTAÇÕES WORKERS E ESCALABILIDADE ====================
@@ -902,6 +905,9 @@ const getSocketMetadata = (socket) => {
 
 // ✅ Rate Limiter para conexões WebSocket
 const websocketRateLimiter = require('./middleware/websocket-rate-limiter');
+const enableEmbeddedListenerWorkers = String(
+    process.env.ENABLE_EMBEDDED_LISTENER_WORKERS || 'false'
+).trim().toLowerCase() === 'true';
 
 const { eventBus } = setupEventBusAndWorkers({
     io,
@@ -910,7 +916,8 @@ const { eventBus } = setupEventBusAndWorkers({
     WorkerManager,
     EVENT_TYPES,
     logStructured,
-    logError
+    logError,
+    enableEmbeddedListenerWorkers
 });
 
 // ✅ NOVO: Middleware para gerar traceId automaticamente em conexões Socket.IO
@@ -1128,6 +1135,16 @@ io.on('connection', async (socket) => {
         logStructured
     });
 
+    registerSocketTripIntegrityHandlers({
+        socket,
+        io,
+        redisPool,
+        logStructured,
+        CancelRideCommand,
+        traceContext,
+        eventBus
+    });
+
     // 8. CompleteTrip (crítico - finalizar viagem)
     registerSocketCompleteTripHandler({
         socket,
@@ -1150,6 +1167,16 @@ io.on('connection', async (socket) => {
         eventBus,
         logEvent,
         fcmService
+    });
+
+    registerSocketEndTripEarlyHandler({
+        socket,
+        io,
+        redisPool,
+        logStructured,
+        EndRideEarlyByRiderCommand,
+        traceContext,
+        eventBus
     });
 
     // 9. DriverHeartbeat (crítico - heartbeat GPS)

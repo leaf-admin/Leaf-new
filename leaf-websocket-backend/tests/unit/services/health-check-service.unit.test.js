@@ -51,6 +51,8 @@ describe('health-check-service firebase checks', () => {
 
   afterEach(() => {
     process.env = originalEnv;
+    delete global.socketIoRedisAdapterStatus;
+    delete global.io;
     jest.restoreAllMocks();
   });
 
@@ -94,5 +96,71 @@ describe('health-check-service firebase checks', () => {
     expect(result.cpu.usagePercent).toBe('220.0%');
     expect(result.cpu.usagePercent5m).toBe('150.0%');
     expect(result.message).toContain('pressão sustentada');
+  });
+
+  test('checkWebSocket marca unhealthy quando Redis adapter obrigatorio nao esta pronto', async () => {
+    global.socketIoRedisAdapterStatus = {
+      state: 'failed',
+      enabled: true,
+      required: true,
+      runtimeRole: 'gateway',
+      updatedAt: '2026-05-24T00:00:00.000Z',
+      error: 'redis unavailable'
+    };
+
+    const result = await healthCheckService.checkWebSocket({
+      engine: { clientsCount: 12 }
+    });
+
+    expect(result.status).toBe('unhealthy');
+    expect(result.redisAdapter).toMatchObject({
+      state: 'failed',
+      enabled: true,
+      required: true,
+      runtimeRole: 'gateway',
+      error: 'redis unavailable'
+    });
+    expect(result.message).toBe('Socket.IO Redis Adapter obrigatório não está pronto');
+  });
+
+  test('checkWebSocket expõe Redis adapter pronto sem degradar conexoes saudaveis', async () => {
+    global.socketIoRedisAdapterStatus = {
+      state: 'ready',
+      enabled: true,
+      required: true,
+      runtimeRole: 'gateway',
+      updatedAt: '2026-05-24T00:00:00.000Z'
+    };
+
+    const result = await healthCheckService.checkWebSocket({
+      engine: { clientsCount: 12 }
+    });
+
+    expect(result.status).toBe('healthy');
+    expect(result.redisAdapter).toMatchObject({
+      state: 'ready',
+      enabled: true,
+      required: true
+    });
+  });
+
+  test('quickCheck falha readiness quando adapter obrigatorio nao esta pronto', async () => {
+    global.socketIoRedisAdapterStatus = {
+      state: 'failed',
+      enabled: true,
+      required: true,
+      runtimeRole: 'gateway',
+      updatedAt: '2026-05-24T00:00:00.000Z',
+      error: 'redis unavailable'
+    };
+
+    const result = await healthCheckService.quickCheck();
+
+    expect(result.status).toBe('unhealthy');
+    expect(result.checks.socketRedisAdapter).toMatchObject({
+      status: 'unhealthy',
+      state: 'failed',
+      required: true
+    });
   });
 });

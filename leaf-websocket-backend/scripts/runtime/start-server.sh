@@ -12,6 +12,7 @@ case "$RUNTIME_MODE" in
     ENTRY_FILE="server.js"
     ;;
   vps)
+    echo "[runtime][deprecated] LEAF_SERVER_RUNTIME=vps é legado. Use apenas para rollback temporário."
     ENTRY_FILE="server.vps.js"
     ;;
   custom)

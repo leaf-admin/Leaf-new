@@ -1,5 +1,16 @@
+const {
+    resolveSocketIoRedisAdapterConfig,
+    setSocketIoRedisAdapterStatus
+} = require('../services/socket-io-redis-adapter-status');
+
 function createSocketServer({ server, socketIo, corsOptions, app, logStructured }) {
-    const enableRedisAdapter = String(process.env.ENABLE_SOCKETIO_REDIS_ADAPTER || 'false').toLowerCase() === 'true';
+    const redisAdapterConfig = resolveSocketIoRedisAdapterConfig({ enabledDefault: false });
+    const enableRedisAdapter = redisAdapterConfig.enabled;
+    const updateRedisAdapterStatus = (state, metadata = {}) => setSocketIoRedisAdapterStatus(
+        state,
+        metadata,
+        { enabledDefault: false }
+    );
     // Configurações de Socket.IO alinhadas com a política CORS central do server.js
     const socketConnectTimeoutMs = Number.parseInt(process.env.SOCKET_CONNECT_TIMEOUT_MS || '60000', 10);
     const socketPingTimeoutMs = Number.parseInt(process.env.SOCKET_PING_TIMEOUT_MS || '45000', 10);
@@ -68,24 +79,32 @@ function createSocketServer({ server, socketIo, corsOptions, app, logStructured 
     // ✅ Expor io globalmente para health checks e workers
     global.io = io;
 
+    updateRedisAdapterStatus(enableRedisAdapter ? 'pending' : 'disabled');
+
     if (enableRedisAdapter) {
         const SocketIORedisAdapter = require('../services/socket-io-adapter');
         const adapter = new SocketIORedisAdapter(process.env.REDIS_URL);
+        updateRedisAdapterStatus('initializing');
         adapter.initialize(io).then(() => {
             app.locals.socketIoRedisAdapter = adapter;
             global.socketIoRedisAdapter = adapter;
+            updateRedisAdapterStatus('ready');
             logStructured('info', 'Socket.IO Redis Adapter ativo no processo realtime', {
-                service: 'websocket'
+                service: 'websocket',
+                runtimeRole: redisAdapterConfig.runtimeRole
             });
         }).catch((error) => {
-            logStructured('warn', 'Falha ao ativar Socket.IO Redis Adapter no processo realtime', {
+            updateRedisAdapterStatus('failed', { error: error.message });
+            logStructured(redisAdapterConfig.required ? 'error' : 'warn', 'Falha ao ativar Socket.IO Redis Adapter no processo realtime', {
                 service: 'websocket',
+                runtimeRole: redisAdapterConfig.runtimeRole,
                 error: error.message
             });
         });
     } else {
         logStructured('info', 'Socket.IO Redis Adapter desabilitado por configuração', {
-            service: 'websocket'
+            service: 'websocket',
+            runtimeRole: redisAdapterConfig.runtimeRole
         });
     }
 

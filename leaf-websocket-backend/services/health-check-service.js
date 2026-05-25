@@ -96,6 +96,55 @@ class HealthCheckService {
     );
   }
 
+  getSocketIoRedisAdapterStatus() {
+    const status = global.socketIoRedisAdapterStatus || null;
+    if (!status) {
+      return {
+        state: 'unknown',
+        enabled: null,
+        required: false,
+        runtimeRole: String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase(),
+        message: 'Status do Socket.IO Redis Adapter ainda não informado pelo runtime'
+      };
+    }
+
+    return {
+      state: status.state || 'unknown',
+      enabled: status.enabled,
+      required: Boolean(status.required),
+      runtimeRole: status.runtimeRole || String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase(),
+      updatedAt: status.updatedAt || null,
+      error: status.error || null
+    };
+  }
+
+  checkSocketIoRedisAdapterReadiness() {
+    const adapter = this.getSocketIoRedisAdapterStatus();
+    if (adapter.required && adapter.state !== 'ready') {
+      return {
+        status: 'unhealthy',
+        ...adapter,
+        message: 'Socket.IO Redis Adapter obrigatório não está pronto'
+      };
+    }
+
+    if (adapter.enabled === true && !['ready', 'disabled'].includes(adapter.state)) {
+      return {
+        status: 'warning',
+        ...adapter,
+        message: `Socket.IO Redis Adapter em estado ${adapter.state}`
+      };
+    }
+
+    return {
+      status: 'healthy',
+      ...adapter,
+      message: adapter.state === 'ready'
+        ? 'Socket.IO Redis Adapter pronto'
+        : 'Socket.IO Redis Adapter não obrigatório'
+    };
+  }
+
   getCachedRedisHealth() {
     const cache = this.redisHealthCache;
     if (!cache) {
@@ -483,6 +532,7 @@ class HealthCheckService {
       const connections = io.engine.clientsCount || 0;
       const maxConnections = parseInt(process.env.MAX_WEBSOCKET_CONNECTIONS || '10000', 10);
       const usagePercent = (connections / maxConnections) * 100;
+      const redisAdapter = this.getSocketIoRedisAdapterStatus();
 
       let status = 'healthy';
       if (usagePercent > 90) {
@@ -491,14 +541,31 @@ class HealthCheckService {
         status = 'warning';
       }
 
+      if (redisAdapter.required && redisAdapter.state !== 'ready') {
+        status = 'unhealthy';
+      } else if (
+        redisAdapter.enabled === true &&
+        !['ready', 'disabled'].includes(redisAdapter.state)
+      ) {
+        status = status === 'healthy' ? 'warning' : status;
+      }
+
+      let message = 'WebSocket está saudável';
+      if (redisAdapter.required && redisAdapter.state !== 'ready') {
+        message = 'Socket.IO Redis Adapter obrigatório não está pronto';
+      } else if (redisAdapter.enabled === true && redisAdapter.state !== 'ready') {
+        message = `Socket.IO Redis Adapter em estado ${redisAdapter.state}`;
+      } else if (status !== 'healthy') {
+        message = `WebSocket com alta utilização (${usagePercent.toFixed(1)}%)`;
+      }
+
       return {
         status,
         connections,
         maxConnections,
         usagePercent: `${usagePercent.toFixed(1)}%`,
-        message: status === 'healthy' 
-          ? 'WebSocket está saudável'
-          : `WebSocket com alta utilização (${usagePercent.toFixed(1)}%)`
+        redisAdapter,
+        message
       };
     } catch (error) {
       logError(error, 'WebSocket health check falhou', {
@@ -605,13 +672,17 @@ class HealthCheckService {
     try {
       // Apenas Redis (mais crítico)
       const redisCheck = await this.checkRedis();
+      const socketRedisAdapterCheck = this.checkSocketIoRedisAdapterReadiness();
       
       return {
         // warning ainda significa backend pronto para tráfego
-        status: redisCheck.status === 'unhealthy' ? 'unhealthy' : 'healthy',
+        status: redisCheck.status === 'unhealthy' || socketRedisAdapterCheck.status === 'unhealthy'
+          ? 'unhealthy'
+          : 'healthy',
         timestamp: new Date().toISOString(),
         checks: {
-          redis: redisCheck
+          redis: redisCheck,
+          socketRedisAdapter: socketRedisAdapterCheck
         }
       };
     } catch (error) {

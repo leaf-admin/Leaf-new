@@ -411,6 +411,39 @@ describe('PaymentService financial rules', () => {
     }
   );
 
+  it('keeps toll as driver pass-through in the canonical financial contract', () => {
+    const service = new PaymentService();
+    const calculation = service.calculateNetAmount(3250, 750);
+
+    expect(calculation).toMatchObject({
+      totalAmount: 3250,
+      tollFee: 750,
+      operationalFee: 99,
+      wooviFee: 50,
+      netAmount: 3101
+    });
+    expect(calculation.financialContract).toMatchObject({
+      passengerPaidCents: 3250,
+      grossFareCents: 2500,
+      driverTollPassThroughCents: 750,
+      allocatedTotalCents: 3250,
+      balanced: true
+    });
+  });
+
+  it('does not generate unbalanced fees for anomalous tiny fares', () => {
+    const service = new PaymentService();
+    const calculation = service.calculateNetAmount(80, 0);
+
+    expect(calculation).toMatchObject({
+      totalAmount: 80,
+      operationalFee: 79,
+      wooviFee: 1,
+      netAmount: 0
+    });
+    expect(calculation.financialContract.balanced).toBe(true);
+  });
+
   it('keeps daily subscription billing suspended by default', () => {
     const service = new PaymentService();
 

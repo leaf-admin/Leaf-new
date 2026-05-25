@@ -284,32 +284,41 @@ class FinancialLedgerService {
         entityType: 'ride',
         entityId: rideId,
         memo: 'Baixa do holding após corrida concluída'
-      },
-      {
+      }
+    ];
+
+    if (netAmount > 0) {
+      lines.push({
         account: 'liability:driver_balance_payable',
         direction: 'credit',
         amountCents: netAmount,
         entityType: 'driver',
         entityId: driverId,
         memo: 'Saldo líquido devido ao motorista'
-      },
-      {
+      });
+    }
+
+    if (operationalFee > 0) {
+      lines.push({
         account: 'revenue:leaf_operational_fee',
         direction: 'credit',
         amountCents: operationalFee,
         entityType: 'ride',
         entityId: rideId,
         memo: 'Taxa operacional Leaf'
-      },
-      {
+      });
+    }
+
+    if (wooviFee > 0) {
+      lines.push({
         account: 'contra_revenue:payment_intermediation_fee',
         direction: 'credit',
         amountCents: wooviFee,
         entityType: 'ride',
         entityId: rideId,
         memo: 'Custo/intermediação de pagamento retido no settlement'
-      }
-    ];
+      });
+    }
 
     if (retainedFee > 0) {
       lines.push({

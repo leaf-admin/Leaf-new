@@ -5,12 +5,21 @@ function setupEventBusAndWorkers({
     WorkerManager,
     EVENT_TYPES,
     logStructured,
-    logError
+    logError,
+    enableEmbeddedListenerWorkers = false
 }) {
     // ✅ REFATORAÇÃO: Configurar EventBus e Listeners
     logStructured('info', 'Configurando EventBus e Listeners', { service: 'server', phase: 'refactoring' });
     const eventBus = setupListeners(io);
     logStructured('info', 'EventBus e Listeners configurados', { service: 'server', phase: 'refactoring' });
+
+    if (!enableEmbeddedListenerWorkers) {
+        logStructured('info', 'WorkerManager embutido desabilitado; side effects serão processados pelo worker dedicado', {
+            service: 'server',
+            phase: 'workers'
+        });
+        return { eventBus, workerManager: null };
+    }
 
     // ==================== WORKERS E ESCALABILIDADE ====================
     // ✅ NOVO: Inicializar WorkerManager para processar listeners pesados em paralelo
@@ -120,7 +129,7 @@ function setupEventBusAndWorkers({
     });
     // ====================================================================
 
-    return { eventBus };
+    return { eventBus, workerManager };
 }
 
 module.exports = setupEventBusAndWorkers;

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ===== REDIS =====
   redis:
@@ -44,11 +42,12 @@ services:
       - RUNTIME_ROLE=gateway
       - ENABLE_EMBEDDED_LISTENER_WORKERS=false
       - ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH=true
-      - LEAF_SERVER_RUNTIME=vps
+      - LEAF_SERVER_RUNTIME=modular
       - AUTO_TEST_MODE=${AUTO_TEST_MODE:-false}
       - QA_SOCKET_BYPASS_UIDS=${QA_SOCKET_BYPASS_UIDS:-}
       - LEAF_CLUSTER_ENABLED=${LEAF_CLUSTER_ENABLED:-true}
       - ENABLE_SOCKETIO_REDIS_ADAPTER=${ENABLE_SOCKETIO_REDIS_ADAPTER:-true}
+      - REQUIRE_SOCKETIO_REDIS_ADAPTER=${REQUIRE_SOCKETIO_REDIS_ADAPTER:-true}
       - LEAF_CLUSTER_WORKERS=${LEAF_CLUSTER_WORKERS:-6}
       - LEAF_CLUSTER_SCHEDULER_LEADER_ID=${LEAF_CLUSTER_SCHEDULER_LEADER_ID:-1}
       - SOCKET_ALLOW_POLLING=${SOCKET_ALLOW_POLLING:-false}
@@ -108,13 +107,14 @@ services:
       - WOOVI_ENVIRONMENT=${WOOVI_ENVIRONMENT:-production}
       - WOOVI_API_TOKEN=${WOOVI_API_TOKEN}
       - WOOVI_APP_ID=${WOOVI_APP_ID}
-      - WOOVI_CLIENT_ID=${WOOVI_CLIENT_ID}
-      - WOOVI_CLIENT_SECRET=${WOOVI_CLIENT_SECRET}
+      - WOOVI_CLIENT_ID=${WOOVI_CLIENT_ID:-}
+      - WOOVI_CLIENT_SECRET=${WOOVI_CLIENT_SECRET:-}
       - WOOVI_BASE_URL=${WOOVI_BASE_URL:-https://api.woovi.com/api/v1}
       - WOOVI_MASTER_API_TOKEN=${WOOVI_MASTER_API_TOKEN}
       - WOOVI_MASTER_APP_ID=${WOOVI_MASTER_APP_ID}
       - WOOVI_WEBHOOK_REQUIRE_SIGNATURE=${WOOVI_WEBHOOK_REQUIRE_SIGNATURE:-true}
       - WOOVI_WEBHOOK_ALLOW_UNSIGNED=${WOOVI_WEBHOOK_ALLOW_UNSIGNED:-false}
+      - WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=${WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED:-true}
       - WOOVI_WEBHOOK_PUBLIC_KEY=${WOOVI_WEBHOOK_PUBLIC_KEY:-}
       - OPENPIX_WEBHOOK_PUBLIC_KEY=${OPENPIX_WEBHOOK_PUBLIC_KEY:-}
       - WOOVI_WEBHOOK_SIGNATURE_SECRET=${WOOVI_WEBHOOK_SIGNATURE_SECRET:-}
@@ -124,8 +124,8 @@ services:
       
       # API Keys
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
-      - MAPBOX_API_KEY=${MAPBOX_API_KEY}
-      - LOCATIONIQ_API_KEY=${LOCATIONIQ_API_KEY}
+      - MAPBOX_API_KEY=${MAPBOX_API_KEY:-}
+      - LOCATIONIQ_API_KEY=${LOCATIONIQ_API_KEY:-}
       
       # Segurança
       - CORS_ORIGIN=${CORS_ORIGIN:?CORS_ORIGIN must be set}
@@ -180,13 +180,13 @@ services:
       - KYC_AWS_LIVENESS_CREDENTIALS_ENABLED=${KYC_AWS_LIVENESS_CREDENTIALS_ENABLED:-true}
       - KYC_AWS_LIVENESS_STS_DURATION_SECONDS=${KYC_AWS_LIVENESS_STS_DURATION_SECONDS:-900}
       - KYC_AWS_LIVENESS_ASSUME_ROLE_ARN=${KYC_AWS_LIVENESS_ASSUME_ROLE_ARN}
-      - KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID=${KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID}
+      - KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID=${KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID:-}
       - KYC_AWS_LIVENESS_STS_SESSION_NAME_PREFIX=${KYC_AWS_LIVENESS_STS_SESSION_NAME_PREFIX:-leaf-liveness}
-      - KYC_AWS_LIVENESS_S3_BUCKET=${KYC_AWS_LIVENESS_S3_BUCKET}
+      - KYC_AWS_LIVENESS_S3_BUCKET=${KYC_AWS_LIVENESS_S3_BUCKET:-}
       - KYC_AWS_LIVENESS_S3_PREFIX=${KYC_AWS_LIVENESS_S3_PREFIX:-kyc/liveness}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       
     volumes:
       # Firebase credentials (montar arquivo JSON)
@@ -220,13 +220,13 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: leaf-sideeffects-worker
-    command: ["node", "workers/listener-worker.js"]
+    command: ["bash", "scripts/runtime/start-sideeffects-worker.sh"]
     environment:
       # Ambiente
       - NODE_ENV=production
       - RUNTIME_ROLE=sideeffects
       - ENABLE_EMBEDDED_LISTENER_WORKERS=false
-      - LEAF_SERVER_RUNTIME=vps
+      - LEAF_SERVER_RUNTIME=modular
 
       # Redis
       - REDIS_HOST=redis
@@ -362,7 +362,7 @@ services:
         soft: 262144
         hard: 262144
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health/liveness"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "--no-check-certificate", "https://127.0.0.1/health/liveness"]
       interval: 30s
       timeout: 10s
       retries: 3

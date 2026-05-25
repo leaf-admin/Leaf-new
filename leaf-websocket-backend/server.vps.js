@@ -189,6 +189,10 @@ const queueMonitoringRoutes = require('./routes/queue-monitoring');
 const IntegratedKYCService = require('./services/IntegratedKYCService');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
 const { metrics: runtimeMetrics } = require('./utils/prometheus-metrics');
+const {
+    resolveSocketIoRedisAdapterConfig,
+    setSocketIoRedisAdapterStatus: updateSocketIoRedisAdapterStatus
+} = require('./services/socket-io-redis-adapter-status');
 // ============================================================================================
 
 function recordRealtimeMetricSafe(channel, result, count = 1) {
@@ -283,11 +287,16 @@ const ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT =
     String(process.env.ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT || 'false').toLowerCase() === 'true';
 const ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT =
     String(process.env.ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT || 'false').toLowerCase() === 'true';
-const ENABLE_SOCKETIO_REDIS_ADAPTER =
-    String(process.env.ENABLE_SOCKETIO_REDIS_ADAPTER || 'true').toLowerCase() !== 'false';
+const socketIoRedisAdapterConfig = resolveSocketIoRedisAdapterConfig({ enabledDefault: true });
+const ENABLE_SOCKETIO_REDIS_ADAPTER = socketIoRedisAdapterConfig.enabled;
 const ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH =
     String(process.env.ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH || 'true').toLowerCase() === 'true';
 const RUNTIME_ROLE = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+const REQUIRE_SOCKETIO_REDIS_ADAPTER = socketIoRedisAdapterConfig.required;
+function setSocketIoRedisAdapterStatus(state, metadata = {}) {
+    return updateSocketIoRedisAdapterStatus(state, metadata, { enabledDefault: true });
+}
+setSocketIoRedisAdapterStatus(ENABLE_SOCKETIO_REDIS_ADAPTER ? 'pending' : 'disabled');
 const ENABLE_EMBEDDED_LISTENER_WORKERS =
     String(
         process.env.ENABLE_EMBEDDED_LISTENER_WORKERS ||
@@ -1922,6 +1931,7 @@ let socketIoAdapterPubClient = null;
 let socketIoAdapterSubClient = null;
 const initializeSocketIoRedisAdapter = async () => {
     if (!ENABLE_SOCKETIO_REDIS_ADAPTER) {
+        setSocketIoRedisAdapterStatus('disabled');
         logStructured('info', 'Socket.IO Redis Adapter desabilitado por configuração', {
             service: 'websocket',
             runtimeRole: RUNTIME_ROLE
@@ -1930,6 +1940,7 @@ const initializeSocketIoRedisAdapter = async () => {
     }
 
     try {
+        setSocketIoRedisAdapterStatus('initializing');
         await redisPool.ensureConnection();
         const baseRedisClient = redisPool.getConnection();
         socketIoAdapterPubClient = baseRedisClient.duplicate();
@@ -1937,6 +1948,7 @@ const initializeSocketIoRedisAdapter = async () => {
         await socketIoAdapterPubClient.ping();
         await socketIoAdapterSubClient.ping();
         io.adapter(createAdapter(socketIoAdapterPubClient, socketIoAdapterSubClient));
+        setSocketIoRedisAdapterStatus('ready');
         logStructured('info', 'Socket.IO Redis Adapter inicializado', {
             service: 'websocket',
             runtimeRole: RUNTIME_ROLE
@@ -1950,11 +1962,18 @@ const initializeSocketIoRedisAdapter = async () => {
             socketIoAdapterSubClient.disconnect();
             socketIoAdapterSubClient = null;
         }
-        logStructured('warn', 'Falha ao inicializar Socket.IO Redis Adapter (seguindo sem adapter)', {
-            service: 'websocket',
-            runtimeRole: RUNTIME_ROLE,
-            error: error.message
-        });
+        setSocketIoRedisAdapterStatus('failed', { error: error.message });
+        logStructured(
+            REQUIRE_SOCKETIO_REDIS_ADAPTER ? 'error' : 'warn',
+            REQUIRE_SOCKETIO_REDIS_ADAPTER
+                ? 'Falha ao inicializar Socket.IO Redis Adapter obrigatório'
+                : 'Falha ao inicializar Socket.IO Redis Adapter (seguindo sem adapter)',
+            {
+                service: 'websocket',
+                runtimeRole: RUNTIME_ROLE,
+                error: error.message
+            }
+        );
     }
 };
 initializeSocketIoRedisAdapter().catch((error) => {
@@ -3913,6 +3932,10 @@ io.on('connection', async (socket) => {
             // Política: Bloquear sessão simultânea (conforme PARAMETROS_DEFINIDOS.md)
             // ✅ DESABILITADO para testes - permitir múltiplas conexões de teste
             const SESSION_SIMULTANEA_BLOCKED = process.env.ALLOW_MULTIPLE_SESSIONS !== 'true'; // Permitir em testes
+            const normalizedSessionUserType = String(authUserType || '').trim().toLowerCase();
+            const shouldEnforceSingleSession =
+                SESSION_SIMULTANEA_BLOCKED &&
+                ['driver', 'motorista', 'partner', 'parceiro'].includes(normalizedSessionUserType);
 
             // Registrar nova conexão
             io.connectedUsers.set(authUserId, socket);
@@ -3921,7 +3944,7 @@ io.on('connection', async (socket) => {
             let sessionLockRef = null;
             const sessionLockOwner = `${socket.id}:${Date.now()}`;
             let redisForSessionLock = null;
-            if (SESSION_SIMULTANEA_BLOCKED) {
+            if (shouldEnforceSingleSession) {
                 try {
                     await redisPool.ensureConnection();
                     redisForSessionLock = redisPool.getConnection();
@@ -3946,11 +3969,12 @@ io.on('connection', async (socket) => {
             try {
                 // Fast-path: evitar fetchSockets cross-worker por conexão (custoso em alto volume).
                 // Em modo bloqueado, terminamos qualquer sessão anterior pelo room da sessão.
-                if (SESSION_SIMULTANEA_BLOCKED) {
+                if (shouldEnforceSingleSession) {
                     io.to(sessionRoom).except(socket.id).emit('sessionTerminated', {
                         code: 'SESSION_REPLACED',
                         reason: 'Nova sessão iniciada em outro dispositivo',
                         userId: authUserId,
+                        userType: authUserType,
                         newSocketId: socket.id,
                         timestamp: new Date().toISOString()
                     });
@@ -3962,7 +3986,7 @@ io.on('connection', async (socket) => {
                     }
                 }
             } finally {
-                if (SESSION_SIMULTANEA_BLOCKED && sessionLockRef?.acquired && redisForSessionLock) {
+                if (shouldEnforceSingleSession && sessionLockRef?.acquired && redisForSessionLock) {
                     await releaseUserSessionLock(redisForSessionLock, sessionLockRef, sessionLockOwner);
                 }
             }
