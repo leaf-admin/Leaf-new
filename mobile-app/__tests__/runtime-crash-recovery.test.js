@@ -2,6 +2,7 @@ import {
   hasActiveDriverRide,
   hasPendingDriverOffer,
   hasVisibleDriverTransientCard,
+  normalizeRuntimeLifecycleStatus,
   shouldFlushRuntimeSessionImmediately,
   shouldFlushRuntimeSessionOnAppState,
   shouldMaintainRealtimeSessionForSnapshot,
@@ -119,6 +120,41 @@ describe("runtimeCrashRecovery", () => {
         activeBookingId: null,
       }),
     ).toBe(false);
+
+    expect(
+      shouldMaintainRealtimeSessionForSnapshot("customer", {
+        bookingStatus: "NO_DRIVERS_AVAILABLE",
+        activeBookingId: "booking_1",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldSyncActiveRideForSnapshot("customer", {
+        bookingStatus: "CANCELED",
+        activeBookingId: "booking_1",
+      }),
+    ).toBe(false);
+  });
+
+  it("normalizes backend ride statuses into runtime lifecycle phases", () => {
+    expect(normalizeRuntimeLifecycleStatus("AWAITING_PAYMENT")).toBe("requesting");
+    expect(normalizeRuntimeLifecycleStatus("NOTIFIED")).toBe("searching");
+    expect(normalizeRuntimeLifecycleStatus("MATCHED")).toBe("accepted");
+    expect(normalizeRuntimeLifecycleStatus("ARRIVED")).toBe("arrived");
+    expect(normalizeRuntimeLifecycleStatus("REASSIGNED_IN_PROGRESS")).toBe("started");
+    expect(normalizeRuntimeLifecycleStatus("NO_DRIVERS_FOUND")).toBe("no_drivers");
+    expect(normalizeRuntimeLifecycleStatus("CANCELLED")).toBe("canceled");
+  });
+
+  it("keeps driver realtime online on terminal ride status without syncing active ride", () => {
+    const snapshot = {
+      bookingStatus: "COMPLETED",
+      activeBookingId: "booking_1",
+      driverOnline: true,
+    };
+
+    expect(shouldMaintainRealtimeSessionForSnapshot("driver", snapshot)).toBe(true);
+    expect(shouldSyncActiveRideForSnapshot("driver", snapshot)).toBe(false);
   });
 
   it("flushes when the app moves to inactive or background", () => {

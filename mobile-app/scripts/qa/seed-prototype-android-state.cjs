@@ -117,6 +117,28 @@ const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const DEFAULT_QA_FREEZE_MS = 600000;
 const ADB_BIN = resolveAdbBin();
+const AUTH_FLOW_STALE_STORAGE_KEYS = [
+  '@onboarding_data',
+  '@onboarding_encrypted_data',
+  '@onboarding_progress',
+  '@onboarding_current_step',
+  'onboarding_phone_validation',
+  'onboarding_profile_selection',
+  'onboarding_profile_data',
+  'onboarding_driver_email',
+  'onboarding_document_data',
+  'onboarding_credentials',
+];
+const DEV_MENU_PREFERENCES_XML = `<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <boolean name="isOnboardingFinished" value="true" />
+    <boolean name="showsAtLaunch" value="false" />
+    <boolean name="showFab" value="false" />
+    <boolean name="motionGestureEnabled" value="false" />
+    <boolean name="touchGestureEnabled" value="false" />
+    <boolean name="keyCommandsEnabled" value="false" />
+</map>
+`;
 
 function readJsonIfExists(filePath, fallbackValue = {}) {
   try {
@@ -182,6 +204,10 @@ function firstAndroidDevice() {
 
 function adbArgs(deviceId, args) {
   return deviceId ? ['-s', deviceId, ...args] : args;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 function buildApprovedDriverActivation() {
@@ -645,6 +671,15 @@ function buildScenarioPatch(scenario) {
     return buildPassengerQuoteBase();
   }
 
+  if (scenario === 'passenger-searching' || scenario === 'passenger-requesting') {
+    return {
+      ...buildPassengerQuoteBase(),
+      bookingStatus: scenario === 'passenger-requesting' ? 'requesting' : 'searching',
+      activeBookingId: 'booking-proof-searching-1',
+      searchingElapsedSeconds: 4,
+    };
+  }
+
   if (scenario === 'passenger-accepted') {
     return {
       ...buildPassengerTripBase('accepted'),
@@ -689,6 +724,33 @@ function buildScenarioPatch(scenario) {
       operationalContinuation: { status: 'idle' },
       currentCoordinate: BASE_COORDS.pickup,
       currentAddress: LABELS.pickupAddress,
+    };
+  }
+
+  if (scenario === 'driver-receipt') {
+    return {
+      activeRole: 'driver',
+      bookingStatus: 'completed',
+      activeBookingId: null,
+      activeBooking: null,
+      tripHistory: [buildPassengerReceipt()],
+      lastReceipt: {
+        ...buildPassengerReceipt(),
+        id: 'trip-driver-proof-1',
+      },
+      driverOnline: true,
+      driverOnlinePending: false,
+      driverOnlineMutationSource: 'qa_seed',
+      driverActivation: buildApprovedDriverActivation(),
+      driverActivationResolved: true,
+      driverCanGoOnline: true,
+      driverOffers: [],
+      driverActiveRide: null,
+      currentCoordinate: BASE_COORDS.destination,
+      driverCoordinate: BASE_COORDS.destination,
+      currentAddress: LABELS.destinationAddress,
+      rideExtension: { status: 'idle' },
+      operationalContinuation: { status: 'idle' },
     };
   }
 
@@ -768,7 +830,86 @@ function buildScenarioPatch(scenario) {
 }
 
 function scenarioRoute(scenario) {
+  const passengerQuoteParams = () => {
+    const params = new URLSearchParams({
+      destination: 'Leblon',
+      destinationAddress: LABELS.destinationAddress,
+      destinationCoordinate: JSON.stringify(BASE_COORDS.destination),
+      originAddress: LABELS.pickupAddress,
+      vehicle: 'Leaf Plus',
+      fare: '24.9',
+      selectedFare: '24.9',
+      initialSelectedPlan: 'plus',
+    });
+    return params.toString();
+  };
+
+  const passengerTripParams = (status) => {
+    const trip = buildPassengerTripBase(status);
+    const driver = trip.driverInfo || {};
+    const activeBooking = trip.activeBooking || {};
+    const params = new URLSearchParams({
+      status,
+      qaStatus: status,
+      destination: 'Leblon',
+      destinationAddress: LABELS.destinationAddress,
+      destinationCoordinate: JSON.stringify(BASE_COORDS.destination),
+      originAddress: LABELS.pickupAddress,
+      pickupCoordinate: JSON.stringify(BASE_COORDS.pickup),
+      driverCoordinate: JSON.stringify(trip.driverCoordinate || BASE_COORDS.pickupManeuver),
+      driverName: driver.name || activeBooking.driverName || 'Carlos Motorista Teste',
+      vehicle: 'Leaf Plus',
+      vehicleModel: driver.model || activeBooking.vehicleModel || 'Toyota Prius',
+      vehiclePlate: driver.plate || activeBooking.vehiclePlate || 'TES8888',
+      vehicleColor: 'Prata',
+      tripDistanceKm: String(trip.tripDistanceKm || 5.1),
+      tripDurationMin: String(trip.tripDurationMin || 16),
+      tripArrivalText: trip.tripArrivalText || 'Chegada estimada em 16 min',
+      selectedFare: '27.5',
+      fare: '27.5',
+      passengerPaidAmount: '27.5',
+      boardingPin: activeBooking.boardingPin || '4821',
+    });
+    return params.toString();
+  };
+
+  const passengerReceiptParams = (activeRole = 'customer') => {
+    const receipt = buildPassengerReceipt();
+    const params = new URLSearchParams({
+      activeRole,
+      receiptId: receipt.id,
+      date: receipt.date,
+      fare: String(receipt.fare),
+      grossAmount: String(receipt.grossAmount),
+      distanceKm: String(receipt.distanceKm),
+      durationMin: String(receipt.durationMin),
+      paymentMethod: receipt.paymentMethod,
+      driverId: receipt.driverId,
+      driverName: receipt.driverName,
+      vehicleLabel: 'Toyota Prius prata · 4,9',
+      vehiclePlate: 'TES8888',
+      passengerId: receipt.passengerId,
+      passengerName: receipt.passengerName,
+      operationalFee: String(receipt.operationalFee),
+      paymentIntermediationFee: String(receipt.paymentIntermediationFee),
+      totalFees: String(receipt.totalFees),
+      driverNetAmount: String(receipt.driverNetAmount),
+      pickupAddress: receipt.pickup,
+      destinationAddress: receipt.drop,
+      pickupCoordinate: JSON.stringify(receipt.pickupCoordinate),
+      destinationCoordinate: JSON.stringify(receipt.destinationCoordinate),
+    });
+    return params.toString();
+  };
+
   const driverTripParams = (status, bookingId = 'booking-proof-driver-1', extra = {}) => {
+    const isStartedTrip = String(status || '').trim().toLowerCase() === 'started';
+    const qaDriverCoordinate = isStartedTrip
+      ? BASE_COORDS.inTransit
+      : { latitude: -22.9746, longitude: -43.1903 };
+    const qaRouteCoordinates = isStartedTrip
+      ? [BASE_COORDS.inTransit, BASE_COORDS.destination]
+      : [qaDriverCoordinate, BASE_COORDS.pickup];
     const request = {
       bookingId,
       id: bookingId,
@@ -777,8 +918,12 @@ function scenarioRoute(scenario) {
       passenger: 'Leaf Passageiro Teste',
       pickupAddress: LABELS.pickupAddress,
       pickup: LABELS.pickupAddress,
+      pickupCoordinate: BASE_COORDS.pickup,
       dropoffAddress: LABELS.destinationAddress,
       dropoff: LABELS.destinationAddress,
+      destinationCoordinate: BASE_COORDS.destination,
+      driverCoordinate: qaDriverCoordinate,
+      routeCoordinates: qaRouteCoordinates,
       fare: 12.5,
       grossFare: 12.5,
       driverNetAmount: 10.8,
@@ -786,7 +931,8 @@ function scenarioRoute(scenario) {
       estimatedOperationalFee: 0.99,
       estimatedPaymentIntermediationFee: 0.71,
       estimatedTotalFees: 1.7,
-      distanceKm: 6.7,
+      distanceKm: 1.3,
+      tripDistanceKm: 6.7,
       pickupEtaMin: 5,
       tripDurationMin: 20,
       passengerRating: 4.9,
@@ -797,19 +943,23 @@ function scenarioRoute(scenario) {
   };
 
   if (scenario === 'driver-offer') {
-    return `leafapp://robotaxi/driver/offer?${driverTripParams('searching', 'booking-proof-offer-1', { expiresInSec: 18 })}`;
+    return `leafapp://robotaxi/driver/offer?${driverTripParams('searching', 'booking-proof-offer-1', { expiresInSec: 18 })}&qaKeepVisible=1`;
   }
   if (scenario === 'passenger-accepted' || scenario === 'passenger-arrived' || scenario === 'passenger-started') {
-    return 'leafapp://robotaxi/trip';
+    const status = scenario.replace('passenger-', '');
+    return `leafapp://robotaxi/trip?${passengerTripParams(status)}`;
   }
   if (scenario === 'passenger-booking') {
-    return 'leafapp://robotaxi/booking';
+    return `leafapp://robotaxi/booking?${passengerQuoteParams()}`;
   }
   if (scenario === 'passenger-payment') {
-    return 'leafapp://robotaxi/payment';
+    return `leafapp://robotaxi/payment?${passengerQuoteParams()}`;
   }
   if (scenario === 'passenger-receipt') {
-    return 'leafapp://robotaxi/receipt';
+    return `leafapp://robotaxi/receipt?${passengerReceiptParams('customer')}`;
+  }
+  if (scenario === 'driver-receipt') {
+    return `leafapp://robotaxi/receipt?${passengerReceiptParams('driver')}`;
   }
   if (scenario === 'driver-accepted' || scenario === 'driver-arrived' || scenario === 'driver-started') {
     const status = scenario.replace('driver-', '');
@@ -822,13 +972,17 @@ function sqliteLiteral(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function buildStorageSql(entries) {
+function buildStorageSql(entries, deleteKeys = []) {
   const statements = [
     'CREATE TABLE IF NOT EXISTS android_metadata (locale TEXT);',
     'DELETE FROM android_metadata;',
     "INSERT INTO android_metadata (locale) VALUES ('en_US');",
     'CREATE TABLE IF NOT EXISTS catalystLocalStorage (key TEXT PRIMARY KEY, value TEXT NOT NULL);',
   ];
+
+  deleteKeys.forEach((key) => {
+    statements.push(`DELETE FROM catalystLocalStorage WHERE key = ${sqliteLiteral(key)};`);
+  });
 
   entries.forEach(([key, value]) => {
     const serialized = typeof value === 'string' ? value : JSON.stringify(value);
@@ -840,34 +994,43 @@ function buildStorageSql(entries) {
   return `${statements.join('\n')}\n`;
 }
 
-function writeAsyncStorage(deviceId, entries) {
-  const sql = buildStorageSql(entries);
+function writeAsyncStorage(deviceId, entries, deleteKeys = []) {
+  const sql = buildStorageSql(entries, deleteKeys);
   spawnSync(
     ADB_BIN,
     adbArgs(deviceId, ['shell', 'run-as', APP_ID, 'mkdir', 'databases']),
     { encoding: 'utf8' },
   );
-  const result = spawnSync(
-    ADB_BIN,
-    adbArgs(deviceId, ['shell', 'run-as', APP_ID, 'sqlite3', 'databases/RKStorage']),
-    {
-      input: sql,
-      encoding: 'utf8',
-      maxBuffer: 1024 * 1024 * 4,
-    },
-  );
+  let result = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    result = spawnSync(
+      ADB_BIN,
+      adbArgs(deviceId, ['shell', 'run-as', APP_ID, 'sqlite3', 'databases/RKStorage']),
+      {
+        input: sql,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024 * 4,
+      },
+    );
 
-  if (result.status !== 0) {
+    const output = `${result.stderr || ''}${result.stdout || ''}`;
+    if (result.status === 0 || !/database is locked/i.test(output)) {
+      break;
+    }
+    sleep(650 + attempt * 250);
+  }
+
+  if (!result || result.status !== 0) {
     throw new Error(
-      `Falha ao gravar AsyncStorage Android. Use build debug/e2e para permitir run-as.\n${result.stderr || result.stdout}`,
+      `Falha ao gravar AsyncStorage Android. Use build debug/e2e para permitir run-as.\n${result?.stderr || result?.stdout || ''}`,
     );
   }
 }
 
-function writeAsyncStorageRoot(deviceId, entries) {
+function writeAsyncStorageRoot(deviceId, entries, deleteKeys = []) {
   const databaseDir = `/data/data/${APP_ID}/databases`;
   const databasePath = `${databaseDir}/RKStorage`;
-  const sql = buildStorageSql(entries);
+  const sql = buildStorageSql(entries, deleteKeys);
 
   run(ADB_BIN, adbArgs(deviceId, ['root']));
   run(ADB_BIN, adbArgs(deviceId, ['wait-for-device']));
@@ -917,6 +1080,41 @@ function writeAsyncStorageRoot(deviceId, entries) {
   run(ADB_BIN, adbArgs(deviceId, ['shell', 'chmod', '600', databasePath]));
 }
 
+function suppressAndroidDevMenu(deviceId) {
+  const sharedPrefsDir = `/data/data/${APP_ID}/shared_prefs`;
+  const prefsPath = `${sharedPrefsDir}/expo.modules.devmenu.sharedpreferences.xml`;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leaf-android-devmenu-'));
+  const tempPrefsPath = path.join(tempDir, 'expo.modules.devmenu.sharedpreferences.xml');
+
+  try {
+    fs.writeFileSync(tempPrefsPath, DEV_MENU_PREFERENCES_XML);
+    run(ADB_BIN, adbArgs(deviceId, ['root']));
+    run(ADB_BIN, adbArgs(deviceId, ['wait-for-device']));
+    run(ADB_BIN, adbArgs(deviceId, ['shell', 'mkdir', '-p', sharedPrefsDir]));
+    run(ADB_BIN, adbArgs(deviceId, ['push', tempPrefsPath, prefsPath]));
+
+    const owner = run(
+      ADB_BIN,
+      adbArgs(deviceId, ['shell', 'stat', '-c', '%u:%g', `/data/data/${APP_ID}`]),
+    ).trim();
+    const appDataContext = run(
+      ADB_BIN,
+      adbArgs(deviceId, ['shell', 'stat', '-c', '%C', `/data/data/${APP_ID}`]),
+    ).trim();
+
+    if (owner) {
+      run(ADB_BIN, adbArgs(deviceId, ['shell', 'chown', '-R', owner, sharedPrefsDir]));
+    }
+    if (appDataContext) {
+      run(ADB_BIN, adbArgs(deviceId, ['shell', 'chcon', appDataContext, prefsPath]));
+    }
+    run(ADB_BIN, adbArgs(deviceId, ['shell', 'chmod', '700', sharedPrefsDir]));
+    run(ADB_BIN, adbArgs(deviceId, ['shell', 'chmod', '660', prefsPath]));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 function captureScreenshot(deviceId, screenshotPath) {
   if (!screenshotPath) {
     return null;
@@ -935,6 +1133,14 @@ function captureScreenshot(deviceId, screenshotPath) {
 
   fs.writeFileSync(path.resolve(screenshotPath), result.stdout);
   return path.resolve(screenshotPath);
+}
+
+function clearAndroidNotifications(deviceId) {
+  spawnSync(
+    ADB_BIN,
+    adbArgs(deviceId, ['shell', 'cmd', 'notification', 'cancel-all']),
+    { encoding: 'utf8' },
+  );
 }
 
 function setAndroidEmulatorLocation(deviceId, coordinate) {
@@ -982,6 +1188,7 @@ async function main() {
   const uid = String(arg('--uid', defaultUid)).trim() || defaultUid;
   const useRootWrite = hasFlag('--root-write');
   const skipSocketToken = hasFlag('--skip-socket-token');
+  const noForceStop = hasFlag('--no-force-stop');
   const devClientUrl = String(arg('--dev-client-url', '')).trim();
   const snapshot = buildScenarioPatch(scenario);
   const route = scenarioRoute(scenario);
@@ -1026,7 +1233,9 @@ async function main() {
     run(ADB_BIN, adbArgs(deviceId, ['shell', 'pm', 'clear', APP_ID]));
   }
 
-  run(ADB_BIN, adbArgs(deviceId, ['shell', 'am', 'force-stop', APP_ID]));
+  if (!noForceStop) {
+    run(ADB_BIN, adbArgs(deviceId, ['shell', 'am', 'force-stop', APP_ID]));
+  }
   setAndroidEmulatorLocation(deviceId, snapshot.driverCoordinate || snapshot.currentCoordinate);
   const qaSocketIdToken = skipSocketToken ? '' : await getIdTokenForUid(uid);
   const storageEntries = [
@@ -1060,16 +1269,18 @@ async function main() {
   }
 
   if (useRootWrite) {
-    writeAsyncStorageRoot(deviceId, storageEntries);
+    writeAsyncStorageRoot(deviceId, storageEntries, AUTH_FLOW_STALE_STORAGE_KEYS);
   } else {
-    writeAsyncStorage(deviceId, storageEntries);
+    writeAsyncStorage(deviceId, storageEntries, AUTH_FLOW_STALE_STORAGE_KEYS);
   }
+  suppressAndroidDevMenu(deviceId);
 
   let launchOutput = '';
   if (!hasFlag('--skip-launch')) {
     setAndroidEmulatorLocation(deviceId, snapshot.driverCoordinate || snapshot.currentCoordinate);
     const launchUrl = devClientUrl || route;
-    const totalCaptureDelayMs = Math.min(Math.max(freezeMs, 5000), 18000);
+    const quotedLaunchUrl = shellQuote(launchUrl);
+    const totalCaptureDelayMs = Math.min(Math.max(freezeMs, 5000), 36000);
     launchOutput = run(
       ADB_BIN,
       adbArgs(deviceId, [
@@ -1080,15 +1291,16 @@ async function main() {
         '-a',
         'android.intent.action.VIEW',
         '-d',
-        launchUrl,
+        quotedLaunchUrl,
         APP_ID,
       ]),
     );
     if (devClientUrl && route !== devClientUrl) {
+      const quotedRoute = shellQuote(route);
       const routeWarmupMs =
         scenario === 'driver-offer'
           ? Math.min(Math.max(freezeMs - 4000, 9000), 14000)
-          : 5000;
+          : Math.min(Math.max(Number(arg('--route-warmup-ms', '12000')), 5000), 24000);
       sleep(routeWarmupMs);
       launchOutput = `${launchOutput}\n${run(
         ADB_BIN,
@@ -1100,7 +1312,7 @@ async function main() {
           '-a',
           'android.intent.action.VIEW',
           '-d',
-          route,
+          quotedRoute,
           APP_ID,
         ]),
       )}`;
@@ -1110,6 +1322,7 @@ async function main() {
     }
   }
 
+  clearAndroidNotifications(deviceId);
   const resolvedScreenshotPath = captureScreenshot(deviceId, screenshotPath);
   process.stdout.write(
     `${JSON.stringify(

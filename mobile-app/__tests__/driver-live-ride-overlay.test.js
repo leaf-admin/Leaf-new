@@ -94,6 +94,45 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.getByLabelText("Finalizar corrida")).toBeTruthy();
   });
 
+  it("keeps the driver sheet minimal while native navigation is visible", () => {
+    const screen = render(
+      <DriverLiveRideOverlay
+        driverActiveRide={{
+          bookingId: "booking_started_navigation",
+          status: "started",
+          pickupAddress: "1540 Mission St",
+          dropoffAddress: "1 Ferry Building",
+          estimatedDriverNetAmount: 24.9,
+          passengerName: "Passageiro Leaf",
+        }}
+        bookingStatus="started"
+        paymentMethod="pix"
+        nativeNavigationVisible
+        driverTripAssist={{
+          status: "started",
+          remainingDistanceLabel: "3 km",
+          etaLabel: "8 min",
+          primaryActionLabel: "Finalizar corrida",
+          primaryActionEnabled: true,
+        }}
+        interruptRideOperationalFlow={jest.fn()}
+        markDriverArrived={jest.fn()}
+        startTripFlow={jest.fn()}
+        completeTripFlow={jest.fn()}
+        onOpenNavigation={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Passageiro Leaf")).toBeTruthy();
+    expect(screen.getByText("Em viagem")).toBeTruthy();
+    expect(screen.getByText("8 min")).toBeTruthy();
+    expect(screen.getByText("3 km")).toBeTruthy();
+    expect(screen.getByText("Encerrar")).toBeTruthy();
+    expect(screen.queryByText("A caminho de 1 Ferry Building")).toBeNull();
+    expect(screen.queryByText("Progresso da viagem")).toBeNull();
+    expect(screen.queryByText("Navegar")).toBeNull();
+  });
+
   it("opens the active trip card without using a scroll view", () => {
     const screen = render(
       <DriverLiveRideOverlay
@@ -199,7 +238,8 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Abrir navegação")).toBeTruthy();
+    expect(screen.getByText("Navegar")).toBeTruthy();
+    expect(screen.getByLabelText("Abrir navegação")).toBeTruthy();
     expect(screen.getByLabelText("Iniciar corrida")).toBeTruthy();
   });
 });

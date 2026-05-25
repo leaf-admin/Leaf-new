@@ -4,7 +4,6 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import RobotaxiDriverDocumentsScreen from '../src/screens/prototype/RobotaxiDriverDocumentsScreen';
 import RobotaxiDriverWaitlistScreen from '../src/screens/prototype/RobotaxiDriverWaitlistScreen';
 import RobotaxiInvitesScreen from '../src/screens/prototype/RobotaxiInvitesScreen';
-import RobotaxiPaymentMethodsScreen from '../src/screens/prototype/RobotaxiPaymentMethodsScreen';
 import RobotaxiPublicTripTrackingScreen from '../src/screens/prototype/RobotaxiPublicTripTrackingScreen';
 import RobotaxiShareTripScreen from '../src/screens/prototype/RobotaxiShareTripScreen';
 import RobotaxiSupportTicketScreen from '../src/screens/prototype/RobotaxiSupportTicketScreen';
@@ -12,7 +11,6 @@ import RobotaxiVehiclesScreen from '../src/screens/prototype/RobotaxiVehiclesScr
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
 import { createReferralInvite, loadMyReferralInvites } from '../src/services/runtime/referralProgramService';
 import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../src/services/runtime/driverWaitlistService';
-import { getPaymentMethods } from '../src/services/runtime/paymentMethodsService';
 
 jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
   usePrototypeRideRuntime: jest.fn(),
@@ -43,10 +41,6 @@ jest.mock('react-native-safe-area-context', () => ({
 
 jest.mock('expo-clipboard', () => ({
   setStringAsync: jest.fn().mockResolvedValue(undefined),
-}));
-
-jest.mock('../src/services/runtime/paymentMethodsService', () => ({
-  getPaymentMethods: jest.fn().mockResolvedValue([]),
 }));
 
 jest.mock('../src/services/runtime/referralProgramService', () => ({
@@ -183,24 +177,6 @@ describe('prototype new surfaces', () => {
 
     fireEvent.press(screen.getByText('Voltar para a viagem'));
     expect(navigation.navigate).toHaveBeenCalledWith('Splash');
-  });
-
-  it('renders payment methods with the PIX pilot fallback', async () => {
-    getPaymentMethods.mockResolvedValueOnce([]);
-    const navigation = buildNavigation();
-    const screen = render(
-      <RobotaxiPaymentMethodsScreen
-        navigation={navigation}
-        route={{ key: 'payment-methods', params: {} }}
-      />
-    );
-
-    expect(screen.getByText('Métodos de pagamento')).toBeTruthy();
-
-    await waitFor(() => {
-      expect(screen.getByText('PIX é o padrão do piloto')).toBeTruthy();
-      expect(screen.getByText('Adicionar método')).toBeTruthy();
-    });
   });
 
   it('renders passenger invites and creates a referral invite', async () => {

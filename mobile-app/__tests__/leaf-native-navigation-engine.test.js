@@ -2,6 +2,8 @@ import {
   buildLeafNativeNavigationState,
   calculateNavigationBearingDegrees,
   calculateDistanceToRouteMeters,
+  resolveNavigationCameraPitch,
+  resolveNavigationCameraZoom,
   resolveCurrentNavigationStepIndex,
 } from '../src/services/LeafNativeNavigationEngine';
 
@@ -66,7 +68,7 @@ describe('LeafNativeNavigationEngine', () => {
 
     expect(distanceToRouteMeters).toBeGreaterThan(100);
     expect(state.isOffRoute).toBe(true);
-    expect(state.currentInstruction).toBe('Vire à direita na Rua B');
+    expect(state.currentInstruction).toBe('Siga até o local de embarque');
   });
 
   it('uses a safe generic instruction when route steps are unavailable', () => {
@@ -109,6 +111,54 @@ describe('LeafNativeNavigationEngine', () => {
     expect(state.maneuverDistanceMeters).toBeGreaterThan(80);
   });
 
+  it('keeps maneuver distance decreasing as the driver advances along the route', () => {
+    const startState = buildLeafNativeNavigationState({
+      bookingId: 'booking_nav_monotonic',
+      phase: 'pickup',
+      status: 'accepted',
+      currentCoordinate: routeCoordinates[0],
+      targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps,
+      totalDistanceMeters: 213,
+      totalDurationMinutes: 3,
+    });
+    const halfwayState = buildLeafNativeNavigationState({
+      bookingId: 'booking_nav_monotonic',
+      phase: 'pickup',
+      status: 'accepted',
+      currentCoordinate: { latitude: -22.9700, longitude: -43.1795 },
+      targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps,
+      totalDistanceMeters: 213,
+      totalDurationMinutes: 3,
+    });
+
+    expect(startState.maneuverDistanceTargetLabel).toBe('a próxima curva');
+    expect(halfwayState.maneuverDistanceTargetLabel).toBe('a próxima curva');
+    expect(halfwayState.maneuverDistanceMeters).toBeLessThan(startState.maneuverDistanceMeters);
+    expect(halfwayState.remainingDistanceMeters).toBeLessThan(startState.remainingDistanceMeters);
+  });
+
+  it('stops showing a passed turn as the next curve', () => {
+    const state = buildLeafNativeNavigationState({
+      bookingId: 'booking_nav_passed_turn',
+      phase: 'pickup',
+      status: 'accepted',
+      currentCoordinate: routeCoordinates[1],
+      targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps,
+      totalDistanceMeters: 213,
+      totalDurationMinutes: 3,
+    });
+
+    expect(state.maneuverDistanceTargetLabel).toBe('o destino');
+    expect(state.currentInstruction).toBe('Siga até o local de embarque');
+    expect(state.maneuverDistanceMeters).toBeGreaterThan(80);
+  });
+
   it('returns a route bearing so navigation can keep the driver moving upward', () => {
     const bearing = calculateNavigationBearingDegrees(
       routeCoordinates[0],
@@ -130,6 +180,47 @@ describe('LeafNativeNavigationEngine', () => {
     expect(Number.isFinite(state.cameraHeadingDegrees)).toBe(true);
     expect(state.cameraHeadingDegrees).toBeGreaterThanOrEqual(0);
     expect(state.cameraHeadingDegrees).toBeLessThan(360);
+    expect(state.cameraAnchorY).toBe(0.68);
+    expect(state.cameraAnimationDurationMs).toBe(800);
+  });
+
+  it('adapts navigation camera zoom and pitch by driver speed', () => {
+    expect(resolveNavigationCameraZoom(0)).toBe(17.8);
+    expect(resolveNavigationCameraZoom(30)).toBe(17);
+    expect(resolveNavigationCameraZoom(55)).toBe(16);
+    expect(resolveNavigationCameraZoom(80)).toBe(15);
+    expect(resolveNavigationCameraPitch(0)).toBe(42);
+    expect(resolveNavigationCameraPitch(12)).toBe(55);
+
+    const stoppedState = buildLeafNativeNavigationState({
+      bookingId: 'booking_nav_camera_stopped',
+      phase: 'destination',
+      status: 'started',
+      currentCoordinate: { ...routeCoordinates[0], speed: 0 },
+      targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps,
+      totalDistanceMeters: 213,
+      totalDurationMinutes: 3,
+    });
+    const fastState = buildLeafNativeNavigationState({
+      bookingId: 'booking_nav_camera_fast',
+      phase: 'destination',
+      status: 'started',
+      currentCoordinate: routeCoordinates[0],
+      currentSpeedMetersPerSecond: 20,
+      targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps,
+      totalDistanceMeters: 213,
+      totalDurationMinutes: 3,
+    });
+
+    expect(stoppedState.cameraZoom).toBe(17.8);
+    expect(stoppedState.cameraPitch).toBe(42);
+    expect(fastState.currentSpeedKmh).toBe(72);
+    expect(fastState.cameraZoom).toBe(15);
+    expect(fastState.cameraPitch).toBe(55);
   });
 
   it('uses step geometry for off-route checks when polyline coordinates are unavailable', () => {

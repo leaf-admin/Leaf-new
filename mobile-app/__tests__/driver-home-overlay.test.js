@@ -144,7 +144,7 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
-    expect(getByText("Meta diária")).toBeTruthy();
+    expect(getByText("Meus ganhos")).toBeTruthy();
     expect(getByText("R$ 184,20")).toBeTruthy();
     expect(getByText("92%")).toBeTruthy();
     expect(getByText("Progresso da meta")).toBeTruthy();
@@ -228,6 +228,44 @@ describe("DriverHomeOverlay", () => {
       expect(getByText("Comparativo direto")).toBeTruthy();
       expect(getByText("Sequência de meta")).toBeTruthy();
       expect(queryByText(/uber/i)).toBeNull();
+    });
+  });
+
+  it("suppresses offline summary and activation CTA while a driver ride is active", async () => {
+    const onToggleOnline = jest.fn();
+    const { getByLabelText, getByText, queryByText, rerender } = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline
+        driverCanGoOnline={false}
+        driverActivationResolved
+        driverWorkInProgress
+        suppressDaySummary
+        onToggleOnline={onToggleOnline}
+        onOpenActivation={() => {}}
+      />,
+    );
+
+    expect(getByText("Em corrida")).toBeTruthy();
+    fireEvent.press(getByLabelText("driver-home-toggle-online-ride"));
+    expect(onToggleOnline).not.toHaveBeenCalled();
+
+    rerender(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline={false}
+        driverActivationResolved
+        driverWorkInProgress
+        suppressDaySummary
+        onToggleOnline={onToggleOnline}
+        onOpenActivation={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(queryByText("Resumo do dia")).toBeNull();
+      expect(queryByText("Em análise")).toBeNull();
     });
   });
 });

@@ -72,12 +72,27 @@ jest.mock('../src/components/prototype/PrototypeScaffold', () => {
 jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
   const React = require('react');
   const { Text, View } = require('react-native');
-  return ({ pickupLabel, pickupAddress }) => (
+  const PassengerHomeOverlay = ({ pickupLabel, pickupAddress }) => (
     <View testID="passenger-home-overlay">
       <Text>{pickupLabel}</Text>
       <Text>{pickupAddress}</Text>
     </View>
   );
+  const PassengerHomeOverlaySkeleton = () => (
+    <View testID="passenger-home-overlay-skeleton" />
+  );
+
+  return {
+    __esModule: true,
+    default: PassengerHomeOverlay,
+    PassengerHomeOverlaySkeleton,
+    PASSENGER_HOME_CARD_METRICS: {
+      horizontalInset: 24,
+      bottomOffset: 16,
+      height: 142,
+      borderRadius: 28,
+    },
+  };
 });
 
 jest.mock('../src/screens/prototype/home/DriverHomeOverlay', () => {
@@ -251,7 +266,7 @@ describe('driver online toggle', () => {
     Alert.alert.mockRestore();
   });
 
-  it('covers the map with a welcome loader until the home UI is ready', () => {
+  it('renders a passenger card skeleton with the map until the home UI is ready', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
         ready: false,
@@ -271,12 +286,12 @@ describe('driver online toggle', () => {
       goBack: jest.fn(),
     };
 
-    const { getByTestId, getByText, queryByTestId } = render(
+    const { getByTestId, queryByTestId } = render(
       <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    expect(getByTestId('prototype-home-loading')).toBeTruthy();
-    expect(getByText('Bem vindo(a), Izaak')).toBeTruthy();
+    expect(queryByTestId('prototype-home-loading')).toBeNull();
+    expect(getByTestId('passenger-home-overlay-skeleton')).toBeTruthy();
     expect(queryByTestId('prototype-top-controls')).toBeNull();
     expect(mockPrototypeMapLayer).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -540,7 +555,7 @@ describe('driver online toggle', () => {
     expect(latestMapProps.showTraffic).toBe(false);
   });
 
-  it('enables the traffic layer once the passenger has an active ride search', async () => {
+  it('keeps the traffic layer off while the passenger has an active ride search', async () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
         trafficLayerEnabled: true,
@@ -556,7 +571,7 @@ describe('driver online toggle', () => {
     });
 
     const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
-    expect(latestMapProps.showTraffic).toBe(true);
+    expect(latestMapProps.showTraffic).toBe(false);
   });
 
   it('does not render driver home surfaces before activation state resolves on boot', () => {

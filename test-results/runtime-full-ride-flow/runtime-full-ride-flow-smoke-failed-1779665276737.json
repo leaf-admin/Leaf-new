@@ -1,0 +1,10 @@
+{
+  "startedAt": "2026-05-24T23:27:37.834Z",
+  "completedAt": "2026-05-24T23:27:56.737Z",
+  "redis": {
+    "port": 63936
+  },
+  "runtimes": [],
+  "artifactsDir": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-full-ride-flow",
+  "error": "timeout_waiting_arrivedAtPickup"
+}

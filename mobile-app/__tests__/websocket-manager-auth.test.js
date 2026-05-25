@@ -42,6 +42,31 @@ function buildJwt(payload) {
   ].join('.');
 }
 
+async function flushMicrotasks(iterations = 5) {
+  for (let index = 0; index < iterations; index += 1) {
+    await Promise.resolve();
+  }
+}
+
+function createPendingSocketMock() {
+  const handlers = new Map();
+  const socket = {
+    connected: false,
+    connect: jest.fn(),
+    disconnect: jest.fn(),
+    close: jest.fn(),
+    removeAllListeners: jest.fn(() => handlers.clear()),
+    on: jest.fn((eventName, callback) => {
+      handlers.set(eventName, callback);
+    }),
+    off: jest.fn((eventName) => {
+      handlers.delete(eventName);
+    }),
+  };
+
+  return socket;
+}
+
 describe('WebSocketManager auth QA bypass', () => {
   let originalPlatformOS;
 
@@ -260,6 +285,79 @@ describe('WebSocketManager auth QA bypass', () => {
         },
       }),
     );
+  });
+
+  it('waits the configured socket connect timeout before trying the fallback endpoint', async () => {
+    jest.useFakeTimers();
+    const sockets = [];
+    let createSocketClientSpy = null;
+    let buildSocketAuthPayloadSpy = null;
+
+    try {
+      const manager = WebSocketManager.getInstance();
+      buildSocketAuthPayloadSpy = jest
+        .spyOn(manager, '_buildSocketAuthPayload')
+        .mockResolvedValue({
+          token: null,
+          uid: 'qa-user',
+          qaAuthBypass: true,
+          qaAutomation: true,
+        });
+      createSocketClientSpy = jest
+        .spyOn(manager, '_createSocketClient')
+        .mockImplementation(() => {
+          const socket = createPendingSocketMock();
+          sockets.push(socket);
+          return socket;
+        });
+      const connectPromise = manager.connect().catch((error) => error);
+
+      await flushMicrotasks();
+
+      expect(createSocketClientSpy).toHaveBeenCalledTimes(1);
+      expect(createSocketClientSpy).toHaveBeenLastCalledWith(
+        'https://socket.test',
+        expect.objectContaining({
+          qaAuthBypass: true,
+          qaAutomation: true,
+        }),
+        expect.objectContaining({
+          qaAuthBypass: 'true',
+          qaAutomation: 'true',
+        }),
+      );
+
+      await jest.advanceTimersByTimeAsync(10000);
+      expect(createSocketClientSpy).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(19999);
+      expect(createSocketClientSpy).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(1);
+      expect(createSocketClientSpy).toHaveBeenCalledTimes(2);
+      expect(createSocketClientSpy).toHaveBeenLastCalledWith(
+        'https://api.test',
+        expect.objectContaining({
+          qaAuthBypass: true,
+          qaAutomation: true,
+        }),
+        expect.objectContaining({
+          qaAuthBypass: 'true',
+          qaAutomation: 'true',
+        }),
+      );
+
+      await jest.advanceTimersByTimeAsync(30000);
+
+      const error = await connectPromise;
+      expect(error.code).toBe('WS_CONNECT_TIMEOUT');
+      expect(sockets[0].disconnect).toHaveBeenCalled();
+      expect(sockets[1].disconnect).toHaveBeenCalled();
+    } finally {
+      createSocketClientSpy?.mockRestore();
+      buildSocketAuthPayloadSpy?.mockRestore();
+      jest.useRealTimers();
+    }
   });
 
   it('correlates availability responses by requestId', async () => {

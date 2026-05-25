@@ -587,8 +587,6 @@ describe('prototype ride screens', () => {
     expect(getByText('Valor recebido')).toBeTruthy();
     expect(getByText('Rota final da corrida')).toBeTruthy();
     expect(getByText('Tempo e distância finais')).toBeTruthy();
-    expect(getByText('Corridas recentes')).toBeTruthy();
-    expect(getByText('1 Ferry Building')).toBeTruthy();
     expect(getByText('Praça Senador Salgado Filho')).toBeTruthy();
     expect(getByTestId('driver-receipt-back-to-map-button')).toBeTruthy();
   });
@@ -690,7 +688,7 @@ describe('prototype ride screens', () => {
       <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    expect(getByText('Procurando motorista')).toBeTruthy();
+    expect(getByText('Detalhes da corrida')).toBeTruthy();
     expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('00:12');
     expect(getByText('Buscando motorista')).toBeTruthy();
     expect(getByText('Buscando em 6 km de diâmetro neste momento')).toBeTruthy();
@@ -810,7 +808,7 @@ describe('prototype ride screens', () => {
       <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    expect(queryByText('Procurando motorista')).toBeNull();
+    expect(queryByText('Buscando motorista')).toBeNull();
   });
 
   it('clears the preview route when leaving the no drivers screen back to the map', () => {

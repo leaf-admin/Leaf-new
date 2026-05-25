@@ -1,0 +1,22 @@
+# Canary preflight sem device - 2026-05-24T16:44:05.988Z
+
+Status: GO
+
+| Gate | Status | Duração | Log |
+| --- | --- | --- | --- |
+| Git diff sem whitespace inválido | PASS | 0.2s | test-results/audit-20260524T132009/non-device-canary-preflight/logs/git_diff_check.log |
+| Backend sensitive route guards | PASS | 0.5s | test-results/audit-20260524T132009/non-device-canary-preflight/logs/backend_route_guards.log |
+| Backend unit + integration | SKIP | - | - |
+| Mobile onboarding copy | PASS | 0.2s | test-results/audit-20260524T132009/non-device-canary-preflight/logs/mobile_static_copy.log |
+| Mobile testIDs essenciais | PASS | 0.4s | test-results/audit-20260524T132009/non-device-canary-preflight/logs/mobile_testids.log |
+| Mobile unit tests | SKIP | - | - |
+| Mobile release preflight estático | PASS | 3.0s | test-results/audit-20260524T132009/non-device-canary-preflight/logs/mobile_release_preflight.log |
+| Dashboard lint | PASS | 4.4s | test-results/audit-20260524T132009/non-device-canary-preflight/logs/dashboard_lint.log |
+| Dashboard build | SKIP | - | - |
+| Support orchestrator syntax check | PASS | 0.9s | test-results/audit-20260524T132009/non-device-canary-preflight/logs/support_orchestrator_check.log |
+| Dry-run limpeza financeira de teste | SKIP | - | - |
+| Reconciliação financeira live | SKIP | - | - |
+
+## Próxima etapa
+
+Gerar builds release iOS/Android e executar o canary test em aparelho/simulador.

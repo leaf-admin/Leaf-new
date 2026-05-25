@@ -1,0 +1,186 @@
+{
+  "startedAt": "2026-05-24T21:48:02.802Z",
+  "completedAt": "2026-05-24T21:48:05.402Z",
+  "redis": {
+    "port": 61617
+  },
+  "runtimes": [
+    {
+      "runtime": "vps",
+      "port": 61618,
+      "pid": 73015,
+      "logPath": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-critical-events/runtime-vps.log",
+      "readiness": {
+        "status": "healthy",
+        "timestamp": "2026-05-24T21:48:04.875Z",
+        "checks": {
+          "redis": {
+            "status": "healthy",
+            "source": "dedicated",
+            "responseTime": "1ms",
+            "latency": 1,
+            "minLatency": 0,
+            "maxLatency": 2,
+            "samples": [
+              1,
+              0,
+              2
+            ],
+            "thresholds": {
+              "warningMs": 1200,
+              "unhealthyMs": 4000
+            },
+            "message": "Redis está saudável"
+          },
+          "socketRedisAdapter": {
+            "status": "healthy",
+            "state": "ready",
+            "enabled": true,
+            "required": true,
+            "runtimeRole": "gateway",
+            "updatedAt": "2026-05-24T21:48:04.798Z",
+            "error": null,
+            "message": "Socket.IO Redis Adapter pronto"
+          }
+        }
+      },
+      "contract": {
+        "runtime": "vps",
+        "port": 61618,
+        "socketId": "ShSiDQNJcz99mGqpAAAB",
+        "authenticated": {
+          "uid": "runtime-smoke-passenger",
+          "userId": "runtime-smoke-passenger",
+          "success": true,
+          "userType": "customer",
+          "socketId": "ShSiDQNJcz99mGqpAAAB"
+        },
+        "checks": [
+          {
+            "emitEvent": "checkRideAvailability",
+            "receivedEvent": "rideAvailabilityError",
+            "payload": {
+              "success": false,
+              "requestId": "vps-availability-invalid",
+              "code": "AVAILABILITY_CHECK_FAILED",
+              "error": "Não foi possível validar disponibilidade agora.",
+              "message": "Não foi possível validar disponibilidade agora."
+            }
+          },
+          {
+            "emitEvent": "passengerLocationUpdate",
+            "receivedEvent": "passengerLocationError",
+            "payload": {
+              "error": "Latitude e longitude válidas são obrigatórias.",
+              "code": "LOCATION_REQUIRED"
+            }
+          },
+          {
+            "emitEvent": "confirmBoardingStatus",
+            "receivedEvent": "boardingStatusError",
+            "payload": {
+              "error": "ID da corrida é obrigatório.",
+              "code": "BOOKING_ID_REQUIRED"
+            }
+          },
+          {
+            "emitEvent": "endTripEarlyByRider",
+            "receivedEvent": "tripCompleteError",
+            "payload": {
+              "error": "bookingId e endLocation são obrigatórios"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "runtime": "modular",
+      "port": 61619,
+      "pid": 73030,
+      "logPath": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-critical-events/runtime-modular.log",
+      "readiness": {
+        "status": "healthy",
+        "timestamp": "2026-05-24T21:48:05.365Z",
+        "checks": {
+          "redis": {
+            "status": "healthy",
+            "source": "dedicated",
+            "responseTime": "0ms",
+            "latency": 0,
+            "minLatency": 0,
+            "maxLatency": 0,
+            "samples": [
+              0,
+              0,
+              0
+            ],
+            "thresholds": {
+              "warningMs": 1200,
+              "unhealthyMs": 4000
+            },
+            "message": "Redis está saudável"
+          },
+          "socketRedisAdapter": {
+            "status": "healthy",
+            "state": "ready",
+            "enabled": true,
+            "required": true,
+            "runtimeRole": "gateway",
+            "updatedAt": "2026-05-24T21:48:05.168Z",
+            "error": null,
+            "message": "Socket.IO Redis Adapter pronto"
+          }
+        }
+      },
+      "contract": {
+        "runtime": "modular",
+        "port": 61619,
+        "socketId": "Qlh79Wpj2gA0omACAAAB",
+        "authenticated": {
+          "uid": "runtime-smoke-passenger",
+          "userId": "runtime-smoke-passenger",
+          "success": true,
+          "userType": "customer",
+          "socketId": "Qlh79Wpj2gA0omACAAAB"
+        },
+        "checks": [
+          {
+            "emitEvent": "checkRideAvailability",
+            "receivedEvent": "rideAvailabilityError",
+            "payload": {
+              "success": false,
+              "requestId": "modular-availability-invalid",
+              "code": "AVAILABILITY_CHECK_FAILED",
+              "error": "Não foi possível validar disponibilidade agora.",
+              "message": "Não foi possível validar disponibilidade agora."
+            }
+          },
+          {
+            "emitEvent": "passengerLocationUpdate",
+            "receivedEvent": "passengerLocationError",
+            "payload": {
+              "error": "Latitude e longitude validas sao obrigatorias.",
+              "code": "LOCATION_REQUIRED"
+            }
+          },
+          {
+            "emitEvent": "confirmBoardingStatus",
+            "receivedEvent": "boardingStatusError",
+            "payload": {
+              "error": "ID da corrida e obrigatorio.",
+              "code": "BOOKING_ID_REQUIRED"
+            }
+          },
+          {
+            "emitEvent": "endTripEarlyByRider",
+            "receivedEvent": "tripCompleteError",
+            "payload": {
+              "error": "bookingId e endLocation são obrigatórios"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "artifactsDir": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-critical-events"
+}

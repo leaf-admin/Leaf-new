@@ -1,0 +1,116 @@
+{
+  "runId": "canary-preflight-20260524T164356Z",
+  "generatedAt": "2026-05-24T16:44:05.988Z",
+  "status": "GO",
+  "reportDir": "/Users/izaakdias/Documents/Leaf-new/test-results/audit-20260524T132009/non-device-canary-preflight",
+  "results": [
+    {
+      "id": "git_diff_check",
+      "title": "Git diff sem whitespace inválido",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 168,
+      "logFile": "test-results/audit-20260524T132009/non-device-canary-preflight/logs/git_diff_check.log",
+      "error": ""
+    },
+    {
+      "id": "backend_route_guards",
+      "title": "Backend sensitive route guards",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 509,
+      "logFile": "test-results/audit-20260524T132009/non-device-canary-preflight/logs/backend_route_guards.log",
+      "error": ""
+    },
+    {
+      "id": "backend_unit_integration",
+      "title": "Backend unit + integration",
+      "status": "skipped",
+      "exitCode": null,
+      "durationMs": 0,
+      "logFile": "",
+      "error": ""
+    },
+    {
+      "id": "mobile_static_copy",
+      "title": "Mobile onboarding copy",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 197,
+      "logFile": "test-results/audit-20260524T132009/non-device-canary-preflight/logs/mobile_static_copy.log",
+      "error": ""
+    },
+    {
+      "id": "mobile_testids",
+      "title": "Mobile testIDs essenciais",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 422,
+      "logFile": "test-results/audit-20260524T132009/non-device-canary-preflight/logs/mobile_testids.log",
+      "error": ""
+    },
+    {
+      "id": "mobile_unit",
+      "title": "Mobile unit tests",
+      "status": "skipped",
+      "exitCode": null,
+      "durationMs": 0,
+      "logFile": "",
+      "error": ""
+    },
+    {
+      "id": "mobile_release_preflight",
+      "title": "Mobile release preflight estático",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 3036,
+      "logFile": "test-results/audit-20260524T132009/non-device-canary-preflight/logs/mobile_release_preflight.log",
+      "error": ""
+    },
+    {
+      "id": "dashboard_lint",
+      "title": "Dashboard lint",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 4422,
+      "logFile": "test-results/audit-20260524T132009/non-device-canary-preflight/logs/dashboard_lint.log",
+      "error": ""
+    },
+    {
+      "id": "dashboard_build",
+      "title": "Dashboard build",
+      "status": "skipped",
+      "exitCode": null,
+      "durationMs": 0,
+      "logFile": "",
+      "error": ""
+    },
+    {
+      "id": "support_orchestrator_check",
+      "title": "Support orchestrator syntax check",
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 933,
+      "logFile": "test-results/audit-20260524T132009/non-device-canary-preflight/logs/support_orchestrator_check.log",
+      "error": ""
+    },
+    {
+      "id": "financial_cleanup_dry_run",
+      "title": "Dry-run limpeza financeira de teste",
+      "status": "skipped",
+      "exitCode": null,
+      "durationMs": 0,
+      "logFile": "",
+      "error": ""
+    },
+    {
+      "id": "financial_reconciliation",
+      "title": "Reconciliação financeira live",
+      "status": "skipped",
+      "exitCode": null,
+      "durationMs": 0,
+      "logFile": "",
+      "error": ""
+    }
+  ]
+}

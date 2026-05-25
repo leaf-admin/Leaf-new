@@ -18,6 +18,8 @@ require_pattern() {
   fi
 }
 
+node scripts/qa/validate-release-runtime-policy.cjs
+
 for file in \
   "src/common-local/actions/bookingactions.js" \
   "src/common-local/bookingactions.js"; do
@@ -46,6 +48,8 @@ require_pattern "src/config/runtimeAccessPolicy.js" "hasExplicitQaOtpForceFlag" 
 require_pattern "src/config/runtimeAccessPolicy.js" "hasExplicitTestUserToolsFlag" "test tools explicit flag gate"
 require_pattern "src/config/runtimeAccessPolicy.js" "allowPaymentBypass" "payment bypass function presence"
 require_pattern "src/config/runtimeAccessPolicy.js" "hasExplicitPaymentBypassFlag" "payment bypass explicit flag gate"
+require_pattern "src/services/PaymentBypassService.js" "allowPaymentBypass" "payment bypass service runtime policy gate"
+require_pattern "src/services/DatabaseBypass.js" "allowTestUserTools" "database bypass service test-user runtime policy gate"
 require_pattern "src/screens/prototype/prototypeRideRuntime.js" "allowCustomOtpFallback" "prototype runtime OTP fallback gate"
 require_pattern "src/screens/prototype/prototypeRideRuntime.js" "allowTestUserTools" "prototype runtime test-user gate"
 require_pattern "src/screens/prototype/prototypeRideRuntime.js" "Restauração de sessão por OTP customizado bloqueada" "prototype runtime OTP production block"
