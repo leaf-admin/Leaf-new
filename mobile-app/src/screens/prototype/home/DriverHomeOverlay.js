@@ -13,12 +13,18 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import LeafCampaignSlot from "../../../components/campaigns/LeafCampaignSlot";
+import LeafCampaignCarousel from "../../../components/campaigns/LeafCampaignCarousel";
 import robotaxiPrototypeTokens from "../../../components/design-system/robotaxiPrototypeTokens";
+import { leafButtonMetrics } from "../../../components/prototype/LeafRideUI";
 import { fonts } from "../../../theme/runtimeTokens";
 
 const { color } = robotaxiPrototypeTokens;
 const DRIVER_BOTTOM_CTA_OFFSET = 16;
+const DRIVER_HOME_CARD_HEIGHT = 236;
+const DRIVER_HOME_CARD_HORIZONTAL_INSET = 24;
+const DRIVER_HOME_CARD_RADIUS = 32;
+const DRIVER_HOME_PROMO_CARD_HEIGHT = 188;
+const DRIVER_HOME_STACK_GAP = 12;
 const DRIVER_GOAL_STORAGE_PREFIX = "@prototype_driver_daily_goal_";
 const DEFAULT_DAILY_GOAL = 200;
 const COMPETITOR_REFERENCE_TAKE_RATE = 0.3;
@@ -187,6 +193,10 @@ function parseGoalInput(value) {
   return parsed;
 }
 
+function isDriverWorkLocked(value) {
+  return Boolean(value);
+}
+
 function DriverHomeOverlay({
   driverId = "",
   insetsBottom = 0,
@@ -194,6 +204,8 @@ function DriverHomeOverlay({
   driverOnlinePending = false,
   driverCanGoOnline = false,
   driverActivationResolved = false,
+  driverWorkInProgress = false,
+  suppressDaySummary = false,
   ridesCount = 0,
   formattedDriverEarnings = "R$ 0,00",
   driverGrossAmount = 0,
@@ -222,6 +234,7 @@ function DriverHomeOverlay({
     Math.min(1, parseMoneyLabel(formattedDriverEarnings) / DEFAULT_DAILY_GOAL),
   );
   const previousDriverOnlineRef = useRef(Boolean(driverOnline));
+  const hasDriverWorkInProgress = isDriverWorkLocked(driverWorkInProgress);
   const earningsAnimation = useRef(
     new Animated.Value(parseMoneyLabel(formattedDriverEarnings)),
   ).current;
@@ -231,19 +244,29 @@ function DriverHomeOverlay({
     ),
   ).current;
   const isActivationBlocked =
-    driverActivationResolved && !driverCanGoOnline && !driverOnline;
-  const pendingOfflineActivation = driverOnlinePending && !driverOnline;
-  const handleSliderPress = isActivationBlocked
-    ? onOpenActivation
-    : onToggleOnline;
-  const sliderStatus = isActivationBlocked
+    driverActivationResolved &&
+    !driverCanGoOnline &&
+    !driverOnline &&
+    !hasDriverWorkInProgress;
+  const pendingOfflineActivation =
+    driverOnlinePending && !driverOnline && !hasDriverWorkInProgress;
+  const handleSliderPress = hasDriverWorkInProgress
+    ? undefined
+    : isActivationBlocked
+      ? onOpenActivation
+      : onToggleOnline;
+  const sliderStatus = hasDriverWorkInProgress
+    ? "ride"
+    : isActivationBlocked
     ? "blocked"
     : pendingOfflineActivation
       ? "pending"
       : driverOnline
         ? "online"
         : "offline";
-  const sliderLabel = isActivationBlocked
+  const sliderLabel = hasDriverWorkInProgress
+    ? "Em corrida"
+    : isActivationBlocked
     ? "Em análise"
     : pendingOfflineActivation
       ? "Ativando..."
@@ -397,13 +420,25 @@ function DriverHomeOverlay({
   ]);
 
   useEffect(() => {
+    const shouldSuppressSummary =
+      Boolean(suppressDaySummary) || hasDriverWorkInProgress;
     const wasOnline = previousDriverOnlineRef.current;
     previousDriverOnlineRef.current = Boolean(driverOnline);
+
+    if (shouldSuppressSummary) {
+      setDaySummaryVisible(false);
+      return;
+    }
 
     if (wasOnline && !driverOnline && !driverOnlinePending) {
       setDaySummaryVisible(true);
     }
-  }, [driverOnline, driverOnlinePending]);
+  }, [
+    driverOnline,
+    driverOnlinePending,
+    hasDriverWorkInProgress,
+    suppressDaySummary,
+  ]);
 
   const handleOpenGoalModal = () => {
     setGoalInput(
@@ -417,7 +452,7 @@ function DriverHomeOverlay({
   const handleSavePreferences = async () => {
     const parsed = parseGoalInput(goalInput);
     if (!parsed) {
-      Alert.alert("Meta diária", "Digite um valor válido para a meta.");
+      Alert.alert("Meus ganhos", "Digite um valor válido para a meta.");
       return;
     }
     if (destinationModeEnabled && String(destinationInput || "").trim().length < 3) {
@@ -462,18 +497,10 @@ function DriverHomeOverlay({
 
   return (
     <>
-      <LeafCampaignSlot
-        userId={driverId}
-        role="driver"
-        surface="driver_home"
-        placement="above_driver_card"
-        style={{ bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET + 248 }}
-        testID="driver-home-campaign-slot"
-      />
       <View
         onLayout={onCtaLayout}
         style={[
-          styles.driverBottomCtaWrap,
+          styles.driverHomeStack,
           { bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET },
         ]}
       >
@@ -485,12 +512,7 @@ function DriverHomeOverlay({
               onPress={onOpenEarnings || handleOpenGoalModal}
             >
               <View style={styles.driverGoalHeaderRow}>
-                <Text style={styles.driverBottomStatLabel}>Meta diária</Text>
-                <View style={styles.driverGoalPercentPill}>
-                  <Text style={styles.driverGoalPercentText}>
-                    {goalProgressPercent}
-                  </Text>
-                </View>
+                <Text style={styles.driverBottomStatLabel}>Meus ganhos</Text>
               </View>
               <View style={styles.driverGoalValueRow}>
                 <Text
@@ -514,9 +536,14 @@ function DriverHomeOverlay({
                   ]}
                 />
               </View>
-              <Text style={styles.driverGoalProgressCaption}>
-                Progresso da meta
-              </Text>
+              <View style={styles.driverGoalProgressCaptionRow}>
+                <Text style={styles.driverGoalProgressCaption}>
+                  Progresso da meta
+                </Text>
+                <Text style={styles.driverGoalProgressPercentText}>
+                  {goalProgressPercent}
+                </Text>
+              </View>
               <View style={styles.driverStreakInline}>
                 <Ionicons
                   name="flame-outline"
@@ -555,6 +582,7 @@ function DriverHomeOverlay({
             <TouchableOpacity
               activeOpacity={0.88}
               onPress={handleSliderPress}
+              disabled={hasDriverWorkInProgress}
               testID="driver-home-toggle-online"
               accessibilityLabel={`driver-home-toggle-online-${sliderStatus}`}
               accessibilityValue={{ text: sliderStatus }}
@@ -566,7 +594,8 @@ function DriverHomeOverlay({
               }}
               style={[
                 styles.driverBottomSlider,
-                sliderStatus === "online" && styles.driverBottomSliderOnline,
+                (sliderStatus === "online" || sliderStatus === "ride") &&
+                  styles.driverBottomSliderOnline,
                 sliderStatus === "blocked" && styles.driverBottomSliderBlocked,
                 sliderStatus === "pending" && styles.driverBottomSliderPending,
               ]}
@@ -574,7 +603,7 @@ function DriverHomeOverlay({
               <Text
                 style={[
                   styles.driverBottomSliderText,
-                  sliderStatus === "online" &&
+                  (sliderStatus === "online" || sliderStatus === "ride") &&
                     styles.driverBottomSliderTextOnline,
                   sliderStatus === "blocked" &&
                     styles.driverBottomSliderTextBlocked,
@@ -587,7 +616,8 @@ function DriverHomeOverlay({
               <Animated.View
                 style={[
                   styles.driverBottomSliderThumb,
-                  sliderStatus === "online" && styles.driverBottomSliderThumbOnline,
+                  (sliderStatus === "online" || sliderStatus === "ride") &&
+                    styles.driverBottomSliderThumbOnline,
                   sliderStatus === "blocked" && styles.driverBottomSliderThumbBlocked,
                   sliderStatus === "pending" && styles.driverBottomSliderThumbPending,
                   { transform: [{ translateX: sliderThumbTranslateX }] },
@@ -597,6 +627,8 @@ function DriverHomeOverlay({
                   name={
                     sliderStatus === "online"
                       ? "checkmark"
+                      : sliderStatus === "ride"
+                        ? "navigate-outline"
                       : sliderStatus === "blocked"
                         ? "time-outline"
                         : sliderStatus === "pending"
@@ -605,7 +637,9 @@ function DriverHomeOverlay({
                   }
                   size={21}
                   color={
-                    sliderStatus === "online" ? DRIVER_HOME_COLOR.leaf : "#FFFFFF"
+                    sliderStatus === "online" || sliderStatus === "ride"
+                      ? DRIVER_HOME_COLOR.leaf
+                      : "#FFFFFF"
                   }
                 />
               </Animated.View>
@@ -625,6 +659,19 @@ function DriverHomeOverlay({
             </TouchableOpacity>
           </View>
         </View>
+
+        <LeafCampaignCarousel
+          userId={driverId}
+          role="driver"
+          surface="driver_home"
+          placement="below_home_card"
+          limit={3}
+          height={DRIVER_HOME_PROMO_CARD_HEIGHT}
+          borderRadius={DRIVER_HOME_CARD_RADIUS}
+          fallbackCampaigns={[]}
+          style={styles.driverPromoCard}
+          testID="driver-home-promo-carousel"
+        />
       </View>
 
       <Modal
@@ -819,19 +866,16 @@ function DriverHomeOverlay({
 export default memo(DriverHomeOverlay);
 
 const styles = StyleSheet.create({
-  driverBottomCtaWrap: {
+  driverHomeStack: {
     position: "absolute",
-    left: 24,
-    right: 24,
+    left: DRIVER_HOME_CARD_HORIZONTAL_INSET,
+    right: DRIVER_HOME_CARD_HORIZONTAL_INSET,
     alignSelf: "center",
     zIndex: 16,
   },
   driverBottomCard: {
-    minHeight: 236,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+    minHeight: DRIVER_HOME_CARD_HEIGHT,
+    borderRadius: DRIVER_HOME_CARD_RADIUS,
     paddingHorizontal: 28,
     paddingTop: 21,
     paddingBottom: 18,
@@ -843,6 +887,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 17,
     elevation: Platform.OS === "android" ? 0 : 12,
+  },
+  driverPromoCard: {
+    marginTop: DRIVER_HOME_STACK_GAP,
   },
   driverBottomStatsRow: {
     flexDirection: "row",
@@ -887,25 +934,7 @@ const styles = StyleSheet.create({
     minHeight: 20,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  driverGoalPercentPill: {
-    minWidth: 42,
-    height: 20,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: DRIVER_HOME_COLOR.leafLight,
-    borderWidth: 1,
-    borderColor: DRIVER_HOME_COLOR.line,
-  },
-  driverGoalPercentText: {
-    color: DRIVER_HOME_COLOR.leaf,
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 13,
+    justifyContent: "flex-start",
   },
   driverBottomStatValuePrimary: {
     color: DRIVER_HOME_COLOR.text,
@@ -941,10 +970,24 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: DRIVER_HOME_COLOR.leaf,
   },
-  driverGoalProgressCaption: {
+  driverGoalProgressCaptionRow: {
     marginTop: 5,
+    width: "100%",
+    minHeight: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  driverGoalProgressCaption: {
     color: DRIVER_HOME_COLOR.secondary,
     fontFamily: fonts.Medium,
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  driverGoalProgressPercentText: {
+    color: DRIVER_HOME_COLOR.leaf,
+    fontFamily: fonts.SemiBold,
     fontSize: 10.5,
     lineHeight: 14,
   },
@@ -1314,7 +1357,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     padding: 3,
-    backgroundColor: "#DFE8E1",
+    backgroundColor: "#E9E2D8",
   },
   destinationModeSwitchActive: {
     backgroundColor: DRIVER_HOME_COLOR.leaf,
@@ -1335,8 +1378,8 @@ const styles = StyleSheet.create({
   },
   modalGhostButton: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 12,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.subtle,
     alignItems: "center",
@@ -1350,8 +1393,8 @@ const styles = StyleSheet.create({
   },
   modalPrimaryButton: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 12,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.strong,
     alignItems: "center",

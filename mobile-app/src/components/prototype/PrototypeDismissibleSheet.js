@@ -19,6 +19,7 @@ export default function PrototypeDismissibleSheet({
   children,
   sheetStyle,
   backdropColor = 'transparent',
+  bottomGapFillColor = '#FFFFFF',
   dragFromTopOnly = true,
   dragHandleZoneHeight = 88,
   dragEnabled = true
@@ -26,6 +27,11 @@ export default function PrototypeDismissibleSheet({
   const translateY = useSharedValue(OPEN_TRANSLATE_Y);
   const backdropOpacity = useSharedValue(0);
   const surfaceOpacity = useSharedValue(0.96);
+  const bottomGapHeight = React.useMemo(() => {
+    const flattenedStyle = StyleSheet.flatten(sheetStyle) || {};
+    const bottom = Number(flattenedStyle.bottom);
+    return Number.isFinite(bottom) && bottom > 0 ? bottom : 0;
+  }, [sheetStyle]);
 
   useEffect(() => {
     translateY.value = withSpring(0, motion.spring.sheet);
@@ -97,12 +103,32 @@ export default function PrototypeDismissibleSheet({
     };
   });
 
+  const animatedBottomFillStyle = useAnimatedStyle(() => {
+    return {
+      opacity: surfaceOpacity.value,
+      transform: [{ translateY: translateY.value }]
+    };
+  });
+
   return (
     <View style={styles.overlay} pointerEvents="box-none">
       <AnimatedPressable
         style={[styles.backdrop, { backgroundColor: backdropColor }, animatedBackdropStyle]}
         onPress={() => closeSheet(0)}
       />
+      {bottomGapHeight > 0 ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.bottomGapFill,
+            {
+              height: bottomGapHeight,
+              backgroundColor: bottomGapFillColor
+            },
+            animatedBottomFillStyle
+          ]}
+        />
+      ) : null}
       <Animated.View
         style={[styles.sheetLayer, animatedSheetStyle, sheetStyle]}
       >
@@ -135,6 +161,13 @@ const styles = StyleSheet.create({
     zIndex: 1
   },
   sheetLayer: {
+    zIndex: 2
+  },
+  bottomGapFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     zIndex: 2
   },
   dragHandleZone: {

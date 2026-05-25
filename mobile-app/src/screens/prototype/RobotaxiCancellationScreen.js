@@ -6,12 +6,13 @@ import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
+import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 98;
+const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 274;
 
 export default function RobotaxiCancellationScreen({ navigation, route }) {
@@ -53,7 +54,7 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
       await cancelRideSearch();
       navigation.navigate('RobotaxiPrototype');
     } catch (error) {
-      Alert.alert('Nao foi possivel cancelar', error?.message || 'Tente novamente em instantes.');
+      Alert.alert('Não conseguimos cancelar', error?.message || 'Tente novamente em instantes.');
     } finally {
       setIsCancelling(false);
     }
@@ -75,12 +76,12 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
             <Text style={styles.title}>Cancelar corrida</Text>
             <Text style={styles.subtitle}>
               {source === 'trip'
-                ? 'Ao cancelar agora, vamos encerrar sua solicitacao e retornar ao mapa.'
+                ? 'Ao cancelar agora, encerramos esta solicitação e você volta para o mapa.'
                 : 'Confirme o cancelamento para voltar ao estado inicial.'}
             </Text>
 
             <View style={styles.warningBox}>
-              <Text style={styles.warningText}>Cancelamento pode impactar prioridade em uma nova solicitacao.</Text>
+              <Text style={styles.warningText}>Você pode pedir uma nova corrida logo depois, se precisar.</Text>
             </View>
 
             <PrototypePrimaryButton
@@ -119,12 +120,12 @@ const styles = StyleSheet.create({
     right: 0
   },
   card: {
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 28,
-    paddingTop: 16,
+    paddingHorizontal: 24,
+    paddingTop: 14,
     paddingBottom: 16
   },
   iconWrap: {
@@ -134,14 +135,14 @@ const styles = StyleSheet.create({
     borderRadius: 31,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4A5565'
+    backgroundColor: color.text.primary
   },
   title: {
     marginTop: 10,
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight,
+    fontSize: 18,
+    lineHeight: 24,
     textAlign: 'center'
   },
   subtitle: {
@@ -175,8 +176,8 @@ const styles = StyleSheet.create({
   },
   keepButton: {
     marginTop: 8,
-    minHeight: 44,
-    borderRadius: 14,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.strong,
     backgroundColor: color.surface.secondary,

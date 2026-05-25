@@ -10,11 +10,14 @@ import WooviPaymentModal from '../../components/payment/WooviPaymentModal';
 import SecurePaymentBadge from '../../components/payment/SecurePaymentBadge';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import {
+  LeafAnimatedPressable,
   LeafButton,
   LeafDivider,
   LeafDriverIdentity,
   LeafRideSheet,
   LeafRouteProgress,
+  LeafStateHeader,
+  leafButtonMetrics,
   leafRideColors,
 } from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
@@ -22,6 +25,8 @@ import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { useLiveRouteTiming } from './liveRouteTiming';
 import { formatCurrencyBRL } from './tripFinancialSummary';
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from './robotaxiPrototypeData';
+import { normalizePassengerBookingStatus } from './passengerFlowRouting';
+import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
@@ -139,6 +144,14 @@ function resolveVehicleColorLabel(...values) {
 }
 
 function normalizeMapCoordinate(value) {
+  if (typeof value === 'string') {
+    try {
+      return normalizeMapCoordinate(JSON.parse(value));
+    } catch (_error) {
+      return null;
+    }
+  }
+
   const latitude = Number(value?.latitude ?? value?.lat);
   const longitude = Number(value?.longitude ?? value?.lng);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -288,8 +301,8 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
   const displayLabel =
     label === 'Mensagem' ? 'Chat' : label === 'Cancelar corrida' ? 'Cancelar' : label;
   return (
-    <TouchableOpacity
-      activeOpacity={0.84}
+    <LeafAnimatedPressable
+      activeScale={0.978}
       accessibilityRole="button"
       accessibilityLabel={label}
       testID={testID}
@@ -303,7 +316,7 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
     >
       <Ionicons
         name={icon}
-        size={16}
+        size={leafButtonMetrics.iconSize}
         color={
           isDanger
             ? leafRideColors.dangerText
@@ -323,7 +336,7 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
         {displayLabel}
       </Text>
       {displayLabel !== label ? <Text style={styles.hiddenText}>{label}</Text> : null}
-    </TouchableOpacity>
+    </LeafAnimatedPressable>
   );
 }
 
@@ -365,21 +378,21 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const sheetBottom = SHEET_BOTTOM_OFFSET;
 
   const destination = route?.params?.destination || selectedDestination?.name || 'Destino';
-  const destinationAddress = selectedDestination?.address || destination;
+  const destinationAddress = route?.params?.destinationAddress || selectedDestination?.address || destination;
   const vehicle = route?.params?.vehicle || selectedVehicle || 'Leaf Plus';
   const fallbackDriverName =
     route?.params?.driverName || activeBooking?.driverName || driverActiveRide?.driverName || null;
   const fallbackVehicleModel = route?.params?.vehicleModel || vehicle;
   const fallbackVehiclePlate = route?.params?.vehiclePlate || '';
   const resolvedTripDistanceKm =
-    toPositiveNumber(tripDistanceKm) ??
-    toPositiveNumber(route?.params?.tripDistanceKm);
+    toPositiveNumber(route?.params?.tripDistanceKm) ??
+    toPositiveNumber(tripDistanceKm);
   const resolvedTripDurationMin =
-    toPositiveNumber(tripDurationMin) ??
-    toPositiveNumber(route?.params?.tripDurationMin);
+    toPositiveNumber(route?.params?.tripDurationMin) ??
+    toPositiveNumber(tripDurationMin);
   const resolvedTripArrivalText =
-    tripArrivalText ||
     route?.params?.tripArrivalText ||
+    tripArrivalText ||
     (Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
       ? `Chegada estimada em ${resolvedTripDurationMin} min`
       : '');
@@ -390,13 +403,14 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     selectedFare,
   });
   const driverName =
-    String(driverInfo?.name || fallbackDriverName || 'Motorista Leaf').trim() || 'Motorista Leaf';
+    String(route?.params?.driverName || driverInfo?.name || fallbackDriverName || 'Motorista Leaf').trim() || 'Motorista Leaf';
   const vehicleModel =
-    String(driverInfo?.model || driverInfo?.vehicle?.model || fallbackVehicleModel || vehicle).trim() ||
+    String(route?.params?.vehicleModel || driverInfo?.model || driverInfo?.vehicle?.model || fallbackVehicleModel || vehicle).trim() ||
     'Leaf Plus';
   const vehiclePlate =
-    String(driverInfo?.plate || driverInfo?.vehicle?.plate || fallbackVehiclePlate || '').trim();
+    String(route?.params?.vehiclePlate || driverInfo?.plate || driverInfo?.vehicle?.plate || fallbackVehiclePlate || '').trim();
   const vehicleColorLabel = resolveVehicleColorLabel(
+    route?.params?.vehicleColor,
     driverInfo?.color,
     driverInfo?.vehicleColor,
     driverInfo?.vehicle?.color,
@@ -406,6 +420,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     driverActiveRide?.vehicle?.color,
     route?.params?.vehicleColor,
   );
+  const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
+    surface: 'ride_map',
+    placement: 'vehicle_marker',
+    role: 'customer',
+    userId: profileUid || '',
+    context: {
+      city: 'rio_de_janeiro',
+    },
+    eventMetadata: {
+      screen: 'robotaxi_trip',
+      status: bookingStatus || route?.params?.qaStatus || '',
+    },
+  });
   const driverPhotoUri =
     String(
       driverInfo?.photo ||
@@ -421,16 +448,14 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const distanceLabel = formatDistanceLabel(resolvedTripDistanceKm);
   const fareLabel = Number.isFinite(resolvedFare) ? formatCurrency(resolvedFare) : '--';
   const routeQaStatus = String(route?.params?.qaStatus || '').trim();
-  const normalizedStatus = String(
+  const normalizedStatus = normalizePassengerBookingStatus(
     routeQaStatus ||
       bookingStatus ||
       driverActiveRide?.status ||
       activeBooking?.status ||
       route?.params?.status ||
       ''
-  )
-    .trim()
-    .toLowerCase();
+  );
   const isAccepted = normalizedStatus === 'accepted' || normalizedStatus === 'arrived';
   const isArrived = normalizedStatus === 'arrived';
   const isStarted = normalizedStatus === 'started';
@@ -456,19 +481,32 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     boardingTimerSeconds !== null && boardingTimerSeconds > 0 && boardingTimerSeconds <= 30;
   const isBoardingTimerExpired = boardingTimerSeconds === 0;
   const tripPickupCoordinate =
+    normalizeMapCoordinate(route?.params?.pickupCoordinate) ||
     normalizeMapCoordinate(activeBooking?.pickupLocation) ||
     normalizeMapCoordinate(driverActiveRide?.pickupCoordinate) ||
     normalizeMapCoordinate(currentCoordinate) ||
     PROTOTYPE_ORIGIN_COORDINATE;
   const tripDestinationCoordinate =
+    normalizeMapCoordinate(route?.params?.destinationCoordinate) ||
+    normalizeMapCoordinate(route?.params?.initialSelectedDestination?.coordinate) ||
     normalizeMapCoordinate(selectedDestination?.coordinate) ||
     normalizeMapCoordinate(activeBooking?.destinationLocation) ||
     normalizeMapCoordinate(driverActiveRide?.destinationCoordinate) ||
     normalizeMapCoordinate(driverActiveRide?.dropoffCoordinate) ||
     null;
   const tripDriverCoordinate =
+    normalizeMapCoordinate(route?.params?.driverCoordinate) ||
     normalizeMapCoordinate(driverCoordinate) ||
     normalizeMapCoordinate(driverInfo?.coordinate) ||
+    null;
+  const tripDriverHeading =
+    driverCoordinate?.heading ??
+    driverCoordinate?.bearing ??
+    driverCoordinate?.course ??
+    driverInfo?.heading ??
+    driverInfo?.bearing ??
+    activeBooking?.driverHeading ??
+    activeBooking?.driverLocation?.heading ??
     null;
   const tripRouteCoordinates = useMemo(() => {
     const candidateRoute =
@@ -486,7 +524,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     const routeStart =
       isAccepted || isArrived
         ? tripDriverCoordinate || tripPickupCoordinate
-        : normalizeMapCoordinate(currentCoordinate) || tripPickupCoordinate;
+        : tripDriverCoordinate || tripPickupCoordinate || normalizeMapCoordinate(currentCoordinate);
     const routeEnd =
       isAccepted || isArrived
         ? tripPickupCoordinate
@@ -505,17 +543,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     tripDriverCoordinate,
     tripPickupCoordinate,
   ]);
+  const tripRouteOriginCoordinate =
+    Array.isArray(tripRouteCoordinates) && tripRouteCoordinates.length >= 2
+      ? tripRouteCoordinates[0]
+      : tripPickupCoordinate;
   const tripMapRegion = useMemo(
     () =>
       buildFallbackTripRegion([
-        currentCoordinate,
         tripPickupCoordinate,
         tripDestinationCoordinate,
         tripDriverCoordinate,
         ...tripRouteCoordinates,
       ]),
     [
-      currentCoordinate,
       tripDestinationCoordinate,
       tripDriverCoordinate,
       tripPickupCoordinate,
@@ -614,6 +654,28 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     : isArrived
       ? `${driverFirstName} chegou`
       : `${driverFirstName} está a caminho`;
+  const passengerIslandSubtitle = isStarted
+    ? distanceLabel && distanceLabel !== '--'
+      ? `${distanceLabel} restantes`
+      : arrivalClockLabel || resolvedTripArrivalText || 'Viagem em andamento'
+    : isArrived
+      ? pickupPointLabel
+      : `${vehicleModel}${vehiclePlate ? ` · ${vehiclePlate}` : ''}`;
+  const passengerIslandRightLabel = isStarted
+    ? 'Em rota'
+    : isArrived
+      ? 'No ponto'
+      : compactEtaValue;
+  const passengerSheetTitle = isStarted
+    ? 'Progresso da viagem'
+    : isArrived
+      ? 'Ponto de encontro'
+      : 'Seu motorista';
+  const passengerSheetKicker = isStarted
+    ? arrivalClockLabel || resolvedTripArrivalText || compactEtaValue
+    : isArrived
+      ? ''
+      : `${compactEtaValue} até o embarque`;
   const boardingPinLabel =
     String(
       activeBooking?.boardingPin ||
@@ -785,7 +847,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     <>
       <View style={styles.cardStateHeader}>
         <Text style={styles.cardStateTitle} numberOfLines={2}>
-          {passengerHeaderTitle}
+          {passengerSheetTitle}
         </Text>
         <IconActionButton
           icon="shield-checkmark-outline"
@@ -815,38 +877,17 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       <View style={styles.rideHeader}>
         <View style={styles.rideHeaderCopy}>
           <Text style={styles.rideTitle} numberOfLines={2}>
-            {isStarted ? `A caminho de ${destination}` : passengerHeaderTitle}
+            {passengerSheetTitle}
           </Text>
-          {isStarted || isArrived ? (
+          {passengerSheetKicker ? (
             <Text style={styles.rideKicker} numberOfLines={1}>
-              {isStarted
-                ? arrivalClockLabel || resolvedTripArrivalText || compactEtaValue
-                : 'Motorista no embarque'}
+              {passengerSheetKicker}
             </Text>
           ) : null}
           {!isStarted && !isArrived ? (
             <Text style={styles.hiddenText}>{`${compactEtaValue} até chegar`}</Text>
           ) : null}
         </View>
-        {isStarted ? (
-          <View style={styles.rideRight}>
-            <Text style={styles.rideRightValue} numberOfLines={1}>
-              {compactEtaValue}
-            </Text>
-            <Text style={styles.rideRightLabel} numberOfLines={1}>
-              ETA
-            </Text>
-          </View>
-        ) : isArrived ? null : (
-          <View style={styles.rideRight}>
-            <Text style={styles.rideRightValue} numberOfLines={1}>
-              {compactEtaValue}
-            </Text>
-            <Text style={styles.rideRightLabel} numberOfLines={1}>
-              chegada
-            </Text>
-          </View>
-        )}
       </View>
 
       {isStarted ? (
@@ -1058,11 +1099,14 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         <PrototypeMapLayer
           mapRef={mapRef}
           region={tripMapRegion}
+          forceRegionUpdate
           userCoordinate={normalizeMapCoordinate(currentCoordinate) || tripPickupCoordinate}
           userHeading={currentHeading}
           userAvatarLetter="L"
           driverCoordinate={tripDriverCoordinate}
+          driverHeading={tripDriverHeading}
           routeCoordinates={tripRouteCoordinates}
+          originCoordinate={tripRouteOriginCoordinate}
           destinationCoordinate={tripDestinationCoordinate || tripPickupCoordinate}
           destinationLabel={destination}
           destinationAddress={destinationAddress}
@@ -1070,9 +1114,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           originAddress={currentAddress || 'Sua localização atual'}
           interactionEnabled={false}
           animateRoute
-          driverMarkerMode="avatar"
+          hideRouteEndpointMarkers
+          driverMarkerMode="car"
+          driverVehicleColor={vehicleColorLabel}
+          driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
           driverMarkerLetter={getFirstName(driverName, 'M')}
           destinationMarkerMode="place"
+        />
+        <LeafStateHeader
+          title={passengerHeaderTitle}
+          subtitle={passengerIslandSubtitle}
+          rightLabel={passengerIslandRightLabel}
+          rightTone={isStarted ? 'dark' : 'leaf'}
+          insetsTop={insets.top}
         />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
@@ -1237,7 +1291,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     testID="passenger-trip-operational-continue-button"
                     accessibilityLabel="passenger-trip-operational-continue-button"
                   >
-                    <Ionicons name="car-outline" size={15} color={color.text.primary} />
+                    <Ionicons
+                      name="car-outline"
+                      size={leafButtonMetrics.iconSize}
+                      color={color.text.primary}
+                    />
                     <Text style={styles.secondaryActionText}>
                       {isBusy ? 'Processando...' : 'Continuar com outro'}
                     </Text>
@@ -1251,7 +1309,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     testID="passenger-trip-operational-end-button"
                     accessibilityLabel="passenger-trip-operational-end-button"
                   >
-                    <Ionicons name="stop-circle-outline" size={15} color="#8A1F2B" />
+                    <Ionicons
+                      name="stop-circle-outline"
+                      size={leafButtonMetrics.iconSize}
+                      color="#8A1F2B"
+                    />
                     <Text style={[styles.secondaryActionText, styles.warningActionText]}>
                       {isBusy ? 'Processando...' : 'Encerrar aqui'}
                     </Text>
@@ -1280,7 +1342,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 activeOpacity={0.86}
                 onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
               >
-                <Ionicons name="chatbubble-ellipses-outline" size={15} color={color.text.primary} />
+                <Ionicons
+                  name="chatbubble-ellipses-outline"
+                  size={leafButtonMetrics.iconSize}
+                  color={color.text.primary}
+                />
                 <Text style={styles.secondaryActionText}>Chat</Text>
               </TouchableOpacity>
 
@@ -1289,7 +1355,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 activeOpacity={0.86}
                 onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
               >
-                <Ionicons name="shield-checkmark-outline" size={15} color={color.text.primary} />
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={leafButtonMetrics.iconSize}
+                  color={color.text.primary}
+                />
                 <Text style={styles.secondaryActionText}>Suporte</Text>
               </TouchableOpacity>
             </View>
@@ -1303,7 +1373,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                   testID="passenger-trip-change-destination-button"
                   accessibilityLabel="passenger-trip-change-destination-button"
                 >
-                  <Ionicons name="navigate-outline" size={15} color={color.text.primary} />
+                  <Ionicons
+                    name="navigate-outline"
+                    size={leafButtonMetrics.iconSize}
+                    color={color.text.primary}
+                  />
                   <Text style={styles.secondaryActionText}>Alterar destino</Text>
                 </TouchableOpacity>
 
@@ -1315,7 +1389,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                   testID="passenger-trip-end-early-button"
                   accessibilityLabel="passenger-trip-end-early-button"
                 >
-                  <Ionicons name="flag-outline" size={15} color="#8A1F2B" />
+                  <Ionicons
+                    name="flag-outline"
+                    size={leafButtonMetrics.iconSize}
+                    color="#8A1F2B"
+                  />
                   <Text style={[styles.secondaryActionText, styles.warningActionText]}>
                     {isBusy ? 'Encerrando...' : 'Encerrar agora'}
                   </Text>
@@ -1329,7 +1407,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 testID="passenger-trip-cancel-button"
                 accessibilityLabel="passenger-trip-cancel-button"
               >
-                <Ionicons name="close-circle-outline" size={15} color={color.text.primary} />
+                <Ionicons
+                  name="close-circle-outline"
+                  size={leafButtonMetrics.iconSize}
+                  color={color.text.primary}
+                />
                 <Text style={styles.cancelActionText}>Cancelar corrida</Text>
               </TouchableOpacity>
             )}
@@ -1379,11 +1461,11 @@ const styles = StyleSheet.create({
   },
   tripCard: {
     minHeight: 332,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingTop: 16
+    paddingTop: 14
   },
   compactCard: {
     minHeight: 332
@@ -1414,29 +1496,29 @@ const styles = StyleSheet.create({
     minWidth: 0,
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 25
+    fontSize: 19,
+    lineHeight: 24
   },
   iconActionButton: {
     minWidth: 76,
-    height: 42,
-    borderRadius: 21,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: leafRideColors.line,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 5,
+    gap: leafButtonMetrics.iconGap,
     paddingHorizontal: 12
   },
   tripActionIcon: {
     minWidth: 76,
-    height: 42
+    minHeight: leafButtonMetrics.height
   },
   tripHeaderIconAction: {
-    width: 66,
-    height: 40
+    minWidth: 72,
+    minHeight: leafButtonMetrics.height
   },
   iconActionButtonWarning: {
     backgroundColor: leafRideColors.warning,
@@ -1498,8 +1580,8 @@ const styles = StyleSheet.create({
   rideTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 21,
-    lineHeight: 27
+    fontSize: 20,
+    lineHeight: 25
   },
   rideRight: {
     minWidth: 58,
@@ -1600,8 +1682,8 @@ const styles = StyleSheet.create({
   compactTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 25
+    fontSize: 19,
+    lineHeight: 24
   },
   compactSubtitleStrong: {
     marginTop: 1,
@@ -1718,18 +1800,18 @@ const styles = StyleSheet.create({
   },
   acceptedPrimary: {
     width: '100%',
-    height: 46,
-    borderRadius: 23
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius
   },
   arrivedPrimary: {
     width: '100%',
-    height: 46,
-    borderRadius: 23
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius
   },
   startedShareButton: {
     flex: 1,
-    height: 42,
-    borderRadius: 21
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius
   },
   arrivedAction: {
     flex: 1
@@ -1739,18 +1821,18 @@ const styles = StyleSheet.create({
   },
   startedAction: {
     flex: 1,
-    height: 44,
-    borderRadius: 22
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius
   },
   startedActionWide: {
     flex: 1.2,
-    height: 44,
-    borderRadius: 22
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius
   },
   startedActionSmall: {
     width: 88,
-    height: 44,
-    borderRadius: 22
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius
   },
   boardingTimerPanel: {
     marginTop: 12,
@@ -1926,13 +2008,13 @@ const styles = StyleSheet.create({
   },
   secondaryAction: {
     flex: 1,
-    minHeight: 38,
-    borderRadius: 19,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6
+    gap: leafButtonMetrics.iconGap
   },
   secondaryActionText: {
     color: color.text.primary,
@@ -1948,13 +2030,13 @@ const styles = StyleSheet.create({
   },
   cancelAction: {
     marginTop: 6,
-    minHeight: 38,
-    borderRadius: 19,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6
+    gap: leafButtonMetrics.iconGap
   },
   cancelActionText: {
     color: color.text.primary,
@@ -2160,15 +2242,15 @@ const styles = StyleSheet.create({
   },
   compactSecondaryAction: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.secondary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8
+    gap: leafButtonMetrics.iconGap
   },
   compactSecondaryActionText: {
     color: color.text.primary,

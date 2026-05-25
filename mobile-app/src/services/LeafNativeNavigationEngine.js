@@ -2,6 +2,10 @@ const DEFAULT_ADVANCE_THRESHOLD_METERS = 35;
 const DEFAULT_OFF_ROUTE_THRESHOLD_METERS = 100;
 const EARTH_RADIUS_METERS = 6371000;
 const CAMERA_LOOK_AHEAD_METERS = 55;
+export const NAVIGATION_CAMERA_ANCHOR_Y = 0.68;
+export const NAVIGATION_CAMERA_ANIMATION_MS = 800;
+export const NAVIGATION_CAMERA_MOVING_PITCH = 55;
+export const NAVIGATION_CAMERA_IDLE_PITCH = 42;
 
 function toFiniteNumber(value) {
   const numeric = Number(value);
@@ -35,6 +39,55 @@ function normalizeDegrees(value) {
 
   const normalized = numeric % 360;
   return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function normalizeNavigationSpeedKmh({
+  speedKmh = null,
+  speedMetersPerSecond = null,
+  coordinate = null,
+} = {}) {
+  const hasExplicitKmh = speedKmh !== null && speedKmh !== undefined && speedKmh !== '';
+  const explicitKmh = Number(speedKmh);
+  if (hasExplicitKmh && Number.isFinite(explicitKmh) && explicitKmh >= 0) {
+    return explicitKmh;
+  }
+
+  const rawMetersPerSecond =
+    speedMetersPerSecond !== null &&
+    speedMetersPerSecond !== undefined &&
+    speedMetersPerSecond !== ''
+      ? speedMetersPerSecond
+      : coordinate?.speed;
+  const hasMetersPerSecond =
+    rawMetersPerSecond !== null &&
+    rawMetersPerSecond !== undefined &&
+    rawMetersPerSecond !== '';
+  const explicitMps = Number(rawMetersPerSecond);
+  if (hasMetersPerSecond && Number.isFinite(explicitMps) && explicitMps >= 0) {
+    return explicitMps * 3.6;
+  }
+
+  return 0;
+}
+
+export function resolveNavigationCameraZoom(speedKmh = 0) {
+  const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
+
+  if (normalizedSpeed <= 20) {
+    return 17.8;
+  }
+  if (normalizedSpeed <= 40) {
+    return 17;
+  }
+  if (normalizedSpeed <= 70) {
+    return 16;
+  }
+  return 15;
+}
+
+export function resolveNavigationCameraPitch(speedKmh = 0) {
+  const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
+  return normalizedSpeed < 2 ? NAVIGATION_CAMERA_IDLE_PITCH : NAVIGATION_CAMERA_MOVING_PITCH;
 }
 
 export function calculateNavigationDistanceMeters(left, right) {
@@ -251,6 +304,15 @@ function calculateRemainingRouteMeters(currentCoordinate, routeCoordinates = [],
     return Number.isFinite(Number(fallbackMeters)) ? Math.max(0, Number(fallbackMeters)) : null;
   }
 
+  const currentMeasure = projectCoordinateToRouteMeasure(current, coordinates);
+  if (
+    currentMeasure &&
+    Number.isFinite(currentMeasure.routeMeters) &&
+    Number.isFinite(currentMeasure.totalMeters)
+  ) {
+    return Math.max(0, currentMeasure.totalMeters - currentMeasure.routeMeters);
+  }
+
   const nearestIndex = findNearestRouteIndex(current, coordinates);
   if (nearestIndex < 0) {
     return Number.isFinite(Number(fallbackMeters)) ? Math.max(0, Number(fallbackMeters)) : null;
@@ -278,6 +340,17 @@ function calculateRouteDistanceToCoordinateMeters(
 
   if (!current || !target || coordinates.length < 2) {
     return Number.isFinite(Number(fallbackMeters)) ? Math.max(0, Number(fallbackMeters)) : null;
+  }
+
+  const currentMeasure = projectCoordinateToRouteMeasure(current, coordinates);
+  const targetMeasure = projectCoordinateToRouteMeasure(target, coordinates);
+  if (
+    currentMeasure &&
+    targetMeasure &&
+    Number.isFinite(currentMeasure.routeMeters) &&
+    Number.isFinite(targetMeasure.routeMeters)
+  ) {
+    return Math.max(0, targetMeasure.routeMeters - currentMeasure.routeMeters);
   }
 
   const currentIndex = findNearestRouteIndex(current, coordinates);
@@ -330,6 +403,99 @@ function calculateRouteDistanceBetweenIndexes(routeCoordinates = [], startIndex 
   }
 
   return Number.isFinite(distanceMeters) ? Math.max(0, distanceMeters) : 0;
+}
+
+function buildRouteMeasureSegments(routeCoordinates = []) {
+  const coordinates = Array.isArray(routeCoordinates)
+    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
+    : [];
+
+  if (coordinates.length < 2) {
+    return null;
+  }
+
+  const origin = coordinates[0];
+  const segments = [];
+  let totalMeters = 0;
+
+  for (let index = 0; index < coordinates.length - 1; index += 1) {
+    const start = coordinates[index];
+    const end = coordinates[index + 1];
+    const startMeters = projectCoordinateToMeters(origin, start);
+    const endMeters = projectCoordinateToMeters(origin, end);
+    const meters = calculateNavigationDistanceMeters(start, end);
+
+    if (!startMeters || !endMeters || !Number.isFinite(meters) || meters <= 0) {
+      continue;
+    }
+
+    segments.push({
+      startMeters,
+      endMeters,
+      routeStartMeters: totalMeters,
+      routeEndMeters: totalMeters + meters,
+      meters,
+    });
+    totalMeters += meters;
+  }
+
+  if (segments.length === 0 || totalMeters <= 0) {
+    return null;
+  }
+
+  return { coordinates, origin, segments, totalMeters };
+}
+
+function projectCoordinateToRouteMeasure(coordinate, routeCoordinates = []) {
+  const current = normalizeNavigationCoordinate(coordinate);
+  const routeMeasure = buildRouteMeasureSegments(routeCoordinates);
+
+  if (!current || !routeMeasure) {
+    return null;
+  }
+
+  const currentMeters = projectCoordinateToMeters(routeMeasure.origin, current);
+  if (!currentMeters) {
+    return null;
+  }
+
+  let nearest = null;
+
+  routeMeasure.segments.forEach((segment) => {
+    const deltaX = segment.endMeters.x - segment.startMeters.x;
+    const deltaY = segment.endMeters.y - segment.startMeters.y;
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+
+    if (lengthSquared <= 0) {
+      return;
+    }
+
+    const ratio = Math.max(
+      0,
+      Math.min(
+        1,
+        ((currentMeters.x - segment.startMeters.x) * deltaX +
+          (currentMeters.y - segment.startMeters.y) * deltaY) /
+          lengthSquared,
+      ),
+    );
+    const projectedX = segment.startMeters.x + deltaX * ratio;
+    const projectedY = segment.startMeters.y + deltaY * ratio;
+    const offRouteDeltaX = currentMeters.x - projectedX;
+    const offRouteDeltaY = currentMeters.y - projectedY;
+    const squaredDistance = offRouteDeltaX * offRouteDeltaX + offRouteDeltaY * offRouteDeltaY;
+    const routeMeters = segment.routeStartMeters + segment.meters * ratio;
+
+    if (!nearest || squaredDistance < nearest.squaredDistance) {
+      nearest = {
+        routeMeters,
+        squaredDistance,
+        totalMeters: routeMeasure.totalMeters,
+      };
+    }
+  });
+
+  return nearest;
 }
 
 function buildSyntheticNavigationStepsFromRoute(
@@ -532,13 +698,30 @@ function resolveUpcomingNavigationTarget({
   const safeCurrentStepIndex = Math.max(0, Number(currentStepIndex) || 0);
   const currentStep =
     currentStepIndex >= 0 ? normalizedSteps[currentStepIndex] : null;
-  const currentCurveStep =
-    currentStep && isCurveInstruction(currentStep.instruction) ? currentStep : null;
-  const upcomingCurveStep =
-    currentCurveStep ||
-    normalizedSteps
-      .slice(safeCurrentStepIndex + 1)
-      .find((step) => isCurveInstruction(step.instruction));
+  const currentMeasure = projectCoordinateToRouteMeasure(
+    current,
+    routeGeometryCoordinates,
+  );
+  const routeCursorMeters = Number(currentMeasure?.routeMeters);
+  const candidateCurveSteps = normalizedSteps
+    .slice(safeCurrentStepIndex)
+    .filter((step) => isCurveInstruction(step.instruction));
+  const upcomingCurveStep = candidateCurveSteps.find((step) => {
+    const coordinate =
+      step?.maneuverLocation ||
+      step?.startLocation ||
+      step?.endLocation;
+    const targetMeasure = projectCoordinateToRouteMeasure(
+      coordinate,
+      routeGeometryCoordinates,
+    );
+
+    if (!Number.isFinite(routeCursorMeters) || !Number.isFinite(targetMeasure?.routeMeters)) {
+      return true;
+    }
+
+    return targetMeasure.routeMeters > routeCursorMeters + DEFAULT_ADVANCE_THRESHOLD_METERS;
+  });
   const upcomingCurveCoordinate =
     upcomingCurveStep?.maneuverLocation ||
     upcomingCurveStep?.startLocation ||
@@ -564,7 +747,10 @@ function resolveUpcomingNavigationTarget({
   }
 
   return {
-    instruction: currentStep?.instruction || fallbackInstruction,
+    instruction:
+      currentStep && !isCurveInstruction(currentStep.instruction)
+        ? currentStep.instruction
+        : fallbackInstruction,
     distanceTargetKind: 'destination',
     distanceTargetLabel: 'o destino',
     distanceTargetCoordinate: target,
@@ -623,6 +809,8 @@ export function buildLeafNativeNavigationState({
   remainingDistanceMeters = null,
   totalDistanceMeters = null,
   totalDurationMinutes = null,
+  currentSpeedKmh = null,
+  currentSpeedMetersPerSecond = null,
   offRouteThresholdMeters = DEFAULT_OFF_ROUTE_THRESHOLD_METERS,
 } = {}) {
   const normalizedStatus = String(status || '').trim().toLowerCase();
@@ -683,6 +871,11 @@ export function buildLeafNativeNavigationState({
     current,
     lookAheadCoordinate,
   );
+  const normalizedSpeedKmh = normalizeNavigationSpeedKmh({
+    speedKmh: currentSpeedKmh,
+    speedMetersPerSecond: currentSpeedMetersPerSecond,
+    coordinate: currentCoordinate,
+  });
   const baselineMeters = Number.isFinite(Number(totalDistanceMeters)) && Number(totalDistanceMeters) > 0
     ? Number(totalDistanceMeters)
     : null;
@@ -724,6 +917,11 @@ export function buildLeafNativeNavigationState({
     remainingDurationMinutes,
     etaLabel: formatEtaLabel(remainingDurationMinutes),
     cameraHeadingDegrees,
+    cameraZoom: resolveNavigationCameraZoom(normalizedSpeedKmh),
+    cameraPitch: resolveNavigationCameraPitch(normalizedSpeedKmh),
+    cameraAnchorY: NAVIGATION_CAMERA_ANCHOR_Y,
+    cameraAnimationDurationMs: NAVIGATION_CAMERA_ANIMATION_MS,
+    currentSpeedKmh: normalizedSpeedKmh,
     isOffRoute,
     distanceToRouteMeters,
     offRouteThresholdMeters,
@@ -737,6 +935,8 @@ export default {
   calculateNavigationBearingDegrees,
   calculateDistanceToRouteMeters,
   calculateNavigationDistanceMeters,
+  resolveNavigationCameraPitch,
+  resolveNavigationCameraZoom,
   normalizeNavigationCoordinate,
   normalizeNavigationSteps,
   resolveCurrentNavigationStepIndex,

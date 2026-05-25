@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PrototypePrimaryButton } from '../../../components/prototype/PrototypeUI';
+import { leafButtonMetrics } from '../../../components/prototype/LeafRideUI';
 import robotaxiPrototypeTokens from '../../../components/design-system/robotaxiPrototypeTokens';
 import { fonts } from '../../../theme/runtimeTokens';
 import { usePrototypeMapOcclusion } from '../prototypeMapOcclusion';
@@ -114,10 +115,10 @@ const styles = StyleSheet.create({
     flex: 1
   },
   eyebrow: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 12,
     textTransform: 'uppercase',
-    letterSpacing: 1.4,
+    letterSpacing: 0.8,
     color: '#1A330E'
   },
   subtitle: {
@@ -137,7 +138,7 @@ const styles = StyleSheet.create({
   },
   metaPillText: {
     marginLeft: 6,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 12,
     color: '#365A6D'
   },
@@ -167,7 +168,7 @@ const styles = StyleSheet.create({
     color: color.text.secondary
   },
   infoValue: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
     color: color.text.primary
   },
@@ -178,14 +179,14 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 1,
-    minHeight: 48,
-    borderRadius: 16,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#274A36'
   },
   primaryButton: {
     flex: 1.15,
-    minHeight: 48,
-    borderRadius: 16
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius
   },
   primaryButtonFull: {
     flex: 1

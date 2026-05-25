@@ -288,7 +288,7 @@ const styles = StyleSheet.create({
   summaryCardValue: {
     marginTop: 6,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 24,
     lineHeight: 28,
   },
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
   },
   historyAmountPillText: {
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
     lineHeight: 16,
   },
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
-    letterSpacing: 1.1,
+    letterSpacing: 0.8,
   },
   routeValue: {
     marginTop: 2,

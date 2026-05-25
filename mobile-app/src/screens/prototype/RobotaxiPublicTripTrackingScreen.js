@@ -201,8 +201,8 @@ const styles = StyleSheet.create({
   heroCard: {
     borderRadius: 26,
     borderWidth: 1,
-    borderColor: 'rgba(221,232,225,0.85)',
-    backgroundColor: '#FFFFFF',
+    borderColor: leafRideColors.line,
+    backgroundColor: 'rgba(255,255,255,0.96)',
     paddingHorizontal: 18,
     paddingVertical: 18,
   },

@@ -9,6 +9,7 @@ import {
   PrototypeMenuCloseButton,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
+import { leafRideColors } from '../../components/prototype/LeafRideUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
@@ -73,7 +74,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
     try {
       await sendChatMessage(text);
     } catch (error) {
-      Alert.alert('Nao foi possivel enviar', error?.message || 'Falha ao enviar mensagem.');
+      Alert.alert('Não foi possível enviar', error?.message || 'Falha ao enviar mensagem.');
       setDraft(text);
     }
   }, [draft, sendChatMessage]);
@@ -125,7 +126,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                 }}
                 ListEmptyComponent={
                   <View style={styles.emptyWrap}>
-                    {chatLoading ? <ActivityIndicator size="small" color={color.accent.primary} /> : null}
+                    {chatLoading ? <ActivityIndicator size="small" color={leafRideColors.leaf} /> : null}
                     <Text style={styles.emptyText}>{chatLoading ? 'Carregando mensagens...' : 'Sem mensagens para esta corrida.'}</Text>
                   </View>
                 }
@@ -133,13 +134,13 @@ export default function RobotaxiChatScreen({ navigation, route }) {
 
               <View style={styles.inputRow}>
                 <View style={styles.inputWrap}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={16} color={color.text.muted} />
+                  <Ionicons name="chatbubble-ellipses-outline" size={16} color={leafRideColors.muted} />
                   <TextInput
                     style={styles.inputText}
                     value={draft}
                     onChangeText={setDraft}
                     placeholder="Enviar mensagem..."
-                    placeholderTextColor={color.text.muted}
+                    placeholderTextColor={leafRideColors.muted}
                     editable={!chatSending}
                     returnKeyType="send"
                     onSubmitEditing={handleSend}
@@ -202,22 +203,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   bubbleDriver: {
-    backgroundColor: 'rgba(255,255,255,0.72)',
-    borderColor: 'rgba(17,26,39,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderColor: leafRideColors.line,
   },
   bubbleYou: {
-    backgroundColor: 'rgba(218,232,210,0.5)',
-    borderColor: 'rgba(42,77,29,0.18)',
+    backgroundColor: leafRideColors.bg,
+    borderColor: 'rgba(26,51,14,0.14)',
   },
   bubbleText: {
-    color: color.text.primary,
+    color: leafRideColors.text,
     fontFamily: fonts.Medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },
   bubbleMeta: {
     marginTop: 3,
-    color: color.text.secondary,
+    color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
@@ -228,7 +229,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emptyText: {
-    color: color.text.secondary,
+    color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
@@ -243,7 +244,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 50,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(17,26,39,0.12)',
+    borderBottomColor: leafRideColors.line,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -251,7 +252,7 @@ const styles = StyleSheet.create({
   },
   inputText: {
     flex: 1,
-    color: color.text.primary,
+    color: leafRideColors.text,
     fontFamily: fonts.Regular,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
@@ -263,14 +264,14 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.accent.primary,
+    backgroundColor: leafRideColors.leaf,
   },
   sendButtonDisabled: {
     opacity: 0.72,
   },
   errorText: {
     marginTop: 8,
-    color: color.feedback.danger,
+    color: leafRideColors.dangerText,
     fontFamily: fonts.Medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,

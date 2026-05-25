@@ -74,19 +74,19 @@ function areRoutesEqual(left, right) {
 function buildCurvePoints(origin, destination) {
   const latDiff = destination.latitude - origin.latitude;
   const lonDiff = destination.longitude - origin.longitude;
-  const curveFactor = 0.2;
+  const curveFactor = 0.09;
   const controlOffsetLat = -lonDiff * curveFactor;
   const controlOffsetLon = latDiff * curveFactor;
 
   return [
     origin,
     {
-      latitude: origin.latitude + latDiff * 0.28 + controlOffsetLat,
-      longitude: origin.longitude + lonDiff * 0.28 + controlOffsetLon
+      latitude: origin.latitude + latDiff * 0.34 + controlOffsetLat,
+      longitude: origin.longitude + lonDiff * 0.34 + controlOffsetLon
     },
     {
-      latitude: origin.latitude + latDiff * 0.64 + controlOffsetLat * 0.65,
-      longitude: origin.longitude + lonDiff * 0.64 + controlOffsetLon * 0.65
+      latitude: origin.latitude + latDiff * 0.68 + controlOffsetLat * 0.55,
+      longitude: origin.longitude + lonDiff * 0.68 + controlOffsetLon * 0.55
     },
     destination
   ];

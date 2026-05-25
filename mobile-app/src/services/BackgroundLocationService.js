@@ -163,6 +163,12 @@ class BackgroundLocationService {
                 return;
             }
 
+            if (Device.isDevice === false) {
+                Logger.log('📍 Emulador detectado, pulando tracking nativo de background');
+                this.isTracking = false;
+                return;
+            }
+
             const permissions = await this.checkPermissions();
             if (!permissions.foreground) {
                 throw new Error('Permissão de foreground não concedida');

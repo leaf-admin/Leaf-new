@@ -23,12 +23,12 @@ import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 96;
+const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 418;
 const ISSUE_TYPES = [
   { id: 'trip', label: 'Problema na corrida', icon: 'car-sport-outline' },
   { id: 'driver', label: 'Conduta do motorista', icon: 'person-outline' },
-  { id: 'payment', label: 'Cobranca e pagamento', icon: 'card-outline' }
+  { id: 'payment', label: 'Cobrança e pagamento', icon: 'card-outline' }
 ];
 
 export default function RobotaxiComplainScreen({ navigation, route }) {
@@ -87,7 +87,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
     const normalizedDescription = String(description || '').trim();
 
     if (!normalizedSubject || !normalizedDescription) {
-      Alert.alert('Campos obrigatorios', 'Preencha assunto e descricao para enviar a reclamacao.');
+      Alert.alert('Campos obrigatórios', 'Conte rapidamente o que aconteceu para a gente ajudar melhor.');
       return;
     }
 
@@ -107,9 +107,9 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
       };
       setLocalHistory(previous => [localTicket, ...previous].slice(0, 3));
       setDescription('');
-      Alert.alert('Reclamacao enviada', 'Seu relato foi registrado com sucesso.');
+      Alert.alert('Relato enviado', 'Recebemos seu relato e vamos acompanhar por aqui.');
     } catch (error) {
-      Alert.alert('Nao foi possivel enviar', error?.message || 'Falha ao enviar reclamacao.');
+      Alert.alert('Não conseguimos enviar', error?.message || 'Tente novamente em instantes.');
     }
   }, [description, openSupportTicket, receipt?.route, selectedType.id, subject]);
 
@@ -134,7 +134,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                 <CardHandle />
 
                 <Text style={styles.title}>Relatar problema</Text>
-                <Text style={styles.subtitle}>Abra uma reclamacao com o contexto da viagem.</Text>
+                <Text style={styles.subtitle}>Conte o que aconteceu nesta viagem.</Text>
 
                 <View style={styles.typeRow}>
                   {ISSUE_TYPES.map(item => {
@@ -165,7 +165,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                 </View>
 
                 <View style={[styles.inputBlock, styles.inputBlockLast]}>
-                  <Text style={styles.inputLabel}>Descricao</Text>
+                  <Text style={styles.inputLabel}>Descrição</Text>
                   <TextInput
                     value={description}
                     onChangeText={setDescription}
@@ -178,7 +178,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                 </View>
 
                 <PrototypePrimaryButton
-                  label={supportLoading ? 'Enviando...' : 'Enviar reclamacao'}
+                  label={supportLoading ? 'Enviando...' : 'Enviar relato'}
                   icon="document-text-outline"
                   onPress={supportLoading ? undefined : handleSubmit}
                   style={styles.submitButton}
@@ -219,12 +219,12 @@ const styles = StyleSheet.create({
     width: '100%'
   },
   card: {
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 28,
-    paddingTop: 16,
+    paddingHorizontal: 24,
+    paddingTop: 14,
     paddingBottom: 16
   },
   cardScroll: {
@@ -233,8 +233,8 @@ const styles = StyleSheet.create({
   title: {
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight
+    fontSize: 18,
+    lineHeight: 24
   },
   subtitle: {
     marginTop: 1,
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   },
   typeChip: {
     minHeight: 40,
-    borderRadius: 12,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.secondary,
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   input: {
     marginTop: 4,
     minHeight: 42,
-    borderRadius: 12,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.primary,

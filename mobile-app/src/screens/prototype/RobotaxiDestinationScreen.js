@@ -36,9 +36,8 @@ import {
   LeafButton,
   LeafDivider,
   LeafInfoRow,
-  LeafMetricRow,
   LeafRideSheet,
-  LeafStateHeader,
+  leafButtonMetrics,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
 import WooviPaymentModal from "../../components/payment/WooviPaymentModal";
@@ -68,14 +67,16 @@ const { motion } = robotaxiPrototypeTokens;
 const SEARCH_STEP = "search";
 const PICKUP_STEP = "pickup";
 const QUOTE_STEP = "quote";
+const CONFIRM_STEP = "confirm";
 const SEARCH_RESULT_LIMIT = 3;
 const SEARCH_BOTTOM_OFFSET = 0;
 const SHEET_MIN_BOTTOM_MARGIN = 10;
-const SEARCH_KEYBOARD_CLEARANCE = 64;
-const SEARCH_FALLBACK_HEIGHT = 472;
+const SEARCH_KEYBOARD_CLEARANCE = 8;
+const SEARCH_FALLBACK_HEIGHT = 266;
 const PICKUP_FALLBACK_HEIGHT = 590;
 const PICKUP_FLOATING_CARD_FALLBACK_HEIGHT = 144;
-const QUOTE_FALLBACK_HEIGHT = 312;
+const QUOTE_FALLBACK_HEIGHT = 322;
+const CONFIRM_FALLBACK_HEIGHT = 392;
 const PREFERENCE_CONFIRMATION_TIMEOUT_MS = 5000;
 const PREFERENCE_CONFIRMATION_TICK_MS = 80;
 const ORIGIN_ADDRESS = "Rua das Pastorinhas, Taquara, Rio de Janeiro";
@@ -310,6 +311,34 @@ function normalizePreviewCoordinate(value) {
   return { latitude, longitude };
 }
 
+function normalizeInitialSelectedDestination(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const coordinate =
+    normalizePreviewCoordinate(value.coordinate) ||
+    normalizePreviewCoordinate({
+      latitude: value.latitude ?? value.lat,
+      longitude: value.longitude ?? value.lng,
+    });
+
+  if (!coordinate) {
+    return null;
+  }
+
+  const name = String(value.name || value.title || value.address || "Destino").trim();
+  const address = String(value.address || value.description || name).trim();
+
+  return {
+    ...value,
+    id: value.id || `${name}-${coordinate.latitude}-${coordinate.longitude}`,
+    name,
+    address,
+    coordinate,
+  };
+}
+
 function resolveOption(options, selectedId) {
   return options.find((item) => item.id === selectedId) || options[0];
 }
@@ -387,6 +416,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const routeParams = route?.params || {};
   const initialPickupCoordinate = resolveInitialPickupCoordinate(routeParams);
   const initialPickupAddress = resolveInitialPickupAddress(routeParams);
+  const initialSelectedDestination = useMemo(
+    () => normalizeInitialSelectedDestination(routeParams.initialSelectedDestination),
+    [routeParams.initialSelectedDestination],
+  );
+  const initialSelectedPlan = getPlanIdFromCarName(routeParams.initialSelectedPlan || "");
+  const startAtConfirmation =
+    routeParams.startAtConfirmation === true ||
+    routeParams.startAtConfirmation === "true" ||
+    routeParams.startAtConfirmation === "1";
   const initialPickupAdjustedOnMap =
     routeParams.initialPickupAdjustedOnMap === true ||
     routeParams.initialPickupAdjustedOnMap === "true" ||
@@ -397,7 +435,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const [query, setQuery] = useState("");
   const [step, setStep] = useState(SEARCH_STEP);
   const [selectedDestination, setSelectedDestination] = useState(null);
-  const [selectedPlan, setSelectedPlan] = useState("plus");
+  const [selectedPlan, setSelectedPlan] = useState(initialSelectedPlan || "plus");
   const [isPixModalVisible, setPixModalVisible] = useState(false);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [checkingPlanAvailability, setCheckingPlanAvailability] =
@@ -447,6 +485,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const connectionAutomationTimersRef = useRef([]);
   const latestRidePreferencesRef = useRef(null);
   const pendingPaymentConfirmationRef = useRef(null);
+  const initialSelectedDestinationHydratedRef = useRef(false);
   const autoStartVoiceRequested =
     route?.params?.autoStartVoice === true ||
     route?.params?.autoStartVoice === "true" ||
@@ -1002,6 +1041,37 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     pickupAdjustedOnMap && pickupAddress
       ? pickupAddress
       : resolveMeaningfulAddress(pickupAddress, originAddress) || originAddress;
+
+  useEffect(() => {
+    if (
+      initialSelectedDestinationHydratedRef.current ||
+      isExtensionFlow ||
+      !initialSelectedDestination
+    ) {
+      return;
+    }
+
+    initialSelectedDestinationHydratedRef.current = true;
+    setSelectedDestination(initialSelectedDestination);
+    setQuery(initialSelectedDestination.name || initialSelectedDestination.address || "");
+    setPickupCoordinate(resolvedPickupCoordinate);
+    setPickupAddress(resolvedPickupAddress);
+    setAvailabilityNotice("");
+    setPlanAvailabilityById({});
+    if (initialSelectedPlan) {
+      setSelectedPlan(initialSelectedPlan);
+    }
+    setStep(startAtConfirmation ? CONFIRM_STEP : QUOTE_STEP);
+    setSheetHeight(startAtConfirmation ? CONFIRM_FALLBACK_HEIGHT : QUOTE_FALLBACK_HEIGHT);
+  }, [
+    initialSelectedPlan,
+    initialSelectedDestination,
+    isExtensionFlow,
+    resolvedPickupAddress,
+    resolvedPickupCoordinate,
+    startAtConfirmation,
+  ]);
+
   const pickupLocationPayload = useMemo(
     () => buildPickupLocationPayload(resolvedPickupCoordinate, resolvedPickupAddress),
     [
@@ -1012,6 +1082,26 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   );
   const destinationCoordinate =
     destinationInfo?.coordinate || selectedDestination?.coordinate || null;
+  const destinationRoutePayload = useMemo(() => {
+    if (!destinationInfo && !destinationCoordinate) {
+      return null;
+    }
+
+    return {
+      name: destinationInfo?.name || destinationInfo?.address || "Destino",
+      address:
+        destinationInfo?.address ||
+        destinationInfo?.description ||
+        destinationInfo?.name ||
+        "Destino",
+      coordinate: destinationCoordinate || null,
+    };
+  }, [
+    destinationCoordinate,
+    destinationInfo?.address,
+    destinationInfo?.description,
+    destinationInfo?.name,
+  ]);
   const routeGuardState = useMemo(() => {
     if (!destinationInfo) {
       return { blocked: false, message: "" };
@@ -1247,10 +1337,72 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     planAvailabilityById?.[selectedPlanData?.id] || null;
   const selectedPlanUnavailable =
     hasCoverageBlockedPlan || selectedPlanAvailability?.available === false;
+  const categoryOptions = useMemo(() => {
+    const rawPickupEta = Number.parseInt(destinationInfo?.eta || "4", 10);
+    const basePickupEta = Number.isFinite(rawPickupEta)
+      ? Math.max(3, rawPickupEta)
+      : 4;
+
+    return visiblePlans.map((plan, index) => {
+      const planAvailability = planAvailabilityById?.[plan.id] || null;
+      const planFare =
+        plan.id === selectedPlan &&
+        selectedPlanFare != null &&
+        Number.isFinite(Number(selectedPlanFare))
+          ? Number(selectedPlanFare)
+          : Number(plan.value);
+      const pickupEta =
+        plan.id === "elite"
+          ? basePickupEta + 2
+          : plan.id === "moto"
+            ? Math.max(2, basePickupEta - 1)
+            : basePickupEta + index;
+
+      return {
+        ...plan,
+        categoryLabel: String(plan.title || "")
+          .replace(/^Leaf\s+/i, "")
+          .trim() || plan.title,
+        categoryDescription:
+          plan.id === "elite"
+            ? "Mais conforto para sua viagem"
+            : plan.id === "moto"
+              ? "Mais rápido para ir sozinho"
+              : "Confortável e acessível",
+        pickupEtaLabel: `${pickupEta} min`,
+        priceLabel: Number.isFinite(planFare) ? formatCurrency(planFare) : "--",
+        arrivalLabel: arrivalTime,
+        unavailable: routeGuardBlocked || planAvailability?.available === false,
+        unavailableMessage: normalizeCoverageMessage(
+          routeGuardBlocked
+            ? routeGuardMessage
+            : planAvailability?.message || "",
+        ),
+      };
+    });
+  }, [
+    arrivalTime,
+    destinationInfo?.eta,
+    planAvailabilityById,
+    routeGuardBlocked,
+    routeGuardMessage,
+    selectedPlan,
+    selectedPlanFare,
+    visiblePlans,
+  ]);
+  const tariffStatusLabel = pricingQuoteLoading
+    ? "Atualizando tarifa"
+    : selectedDynamicNotice
+      ? "Tarifa alta"
+      : "Tarifa normal";
+  const selectedCategoryOption =
+    categoryOptions.find((item) => item.id === selectedPlan) ||
+    categoryOptions[0] ||
+    null;
 
   useEffect(() => {
     if (
-      (step !== QUOTE_STEP && step !== PICKUP_STEP) ||
+      (step !== QUOTE_STEP && step !== CONFIRM_STEP && step !== PICKUP_STEP) ||
       isExtensionFlow ||
       routeGuardBlocked ||
       !canRequestRide ||
@@ -1383,7 +1535,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     return pickupMapTopOcclusion + visibleMapHeight / 2 - 34;
   }, [insets.bottom, pickupMapTopOcclusion, windowHeight]);
   const searchSurfaceMaxHeight = Math.max(
-    420,
+    SEARCH_FALLBACK_HEIGHT,
     windowHeight - insets.top - effectiveSheetBottomOffset - 24,
   );
   const mapOccludedBottom =
@@ -1513,13 +1665,35 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     }
   }, [clearFlowPreview, isExtensionFlow]);
 
+  const handleBackToCategories = useCallback(() => {
+    setStep(QUOTE_STEP);
+    setSheetHeight(QUOTE_FALLBACK_HEIGHT);
+    setAvailabilityNotice("");
+  }, []);
+
+  const handleSelectCategory = useCallback(
+    (plan) => {
+      if (!plan || plan.unavailable) {
+        if (plan?.unavailableMessage) {
+          setAvailabilityNotice(plan.unavailableMessage);
+        }
+        return;
+      }
+
+      setSelectedPlan(plan.id);
+      setAvailabilityNotice("");
+      setSheetHeight(QUOTE_FALLBACK_HEIGHT);
+    },
+    [],
+  );
+
   useEffect(() => {
     if (step === PICKUP_STEP) {
       clearPrototypeMapRoute();
       return undefined;
     }
 
-    if (step !== QUOTE_STEP) {
+    if (step !== QUOTE_STEP && step !== CONFIRM_STEP) {
       return undefined;
     }
 
@@ -1552,7 +1726,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
   useEffect(() => {
     if (
-      (step !== QUOTE_STEP && step !== PICKUP_STEP) ||
+      (step !== QUOTE_STEP && step !== CONFIRM_STEP && step !== PICKUP_STEP) ||
       visiblePlans.length === 0
     ) {
       return;
@@ -1676,7 +1850,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
   useEffect(() => {
     if (
-      (step !== QUOTE_STEP && step !== PICKUP_STEP) ||
+      (step !== QUOTE_STEP && step !== CONFIRM_STEP && step !== PICKUP_STEP) ||
       visiblePlans.length === 0
     ) {
       return;
@@ -1874,7 +2048,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [submittingRide]);
 
   useEffect(() => {
-    if (step === QUOTE_STEP || step === PICKUP_STEP) {
+    if (step === QUOTE_STEP || step === CONFIRM_STEP || step === PICKUP_STEP) {
       setAvailabilityNotice("");
     }
   }, [selectedPlan, selectedDestination, step]);
@@ -1894,9 +2068,17 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
     lastAutoRouteRef.current = routeKey;
     const commonParams = {
-      destination: destinationInfo?.name || "Destino",
+      destination: destinationRoutePayload?.name || destinationInfo?.name || "Destino",
       destinationAddress:
-        destinationInfo?.address || destinationInfo?.name || "Destino",
+        destinationRoutePayload?.address ||
+        destinationInfo?.address ||
+        destinationInfo?.name ||
+        "Destino",
+      destinationCoordinate: destinationRoutePayload?.coordinate || null,
+      initialSelectedDestination: destinationRoutePayload,
+      initialSelectedPlan: selectedPlan,
+      selectedFare: selectedPlanFare,
+      fare: selectedPlanFare,
       originAddress: resolvedPickupAddress,
       vehicle: selectedPlanData.title || selectedVehicle || "Leaf Plus",
     };
@@ -1919,12 +2101,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     bookingStatus,
     destinationInfo?.address,
     destinationInfo?.name,
+    destinationRoutePayload,
     driverInfo?.name,
     isExtensionFlow,
     navigation,
     resolvedPickupAddress,
     passengerAutoRoute,
+    selectedPlan,
     selectedPlanData.title,
+    selectedPlanFare,
     selectedVehicle,
   ]);
 
@@ -1982,9 +2167,17 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
         pendingPaymentConfirmationRef.current = null;
         navigation.replace("RobotaxiPrototypePaymentSuccess", {
-          destination: destinationInfo?.name || "Destino",
+          destination: destinationRoutePayload?.name || destinationInfo?.name || "Destino",
           destinationAddress:
-            destinationInfo?.address || destinationInfo?.name || "Destino",
+            destinationRoutePayload?.address ||
+            destinationInfo?.address ||
+            destinationInfo?.name ||
+            "Destino",
+          destinationCoordinate: destinationRoutePayload?.coordinate || null,
+          initialSelectedDestination: destinationRoutePayload,
+          initialSelectedPlan: selectedPlan,
+          selectedFare: selectedPlanFare,
+          fare: selectedPlanFare,
           originAddress: resolvedPickupAddress,
           vehicle: selectedPlanData.title,
           autoAdvance: true,
@@ -2002,6 +2195,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             initialPickupCoordinate: resolvedPickupCoordinate,
             initialPickupAddress: resolvedPickupAddress,
             initialPickupAdjustedOnMap: pickupAdjustedOnMap,
+            initialSelectedDestination: destinationRoutePayload,
+            initialSelectedPlan: selectedPlan,
+            selectedFare: selectedPlanFare,
           },
         });
       } finally {
@@ -2014,6 +2210,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       destinationCoordinate,
       destinationInfo?.address,
       destinationInfo?.name,
+      destinationRoutePayload,
       navigation,
       pickupAdjustedOnMap,
       pickupLocationPayload,
@@ -2022,6 +2219,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       resolvedPickupCoordinate,
       routeGuardBlocked,
       routeGuardMessage,
+      selectedPlan,
       selectedPlanData.title,
       selectedPlanFare,
       submittingRide,
@@ -2157,7 +2355,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   useEffect(() => {
     if (
       !qaAutoOpenPix ||
-      (step !== QUOTE_STEP && step !== PICKUP_STEP) ||
+      (step !== QUOTE_STEP && step !== CONFIRM_STEP && step !== PICKUP_STEP) ||
       !canRequestRide ||
       checkingAvailability ||
       checkingPlanAvailability ||
@@ -2329,13 +2527,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           title={effectiveConnectionIndicatorModel?.title}
           message={effectiveConnectionIndicatorModel?.message}
         />
-        {step === QUOTE_STEP ? (
-          <LeafStateHeader
-            insetsTop={insets.top}
-            title="Confirmar corrida"
-            subtitle="Revise valor, tempo e pagamento antes de pedir."
-          />
-        ) : null}
         {step === PICKUP_STEP ? (
           <View
             pointerEvents="none"
@@ -2344,7 +2535,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             accessibilityLabel="Marcador do ponto de embarque"
           >
             <View style={styles.pickupMapMarkerPin}>
-              <Ionicons name="location-sharp" size={28} color="#174A2B" />
+              <Ionicons name="location-sharp" size={28} color={leafRideColors.leaf} />
             </View>
             <View style={styles.pickupMapMarkerStem} />
           </View>
@@ -2369,7 +2560,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   testID="passenger-pickup-back-button"
                   accessibilityLabel="Voltar para buscar destino"
                 >
-                  <Ionicons name="chevron-back" size={19} color="#102018" />
+                  <Ionicons name="chevron-back" size={19} color={leafRideColors.text} />
                 </TouchableOpacity>
 
                 <View style={styles.pickupFloatingCopy}>
@@ -2495,9 +2686,31 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               ]}
             >
               <View style={styles.sheetHandle} />
-              <Text style={styles.searchTitle}>Destino</Text>
+              <View style={styles.searchHeaderRow}>
+                <View style={styles.searchHeaderCopy}>
+                  <Text style={styles.searchTitle}>Para onde vamos?</Text>
+                  <Text style={styles.searchSubtitle}>
+                    Busque um endereço ou escolha um destino recente.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  activeOpacity={0.82}
+                  onPress={handleDismiss}
+                  style={styles.searchCloseButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Fechar busca de destino"
+                >
+                  <Ionicons name="close" size={17} color={leafRideColors.text} />
+                </TouchableOpacity>
+              </View>
 
               <View style={styles.searchInputShell}>
+                <Ionicons
+                  name="search-outline"
+                  size={17}
+                  color={leafRideColors.secondary}
+                  style={styles.searchInputIcon}
+                />
                 <TextInput
                   ref={destinationInputRef}
                   value={query}
@@ -2513,10 +2726,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   activeOpacity={0.86}
                   onPress={handleToggleVoiceSearch}
                   disabled={voiceStarting}
-                  style={styles.hiddenMicButton}
+                  style={styles.searchMicButton}
                   testID="passenger-destination-search-mic"
                   accessibilityLabel="Ditar destino por voz"
-                />
+                >
+                  <Ionicons
+                    name={voiceListening ? "mic" : "mic-outline"}
+                    size={18}
+                    color={voiceListening ? leafRideColors.leaf : leafRideColors.secondary}
+                  />
+                </TouchableOpacity>
               </View>
 
               {voiceListening || voiceError ? (
@@ -2574,11 +2793,20 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                       </Text>
                     </View>
                   ) : (
-                    <Text style={styles.emptyText}>
-                      {query.trim()
-                        ? "Nenhum destino encontrado."
-                        : "Nenhum destino recente."}
-                    </Text>
+                    <View style={styles.emptyStateWrap}>
+                      <View style={styles.emptyStateIcon}>
+                        <Ionicons
+                          name={query.trim() ? "search-outline" : "time-outline"}
+                          size={18}
+                          color={leafRideColors.secondary}
+                        />
+                      </View>
+                      <Text style={styles.emptyText}>
+                        {query.trim()
+                          ? "Nenhum destino encontrado."
+                          : "Sem destinos recentes por aqui."}
+                      </Text>
+                    </View>
                   )
                 }
               />
@@ -2621,7 +2849,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
                 <View style={styles.pickupPointPanel}>
                   <View style={styles.pickupPointIcon}>
-                    <Ionicons name="navigate-outline" size={18} color="#174A2B" />
+                    <Ionicons name="navigate-outline" size={18} color={leafRideColors.leaf} />
                   </View>
                   <View style={styles.pickupPointCopy}>
                     <Text style={styles.pickupPointLabel}>Local de partida</Text>
@@ -2652,7 +2880,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
                 <View style={styles.comfortIndicator}>
                   <View style={styles.comfortIndicatorIcon}>
-                    <Ionicons name="sparkles-outline" size={17} color="#174A2B" />
+                    <Ionicons name="sparkles-outline" size={17} color={leafRideColors.leaf} />
                   </View>
                   <View style={styles.comfortIndicatorCopy}>
                     <Text style={styles.comfortIndicatorTitle}>Leaf Comfort</Text>
@@ -2848,20 +3076,235 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 </View>
               </LeafRideSheet>
             </Animated.View>
-          ) : (
+          ) : step === QUOTE_STEP ? (
             <Animated.View
               key={QUOTE_STEP}
               entering={FadeIn.duration(motion.timing.standard).easing(
                 stepEasing,
               )}
-              style={styles.quoteStack}
+              style={styles.categoryStack}
               onLayout={handleCardLayout}
             >
-              <LeafRideSheet style={styles.quoteCard}>
+              <LeafRideSheet style={styles.categoryCard}>
+                <View style={styles.categoryHandle} />
+                <View style={styles.categoryTopRow}>
+                  <Text style={styles.categoryEyebrow}>Escolha a categoria</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.84}
+                    onPress={handleDismiss}
+                    style={styles.categoryCloseButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Fechar categorias"
+                  >
+                    <Ionicons name="close" size={15} color={leafRideColors.text} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.categoryTabs}>
+                  {categoryOptions.map((plan) => {
+                    const selected = plan.id === selectedPlan;
+                    const iconName =
+                      plan.id === "elite"
+                        ? "diamond-outline"
+                        : plan.id === "moto"
+                          ? "bicycle-outline"
+                          : "leaf-outline";
+                    return (
+                      <TouchableOpacity
+                        key={plan.id}
+                        activeOpacity={plan.unavailable ? 1 : 0.82}
+                        onPress={() => handleSelectCategory(plan)}
+                        style={[
+                          styles.categoryTab,
+                          selected && styles.categoryTabActive,
+                          plan.unavailable && styles.categoryTabDisabled,
+                        ]}
+                        testID={`passenger-destination-category-${plan.id}`}
+                        accessibilityLabel={`Categoria ${plan.categoryLabel}, embarque em ${plan.pickupEtaLabel}, ${plan.priceLabel}`}
+                        accessibilityState={{ selected, disabled: plan.unavailable }}
+                      >
+                        <Ionicons
+                          name={iconName}
+                          size={15}
+                          color={selected ? leafRideColors.text : leafRideColors.secondary}
+                        />
+                        <Text
+                          style={[
+                            styles.categoryTabText,
+                            selected && styles.categoryTabTextActive,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {plan.categoryLabel}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <LeafDivider style={styles.categoryDivider} />
+
+                <View style={styles.categorySelectedRow}>
+                  <View style={styles.categorySelectedLeft}>
+                    <View style={styles.categorySelectedIcon}>
+                      <Ionicons
+                        name={
+                          selectedCategoryOption?.id === "elite"
+                            ? "diamond-outline"
+                            : selectedCategoryOption?.id === "moto"
+                              ? "bicycle-outline"
+                              : "leaf-outline"
+                        }
+                        size={17}
+                        color={leafRideColors.leaf}
+                      />
+                    </View>
+                    <View style={styles.categorySelectedCopy}>
+                      <Text style={styles.categorySelectedTitle} numberOfLines={1}>
+                        {selectedCategoryOption?.categoryLabel || "Plus"}
+                      </Text>
+                      <Text style={styles.categorySelectedSubtitle} numberOfLines={1}>
+                        {selectedCategoryOption?.categoryDescription || "Confortável e acessível"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.categorySelectedPriceWrap}>
+                    <Text style={styles.categorySelectedPrice} numberOfLines={1}>
+                      {selectedCategoryOption?.priceLabel || "--"}
+                    </Text>
+                    <Text style={styles.categorySelectedPriceCaption}>
+                      valor da corrida
+                    </Text>
+                  </View>
+                </View>
+
+                <LeafDivider style={styles.categoryDividerCompact} />
+
+                <View style={styles.categoryMetaRow}>
+                  <View style={styles.categoryMetaItem}>
+                    <Text style={styles.categoryMetaLabel}>Tempo estimado</Text>
+                    <View style={styles.categoryMetaValueRow}>
+                      <Ionicons name="time-outline" size={13} color={leafRideColors.text} />
+                      <Text style={styles.categoryMetaValue}>
+                        {selectedCategoryOption?.pickupEtaLabel || "--"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={[styles.categoryMetaItem, styles.categoryMetaItemRight]}>
+                    <Text style={styles.categoryMetaLabel}>Horário de chegada</Text>
+                    <View style={styles.categoryMetaValueRow}>
+                      <Ionicons name="location-outline" size={13} color={leafRideColors.text} />
+                      <Text style={styles.categoryMetaValue}>
+                        {selectedCategoryOption?.arrivalLabel || arrivalTime}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.categoryStatusRow}>
+                  <View
+                    style={[
+                      styles.categoryStatusPill,
+                      selectedDynamicNotice && styles.categoryStatusPillHigh,
+                    ]}
+                    testID="passenger-destination-dynamic-pricing-badge"
+                    accessibilityLabel={tariffStatusLabel}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryStatusText,
+                        selectedDynamicNotice && styles.categoryStatusTextHigh,
+                      ]}
+                    >
+                      {tariffStatusLabel}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    activeOpacity={0.84}
+                    onPress={() => setLeafDelasEnabled((current) => !current)}
+                    style={[
+                      styles.categoryStatusPill,
+                      leafDelasEnabled && styles.categoryLeafDelasPillActive,
+                    ]}
+                    testID="passenger-destination-leaf-delas-toggle"
+                    accessibilityRole="switch"
+                    accessibilityLabel="Leaf Delas"
+                    accessibilityState={{ checked: leafDelasEnabled }}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryStatusText,
+                        leafDelasEnabled && styles.categoryLeafDelasTextActive,
+                      ]}
+                    >
+                      {leafDelasEnabled ? "Leaf Delas ativa" : "Leaf Delas"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {availabilityNotice ? (
+                  <Text
+                    style={styles.availabilityNotice}
+                    testID="passenger-destination-availability-notice"
+                    accessibilityLabel="Aviso de disponibilidade da categoria"
+                  >
+                    {availabilityNotice}
+                  </Text>
+                ) : null}
+
+                <LeafButton
+                  label={
+                    isExtensionFlow
+                      ? submittingRide
+                        ? "Solicitando alteração..."
+                        : "Confirmar"
+                      : checkingPlanAvailability
+                        ? "Verificando..."
+                      : checkingAvailability
+                        ? "Buscando motorista..."
+                      : routeGuardBlocked || hasCoverageBlockedPlan || selectedPlanUnavailable
+                          ? "Indisponível"
+                        : "Confirmar"
+                  }
+                  tone="primary"
+                  style={styles.categoryConfirmButton}
+                  onPress={
+                    checkingAvailability ||
+                    checkingPlanAvailability ||
+                    submittingRide ||
+                    routeGuardBlocked ||
+                    hasCoverageBlockedPlan ||
+                    selectedPlanUnavailable
+                      ? undefined
+                      : handleOpenPixModal
+                  }
+                  testID="passenger-destination-confirm-button"
+                  accessibilityLabel="Confirmar categoria"
+                />
+
+                <Text style={styles.hiddenText}>{resolvedPickupAddress}</Text>
+                <Text style={styles.hiddenText}>{destinationInfo?.name || "Destino"}</Text>
+              </LeafRideSheet>
+            </Animated.View>
+          ) : (
+            <Animated.View
+              key={CONFIRM_STEP}
+              entering={FadeIn.duration(motion.timing.standard).easing(
+                stepEasing,
+              )}
+              style={styles.confirmStack}
+              onLayout={handleCardLayout}
+            >
+              <LeafRideSheet style={styles.confirmCard}>
                 <View style={styles.sheetHandle} />
-                <View style={styles.quoteHeader}>
-                  <Text style={styles.quoteTitle}>Sua corrida</Text>
-                  <Text style={styles.quotePrice} numberOfLines={1}>
+                <View style={styles.confirmHeader}>
+                  <View style={styles.confirmHeaderCopy}>
+                    <Text style={styles.confirmEyebrow}>Categoria escolhida</Text>
+                    <Text style={styles.confirmTitle} numberOfLines={1}>
+                      {selectedPlanData?.title || "Leaf"}
+                    </Text>
+                  </View>
+                  <Text style={styles.confirmPrice} numberOfLines={1}>
                     {selectedPlanFare != null &&
                     Number.isFinite(Number(selectedPlanFare))
                       ? formatCurrency(selectedPlanFare)
@@ -2869,82 +3312,26 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   </Text>
                 </View>
 
-                <LeafDivider style={styles.quoteDivider} />
-
-                <LeafMetricRow
-                  metrics={[
-                    { value: durationLabel, label: "buscar" },
-                    { value: distanceLabel, label: "distancia" },
-                    {
-                      value: selectedPlanFare != null &&
-                      Number.isFinite(Number(selectedPlanFare))
-                        ? formatCurrency(
-                            Number(selectedPlanFare) > 50
-                              ? Number(selectedPlanFare) * 0.03
-                              : Number(selectedPlanFare) > 25
-                                ? 1.49
-                                : 0.99,
-                          )
-                        : "--",
-                      label: "taxa Leaf",
-                    },
-                  ]}
-                />
-
-                {selectedDynamicNotice ? (
-                  <View
-                    style={styles.dynamicPricingBadge}
-                    testID="passenger-destination-dynamic-pricing-badge"
-                    accessibilityLabel="Aviso de tarifa dinâmica"
-                  >
-                    <Text style={styles.dynamicPricingBadgeTitle}>
-                      Tarifas mais altas agora
+                <View style={styles.confirmMetricRow}>
+                  <View style={styles.confirmMetric}>
+                    <Text style={styles.confirmMetricValue}>
+                      {selectedCategoryOption?.pickupEtaLabel || "--"}
                     </Text>
-                    <Text style={styles.dynamicPricingBadgeText}>
-                      {selectedDynamicNotice}
+                    <Text style={styles.confirmMetricLabel}>embarque</Text>
+                  </View>
+                  <View style={styles.confirmMetric}>
+                    <Text style={styles.confirmMetricValue}>{arrivalTime}</Text>
+                    <Text style={styles.confirmMetricLabel}>chegada</Text>
+                  </View>
+                  <View style={styles.confirmMetric}>
+                    <Text style={styles.confirmMetricValue}>
+                      {tariffStatusLabel}
                     </Text>
+                    <Text style={styles.confirmMetricLabel}>tarifa</Text>
                   </View>
-                ) : pricingQuoteLoading ? (
-                  <Text style={styles.pricingQuoteStatus}>
-                    Atualizando tarifa...
-                  </Text>
-                ) : pricingQuoteError ? (
-                  <Text style={styles.pricingQuoteStatus}>
-                    Tarifa atualizada no pagamento.
-                  </Text>
-                ) : null}
+                </View>
 
-                <TouchableOpacity
-                  activeOpacity={0.86}
-                  style={styles.leafDelasRow}
-                  onPress={() => setLeafDelasEnabled((current) => !current)}
-                  testID="passenger-destination-leaf-delas-toggle"
-                  accessibilityRole="switch"
-                  accessibilityLabel="Leaf Delas"
-                  accessibilityState={{ checked: leafDelasEnabled }}
-                >
-                  <View style={styles.leafDelasCopy}>
-                    <Text style={styles.leafDelasTitle}>Leaf Delas</Text>
-                    <Text style={styles.leafDelasSubtitle}>
-                      Motorista mulher, quando disponível.
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.leafDelasSwitch,
-                      leafDelasEnabled && styles.leafDelasSwitchActive,
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.leafDelasSwitchKnob,
-                        leafDelasEnabled && styles.leafDelasSwitchKnobActive,
-                      ]}
-                    />
-                  </View>
-                </TouchableOpacity>
-
-                <LeafDivider style={styles.quoteDividerLarge} />
+                <LeafDivider style={styles.confirmDivider} />
 
                 <LeafInfoRow
                   marker="$"
@@ -2954,9 +3341,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   markerTone="leaf"
                 />
                 <SecurePaymentBadge style={styles.quoteSecurePaymentBadge} />
-
-                <Text style={styles.hiddenText}>{resolvedPickupAddress}</Text>
-                <Text style={styles.hiddenText}>{destinationInfo?.name || "Destino"}</Text>
 
                 {selectedPlanUnavailable || routeGuardBlocked ? (
                   <View style={styles.unavailableWrap}>
@@ -2993,9 +3377,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
                 <View style={styles.quoteActionsRow}>
                   <LeafButton
-                    label="Editar"
+                    label="Trocar"
                     tone="ghost"
-                    onPress={handleBackToSearch}
+                    onPress={handleBackToCategories}
                     style={styles.editButton}
                   />
                   <LeafButton
@@ -3244,51 +3628,85 @@ const styles = StyleSheet.create({
   },
   searchSurface: {
     minHeight: SEARCH_FALLBACK_HEIGHT,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     backgroundColor: leafRideColors.sheet,
-    paddingHorizontal: 28,
-    paddingTop: 16,
-    paddingBottom: 24,
+    paddingHorizontal: 22,
+    paddingTop: 10,
+    paddingBottom: 14,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: -14 },
     shadowOpacity: 0.08,
     shadowRadius: 30,
     elevation: 12,
   },
+  searchHeaderRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  searchHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  searchCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8F6F1",
+    borderWidth: 1,
+    borderColor: "rgba(39,74,54,0.08)",
+  },
   searchTitle: {
-    marginTop: 31,
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 20,
+    lineHeight: 25,
+  },
+  searchSubtitle: {
+    marginTop: 3,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11.5,
+    lineHeight: 15,
   },
   searchInputShell: {
-    marginTop: 24,
-    height: 52,
-    borderRadius: 26,
+    marginTop: 14,
+    height: 46,
+    borderRadius: 23,
     borderWidth: 1,
-    borderColor: "#E7DFD5",
+    borderColor: "#E9E2D8",
     backgroundColor: leafRideColors.field,
     justifyContent: "center",
-    paddingLeft: 19,
-    paddingRight: 44,
+    paddingLeft: 42,
+    paddingRight: 48,
+  },
+  searchInputIcon: {
+    position: "absolute",
+    left: 16,
   },
   searchInput: {
     color: leafRideColors.text,
     fontFamily: fonts.Medium,
-    fontSize: 14,
+    fontSize: 13.5,
     lineHeight: 18,
     paddingVertical: 0,
   },
-  hiddenMicButton: {
+  searchMicButton: {
     position: "absolute",
-    right: 8,
-    width: 1,
-    height: 1,
-    opacity: 0,
+    right: 6,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(246,250,247,0.9)",
   },
   voiceHint: {
     marginTop: 8,
@@ -3305,29 +3723,31 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   list: {
-    marginTop: 24,
-    maxHeight: SEARCH_RESULT_LIMIT * 58 + 8,
+    marginTop: 12,
+    maxHeight: SEARCH_RESULT_LIMIT * 54 + 6,
   },
   listContent: {
     paddingBottom: 2,
   },
   destinationRow: {
-    minHeight: 58,
+    minHeight: 54,
     flexDirection: "row",
     alignItems: "center",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#DFE8E1",
+    borderBottomColor: "#E9E2D8",
   },
   destinationDot: {
-    width: 20,
-    height: 20,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(246,250,247,0.94)",
     alignItems: "center",
     justifyContent: "center",
   },
   destinationTextWrap: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 22,
+    marginLeft: 14,
   },
   destinationName: {
     color: leafRideColors.text,
@@ -3354,10 +3774,25 @@ const styles = StyleSheet.create({
   emptyText: {
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 12,
+    lineHeight: 16,
     textAlign: "center",
-    paddingVertical: 14,
+  },
+  emptyStateWrap: {
+    minHeight: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  emptyStateIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(246,250,247,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(39,74,54,0.08)",
   },
   searchingWrap: {
     minHeight: 44,
@@ -3374,8 +3809,8 @@ const styles = StyleSheet.create({
   },
   searchConfirmButton: {
     marginTop: 20,
-    height: 46,
-    borderRadius: 23,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   pickupMapMarker: {
     position: "absolute",
@@ -3394,7 +3829,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.92)",
     borderWidth: 1,
     borderColor: "rgba(23,74,43,0.12)",
-    shadowColor: "#102018",
+    shadowColor: "#000000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.16,
     shadowRadius: 18,
@@ -3405,7 +3840,7 @@ const styles = StyleSheet.create({
     height: 20,
     marginTop: -3,
     borderRadius: 999,
-    backgroundColor: "#174A2B",
+    backgroundColor: leafRideColors.leaf,
   },
   pickupFloatingLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -3423,7 +3858,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 14,
     paddingBottom: 13,
-    shadowColor: "#102018",
+    shadowColor: "#000000",
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.14,
     shadowRadius: 24,
@@ -3473,7 +3908,7 @@ const styles = StyleSheet.create({
   },
   pickupFloatingMeta: {
     marginTop: 5,
-    color: "#174A2B",
+    color: leafRideColors.leaf,
     fontFamily: fonts.SemiBold,
     fontSize: 12,
     lineHeight: 16,
@@ -3490,7 +3925,7 @@ const styles = StyleSheet.create({
   },
   pickupFloatingDynamicText: {
     marginTop: 6,
-    color: "#174A2B",
+    color: leafRideColors.leaf,
     fontFamily: fonts.Medium,
     fontSize: 10.5,
     lineHeight: 14,
@@ -3502,8 +3937,8 @@ const styles = StyleSheet.create({
   },
   pickupFloatingSecondaryButton: {
     minWidth: 78,
-    height: 42,
-    borderRadius: 21,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(242,247,244,0.96)",
@@ -3511,18 +3946,18 @@ const styles = StyleSheet.create({
     borderColor: "rgba(39,74,54,0.1)",
   },
   pickupFloatingSecondaryButtonText: {
-    color: "#174A2B",
+    color: leafRideColors.leaf,
     fontFamily: fonts.SemiBold,
     fontSize: 12,
     lineHeight: 16,
   },
   pickupFloatingPrimaryButton: {
     flex: 1,
-    height: 42,
-    borderRadius: 21,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#174A2B",
+    backgroundColor: leafRideColors.leaf,
   },
   pickupFloatingPrimaryButtonDisabled: {
     backgroundColor: "#9BAB9F",
@@ -3562,7 +3997,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 14,
     textTransform: "uppercase",
-    letterSpacing: 1.2,
+    letterSpacing: 0.8,
   },
   pickupTitle: {
     marginTop: 4,
@@ -3590,8 +4025,8 @@ const styles = StyleSheet.create({
     minHeight: 92,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: "rgba(39,74,54,0.1)",
-    backgroundColor: "rgba(246,250,247,0.84)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F8F6F1",
     paddingHorizontal: 14,
     paddingVertical: 13,
     flexDirection: "row",
@@ -3604,7 +4039,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(34,139,84,0.11)",
+    backgroundColor: "#F1F5EE",
   },
   pickupPointCopy: {
     flex: 1,
@@ -3616,7 +4051,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 14,
     textTransform: "uppercase",
-    letterSpacing: 1.1,
+    letterSpacing: 0.8,
   },
   pickupPointAddress: {
     marginTop: 3,
@@ -3643,7 +4078,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(39,74,54,0.12)",
   },
   pickupResetButtonText: {
-    color: "#174A2B",
+    color: leafRideColors.leaf,
     fontFamily: fonts.SemiBold,
     fontSize: 11,
     lineHeight: 15,
@@ -3652,8 +4087,8 @@ const styles = StyleSheet.create({
     marginTop: 14,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(23,74,43,0.12)",
-    backgroundColor: "rgba(241,248,244,0.88)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F8F6F1",
     paddingHorizontal: 13,
     paddingVertical: 10,
     flexDirection: "row",
@@ -3666,7 +4101,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(34,139,84,0.12)",
+    backgroundColor: "#F1F5EE",
   },
   comfortIndicatorCopy: {
     flex: 1,
@@ -3707,12 +4142,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(39,74,54,0.1)",
+    borderColor: "#E9E2D8",
     backgroundColor: "rgba(255,255,255,0.82)",
   },
   preferenceChipSelected: {
-    backgroundColor: "#174A2B",
-    borderColor: "#174A2B",
+    backgroundColor: leafRideColors.leaf,
+    borderColor: leafRideColors.leaf,
   },
   preferenceChipText: {
     color: leafRideColors.text,
@@ -3723,13 +4158,301 @@ const styles = StyleSheet.create({
   preferenceChipTextSelected: {
     color: "#FFFFFF",
   },
+  categoryStack: {
+    minHeight: QUOTE_FALLBACK_HEIGHT,
+  },
+  categoryCard: {
+    minHeight: QUOTE_FALLBACK_HEIGHT,
+    marginHorizontal: 24,
+    borderRadius: 28,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 18,
+  },
+  categoryHandle: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(23,20,18,0.18)",
+    marginBottom: 12,
+  },
+  categoryTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  categoryEyebrow: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 15,
+    letterSpacing: 0,
+    textTransform: "uppercase",
+  },
+  categoryCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8F6F1",
+    borderWidth: 1,
+    borderColor: "#E9E2D8",
+  },
+  categoryTabs: {
+    marginTop: 14,
+    minHeight: 55,
+    flexDirection: "row",
+    alignItems: "flex-end",
+  },
+  categoryTab: {
+    flex: 1,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E9E2D8",
+  },
+  categoryTabActive: {
+    borderBottomWidth: 2,
+    borderBottomColor: leafRideColors.text,
+  },
+  categoryTabDisabled: {
+    opacity: 0.42,
+  },
+  categoryTabText: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 10.5,
+    lineHeight: 13,
+  },
+  categoryTabTextActive: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+  },
+  categoryDivider: {
+    marginTop: 0,
+    marginBottom: 14,
+  },
+  categoryDividerCompact: {
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  categorySelectedRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  categorySelectedLeft: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 9,
+  },
+  categorySelectedIcon: {
+    width: 25,
+    height: 25,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F1F5EE",
+  },
+  categorySelectedCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  categorySelectedTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13.5,
+    lineHeight: 18,
+  },
+  categorySelectedSubtitle: {
+    marginTop: 1,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  categorySelectedPriceWrap: {
+    alignItems: "flex-end",
+    minWidth: 96,
+  },
+  categorySelectedPrice: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 17,
+    lineHeight: 22,
+    textAlign: "right",
+  },
+  categorySelectedPriceCaption: {
+    marginTop: 1,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  categoryMetaRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  categoryMetaItem: {
+    flex: 1,
+    minWidth: 0,
+  },
+  categoryMetaItemRight: {
+    alignItems: "flex-end",
+  },
+  categoryMetaLabel: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  categoryMetaValueRow: {
+    marginTop: 3,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  categoryMetaValue: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  categoryStatusRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  categoryStatusPill: {
+    minHeight: 25,
+    borderRadius: 13,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8F6F1",
+    borderWidth: 1,
+    borderColor: "#E9E2D8",
+  },
+  categoryStatusPillHigh: {
+    backgroundColor: "#FFF7ED",
+    borderColor: "rgba(194,106,24,0.18)",
+  },
+  categoryLeafDelasPillActive: {
+    backgroundColor: "#1A330E",
+    borderColor: "#1A330E",
+  },
+  categoryStatusText: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  categoryStatusTextHigh: {
+    color: "#8A5A17",
+  },
+  categoryLeafDelasTextActive: {
+    color: "#FFFFFF",
+  },
+  categoryConfirmButton: {
+    marginTop: 14,
+    minHeight: 48,
+    borderRadius: 24,
+  },
+  confirmStack: {
+    minHeight: CONFIRM_FALLBACK_HEIGHT,
+  },
+  confirmCard: {
+    minHeight: CONFIRM_FALLBACK_HEIGHT,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingTop: 14,
+  },
+  confirmHeader: {
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  confirmHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  confirmEyebrow: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.SemiBold,
+    fontSize: 10,
+    lineHeight: 14,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  confirmTitle: {
+    marginTop: 2,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 25,
+  },
+  confirmPrice: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 19,
+    lineHeight: 24,
+    textAlign: "right",
+  },
+  confirmMetricRow: {
+    marginTop: 16,
+    flexDirection: "row",
+    borderRadius: 20,
+    backgroundColor: "#F8F6F1",
+    borderWidth: 1,
+    borderColor: "#E9E2D8",
+    paddingVertical: 12,
+  },
+  confirmMetric: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 9,
+  },
+  confirmMetricValue: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 17,
+    textAlign: "center",
+  },
+  confirmMetricLabel: {
+    marginTop: 2,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 10,
+    lineHeight: 13,
+    textAlign: "center",
+  },
+  confirmDivider: {
+    marginTop: 16,
+    marginBottom: 14,
+  },
   quoteStack: {
     minHeight: QUOTE_FALLBACK_HEIGHT,
   },
   quoteCard: {
     minHeight: QUOTE_FALLBACK_HEIGHT,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     paddingTop: 16,
@@ -3744,8 +4467,8 @@ const styles = StyleSheet.create({
   quoteTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 20,
+    lineHeight: 25,
   },
   quotePrice: {
     color: leafRideColors.text,
@@ -3767,9 +4490,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderRadius: 18,
-    backgroundColor: "rgba(18, 176, 116, 0.1)",
+    backgroundColor: "#F8F6F1",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(18, 176, 116, 0.26)",
+    borderColor: "#E9E2D8",
   },
   dynamicPricingBadgeTitle: {
     color: leafRideColors.text,
@@ -3826,7 +4549,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     padding: 3,
-    backgroundColor: "#DFE8E1",
+    backgroundColor: "#E9E2D8",
   },
   leafDelasSwitchActive: {
     backgroundColor: leafRideColors.leaf,
@@ -3883,13 +4606,13 @@ const styles = StyleSheet.create({
   },
   editButton: {
     flex: 0.54,
-    height: 48,
-    borderRadius: 24,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   submitButton: {
     flex: 1,
-    height: 48,
-    borderRadius: 24,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   preferenceModalLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -3908,7 +4631,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 16,
-    shadowColor: "#102018",
+    shadowColor: "#000000",
     shadowOffset: { width: 0, height: 18 },
     shadowOpacity: 0.16,
     shadowRadius: 34,
@@ -3957,7 +4680,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(34,139,84,0.16)",
   },
   preferenceModalCountdownText: {
-    color: "#174A2B",
+    color: leafRideColors.leaf,
     fontFamily: fonts.SemiBold,
     fontSize: 14,
     lineHeight: 18,
@@ -3999,7 +4722,7 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   preferenceModalOptionTextSelected: {
-    color: "#174A2B",
+    color: leafRideColors.leaf,
   },
   preferenceModalOptionHint: {
     marginTop: 3,
@@ -4024,15 +4747,15 @@ const styles = StyleSheet.create({
   preferenceModalOptionTimerFill: {
     height: "100%",
     borderRadius: 999,
-    backgroundColor: "#174A2B",
+    backgroundColor: leafRideColors.leaf,
   },
   preferenceModalConfirmButton: {
     marginTop: 18,
-    height: 46,
-    borderRadius: 23,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#174A2B",
+    backgroundColor: leafRideColors.leaf,
   },
   preferenceModalConfirmButtonText: {
     color: "#FFFFFF",

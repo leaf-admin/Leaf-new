@@ -7,7 +7,6 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,11 +15,14 @@ import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import {
+  LeafAnimatedPressable,
   LeafButton,
   LeafDivider,
   LeafPersonIdentity,
   LeafRideSheet,
   LeafRouteProgress,
+  LeafStateHeader,
+  leafButtonMetrics,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
@@ -86,6 +88,30 @@ function resolveDriverTripPrimaryActionTestID(status) {
   }
 
   return "driver-live-primary-action-button";
+}
+
+function normalizeDriverStatusError(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isActivationOrVehicleStatusError(message) {
+  const normalized = normalizeDriverStatusError(message);
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes("ativar seu status") ||
+    normalized.includes("veiculo valido") ||
+    normalized.includes("veiculo ativo") ||
+    normalized.includes("vehicle_required") ||
+    normalized.includes("driver_not_eligible") ||
+    normalized.includes("ativacao do motorista pendente")
+  );
 }
 
 function formatCurrency(value) {
@@ -239,8 +265,8 @@ function IconActionButton({
   const isDanger = tone === "danger";
   const isPrimary = tone === "primary";
   return (
-    <TouchableOpacity
-      activeOpacity={0.82}
+    <LeafAnimatedPressable
+      activeScale={0.978}
       accessibilityRole="button"
       accessibilityLabel={label}
       testID={testID}
@@ -256,7 +282,7 @@ function IconActionButton({
     >
       <Ionicons
         name={icon}
-        size={16}
+        size={leafButtonMetrics.iconSize}
         color={isPrimary ? "#FFFFFF" : isDanger ? leafRideColors.dangerText : leafRideColors.leaf}
       />
       <Text
@@ -269,7 +295,7 @@ function IconActionButton({
       >
         {label}
       </Text>
-    </TouchableOpacity>
+    </LeafAnimatedPressable>
   );
 }
 
@@ -293,6 +319,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [busyAction, setBusyAction] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
   const sheetBottom = SHEET_BOTTOM_OFFSET;
 
@@ -315,6 +342,14 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
   )
     .trim()
     .toLowerCase();
+  const isActiveTripSurface =
+    hasActiveRide &&
+    ["accepted", "arrived", "started"].includes(normalizedBookingStatus);
+  const isCompactTripSurface = isActiveTripSurface && !detailsExpanded;
+  const visibleLastError =
+    isActiveTripSurface && isActivationOrVehicleStatusError(lastError)
+      ? ""
+      : lastError;
   const pickupLabel =
     String(
       request?.pickup || request?.pickupAddress || currentAddress || "",
@@ -494,12 +529,55 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       rightTone: "leaf",
     };
   }, [dropoffTitle, hasActiveRide, normalizedBookingStatus]);
+  const driverSheetTitle = !hasActiveRide
+    ? "Sem corrida ativa"
+    : normalizedBookingStatus === "started"
+      ? "Progresso da viagem"
+      : normalizedBookingStatus === "arrived"
+        ? "Confirmar embarque"
+        : normalizedBookingStatus === "accepted"
+          ? "Ponto de embarque"
+          : "Detalhes da corrida";
+  const driverIslandSubtitle = normalizedBookingStatus === "started"
+    ? `${distanceLabel} restantes`
+    : normalizedBookingStatus === "arrived"
+      ? pickupLabel
+      : headerCopy.subtitle;
+  const driverIslandRightLabel = normalizedBookingStatus === "started"
+    ? "Em rota"
+    : normalizedBookingStatus === "arrived"
+      ? boardingCountdownLabel || "Embarque"
+      : headerCopy.right;
+  const compactTripTitle = normalizedBookingStatus === "started"
+    ? `A caminho de ${dropoffTitle}`
+    : normalizedBookingStatus === "arrived"
+      ? "Confirmar embarque"
+      : normalizedBookingStatus === "accepted"
+        ? "Indo buscar"
+        : driverSheetTitle;
+  const compactTripMetaLabel = normalizedBookingStatus === "started"
+    ? "restante"
+    : normalizedBookingStatus === "arrived"
+      ? "embarque"
+      : "até o embarque";
+  const compactTripEtaLabel = normalizedBookingStatus === "arrived"
+    ? boardingCountdownLabel || "--"
+    : etaLabel;
+  const compactTripEtaCaption = normalizedBookingStatus === "arrived"
+    ? "tempo grátis"
+    : normalizedBookingStatus === "started"
+      ? "ETA final"
+      : "até chegar";
 
   useEffect(() => {
     if (bookingStatus === "completed") {
       navigation.navigate("RobotaxiPrototypeReceipt", { fromTrip: true });
     }
   }, [bookingStatus, navigation]);
+
+  useEffect(() => {
+    setDetailsExpanded(false);
+  }, [request?.bookingId, request?.id, normalizedBookingStatus]);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -680,7 +758,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       <View style={styles.cardStateHeader}>
         <View style={styles.cardStateCopy}>
           <Text style={styles.cardStateTitle} numberOfLines={2}>
-            {headerCopy.title}
+            {driverSheetTitle}
           </Text>
         </View>
         {rightContent}
@@ -699,6 +777,262 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       </Text>
     </View>
   );
+
+  const renderCompactMetric = (value, label, valueStyle = null) => (
+    <View style={styles.compactMetric}>
+      <Text style={[styles.compactMetricValue, valueStyle]} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={styles.compactMetricLabel} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+
+  const renderCompactTripDetails = () => {
+    if (!detailsExpanded) {
+      return null;
+    }
+
+    if (normalizedBookingStatus === "started") {
+      return (
+        <>
+          <LeafDivider style={styles.compactDetailsDivider} />
+          <LeafRouteProgress
+            originLabel={pickupLabel}
+            destinationLabel={dropoffTitle}
+            progress={routeProgress}
+            progressKey={liveRouteKey || "driver-trip-route"}
+            arrivalLabel={null}
+            style={styles.driverRouteProgress}
+            testID="driver-trip-route-progress"
+          />
+          <Text style={styles.driverRouteSummaryText} numberOfLines={1}>
+            {driverStartedSummary}
+          </Text>
+        </>
+      );
+    }
+
+    if (normalizedBookingStatus === "accepted") {
+      return (
+        <>
+          <LeafDivider style={styles.compactDetailsDivider} />
+          <View style={styles.driverRouteTimeline}>
+            <View style={styles.driverRouteStep}>
+              <View style={styles.driverRouteTrack}>
+                <View style={styles.driverRouteDot} />
+                <View style={styles.driverRouteLine} />
+              </View>
+              <View style={styles.driverRouteCopy}>
+                <Text style={styles.driverRouteMeta} numberOfLines={1}>
+                  Embarque
+                </Text>
+                <Text style={styles.driverRouteAddress} numberOfLines={1}>
+                  {pickupLabel}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.driverRouteStep}>
+              <View style={styles.driverRouteTrack}>
+                <View style={[styles.driverRouteDot, styles.driverRouteDotDestination]} />
+              </View>
+              <View style={styles.driverRouteCopy}>
+                <Text style={styles.driverRouteMeta} numberOfLines={1}>
+                  Destino · {ridePreferenceSummary}
+                </Text>
+                <Text style={styles.driverRouteAddress} numberOfLines={1}>
+                  {dropoffLabel}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </>
+      );
+    }
+
+    return null;
+  };
+
+  const renderCompactDriverCard = () => {
+    const passengerMeta = normalizedBookingStatus === "started"
+      ? "A bordo"
+      : normalizedBookingStatus === "arrived"
+        ? "No ponto de encontro"
+        : `${etaLabel} · ${distanceLabel} até o embarque`;
+    const shouldShowPickupLine =
+      normalizedBookingStatus === "accepted" || normalizedBookingStatus === "arrived";
+    const secondaryActions = normalizedBookingStatus === "started"
+      ? (
+        <>
+          <IconActionButton
+            icon="warning-outline"
+            label="Reportar"
+            tone="danger"
+            onPress={() => navigation.navigate("RobotaxiPrototypeSupport")}
+            style={styles.compactSecondaryButton}
+            testID="driver-trip-report-button"
+          />
+          <LeafButton
+            label={primaryLabel}
+            tone="primary"
+            disabled={busyAction}
+            onPress={handlePrimaryAction}
+            style={styles.compactPrimaryButton}
+            testID={primaryActionTestID}
+            accessibilityLabel={primaryActionTestID}
+          />
+        </>
+      )
+      : normalizedBookingStatus === "arrived"
+        ? (
+          <>
+            <IconActionButton
+              icon="chatbubble-outline"
+              label="Chat"
+              onPress={() => navigation.navigate("RobotaxiPrototypeChat")}
+              style={styles.compactSecondaryButton}
+              testID="driver-trip-chat-button"
+            />
+            <IconActionButton
+              icon="person-remove-outline"
+              label="No-show"
+              tone="danger"
+              onPress={handleNoShow}
+              style={styles.compactSecondaryButton}
+              testID="driver-trip-no-show-button"
+            />
+            <LeafButton
+              label={primaryLabel}
+              tone="primary"
+              disabled={busyAction}
+              onPress={handlePrimaryAction}
+              style={styles.compactPrimaryButton}
+              testID={primaryActionTestID}
+              accessibilityLabel={primaryActionTestID}
+            />
+          </>
+        )
+        : (
+          <>
+            <IconActionButton
+              icon="chatbubble-outline"
+              label="Chat"
+              onPress={() => navigation.navigate("RobotaxiPrototypeChat")}
+              style={styles.compactSecondaryButton}
+              testID="driver-trip-chat-button"
+            />
+            <IconActionButton
+              icon="close-circle-outline"
+              label="Cancelar"
+              tone="danger"
+              onPress={() => navigation.navigate("RobotaxiPrototypeCancellation", { source: "driver-trip" })}
+              style={styles.compactSecondaryButton}
+              testID="driver-trip-cancel-button"
+            />
+            <LeafButton
+              label={primaryLabel}
+              tone="primary"
+              disabled={busyAction}
+              onPress={handlePrimaryAction}
+              style={styles.compactPrimaryButton}
+              testID={primaryActionTestID}
+              accessibilityLabel={primaryActionTestID}
+            />
+          </>
+        );
+
+    return (
+      <>
+        <View style={styles.sheetHandle} />
+        <View style={styles.compactHeaderRow}>
+          <View style={styles.compactHeaderCopy}>
+            <Text style={styles.compactTitle} numberOfLines={1}>
+              {compactTripTitle}
+            </Text>
+            {shouldShowPickupLine ? (
+              <Text style={styles.compactSubtitle} numberOfLines={1}>
+                {pickupLabel}
+              </Text>
+            ) : (
+              <Text style={styles.compactSubtitle} numberOfLines={1}>
+                {driverArrivalSummary}
+              </Text>
+            )}
+          </View>
+          <LeafAnimatedPressable
+            activeScale={0.96}
+            accessibilityRole="button"
+            accessibilityLabel={detailsExpanded ? "Ocultar detalhes" : "Ver detalhes"}
+            onPress={() => setDetailsExpanded(value => !value)}
+            style={styles.compactDetailsButton}
+          >
+            <Text style={styles.compactDetailsLabel} numberOfLines={1}>
+              {detailsExpanded ? "Menos" : "Detalhes"}
+            </Text>
+            <Ionicons
+              name={detailsExpanded ? "chevron-down" : "chevron-up"}
+              size={14}
+              color={leafRideColors.text}
+            />
+          </LeafAnimatedPressable>
+        </View>
+
+        <LeafPersonIdentity
+          initial={passengerInitial}
+          photoUri={passengerPhotoUri}
+          name={passengerLabel}
+          meta={passengerMeta}
+          compact
+          style={styles.compactPassengerIdentity}
+          testID="driver-trip-passenger-identity"
+        />
+
+        {normalizedBookingStatus === "arrived" ? (
+          <View style={styles.compactPinRow}>
+            <View style={styles.pinCopy}>
+              <Text style={styles.pinLabel} numberOfLines={1}>
+                Código da corrida
+              </Text>
+              <Text
+                style={[
+                  styles.pinHint,
+                  isBoardingTimerUrgent && styles.boardingTimerMessageUrgent,
+                  isBoardingTimerExpired && styles.boardingTimerMessageExpired,
+                ]}
+                numberOfLines={1}
+              >
+                {boardingTimerMessage}
+              </Text>
+            </View>
+            <Text style={styles.pinValue} numberOfLines={1}>
+              {boardingPin}
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={styles.compactMetricRow}>
+          {renderCompactMetric(compactTripEtaLabel, compactTripEtaCaption)}
+          {normalizedBookingStatus !== "arrived"
+            ? renderCompactMetric(distanceLabel, compactTripMetaLabel)
+            : null}
+          {renderCompactMetric(tripFareLabel, "líquido", styles.compactMetricValueLeaf)}
+        </View>
+
+        {normalizedBookingStatus === "accepted" ? (
+          <Text style={styles.compactPreferenceText} numberOfLines={1}>
+            {ridePreferenceSummary}
+          </Text>
+        ) : null}
+
+        {renderCompactTripDetails()}
+
+        <View style={styles.compactActionsRow}>
+          {secondaryActions}
+        </View>
+      </>
+    );
+  };
 
   const renderDriverCard = () => {
     if (!hasActiveRide) {
@@ -719,6 +1053,10 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           </Text>
         </>
       );
+    }
+
+    if (isActiveTripSurface) {
+      return renderCompactDriverCard();
     }
 
     if (normalizedBookingStatus === "arrived") {
@@ -973,6 +1311,15 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           backgroundColor="transparent"
           barStyle="dark-content"
         />
+        {!isActiveTripSurface ? (
+          <LeafStateHeader
+            title={headerCopy.title}
+            subtitle={driverIslandSubtitle}
+            rightLabel={driverIslandRightLabel}
+            rightTone={normalizedBookingStatus === "started" ? "dark" : headerCopy.rightTone}
+            insetsTop={insets.top}
+          />
+        ) : null}
 
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
@@ -980,13 +1327,19 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
         >
           <LeafRideSheet
             onLayout={handleCardLayout}
-            style={[styles.tripCard, { paddingBottom: 12 + safeBottom }]}
+            style={[
+              styles.tripCard,
+              isCompactTripSurface && styles.compactTripCard,
+              { paddingBottom: 12 + safeBottom },
+            ]}
             testID="driver-live-trip-screen"
             accessibilityLabel="driver-live-trip-screen"
           >
             {renderDriverCard()}
 
-            {lastError ? <Text style={styles.errorText}>{lastError}</Text> : null}
+            {visibleLastError ? (
+              <Text style={styles.errorText}>{visibleLastError}</Text>
+            ) : null}
           </LeafRideSheet>
         </PrototypeDismissibleSheet>
       </View>
@@ -1005,12 +1358,17 @@ const styles = StyleSheet.create({
     right: 0,
   },
   tripCard: {
+    backgroundColor: "#FFFFFF",
     minHeight: 332,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     paddingTop: 14,
+  },
+  compactTripCard: {
+    minHeight: 218,
+    paddingTop: 12,
   },
   sheetHandle: {
     width: 50,
@@ -1018,7 +1376,118 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "#D8D0C7",
     alignSelf: "center",
-    marginBottom: 24,
+    marginBottom: 18,
+  },
+  compactHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  compactHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  compactTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 21,
+    lineHeight: 26,
+  },
+  compactSubtitle: {
+    marginTop: 3,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  compactDetailsButton: {
+    minHeight: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: leafRideColors.line,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  compactDetailsLabel: {
+    color: leafRideColors.text,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  compactPassengerIdentity: {
+    marginTop: 14,
+  },
+  compactPinRow: {
+    marginTop: 12,
+    minHeight: 50,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(17,22,17,0.08)",
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  compactMetricRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "stretch",
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: leafRideColors.line,
+    paddingVertical: 10,
+  },
+  compactMetric: {
+    flex: 1,
+    minWidth: 0,
+  },
+  compactMetricValue: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  compactMetricValueLeaf: {
+    color: leafRideColors.leaf,
+  },
+  compactMetricLabel: {
+    marginTop: 1,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 10.5,
+    lineHeight: 14,
+  },
+  compactPreferenceText: {
+    marginTop: 8,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  compactDetailsDivider: {
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  compactActionsRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  compactSecondaryButton: {
+    flex: 0.72,
+    minWidth: 74,
+  },
+  compactPrimaryButton: {
+    flex: 1.22,
+    minWidth: 112,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   cardStateHeader: {
     flexDirection: "row",
@@ -1033,8 +1502,8 @@ const styles = StyleSheet.create({
   cardStateTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 21,
-    lineHeight: 27,
+    fontSize: 20,
+    lineHeight: 25,
   },
   driverPayout: {
     minWidth: 82,
@@ -1143,8 +1612,8 @@ const styles = StyleSheet.create({
   pinValue: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 20,
+    lineHeight: 25,
   },
   driverRouteTimeline: {
     marginTop: 14,
@@ -1240,15 +1709,15 @@ const styles = StyleSheet.create({
   },
   iconActionButton: {
     minWidth: 76,
-    height: 42,
-    borderRadius: 21,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: leafRideColors.line,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    gap: 5,
+    gap: leafButtonMetrics.iconGap,
     paddingHorizontal: 12,
   },
   iconActionButtonDanger: {
@@ -1277,8 +1746,8 @@ const styles = StyleSheet.create({
   primaryAction: {
     flex: 1,
     width: "100%",
-    height: 46,
-    borderRadius: 23,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   emptyBackButton: {
     alignSelf: "flex-start",
@@ -1287,8 +1756,8 @@ const styles = StyleSheet.create({
     marginTop: 18,
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 22,
-    lineHeight: 27,
+    fontSize: 20,
+    lineHeight: 25,
   },
   emptyText: {
     marginTop: 6,

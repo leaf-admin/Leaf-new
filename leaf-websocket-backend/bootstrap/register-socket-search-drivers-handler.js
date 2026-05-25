@@ -7,6 +7,81 @@ function registerSocketSearchDriversHandler({
     const emitLegacyNoDriversFoundEvent =
         String(process.env.ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT || 'false').toLowerCase() === 'true';
 
+    socket.on('checkRideAvailability', async (data = {}) => {
+        const userId = socket.userId || data.customerId || socket.id;
+        const requestId = String(data?.requestId || '').trim();
+
+        try {
+            const pickupLocation = data?.pickupLocation || {
+                lat: data?.lat,
+                lng: data?.lng
+            };
+            const requestedCarType = data?.carType || data?.vehicle || null;
+            const requestedRadiusKm = Number.parseFloat(
+                data?.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5'
+            );
+
+            const availability = await findAvailableDriversForPickup(pickupLocation, {
+                carType: requestedCarType,
+                destinationLocation: data?.destinationLocation || data?.destination || null,
+                preferences: data?.preferences || {},
+                radiusKm: Number.isFinite(requestedRadiusKm) ? requestedRadiusKm : 5,
+                limit: Number.parseInt(data?.limit || process.env.PAYMENT_AVAILABILITY_LIMIT || '12', 10)
+            });
+
+            if (!availability?.success) {
+                socket.emit('rideAvailabilityError', {
+                    success: false,
+                    requestId,
+                    code: 'AVAILABILITY_CHECK_FAILED',
+                    error: 'Não foi possível validar disponibilidade agora.',
+                    message: 'Não foi possível validar disponibilidade agora.'
+                });
+                return;
+            }
+
+            const hasDrivers = Array.isArray(availability.drivers)
+                ? availability.drivers.length > 0
+                : Boolean(availability.hasDrivers);
+            const radiusKm = availability.radiusKm || availability.summary?.radiusKm || requestedRadiusKm;
+
+            socket.emit('rideAvailabilityResult', {
+                success: true,
+                requestId,
+                available: hasDrivers,
+                hasDrivers,
+                code: hasDrivers ? 'DRIVERS_AVAILABLE' : 'NO_DRIVERS_AVAILABLE',
+                message: hasDrivers
+                    ? 'Há motoristas disponíveis para esta corrida.'
+                    : 'Não há motoristas disponíveis',
+                carType: requestedCarType,
+                radiusKm
+            });
+
+            logStructured('info', 'Pré-check de disponibilidade concluído', {
+                userId,
+                eventType: 'checkRideAvailability',
+                requestedCarType,
+                hasDrivers,
+                radiusKm
+            });
+        } catch (availabilityError) {
+            logStructured('warn', 'Erro no pré-check de disponibilidade', {
+                userId,
+                eventType: 'checkRideAvailability',
+                error: availabilityError.message
+            });
+
+            socket.emit('rideAvailabilityError', {
+                success: false,
+                requestId,
+                code: 'AVAILABILITY_CHECK_ERROR',
+                error: 'Não foi possível validar disponibilidade agora.',
+                message: 'Não foi possível validar disponibilidade agora.'
+            });
+        }
+    });
+
     socket.on('searchDrivers', async (data) => {
         try {
             // ✅ NOVO: Rate Limiting

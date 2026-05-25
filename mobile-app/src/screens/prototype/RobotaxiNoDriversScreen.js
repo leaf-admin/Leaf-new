@@ -16,13 +16,14 @@ import {
   PrototypeCard,
   PrototypePrimaryButton,
 } from "../../components/prototype/PrototypeUI";
+import { leafButtonMetrics } from "../../components/prototype/LeafRideUI";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolvePassengerAutoRoute } from "./passengerFlowRouting";
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 98;
+const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 286;
 
 export default function RobotaxiNoDriversScreen({ navigation, route }) {
@@ -38,7 +39,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
   const reason =
-    route?.params?.reason || "Nenhum motorista disponivel no momento.";
+    route?.params?.reason || "Ainda não encontramos um motorista disponível perto de você.";
   const refundStatus = String(route?.params?.refundStatus || "")
     .trim()
     .toUpperCase();
@@ -213,12 +214,12 @@ const styles = StyleSheet.create({
     right: 0,
   },
   card: {
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 28,
-    paddingTop: 16,
+    paddingHorizontal: 24,
+    paddingTop: 14,
     paddingBottom: 16,
   },
   iconWrap: {
@@ -236,8 +237,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight,
+    fontSize: 18,
+    lineHeight: 24,
     textAlign: "center",
   },
   subtitle: {
@@ -279,15 +280,15 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.strong,
     backgroundColor: color.surface.secondary,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: leafButtonMetrics.iconGap,
   },
   secondaryButtonText: {
     color: color.text.primary,

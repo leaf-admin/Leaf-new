@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Alert, View, Platform } from 'react-native';
+import { Alert, View, Platform, LogBox } from 'react-native';
 import { Provider } from 'react-redux';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -12,13 +12,21 @@ import { LanguageProvider } from './src/components/i18n/LanguageProvider';
 import FCMNotificationService from './src/services/FCMNotificationService';
 import InteractiveNotificationService from './src/services/InteractiveNotificationService';
 import PersistentRideNotificationService from './src/services/PersistentRideNotificationService';
-import WebSocketManager from './src/services/WebSocketManager';
+import realtimeConnectionOrchestrator from './src/services/RealtimeConnectionOrchestrator';
 import { setupAxiosInterceptor } from './src/utils/axiosInterceptor';
 import Logger from './src/utils/Logger';
 import NetworkStatusBanner from './src/components/NetworkStatusBanner';
 import { toUserFriendlyMessage } from './src/utils/friendlyErrorMessages';
 import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
+
+if (__DEV__) {
+  LogBox.ignoreAllLogs(true);
+  LogBox.ignoreLogs([
+    'This method is deprecated (as well as all React Native Firebase namespaced API)',
+    'Token QA do socket expirado ou próximo de expirar',
+  ]);
+}
 
 const FRIENDLY_ALERT_PATCH_BYPASS_OPTION_KEY = '__skipFriendlyAlertPatch';
 const CANONICAL_FONT_ASSETS = {
@@ -117,6 +125,10 @@ async function loadCanonicalFonts() {
   await Font.loadAsync(CANONICAL_FONT_ASSETS);
 }
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // ✅ CRÍTICO: Manter a splash screen nativa visível desde o início
 // Isso DEVE ser chamado antes de qualquer renderização
 // Usar try/catch para garantir que não quebra se já foi chamado
@@ -210,28 +222,20 @@ export default function App() {
         // Socket e notificações continuam inicializando em background para reduzir o tempo de abertura.
         markAppReady('shell-ready');
 
-        // 1. Conectar WebSocket em background (para que o FCM possa registrar o token depois)
-        // ✅ Timeout de 10s para conexão WebSocket (Item 1.3)
-        try {
-          const wsManager = WebSocketManager.getInstance();
-          if (!wsManager.isConnected()) {
-            Logger.log('🔌 [App] Conectando WebSocket...');
-            
-            // Timeout de 10s para conexão
-            try {
-              await withTimeout(wsManager.connect(), 10000, 'WebSocket connect');
-              Logger.log('✅ [App] WebSocket conectado');
-            } catch (timeoutError) {
-              Logger.warn('⚠️ [App] WebSocket timeout ou erro (continuando mesmo assim):', timeoutError.message);
-              // Continuar mesmo se o WebSocket falhar - ele tentará reconectar automaticamente
-            }
-          } else {
-            Logger.log('✅ [App] WebSocket já conectado');
-          }
-        } catch (wsError) {
-          Logger.warn('⚠️ [App] Erro ao conectar WebSocket (continuando mesmo assim):', wsError.message);
-          // Continuar mesmo se o WebSocket falhar - ele tentará reconectar automaticamente
+        if (Platform.OS === 'android') {
+          await wait(__DEV__ ? 1800 : 450);
         }
+
+        // 1. Preparar o canal realtime sem bloquear FCM nem a navegação.
+        // A autenticação fica centralizada no orquestrador quando o perfil é hidratado.
+        realtimeConnectionOrchestrator
+          .bootstrap({ reason: 'app_boot' })
+          .catch(error => {
+            Logger.warn(
+              '⚠️ [App] Realtime bootstrap inicial não concluiu:',
+              error?.message || error
+            );
+          });
         
         // 2. Inicializar FCM (agora o WebSocket já está conectado ou tentando conectar)
         await withTimeout(FCMNotificationService.initialize(), 8000, 'FCM initialize');
@@ -313,7 +317,7 @@ export default function App() {
         } catch (error) {
           Logger.warn('⚠️ Erro ao esconder splash screen:', error);
         }
-      }, 100); // Pequeno delay para garantir que o layout foi renderizado
+      }, Platform.OS === 'android' && __DEV__ ? 4800 : 100);
       
       return () => clearTimeout(timer);
     }

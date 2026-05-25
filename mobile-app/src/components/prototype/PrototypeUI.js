@@ -12,6 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Animated, { Easing, FadeInUp } from "react-native-reanimated";
 import { fonts } from "../../theme/runtimeTokens";
 import robotaxiPrototypeTokens from "../design-system/robotaxiPrototypeTokens";
+import { leafButtonMetrics } from "./LeafRideUI";
 
 const { color, typography, motion } = robotaxiPrototypeTokens;
 const cardEnterEasing = Easing.bezier(...motion.bezier.snappy);
@@ -166,7 +167,11 @@ export function PrototypePrimaryButton({
       accessibilityLabel={accessibilityLabel}
     >
       {icon ? (
-        <Ionicons name={icon} size={16} color={color.accent.contrast} />
+        <Ionicons
+          name={icon}
+          size={leafButtonMetrics.iconSize}
+          color={color.accent.contrast}
+        />
       ) : null}
       <Text style={styles.primaryButtonText}>{label}</Text>
     </TouchableOpacity>
@@ -180,29 +185,29 @@ export function CardHandle() {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: Platform.OS === "android" ? color.bg.panelSolid : color.bg.panel,
-    borderRadius: 22,
+    borderRadius: 28,
     borderWidth: 1,
-    borderColor: color.border.strong,
+    borderColor: color.border.subtle,
     shadowColor: color.shadow.base,
     shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.22,
-    shadowRadius: 30,
-    elevation: Platform.OS === "android" ? 0 : 15,
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: Platform.OS === "android" ? 0 : 10,
   },
   handle: {
     width: 46,
-    height: 5,
+    height: 4,
     borderRadius: 999,
-    backgroundColor: "rgba(142,154,169,0.64)",
+    backgroundColor: "#D8D0C7",
     alignSelf: "center",
     marginBottom: 10,
   },
   destinationInput: {
-    minHeight: 58,
-    borderRadius: 18,
+    minHeight: 52,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: color.border.subtle,
-    backgroundColor: color.surface.primary,
+    backgroundColor: color.surface.secondary,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
@@ -245,9 +250,9 @@ const styles = StyleSheet.create({
     color: color.text.muted,
   },
   trailingButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: color.accent.primary,
@@ -264,13 +269,13 @@ const styles = StyleSheet.create({
     opacity: 0.68,
   },
   primaryButton: {
-    minHeight: 50,
-    borderRadius: 16,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: color.accent.primary,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    gap: 8,
+    gap: leafButtonMetrics.iconGap,
     paddingHorizontal: 18,
     borderWidth: 1,
     borderColor: color.border.strong,
@@ -282,8 +287,8 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: color.accent.contrast,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.body.size,
-    lineHeight: typography.body.lineHeight,
+    fontSize: 13,
+    lineHeight: 17,
     flexShrink: 1,
   },
 });

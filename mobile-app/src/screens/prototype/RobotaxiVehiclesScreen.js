@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
   },
   carGlyphText: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 20,
     lineHeight: 27,
   },

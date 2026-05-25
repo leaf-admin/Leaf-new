@@ -5,13 +5,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
-import DriverSearchRadar from "../../components/prototype/DriverSearchRadar";
 import {
   LeafButton,
   LeafInfoRow,
   LeafProgressBar,
   LeafRideSheet,
   LeafPill,
+  LeafStateHeader,
+  leafButtonMetrics,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
@@ -20,6 +21,7 @@ import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import useSearchElapsedClock from "./useSearchElapsedClock";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
 import { formatCurrencyBRL } from "./tripFinancialSummary";
+import { normalizePassengerBookingStatus } from "./passengerFlowRouting";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 302;
@@ -59,8 +61,10 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const terminalRouteHandledRef = useRef(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
   const isSearchActive =
-    bookingStatus === "searching" || bookingStatus === "requesting";
+    normalizedBookingStatus === "searching" ||
+    normalizedBookingStatus === "requesting";
   const searchAnchorTimestamp =
     activeBooking?.timestamp ||
     activeBooking?.createdAt ||
@@ -99,6 +103,12 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     selectedDestination?.address ||
     bookingDestinationAddress ||
     "Destino";
+  const destinationCoordinate =
+    route?.params?.destinationCoordinate ||
+    route?.params?.initialSelectedDestination?.coordinate ||
+    selectedDestination?.coordinate ||
+    activeBooking?.destinationLocation ||
+    null;
   const vehicle = route?.params?.vehicle || selectedVehicle || "Leaf Plus";
   const originLabel = compactPlaceLabel(
     routeOriginAddress || bookingPickupAddress || currentAddress,
@@ -125,28 +135,52 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
 
   useEffect(() => {
     if (
-      bookingStatus === "accepted" ||
-      bookingStatus === "arrived" ||
-      bookingStatus === "started"
+      normalizedBookingStatus === "accepted" ||
+      normalizedBookingStatus === "arrived" ||
+      normalizedBookingStatus === "started"
     ) {
       navigation.navigate("RobotaxiPrototypeTrip", {
         destination,
+        destinationAddress: routeDestinationAddress || bookingDestinationAddress,
+        destinationCoordinate,
+        initialSelectedDestination:
+          route?.params?.initialSelectedDestination || {
+            name: destination,
+            address: routeDestinationAddress || bookingDestinationAddress || destination,
+            coordinate: destinationCoordinate,
+          },
+        selectedFare:
+          route?.params?.selectedFare ||
+          selectedFare ||
+          activeBooking?.estimatedFare ||
+          activeBooking?.fare,
         vehicle,
         elapsed,
         driverName: driverInfo?.name || "Motorista",
       });
     }
   }, [
-    bookingStatus,
+    activeBooking?.estimatedFare,
+    activeBooking?.fare,
+    bookingDestinationAddress,
     destination,
+    destinationCoordinate,
     driverInfo?.name,
     elapsed,
     navigation,
+    normalizedBookingStatus,
+    route?.params?.initialSelectedDestination,
+    route?.params?.selectedFare,
+    routeDestinationAddress,
+    selectedFare,
     vehicle,
   ]);
 
   useEffect(() => {
-    if (bookingStatus === "searching" || bookingStatus === "requesting") {
+    if (
+      normalizedBookingStatus === "searching" ||
+      normalizedBookingStatus === "requesting"
+    ) {
       terminalRouteHandledRef.current = false;
       return;
     }
@@ -155,13 +189,27 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       return;
     }
 
-    if (bookingStatus === "idle" && lastError) {
+    if (normalizedBookingStatus === "idle" && lastError) {
       terminalRouteHandledRef.current = true;
       if (/pagamento|payment/i.test(lastError)) {
         navigation.replace("RobotaxiPrototypePaymentFailed", {
           errorMessage: lastError,
           retryRouteName: "RobotaxiPrototypeDestination",
-          retryParams: {},
+          retryParams: {
+            destination,
+            destinationAddress,
+            destinationCoordinate,
+            initialSelectedDestination:
+              route?.params?.initialSelectedDestination || {
+                name: destination,
+                address: destinationAddress,
+                coordinate: destinationCoordinate,
+              },
+            selectedFare: route?.params?.selectedFare || route?.params?.fare,
+            fare: route?.params?.fare,
+            originAddress,
+            vehicle,
+          },
         });
         return;
       }
@@ -177,10 +225,13 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
         reason: lastError,
       });
     }
-  }, [bookingStatus, lastError, navigation]);
+  }, [lastError, navigation, normalizedBookingStatus]);
 
   const handleDismiss = () => {
-    if (bookingStatus === "searching" || bookingStatus === "requesting") {
+    if (
+      normalizedBookingStatus === "searching" ||
+      normalizedBookingStatus === "requesting"
+    ) {
       cancelRideSearch();
     }
     if (navigation.canGoBack()) {
@@ -215,10 +266,13 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           backgroundColor="transparent"
           barStyle="dark-content"
         />
-
-        <View pointerEvents="none" style={styles.radarWrap}>
-          <DriverSearchRadar />
-        </View>
+        <LeafStateHeader
+          title="Buscando motorista"
+          subtitle="Pagamento confirmado"
+          rightLabel="Ativo"
+          rightTone="dark"
+          insetsTop={insets.top}
+        />
 
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
@@ -232,7 +286,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           >
             <View style={styles.sheetHandle} />
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardTitle}>Procurando motorista</Text>
+              <Text style={styles.cardTitle}>Detalhes da corrida</Text>
               <LeafPill label={fareLabel} tone="ghost" />
             </View>
 
@@ -265,7 +319,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
             </View>
 
             <View style={styles.hiddenLegacyRows}>
-              <Text>Buscando motorista</Text>
+              <Text>Busca ativa</Text>
               <LeafInfoRow title="Raio de busca expandido" subtitle={searchMilestoneLabel} />
               <LeafInfoRow title="Preço protegido" subtitle={`${fareLabel} confirmado até encontrar motorista`} />
               <LeafInfoRow title="Ponto de partida" subtitle={originLabel} />
@@ -276,15 +330,15 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
 
             <LeafButton
               label={
-                bookingStatus === "requesting"
+                normalizedBookingStatus === "requesting"
                   ? "Criando corrida..."
-                  : "Cancelar busca"
+                  : "Cancelar"
               }
               onPress={
-                bookingStatus === "requesting" ? undefined : handleDismiss
+                normalizedBookingStatus === "requesting" ? undefined : handleDismiss
               }
               icon={
-                bookingStatus === "requesting"
+                normalizedBookingStatus === "requesting"
                   ? "time-outline"
                   : "close-circle-outline"
               }
@@ -305,23 +359,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "transparent",
   },
-  radarWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   sheetWrap: {
     position: "absolute",
     left: 0,
     right: 0,
   },
   searchingCard: {
+    backgroundColor: "#FFFFFF",
     minHeight: FALLBACK_CARD_HEIGHT,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingTop: 16,
+    paddingTop: 14,
     paddingBottom: 14,
   },
   sheetHandle: {
@@ -341,8 +391,8 @@ const styles = StyleSheet.create({
   cardTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 20,
+    lineHeight: 25,
   },
   hiddenMeasurement: {
     position: "absolute",
@@ -354,8 +404,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 26,
+    lineHeight: 32,
   },
   elapsedMetaText: {
     marginTop: 0,
@@ -365,7 +415,7 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   routeSummaryRow: {
-    marginTop: 28,
+    marginTop: 24,
     minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
@@ -403,9 +453,9 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   actionButton: {
-    marginTop: 36,
-    width: 126,
-    height: 44,
-    borderRadius: 22,
+    marginTop: 30,
+    width: 154,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
 });

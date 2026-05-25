@@ -7,6 +7,12 @@ import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const { color, typography, elevation, motion } = robotaxiPrototypeTokens;
 const contentEnterEasing = Easing.bezier(...motion.bezier.smoothOut);
+const LEAF_CARD_SURFACE = 'rgba(255,255,255,0.96)';
+const LEAF_CARD_BORDER = '#ECE5DC';
+const LEAF_BG = '#F8F6F1';
+const LEAF_TEXT = '#171412';
+const LEAF_MUTED = '#827B73';
+const LEAF_SECONDARY = '#756F68';
 
 function isLoadingValue(value) {
   return value === null || value === undefined || String(value).trim() === '';
@@ -106,22 +112,30 @@ export function PrototypeMenuRow({
   badge,
   trailing,
   active = false,
+  compact = false,
   last = false,
   testID,
   accessibilityLabel,
 }) {
   const RowComponent = onPress ? TouchableOpacity : View;
+  const iconName = typeof icon === 'string' ? icon : null;
 
   return (
     <RowComponent
-      style={[styles.row, active && styles.rowActive, last && styles.rowLast]}
+      style={[styles.row, compact && styles.rowCompact, active && styles.rowActive, last && styles.rowLast]}
       onPress={onPress}
       activeOpacity={onPress ? 0.78 : 1}
       testID={testID}
       accessibilityLabel={accessibilityLabel}
     >
-      <View style={styles.rowIconSlot}>
-        {icon ? <View style={[styles.rowDot, active && styles.rowDotActive]} /> : null}
+      <View style={[styles.rowIconSlot, compact && styles.rowIconSlotCompact]}>
+        {iconName ? (
+          <Ionicons
+            name={iconName}
+            size={compact ? 16 : 17}
+            color={active ? color.accent.strong : '#4F5C54'}
+          />
+        ) : null}
       </View>
 
       <View style={styles.rowCopyWrap}>
@@ -194,25 +208,28 @@ export function PrototypeMenuCloseButton({
 const styles = StyleSheet.create({
   surface: {
     alignSelf: 'flex-start',
-    borderRadius: 30,
-    paddingHorizontal: 18,
-    paddingTop: 18,
+    borderRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 20,
     paddingBottom: 16,
-    backgroundColor: 'rgba(247,250,252,0.97)',
+    backgroundColor: LEAF_CARD_SURFACE,
     borderWidth: 1,
-    borderColor: 'rgba(17,26,39,0.08)',
+    borderColor: LEAF_CARD_BORDER,
     shadowColor: color.shadow.base,
-    ...elevation.panel,
+    shadowOffset: elevation.soft.shadowOffset,
+    shadowOpacity: 0.08,
+    shadowRadius: 22,
+    elevation: 3,
   },
   surfaceFullScreen: {
     alignSelf: 'stretch',
     flex: 1,
     width: '100%',
     borderRadius: 0,
-    paddingHorizontal: 31,
-    paddingTop: 18,
+    paddingHorizontal: 24,
+    paddingTop: 42,
     paddingBottom: 18,
-    backgroundColor: '#F6FAF6',
+    backgroundColor: LEAF_BG,
     borderWidth: 0,
     shadowOpacity: 0,
     elevation: 0,
@@ -232,25 +249,25 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     marginBottom: 2,
-    color: '#667180',
+    color: LEAF_MUTED,
     fontFamily: fonts.Medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
-    letterSpacing: 1.4,
+    letterSpacing: 0.8,
   },
   title: {
-    color: '#102018',
-    fontFamily: fonts.Medium,
-    fontSize: 19,
-    lineHeight: 25,
+    color: LEAF_TEXT,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   subtitle: {
-    marginTop: 8,
-    color: '#66756B',
+    marginTop: 5,
+    color: LEAF_SECONDARY,
     fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12.5,
+    lineHeight: 17,
   },
   badgePill: {
     minHeight: 28,
@@ -258,9 +275,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(230,237,244,0.92)',
+    backgroundColor: LEAF_BG,
     borderWidth: 1,
-    borderColor: 'rgba(17,26,39,0.08)',
+    borderColor: LEAF_CARD_BORDER,
   },
   badgePillText: {
     color: color.text.secondary,
@@ -270,47 +287,51 @@ const styles = StyleSheet.create({
   },
   headerDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#DFE8E1',
-    marginTop: 28,
+    backgroundColor: LEAF_CARD_BORDER,
+    marginTop: 20,
   },
   body: {
-    paddingTop: 18,
+    paddingTop: 14,
   },
   bodyFullScreen: {
     flex: 1,
   },
   footerDivider: {
     height: 1,
-    backgroundColor: 'rgba(17,26,39,0.08)',
+    backgroundColor: LEAF_CARD_BORDER,
     marginTop: 12,
   },
   footer: {
     paddingTop: 12,
   },
   sectionBlock: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   sectionTitle: {
-    color: '#8C9A92',
+    color: LEAF_MUTED,
     fontFamily: fonts.Medium,
     fontSize: 11,
     lineHeight: 15,
     textTransform: 'uppercase',
-    letterSpacing: 1.1,
-    marginBottom: 8,
+    letterSpacing: 0.8,
+    marginBottom: 7,
   },
   sectionDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#DFE8E1',
+    backgroundColor: LEAF_CARD_BORDER,
     marginBottom: 2,
   },
   row: {
-    minHeight: 70,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#DFE8E1',
+    borderBottomColor: LEAF_CARD_BORDER,
+  },
+  rowCompact: {
+    minHeight: 54,
+    paddingVertical: 7,
   },
   rowActive: {
     backgroundColor: 'transparent',
@@ -320,25 +341,19 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   rowIconSlot: {
-    width: 20,
+    width: 25,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
-  rowDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#26A66A',
-  },
-  rowDotActive: {
-    backgroundColor: '#0F3B16',
+  rowIconSlotCompact: {
+    width: 24,
   },
   rowCopyWrap: {
     flex: 1,
     paddingRight: 8,
   },
   rowTitle: {
-    color: '#101C14',
+    color: LEAF_TEXT,
     fontFamily: fonts.Medium,
     fontSize: 13,
     lineHeight: 17,
@@ -348,7 +363,7 @@ const styles = StyleSheet.create({
   },
   rowSubtitle: {
     marginTop: 3,
-    color: '#5F6B62',
+    color: LEAF_SECONDARY,
     fontFamily: fonts.Regular,
     fontSize: 10,
     lineHeight: 13,
@@ -365,14 +380,14 @@ const styles = StyleSheet.create({
   },
   inlineBadgeText: {
     color: '#FFFFFF',
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
   infoRow: {
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(17,26,39,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LEAF_CARD_BORDER,
   },
   infoRowLast: {
     borderBottomWidth: 0,
@@ -384,7 +399,7 @@ const styles = StyleSheet.create({
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
-    letterSpacing: 1.1,
+    letterSpacing: 0.8,
   },
   infoValue: {
     marginTop: 4,
@@ -413,12 +428,12 @@ const styles = StyleSheet.create({
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
-    letterSpacing: 1.1,
+    letterSpacing: 0.8,
   },
   statValue: {
     marginTop: 4,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: typography.subtitle.size,
     lineHeight: typography.subtitle.lineHeight,
   },
@@ -426,15 +441,15 @@ const styles = StyleSheet.create({
     marginTop: 7,
     height: 11,
     borderRadius: 999,
-    backgroundColor: 'rgba(102,117,107,0.16)',
+    backgroundColor: 'rgba(130,123,115,0.16)',
   },
   closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EAF6EE',
+    backgroundColor: LEAF_BG,
     borderWidth: 0,
     borderColor: 'transparent',
   },

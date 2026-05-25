@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
@@ -12,19 +13,21 @@ import { DRIVER_ONBOARDING_STAGE_KEYS } from '../../services/DriverOnboardingSer
 import Logger from '../../utils/Logger';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 28;
 const SURFACE_BOTTOM_PADDING = 18;
 const FALLBACK_CARD_HEIGHT = 330;
 const DOC_ANALYSIS_SLA_TEXT = 'Até 48 horas';
 const ACTIVATION_COLOR = {
-  bg: '#F6FAF6',
-  text: '#101C14',
-  title: '#102018',
-  secondary: '#66756B',
-  muted: '#5F6B62',
-  line: '#DFE8E1',
-  leaf: '#0F3B16',
-  dot: '#26A66A',
+  bg: '#F8F6F1',
+  text: '#171412',
+  title: '#171412',
+  secondary: '#756F68',
+  muted: '#827B73',
+  line: '#E9E2D8',
+  leaf: '#1A330E',
+  dot: '#1A330E',
+  icon: '#514B45',
+  chevron: '#827B73',
 };
 
 const FIELD_STATUS = {
@@ -54,14 +57,6 @@ const STAGE_META = {
         actionLabel: 'Enviar CRLV',
         kind: 'document',
         validator: 'crlv'
-      },
-      {
-        key: 'inssOrMei',
-        label: 'INSS / MEI',
-        helper: 'Anexe o comprovante MEI ativo em PDF.',
-        actionLabel: 'Enviar',
-        kind: 'document',
-        validator: 'mei'
       },
       {
         key: 'backgroundCheckConsent',
@@ -126,7 +121,6 @@ function mapFieldStatusLabel(status) {
 function resolveActivationRowTitle(field) {
   if (field?.validator === 'cnh') return 'CNH';
   if (field?.validator === 'crlv') return 'CRLV';
-  if (field?.validator === 'mei') return 'MEI';
   if (field?.kind === 'consent') return 'Termos';
   if (field?.kind === 'task') return 'Validação facial';
   if (field?.kind === 'readonly') return 'Veículo';
@@ -144,6 +138,15 @@ function resolveActivationRowSubtitle(field, fieldState) {
   return mapFieldStatusLabel(status);
 }
 
+function resolveActivationRowIcon(field) {
+  if (field?.validator === 'cnh') return 'id-card-outline';
+  if (field?.validator === 'crlv') return 'document-text-outline';
+  if (field?.kind === 'consent') return 'shield-checkmark-outline';
+  if (field?.kind === 'task') return 'scan-outline';
+  if (field?.kind === 'readonly') return 'car-outline';
+  return 'checkmark-circle-outline';
+}
+
 function waitMs(delay) {
   return new Promise(resolve => setTimeout(resolve, delay));
 }
@@ -151,7 +154,6 @@ function waitMs(delay) {
 function resolveDocumentTypeByField(field) {
   if (field?.validator === 'cnh') return 'cnh';
   if (field?.validator === 'crlv') return 'crlv';
-  if (field?.validator === 'mei') return 'mei';
   return null;
 }
 
@@ -200,14 +202,6 @@ function toSummaryRows(field, data = {}) {
       .map(([label, value]) => ({ label, value: String(value).trim() }));
   }
 
-  if (field?.validator === 'mei') {
-    const rows = [
-      ['Situação', 'Ativo'],
-      ['Comprovante', 'Recebido em PDF']
-    ];
-    return rows;
-  }
-
   return [];
 }
 
@@ -234,6 +228,21 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
   const lastInitialRefreshUidRef = useRef('');
   const activation = driverActivation || {};
   const stages = activation?.stages || {};
+
+  useEffect(() => {
+    const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
+    const showStatusBar = () => StatusBar.setHidden(false, 'fade');
+
+    hideStatusBar();
+    const removeFocusListener = navigation?.addListener?.('focus', hideStatusBar);
+    const removeBlurListener = navigation?.addListener?.('blur', showStatusBar);
+
+    return () => {
+      removeFocusListener?.();
+      removeBlurListener?.();
+      showStatusBar();
+    };
+  }, [navigation]);
 
   const stageKeys = useMemo(
     () => [
@@ -620,21 +629,23 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               },
             ]}
           >
-            <View style={styles.activationStatusRow}>
-              <Text style={styles.activationStatusText}>9:41</Text>
-              <Text style={styles.activationStatusText}>100%</Text>
+            <View style={styles.activationHeaderRow}>
+              <View style={styles.activationHeaderCopy}>
+                <Text style={styles.activationTitle}>Ativação do motorista</Text>
+                <Text style={styles.activationSubtitle}>
+                  Envie o essencial para ficar online.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.activationCloseButton}
+                onPress={handleDismiss}
+                activeOpacity={0.78}
+                accessibilityRole="button"
+                accessibilityLabel="Fechar ativação"
+              >
+                <Ionicons name="close" size={18} color={ACTIVATION_COLOR.text} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={styles.activationCloseHit}
-              onPress={handleDismiss}
-              activeOpacity={0.78}
-              accessibilityRole="button"
-              accessibilityLabel="Fechar ativação"
-            />
-            <Text style={styles.activationTitle}>Ativação do motorista</Text>
-            <Text style={styles.activationSubtitle}>
-              Envie o necessário para ficar online.
-            </Text>
 
             <ScrollView
               bounces={false}
@@ -655,7 +666,13 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                       index === activationRows.length - 1 && styles.activationRowLast,
                     ]}
                   >
-                    <View style={styles.activationDot} />
+                    <View style={styles.activationIconSlot}>
+                      <Ionicons
+                        name={resolveActivationRowIcon(row.field)}
+                        size={17}
+                        color={ACTIVATION_COLOR.icon}
+                      />
+                    </View>
                     <View style={styles.activationRowCopy}>
                       <Text style={styles.activationRowTitle}>{row.title}</Text>
                       <Text style={styles.activationRowSubtitle} numberOfLines={1}>
@@ -708,33 +725,33 @@ const styles = StyleSheet.create({
   activationSurface: {
     flex: 1,
     backgroundColor: ACTIVATION_COLOR.bg,
-    paddingHorizontal: 31,
+    paddingHorizontal: 24,
   },
-  activationStatusRow: {
-    minHeight: 18,
+  activationHeaderRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: 14,
   },
-  activationStatusText: {
-    color: ACTIVATION_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+  activationHeaderCopy: {
+    flex: 1,
+    paddingRight: 4,
   },
-  activationCloseHit: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 72,
-    height: 88,
+  activationCloseButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: ACTIVATION_COLOR.line,
   },
   activationTitle: {
-    marginTop: 28,
     color: ACTIVATION_COLOR.title,
-    fontFamily: fonts.Medium,
-    fontSize: 19,
-    lineHeight: 25,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   activationSubtitle: {
     marginTop: 8,
@@ -744,11 +761,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   activationScrollContent: {
-    paddingTop: 38,
+    paddingTop: 18,
     paddingBottom: 118,
   },
   activationRow: {
-    minHeight: 78,
+    minHeight: 62,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -757,12 +774,10 @@ const styles = StyleSheet.create({
   activationRowLast: {
     borderBottomWidth: 0,
   },
-  activationDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: ACTIVATION_COLOR.dot,
-    marginRight: 12,
+  activationIconSlot: {
+    width: 28,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   activationRowCopy: {
     flex: 1,

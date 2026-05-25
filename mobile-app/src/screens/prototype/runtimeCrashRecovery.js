@@ -1,21 +1,10 @@
-const ACTIVE_PASSENGER_BOOKING_STATUSES = new Set([
-  "requesting",
-  "searching",
-  "accepted",
-  "arrived",
-  "started",
-  "operational_interrupted",
-  "searching_replacement",
-]);
-
-const ACTIVE_DRIVER_BOOKING_STATUSES = new Set([
-  "searching",
-  "accepted",
-  "arrived",
-  "started",
-  "operational_interrupted",
-  "searching_replacement",
-]);
+import {
+  isActiveDriverRideStatus,
+  isActivePassengerRideStatus,
+  isTerminalRideStatus,
+  normalizeRuntimeRideStatus,
+  RUNTIME_RIDE_STATUSES,
+} from "./rideLifecycleContract";
 
 const CRITICAL_RUNTIME_KEYS = new Set([
   "bookingStatus",
@@ -34,9 +23,7 @@ const CRITICAL_RUNTIME_KEYS = new Set([
 ]);
 
 export function normalizeRuntimeLifecycleStatus(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
+  return normalizeRuntimeRideStatus(value);
 }
 
 export function hasPendingDriverOffer(driverOffers) {
@@ -86,10 +73,10 @@ export function shouldFlushRuntimeSessionImmediately(
   if (
     changedKeys.includes("bookingStatus") &&
     previousStatus !== nextStatus &&
-    (ACTIVE_PASSENGER_BOOKING_STATUSES.has(nextStatus) ||
-      ACTIVE_DRIVER_BOOKING_STATUSES.has(nextStatus) ||
-      nextStatus === "completed" ||
-      nextStatus === "idle")
+    (isActivePassengerRideStatus(nextStatus) ||
+      isActiveDriverRideStatus(nextStatus) ||
+      isTerminalRideStatus(nextStatus) ||
+      nextStatus === RUNTIME_RIDE_STATUSES.IDLE)
   ) {
     return true;
   }
@@ -153,19 +140,31 @@ export function shouldMaintainRealtimeSessionForSnapshot(
   const bookingStatus = normalizeRuntimeLifecycleStatus(snapshot?.bookingStatus);
 
   if (normalizedRole === "customer") {
+    if (isTerminalRideStatus(bookingStatus)) {
+      return false;
+    }
+
     return (
-      ACTIVE_PASSENGER_BOOKING_STATUSES.has(bookingStatus) ||
+      isActivePassengerRideStatus(bookingStatus) ||
       Boolean(snapshot?.activeBookingId)
     );
   }
 
   if (normalizedRole === "driver") {
+    if (isTerminalRideStatus(bookingStatus)) {
+      return (
+        Boolean(snapshot?.driverOnline) ||
+        Boolean(snapshot?.driverOnlinePending) ||
+        hasPendingDriverOffer(snapshot?.driverOffers)
+      );
+    }
+
     return (
       Boolean(snapshot?.driverOnline) ||
       Boolean(snapshot?.driverOnlinePending) ||
       hasActiveDriverRide(snapshot?.driverActiveRide) ||
       hasPendingDriverOffer(snapshot?.driverOffers) ||
-      ACTIVE_DRIVER_BOOKING_STATUSES.has(bookingStatus) ||
+      isActiveDriverRideStatus(bookingStatus) ||
       Boolean(snapshot?.activeBookingId)
     );
   }
@@ -183,14 +182,17 @@ export function shouldSyncActiveRideForSnapshot(role, snapshot = {}) {
   }
 
   if (normalizedRole === "driver") {
+    const bookingStatus = normalizeRuntimeLifecycleStatus(snapshot?.bookingStatus);
+    if (isTerminalRideStatus(bookingStatus)) {
+      return false;
+    }
+
     return (
       Boolean(snapshot?.driverOnline) ||
       Boolean(snapshot?.driverOnlinePending) ||
       hasActiveDriverRide(snapshot?.driverActiveRide) ||
       hasPendingDriverOffer(snapshot?.driverOffers) ||
-      ACTIVE_DRIVER_BOOKING_STATUSES.has(
-        normalizeRuntimeLifecycleStatus(snapshot?.bookingStatus),
-      ) ||
+      isActiveDriverRideStatus(bookingStatus) ||
       Boolean(snapshot?.activeBookingId)
     );
   }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Linking, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,7 +11,10 @@ import PrototypeScreenTransition from '../../components/prototype/PrototypeScree
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import { PrototypeBottomIsland, PrototypeTopControls } from '../../components/prototype/PrototypeScaffold';
-import PassengerHomeOverlay from './home/PassengerHomeOverlay';
+import PassengerHomeOverlay, {
+  PASSENGER_HOME_CARD_METRICS,
+  PassengerHomeOverlaySkeleton,
+} from './home/PassengerHomeOverlay';
 import DriverHomeOverlay from './home/DriverHomeOverlay';
 import DriverLiveRideOverlay from './home/DriverLiveRideOverlay';
 import DriverTripStatusBanner from './home/DriverTripStatusBanner';
@@ -23,11 +26,12 @@ import { subscribePrototypeMapOcclusion, usePrototypeMapOcclusion } from './prot
 import {
   clearPrototypeMapRoute,
   publishPrototypeMapCamera,
+  setPrototypeMapRoute,
   subscribePrototypeMapRoute,
 } from './prototypeMapRoute';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { resolvePassengerAutoRoute, shouldAutoSyncPassengerRoute } from './passengerFlowRouting';
-import { getSearchPresentation } from './searchPresentation';
+import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
 import useSearchElapsedClock from './useSearchElapsedClock';
 import { openDriverExternalNavigation } from '../../services/DriverExternalNavigationService';
 import { fetchH3CellsForRegion } from '../../services/runtime/h3MapService';
@@ -56,14 +60,21 @@ import {
 import { isE2ETestBuild } from '../../config/runtimeAccessPolicy';
 import { buildTripFinancialTotals, formatCurrencyBRL } from './tripFinancialSummary';
 import {
+  NAVIGATION_CAMERA_ANCHOR_Y,
+  NAVIGATION_CAMERA_ANIMATION_MS,
+  resolveNavigationCameraPitch,
+  resolveNavigationCameraZoom,
+} from '../../services/LeafNativeNavigationEngine';
+import {
   buildPrototypeConnectionIndicatorModel,
   resolvePrototypeConnectionAutomationConfig,
   shouldRunPrototypeConnectionAutomation,
 } from './prototypeConnectionStatus';
+import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 
 const { color } = robotaxiPrototypeTokens;
 const HOME_CARD_BOTTOM_OFFSET = 16;
-const HOME_CARD_FALLBACK_HEIGHT = 142;
+const HOME_CARD_FALLBACK_HEIGHT = PASSENGER_HOME_CARD_METRICS.stackHeight;
 const HOME_PICKUP_PICKER_BOTTOM_OFFSET = 26;
 const HOME_PICKUP_PICKER_FALLBACK_HEIGHT = 122;
 const DRIVER_BOTTOM_CTA_OFFSET = 16;
@@ -74,7 +85,7 @@ const MAX_OVERLAY_ZOOM_OUT_RATIO = 0.62;
 const IS_TEST_ENV = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
 const HOME_MAP_READY_FALLBACK_MS = Platform.OS === 'android' ? 4500 : 3500;
 const HOME_MAP_READY_WARMUP_MS = Platform.OS === 'android' ? 700 : 180;
-const SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP = Platform.OS !== 'android';
+const SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP = true;
 const PLACES_CACHE_LOOKUP_TIMEOUT_MS = 2500;
 const DEFAULT_USER_COORDINATE = {
   latitude: PROTOTYPE_REGION.latitude,
@@ -92,18 +103,22 @@ const QA_SEEDED_DESTINATION = Object.freeze({
 const ROUTE_SIDE_PADDING = 72;
 const ROUTE_TOP_EXTRA_PADDING = 22;
 const ROUTE_BOTTOM_EXTRA_PADDING = 28;
+const ROUTE_SHORT_TRIP_MAX_DISTANCE_KM = 1.8;
+const ROUTE_SHORT_TRIP_MIN_LAT_DELTA = 0.014;
 const SEARCH_ZOOM_ANIMATION_MS = 1150;
 const SEARCH_RADIUS_MARGIN = 1.34;
+const SEARCH_INITIAL_VIEWPORT_RADIUS_KM = 0.48;
 const MAP_OCCLUSION_REPOSITION_MS = 760;
 const MAP_RETURN_REPOSITION_MS = 820;
 const DRIVER_H3_VIEWPORT_DEBOUNCE_MS = 420;
 const DRIVER_H3_SOCKET_REFRESH_DEBOUNCE_MS = 900;
 const HOME_AUTOMATION_POLL_MS = 350;
 const HOME_AUTOMATION_WATCHDOG_MS = 250;
-const LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS = 1200;
+const LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS = 800;
 const LEAF_NATIVE_NAV_MANUAL_PAN_PAUSE_MS = 8000;
-const LEAF_NATIVE_NAV_CAMERA_ZOOM = Platform.OS === 'ios' ? 15.4 : 17;
-const LEAF_NATIVE_NAV_CAMERA_ANIMATION_MS = 920;
+const LEAF_NATIVE_NAV_CAMERA_MIN_LOOKAHEAD_KM = 0.045;
+const LEAF_NATIVE_NAV_CAMERA_MAX_LOOKAHEAD_KM = 0.28;
+const MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
 const SHOULD_AUTO_OPEN_DRIVER_NAVIGATION = false;
 const CONNECTION_STATUS_STABILITY_MS = 10000;
 const MAX_DEPTH_DEBUG_STORAGE_KEY = '@prototype_runtime_debug_max_depth';
@@ -353,17 +368,105 @@ function offsetCoordinateByDistance(center, distanceKm, bearingDegrees) {
   };
 }
 
-function buildNearbyVehicleCoordinates(center, { minDistanceKm, maxDistanceKm, count, seedBase, prefix }) {
+function resolveNavigationCameraLookAheadKm({
+  coordinate,
+  zoom,
+  mapHeight,
+  anchorY = NAVIGATION_CAMERA_ANCHOR_Y,
+}) {
+  if (!isFiniteCoordinate(coordinate)) {
+    return LEAF_NATIVE_NAV_CAMERA_MIN_LOOKAHEAD_KM;
+  }
+
+  const safeZoom = Number.isFinite(Number(zoom))
+    ? Math.max(1, Math.min(22, Number(zoom)))
+    : resolveNavigationCameraZoom(0);
+  const safeHeight = Number.isFinite(Number(mapHeight)) && Number(mapHeight) > 0
+    ? Number(mapHeight)
+    : 760;
+  const safeAnchorY = Math.max(0.5, Math.min(0.82, Number(anchorY) || NAVIGATION_CAMERA_ANCHOR_Y));
+  const latitudeCosine = Math.max(
+    0.18,
+    Math.cos((Number(coordinate.latitude) * Math.PI) / 180),
+  );
+  const metersPerPixel =
+    (MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 * latitudeCosine) / (2 ** safeZoom);
+  const anchorOffsetPixels = Math.max(0, safeHeight * (safeAnchorY - 0.5));
+  const lookAheadKm = (anchorOffsetPixels * metersPerPixel) / 1000;
+
+  return Math.min(
+    LEAF_NATIVE_NAV_CAMERA_MAX_LOOKAHEAD_KM,
+    Math.max(LEAF_NATIVE_NAV_CAMERA_MIN_LOOKAHEAD_KM, lookAheadKm),
+  );
+}
+
+const PRIVACY_SAFE_NEARBY_VEHICLE_BEARINGS = Object.freeze([
+  300,
+  332,
+  282,
+  24,
+  255,
+  314,
+  346,
+]);
+const PRIVACY_SAFE_NEARBY_VEHICLE_COLORS = Object.freeze([
+  'black',
+  'silver',
+  'white',
+  'blue',
+  'gray',
+  'red',
+]);
+
+function buildNearbyVehicleCoordinates(center, { minDistanceKm, maxDistanceKm, count, seedBase, prefix, bearingSlots = PRIVACY_SAFE_NEARBY_VEHICLE_BEARINGS }) {
   return Array.from({ length: count }).map((_, index) => {
     const seed = seedBase + index + 1;
-    const bearing = seededUnit(seed * 3.31) * 360;
+    const slotBearing = Array.isArray(bearingSlots) && bearingSlots.length > 0
+      ? bearingSlots[index % bearingSlots.length]
+      : null;
+    const jitter = (seededUnit(seed * 3.31) - 0.5) * 18;
+    const bearing = Number.isFinite(Number(slotBearing))
+      ? Number(slotBearing) + jitter
+      : seededUnit(seed * 3.31) * 360;
     const distance = minDistanceKm + seededUnit(seed * 7.17) * (maxDistanceKm - minDistanceKm);
 
     return {
       id: `${prefix}-${index + 1}`,
-      coordinate: offsetCoordinateByDistance(center, distance, bearing)
+      coordinate: offsetCoordinateByDistance(center, distance, bearing),
+      heading: (bearing + 155 + seededUnit(seed * 5.11) * 50) % 360,
+      color: PRIVACY_SAFE_NEARBY_VEHICLE_COLORS[index % PRIVACY_SAFE_NEARBY_VEHICLE_COLORS.length],
     };
   });
+}
+
+function getSearchViewportRadiusKm(radiusKm) {
+  const normalized = Number(radiusKm);
+
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return SEARCH_INITIAL_VIEWPORT_RADIUS_KM;
+  }
+
+  if (normalized <= 1) {
+    return SEARCH_INITIAL_VIEWPORT_RADIUS_KM;
+  }
+
+  if (normalized <= 2) {
+    return Math.max(1.36, normalized * 0.92);
+  }
+
+  if (normalized <= 3) {
+    return normalized * 0.96;
+  }
+
+  if (normalized <= 4) {
+    return normalized * 1.03;
+  }
+
+  if (normalized >= SEARCH_MAX_RADIUS_KM) {
+    return normalized * 1.14;
+  }
+
+  return normalized * 1.08;
 }
 
 function buildSearchRegion(center, radiusKm) {
@@ -408,28 +511,21 @@ function distanceBetweenCoordinatesKm(origin, destination) {
 
 function buildSearchViewportRegion({
   center,
-  radiusKm,
-  destination
+  radiusKm
 }) {
   if (!isFiniteCoordinate(center) || !Number.isFinite(radiusKm) || radiusKm <= 0) {
     return null;
   }
 
-  const baseRegion = buildSearchRegion(center, radiusKm);
+  const viewportRadiusKm = getSearchViewportRadiusKm(radiusKm);
+  const baseRegion = buildSearchRegion(center, viewportRadiusKm);
   const points = [
     center,
-    offsetCoordinateByDistance(center, radiusKm, 0),
-    offsetCoordinateByDistance(center, radiusKm, 90),
-    offsetCoordinateByDistance(center, radiusKm, 180),
-    offsetCoordinateByDistance(center, radiusKm, 270)
+    offsetCoordinateByDistance(center, viewportRadiusKm, 0),
+    offsetCoordinateByDistance(center, viewportRadiusKm, 90),
+    offsetCoordinateByDistance(center, viewportRadiusKm, 180),
+    offsetCoordinateByDistance(center, viewportRadiusKm, 270)
   ];
-  const shouldIncludeDestination =
-    isFiniteCoordinate(destination) &&
-    distanceBetweenCoordinatesKm(center, destination) <= Math.max(4.5, radiusKm * 4.25);
-
-  if (shouldIncludeDestination) {
-    points.push(destination);
-  }
 
   const latitudes = points.map((point) => point.latitude);
   const longitudes = points.map((point) => point.longitude);
@@ -443,6 +539,77 @@ function buildSearchViewportRegion({
     longitude: (minLongitude + maxLongitude) / 2,
     latitudeDelta: Math.max(baseRegion.latitudeDelta, (maxLatitude - minLatitude) * 1.18),
     longitudeDelta: Math.max(baseRegion.longitudeDelta, (maxLongitude - minLongitude) * 1.22)
+  };
+}
+
+function buildShortRouteViewportRegion({
+  coordinates,
+  mapHeight,
+  activeOcclusion,
+  insets,
+}) {
+  const points = Array.isArray(coordinates)
+    ? coordinates.filter(isFiniteCoordinate)
+    : [];
+
+  if (points.length < 2) {
+    return null;
+  }
+
+  const routeDistanceKm = points.reduce((total, point, index) => {
+    if (index === 0) {
+      return 0;
+    }
+
+    const segmentDistanceKm = distanceBetweenCoordinatesKm(points[index - 1], point);
+    return total + (Number.isFinite(segmentDistanceKm) ? segmentDistanceKm : 0);
+  }, 0);
+
+  if (routeDistanceKm > ROUTE_SHORT_TRIP_MAX_DISTANCE_KM) {
+    return null;
+  }
+
+  const latitudes = points.map(point => point.latitude);
+  const longitudes = points.map(point => point.longitude);
+  const minLatitude = Math.min(...latitudes);
+  const maxLatitude = Math.max(...latitudes);
+  const minLongitude = Math.min(...longitudes);
+  const maxLongitude = Math.max(...longitudes);
+  const centerLatitude = (minLatitude + maxLatitude) / 2;
+  const centerLongitude = (minLongitude + maxLongitude) / 2;
+  const latitudeCosine = Math.max(Math.cos((centerLatitude * Math.PI) / 180), 0.28);
+  const latitudeDelta = Math.max(
+    ROUTE_SHORT_TRIP_MIN_LAT_DELTA,
+    (maxLatitude - minLatitude) * 3.1,
+  );
+  const longitudeDelta = Math.max(
+    ROUTE_SHORT_TRIP_MIN_LAT_DELTA / latitudeCosine,
+    (maxLongitude - minLongitude) * 3.25,
+  );
+  const effectiveHeight = Math.max(1, Number(mapHeight) || 1);
+  const maxTop = Math.max(0, effectiveHeight - MAP_MIN_VISIBLE_HEIGHT);
+  const topInset = Math.min(
+    Math.max(Number(insets?.top) || 0, Number(activeOcclusion?.top) || 0),
+    maxTop,
+  );
+  const maxBottom = Math.max(0, effectiveHeight - MAP_MIN_VISIBLE_HEIGHT - topInset);
+  const bottomInset = Math.min(
+    Math.max(Number(insets?.bottom) || 0, Number(activeOcclusion?.bottom) || 0),
+    maxBottom,
+  );
+  const availableHeight = Math.max(
+    MAP_MIN_VISIBLE_HEIGHT,
+    effectiveHeight - topInset - bottomInset,
+  );
+  const desiredRouteCenterY = topInset + availableHeight / 2;
+  const baseCenterY = effectiveHeight / 2;
+  const latitudeOffset = (latitudeDelta * (desiredRouteCenterY - baseCenterY)) / effectiveHeight;
+
+  return {
+    latitude: centerLatitude + latitudeOffset,
+    longitude: centerLongitude,
+    latitudeDelta,
+    longitudeDelta,
   };
 }
 
@@ -650,6 +817,63 @@ function hexToRgba(hexColor, opacity = 1) {
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
 }
 
+const HOME_CATEGORY_RATE_CARDS = Object.freeze({
+  plus: {
+    title: 'Leaf Plus',
+    label: 'Plus',
+    description: 'Confortável e acessível',
+    icon: 'leaf-outline',
+    base_fare: 2.79,
+    fixed_fee: 1.1,
+    rate_per_hour: 15.6,
+    rate_per_unit_distance: 1.53,
+    min_fare: 8.5,
+  },
+  elite: {
+    title: 'Leaf Elite',
+    label: 'Elite',
+    description: 'Mais conforto para sua viagem',
+    icon: 'diamond-outline',
+    base_fare: 4.98,
+    fixed_fee: 1.8,
+    rate_per_hour: 17.4,
+    rate_per_unit_distance: 2.41,
+    min_fare: 10.5,
+  },
+  moto: {
+    title: 'Leaf Moto',
+    label: 'Moto',
+    description: 'Mais rápido para ir sozinho',
+    icon: 'bicycle-outline',
+    base_fare: 2.18,
+    fixed_fee: 0.86,
+    rate_per_hour: 12.17,
+    rate_per_unit_distance: 1.19,
+    min_fare: 6.9,
+  },
+});
+
+function calculateHomeCategoryFare(distanceKm, durationMin, rateCard) {
+  const distance = Number(distanceKm) || 0;
+  const durationHours = (Number(durationMin) || 0) / 60;
+  const subtotal =
+    (Number(rateCard?.base_fare) || 0) +
+    (Number(rateCard?.fixed_fee) || 0) +
+    distance * (Number(rateCard?.rate_per_unit_distance) || 0) +
+    durationHours * (Number(rateCard?.rate_per_hour) || 0);
+
+  return Number(Math.max(subtotal, Number(rateCard?.min_fare) || 0).toFixed(2));
+}
+
+function formatHomeArrivalTime(durationMin) {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() + Math.max(1, Math.round(Number(durationMin) || 1)));
+  return new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(now);
+}
+
 export default function RobotaxiHomeScreen({ navigation, route }) {
   const {
     activeRole,
@@ -664,7 +888,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     isSocketConnected,
     isSocketAuthenticated,
     driverCoordinate,
-    trafficLayerEnabled,
     clearFlowPreview,
     bookingStatus,
     activeBooking,
@@ -687,7 +910,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     paymentMethod,
     driverInfo,
     loadDestinationSuggestions,
+    loadRecentDestinations,
     resolveDestinationInput,
+    selectDestination,
     requestRide,
     setDriverOnline,
     setDriverDestinationMode,
@@ -756,6 +981,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const connectionAutomationTimersRef = useRef([]);
   const [homeCardHeight, setHomeCardHeight] = useState(HOME_CARD_FALLBACK_HEIGHT);
   const [homePickupPickerVisible, setHomePickupPickerVisible] = useState(false);
+  const [homeDestinationSearchActive, setHomeDestinationSearchActive] = useState(false);
+  const [homeDestinationQuery, setHomeDestinationQuery] = useState('');
+  const [homeDestinationResults, setHomeDestinationResults] = useState([]);
+  const [homeDestinationSearching, setHomeDestinationSearching] = useState(false);
+  const [homeSelectedDestination, setHomeSelectedDestination] = useState(null);
+  const [homeSelectedCategoryId, setHomeSelectedCategoryId] = useState('plus');
+  const [homeLeafDelasEnabled, setHomeLeafDelasEnabled] = useState(false);
   const [homePickupCoordinate, setHomePickupCoordinate] = useState(null);
   const [homePickupAddress, setHomePickupAddress] = useState('');
   const [cachedHomePickupAddress, setCachedHomePickupAddress] = useState('');
@@ -771,6 +1003,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [mapFollowingUser, setMapFollowingUser] = useState(true);
   const [visibleMapRegion, setVisibleMapRegion] = useState(PROTOTYPE_REGION);
   const [homeMapReady, setHomeMapReady] = useState(IS_TEST_ENV);
+  const [homeMapLayoutReady, setHomeMapLayoutReady] = useState(IS_TEST_ENV);
   const [homeSurfaceHydrated, setHomeSurfaceHydrated] = useState(false);
   const [driverH3Cells, setDriverH3Cells] = useState([]);
   const [driverH3RefreshNonce, setDriverH3RefreshNonce] = useState(0);
@@ -864,6 +1097,76 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       homePickupDisplayLabel,
     ]
   );
+  const homeQuoteDestinationCoordinate = homeSelectedDestination?.coordinate || null;
+  const homeQuoteDistanceKm = useMemo(() => {
+    if (!isFiniteCoordinate(effectiveHomePickupCoordinate) || !isFiniteCoordinate(homeQuoteDestinationCoordinate)) {
+      return 3.8;
+    }
+
+    const straightDistance = distanceBetweenCoordinatesKm(
+      effectiveHomePickupCoordinate,
+      homeQuoteDestinationCoordinate,
+    );
+    if (!Number.isFinite(straightDistance)) {
+      return 3.8;
+    }
+
+    return Math.max(1.2, Number((straightDistance * 1.32).toFixed(1)));
+  }, [
+    effectiveHomePickupCoordinate,
+    homeQuoteDestinationCoordinate,
+  ]);
+  const homeQuoteDurationMin = useMemo(() => {
+    const destinationEta = Number.parseInt(homeSelectedDestination?.eta || '', 10);
+    if (Number.isFinite(destinationEta) && destinationEta > 0) {
+      return Math.max(4, destinationEta + 4);
+    }
+
+    return Math.max(6, Math.round(homeQuoteDistanceKm * 4.2));
+  }, [homeQuoteDistanceKm, homeSelectedDestination?.eta]);
+  const homePickupEtaBaseMin = useMemo(() => {
+    const destinationEta = Number.parseInt(homeSelectedDestination?.eta || '', 10);
+    return Number.isFinite(destinationEta) && destinationEta > 0
+      ? Math.max(3, destinationEta)
+      : 4;
+  }, [homeSelectedDestination?.eta]);
+  const homeArrivalTime = useMemo(
+    () => formatHomeArrivalTime(homeQuoteDurationMin),
+    [homeQuoteDurationMin],
+  );
+  const homeCategoryOptions = useMemo(
+    () =>
+      Object.entries(HOME_CATEGORY_RATE_CARDS).map(([id, rateCard]) => {
+        const pickupEta =
+          id === 'elite'
+            ? homePickupEtaBaseMin + 2
+            : id === 'moto'
+              ? Math.max(2, homePickupEtaBaseMin - 1)
+              : homePickupEtaBaseMin;
+        return {
+          id,
+          title: rateCard.title,
+          label: rateCard.label,
+          description: rateCard.description,
+          icon: rateCard.icon,
+          pickupEtaLabel: `${pickupEta} min`,
+          arrivalLabel: homeArrivalTime,
+          priceLabel: formatCurrencyBRL(
+            calculateHomeCategoryFare(homeQuoteDistanceKm, homeQuoteDurationMin, rateCard),
+          ),
+        };
+      }),
+    [
+      homeArrivalTime,
+      homePickupEtaBaseMin,
+      homeQuoteDistanceKm,
+      homeQuoteDurationMin,
+    ],
+  );
+  const homeSelectedCategory =
+    homeCategoryOptions.find((item) => item.id === homeSelectedCategoryId) ||
+    homeCategoryOptions[0] ||
+    null;
 
   useEffect(() => {
     const query = resolvePickupAddressCandidate(currentAddress);
@@ -934,6 +1237,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const shouldSyncPassengerRoute = shouldAutoSyncPassengerRoute(currentRouteName);
   const freezeBackgroundMapCamera = isDriverOfferRoute;
   const showHomeChrome = Boolean(isScreenFocused && isHomeRoute);
+  const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
+    enabled: showHomeChrome,
+    surface: 'ride_map',
+    placement: 'vehicle_marker',
+    role: isDriverRole ? 'driver' : 'customer',
+    userId: profile?.uid || profileUid || '',
+    context: {
+      city: 'rio_de_janeiro',
+    },
+    eventMetadata: {
+      screen: 'robotaxi_home',
+      role: isDriverRole ? 'driver' : 'customer',
+    },
+  });
   const hasMenuTopAction = isDriverRole || isHomeRoute || isDriverRoute;
   const isSearchingMode = bookingStatus === 'searching' || bookingStatus === 'requesting';
   const searchAnchorTimestamp =
@@ -1039,8 +1356,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     const viewportRegion = buildSearchViewportRegion({
       center: searchCenterCoordinate,
-      radiusKm: searchRadiusKm,
-      destination: activeRoute.destination
+      radiusKm: searchPreviewRadiusKm || searchRadiusKm,
     });
 
     if (!viewportRegion) {
@@ -1065,10 +1381,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     activeOcclusion.bottom,
     activeOcclusion.top,
-    activeRoute.destination,
     isSearchingMode,
     mapHeight,
     searchCenterCoordinate,
+    searchPreviewRadiusKm,
     searchRadiusKm,
     windowHeight
   ]);
@@ -2025,6 +2341,97 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       (!normalizedBookingStatus || normalizedBookingStatus === 'idle') &&
       !passengerAutoRoute
   );
+
+  useEffect(() => {
+    if (canShowPassengerHomeOverlay || !homeDestinationSearchActive) {
+      return;
+    }
+
+    setHomeDestinationSearchActive(false);
+    setHomeDestinationQuery('');
+    setHomeDestinationResults([]);
+    setHomeDestinationSearching(false);
+    Keyboard.dismiss();
+  }, [canShowPassengerHomeOverlay, homeDestinationSearchActive]);
+
+  useEffect(() => {
+    if (!homeDestinationSearchActive) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const trimmedQuery = homeDestinationQuery.trim();
+
+    const loadResults = async () => {
+      if (!trimmedQuery) {
+        setHomeDestinationSearching(false);
+        if (typeof loadRecentDestinations !== 'function') {
+          setHomeDestinationResults([]);
+          return;
+        }
+
+        try {
+          const recent = await loadRecentDestinations();
+          if (!cancelled) {
+            setHomeDestinationResults(
+              Array.isArray(recent) ? recent.slice(0, 3) : [],
+            );
+          }
+        } catch (_error) {
+          if (!cancelled) {
+            setHomeDestinationResults([]);
+          }
+        }
+        return;
+      }
+
+      if (trimmedQuery.length < 3) {
+        setHomeDestinationSearching(false);
+        setHomeDestinationResults([]);
+        return;
+      }
+
+      if (typeof loadDestinationSuggestions !== 'function') {
+        setHomeDestinationSearching(false);
+        setHomeDestinationResults([]);
+        return;
+      }
+
+      setHomeDestinationSearching(true);
+      try {
+        const suggestions = await loadDestinationSuggestions(trimmedQuery, {
+          location: effectiveHomePickupCoordinate,
+        });
+        if (!cancelled) {
+          setHomeDestinationResults(
+            Array.isArray(suggestions) ? suggestions.slice(0, 3) : [],
+          );
+        }
+      } catch (_error) {
+        if (!cancelled) {
+          setHomeDestinationResults([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setHomeDestinationSearching(false);
+        }
+      }
+    };
+
+    const timer = setTimeout(loadResults, trimmedQuery ? 360 : 0);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    homeDestinationQuery,
+    homeDestinationSearchActive,
+    effectiveHomePickupCoordinate,
+    loadDestinationSuggestions,
+    loadRecentDestinations,
+  ]);
+
   const shouldRenderRuntimeMapState = runtimeVisualStateReady;
   const presentedSearchingMode = Boolean(
     shouldRenderRuntimeMapState && isSearchingMode,
@@ -2047,42 +2454,75 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const isLiveTripMapActive = ['accepted', 'arrived', 'started'].includes(
     normalizedBookingStatus
   );
-  const hasTrafficEligibleRoute =
-    hasActiveRoute && (!isHomeRoute || normalizedBookingStatus !== 'idle');
-  const shouldShowTrafficLayer = Boolean(
-    trafficLayerEnabled &&
-      shouldRenderRuntimeMapState &&
-      (
-        presentedSearchingMode ||
-        hasTrafficEligibleRoute ||
-        isLiveTripMapActive ||
-        [
-          'operational_interrupted',
-          'searching_replacement',
-          'searching_replacement_driver',
-        ].includes(normalizedBookingStatus)
-      )
-  );
+  const shouldShowTrafficLayer = false;
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
   const isPickupPhase =
     normalizedBookingStatus === 'accepted' ||
     normalizedBookingStatus === 'arrived';
   const mapShouldHideUserMarker =
-    shouldRenderRuntimeMapState && isLiveTripMapActive;
+    shouldRenderRuntimeMapState && (isDriverRole || isLiveTripMapActive || hasActiveRoute);
   const activeDriverNavigationCoordinate =
-    shouldRenderRuntimeMapState && isDriverRole && isLiveTripMapActive
-      ? driverTripAssistNativeNavigation?.currentCoordinate ||
-        driverCoordinate ||
-        currentCoordinate ||
-        null
+    shouldRenderRuntimeMapState && isDriverRole
+      ? isLiveTripMapActive
+        ? driverTripAssistNativeNavigation?.currentCoordinate ||
+          driverCoordinate ||
+          currentCoordinate ||
+          null
+        : driverCoordinate ||
+          currentCoordinate ||
+          null
       : currentCoordinate || null;
   const presentedDriverCoordinate = shouldRenderRuntimeMapState
-    ? isDriverRole && isLiveTripMapActive
+    ? isDriverRole
       ? activeDriverNavigationCoordinate
       : driverCoordinate
     : null;
-  const driverMarkerMode =
-    shouldRenderRuntimeMapState && isLiveTripMapActive ? 'avatar' : 'car';
+  const presentedDriverHeading = shouldRenderRuntimeMapState
+    ? isDriverRole
+      ? driverTripAssistNativeNavigation?.heading ??
+        driverTripAssistNativeNavigation?.bearing ??
+        currentHeading
+      : driverCoordinate?.heading ??
+        driverCoordinate?.bearing ??
+        driverCoordinate?.course ??
+        driverInfo?.heading ??
+        driverInfo?.bearing ??
+        null
+    : null;
+  const presentedDriverVehicleColor = useMemo(() => {
+    const candidates = [
+      driverInfo?.color,
+      driverInfo?.vehicleColor,
+      driverInfo?.vehicle?.color,
+      activeBooking?.vehicleColor,
+      activeBooking?.vehicle?.color,
+      driverActiveRide?.vehicleColor,
+      driverActiveRide?.vehicle?.color,
+      profile?.vehicleColor,
+      profile?.vehicle?.color,
+      profile?.carColor,
+      profile?.car?.color,
+    ];
+
+    return (
+      candidates
+        .map((candidate) => String(candidate || '').trim())
+        .find(Boolean) || ''
+    );
+  }, [
+    activeBooking?.vehicle?.color,
+    activeBooking?.vehicleColor,
+    driverActiveRide?.vehicle?.color,
+    driverActiveRide?.vehicleColor,
+    driverInfo?.color,
+    driverInfo?.vehicle?.color,
+    driverInfo?.vehicleColor,
+    profile?.car?.color,
+    profile?.carColor,
+    profile?.vehicle?.color,
+    profile?.vehicleColor,
+  ]);
+  const driverMarkerMode = 'car';
   const driverMarkerLetter = useMemo(() => {
     if (isDriverRole) {
       return profileInitial;
@@ -2113,10 +2553,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       : 'place';
   const routeAnimate = !(shouldRenderRuntimeMapState && isLiveTripMapActive);
   const routeMainColor =
-    shouldRenderRuntimeMapState && isLiveTripMapActive ? '#1A330E' : null;
+    shouldRenderRuntimeMapState && hasActiveRoute ? '#2B5B21' : null;
   const routeShadowColor =
-    shouldRenderRuntimeMapState && isLiveTripMapActive
-      ? 'rgba(26,127,55,0.20)'
+    shouldRenderRuntimeMapState && hasActiveRoute
+      ? 'rgba(255,255,255,0.88)'
       : null;
   const routeHighlightColor =
     shouldRenderRuntimeMapState && isLiveTripMapActive ? null : undefined;
@@ -2125,6 +2565,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   );
   const hasDriverLiveOfferContext = Boolean(
     driverLiveOffer?.bookingId || driverLiveOffer?.id
+  );
+  const driverActiveSurfaceStatus = String(
+    driverActiveRide?.status || normalizedBookingStatus || ''
+  )
+    .trim()
+    .toLowerCase();
+  const driverHasAcceptedOrActiveWork = Boolean(
+    isDriverRole &&
+      (
+        (hasDriverActiveRideContext &&
+          ['accepted', 'arrived', 'started'].includes(driverActiveSurfaceStatus)) ||
+        (hasDriverLiveOfferContext &&
+          ['accepted', 'arrived', 'started'].includes(normalizedBookingStatus))
+      )
   );
   const canRenderDriverRideChrome = Boolean(
     driverActivationResolved ||
@@ -2159,9 +2613,19 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       canRenderDriverRideChrome &&
       !hasDriverLiveRideOverlay
   );
+  const hasPrimaryHomeSurfaceForFirstPaint = Boolean(
+    !showHomeChrome ||
+      homePickupPickerVisible ||
+      canShowPassengerHomeOverlay ||
+      hasDriverLiveRideOverlay ||
+      showDriverHomeOverlay
+  );
+  const homeMapInteractiveReady = Boolean(homeMapReady && homeMapLayoutReady);
+  const homeMapFirstPaintReady = Boolean(homeMapReady);
   const homeSurfaceReadyForFirstPaint = Boolean(
-    (!SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP || homeMapReady) &&
+    (!SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP || homeMapFirstPaintReady) &&
       runtimeVisualStateReady &&
+      hasPrimaryHomeSurfaceForFirstPaint &&
       (!isDriverRole || !isHomeRoute || canRenderDriverRideChrome)
   );
   const homeSurfaceLoadingVisible = Boolean(
@@ -2206,9 +2670,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, []);
 
   const handleHomeMapReady = useCallback(() => {
-    if (Platform.OS !== 'android') {
-      scheduleHomeMapReady();
-    }
+    scheduleHomeMapReady();
   }, [scheduleHomeMapReady]);
 
   const handleHomeMapLoaded = useCallback(() => {
@@ -2496,6 +2958,35 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       !homePickupPickerVisible &&
       !canShowPassengerHomeOverlay &&
       normalizedBookingStatus === 'idle'
+  );
+  const showPassengerHomeSkeleton = Boolean(
+    showHomeChrome &&
+      !isDriverRole &&
+      !isDriverRoute &&
+      !homePickupPickerVisible &&
+      !canShowPassengerHomeOverlay &&
+      !activeBookingId &&
+      !passengerAutoRoute &&
+      (!normalizedBookingStatus || normalizedBookingStatus === 'idle')
+  );
+  const hasPrimaryHomeBottomSurface = Boolean(
+    homePickupPickerVisible ||
+      canShowPassengerHomeOverlay ||
+      showPassengerHomeSkeleton ||
+      hasDriverLiveRideOverlay ||
+      showDriverHomeOverlay
+  );
+  const shouldCoverBareHomeMap = Boolean(
+    showHomeChrome &&
+      runtimeVisualStateReady &&
+      !hasPrimaryHomeBottomSurface
+  );
+  const effectiveHomeSurfaceLoadingVisible = Boolean(
+    (homeSurfaceLoadingVisible || shouldCoverBareHomeMap) &&
+      !showPassengerHomeSkeleton
+  );
+  const homeSurfaceInteractionBlocked = Boolean(
+    effectiveHomeSurfaceLoadingVisible || showPassengerHomeSkeleton
   );
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -2874,7 +3365,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [activeOcclusion.bottom, activeOcclusion.top, hasDriverLiveRideOverlay, insets.bottom, insets.top, mapHeight]);
 
   const focusRoute = useCallback((routePayload, animatedFit = true) => {
-    if (!mapRef.current || !routePayload) {
+    if (!mapRef.current || !homeMapInteractiveReady || !routePayload) {
       return;
     }
 
@@ -2885,16 +3376,30 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    const shortRouteRegion = buildShortRouteViewportRegion({
+      coordinates,
+      mapHeight,
+      activeOcclusion,
+      insets,
+    });
+    if (shortRouteRegion) {
+      mapRef.current.animateToRegion(
+        shortRouteRegion,
+        animatedFit ? MAP_OCCLUSION_REPOSITION_MS : 0,
+      );
+      return;
+    }
+
     const edgePadding = getRouteEdgePadding();
     mapRef.current.animateCamera({ heading: 0, pitch: 0 }, { duration: animatedFit ? 220 : 0 });
     mapRef.current.fitToCoordinates(coordinates, {
       edgePadding,
       animated: animatedFit
     });
-  }, [getRouteEdgePadding]);
+  }, [activeOcclusion, getRouteEdgePadding, homeMapInteractiveReady, insets, mapHeight]);
 
   const focusSearchArea = useCallback((animatedFit = true) => {
-    if (!mapRef.current || !isSearchingMode || !searchTargetRegion) {
+    if (!mapRef.current || !homeMapInteractiveReady || !isSearchingMode || !searchTargetRegion) {
       return;
     }
 
@@ -2903,12 +3408,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       animatedFit ? SEARCH_ZOOM_ANIMATION_MS : 0
     );
   }, [
+    homeMapInteractiveReady,
     isSearchingMode,
     searchTargetRegion
   ]);
 
   useEffect(() => {
-    if (!mapRef.current || !hasActiveRoute || !routeLayoutKey || isSearchingMode) {
+    if (!mapRef.current || !homeMapInteractiveReady || !hasActiveRoute || !routeLayoutKey || isSearchingMode) {
       return;
     }
 
@@ -2926,6 +3432,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     activeRoute,
     focusRoute,
     hasActiveRoute,
+    homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationKey,
     liveRouteTrackingKey,
@@ -2934,7 +3441,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
-    if (!mapRef.current || hasActiveRoute || isSearchingMode || shouldFreezeBackgroundMapCamera) {
+    if (!mapRef.current || !homeMapInteractiveReady || hasActiveRoute || isSearchingMode || shouldFreezeBackgroundMapCamera) {
       return;
     }
 
@@ -2944,7 +3451,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     lastRouteLayoutKeyRef.current = '';
     mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
-  }, [hasActiveRoute, isSearchingMode, mapFollowingUser, shouldFreezeBackgroundMapCamera, targetRegion]);
+  }, [hasActiveRoute, homeMapInteractiveReady, isSearchingMode, mapFollowingUser, shouldFreezeBackgroundMapCamera, targetRegion]);
 
   useEffect(() => {
     if (!isSearchingMode) {
@@ -2954,10 +3461,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    const innerVehicleCount = Math.min(6, searchPresentation.nearbyVehiclesCount);
+    const visibleVehicleCount = Math.min(4, searchPresentation.nearbyVehiclesCount);
+    const innerVehicleCount = Math.min(3, visibleVehicleCount);
     const baseInnerVehicles = buildNearbyVehicleCoordinates(searchCenterCoordinate, {
-      minDistanceKm: 0.42,
-      maxDistanceKm: Math.max(0.78, Math.min(searchRadiusKm * 0.9, 1.6)),
+      minDistanceKm: 1.68,
+      maxDistanceKm: Math.max(2.04, Math.min(searchRadiusKm * 0.92, 2.46)),
       count: innerVehicleCount,
       seedBase: 21,
       prefix: 'inner'
@@ -2968,9 +3476,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    const outerVehicleCount = Math.max(0, searchPresentation.nearbyVehiclesCount - innerVehicleCount);
+    const outerVehicleCount = Math.max(0, visibleVehicleCount - innerVehicleCount);
     const outerVehicles = buildNearbyVehicleCoordinates(searchCenterCoordinate, {
-      minDistanceKm: Math.max(1.15, searchRadiusKm * 0.42),
+      minDistanceKm: Math.max(2.24, searchRadiusKm * 0.68),
       maxDistanceKm: searchRadiusKm * 0.98,
       count: outerVehicleCount,
       seedBase: 77,
@@ -2981,14 +3489,22 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [isSearchingMode, searchCenterCoordinate, searchPresentation.nearbyVehiclesCount, searchRadiusKm]);
 
   useEffect(() => {
-    if (!mapRef.current || !isSearchingMode || !searchRegion) {
+    if (!mapRef.current || !homeMapInteractiveReady || !isSearchingMode || !searchRegion) {
       return;
     }
 
-    const changedRadius = lastSearchRadiusRef.current !== searchRadiusKm;
-    lastSearchRadiusRef.current = searchRadiusKm;
+    const cameraRadiusKey = `${searchRadiusKm || 0}:${searchPreviewRadiusKm || 0}`;
+    const changedRadius = lastSearchRadiusRef.current !== cameraRadiusKey;
+    lastSearchRadiusRef.current = cameraRadiusKey;
     focusSearchArea(changedRadius);
-  }, [focusSearchArea, isSearchingMode, searchRadiusKm, searchRegion]);
+  }, [
+    focusSearchArea,
+    homeMapInteractiveReady,
+    isSearchingMode,
+    searchPreviewRadiusKm,
+    searchRadiusKm,
+    searchRegion,
+  ]);
 
   useEffect(() => {
     if (isSearchingMode) {
@@ -2996,7 +3512,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    if (!wasSearchingRef.current || !mapRef.current) {
+    if (!wasSearchingRef.current || !mapRef.current || !homeMapInteractiveReady) {
       return;
     }
 
@@ -3022,6 +3538,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     activeRoute,
     focusRoute,
     hasActiveRoute,
+    homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationKey,
     liveRouteTrackingKey,
@@ -3032,7 +3549,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   const handleCenterMap = useCallback(() => {
-    if (mapRef.current) {
+    if (mapRef.current && homeMapInteractiveReady) {
       setMapFollowingUser(true);
 
       if (isSearchingMode && searchRegion) {
@@ -3048,7 +3565,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       lastRouteLayoutKeyRef.current = '';
       mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
     }
-  }, [activeRoute, focusRoute, focusSearchArea, hasActiveRoute, isSearchingMode, routeLayoutKey, searchRegion, targetRegion]);
+  }, [activeRoute, focusRoute, focusSearchArea, hasActiveRoute, homeMapInteractiveReady, isSearchingMode, routeLayoutKey, searchRegion, targetRegion]);
 
   const handleHideLeafNativeNavigation = useCallback(() => {
     if (!leafNativeNavigationKey) {
@@ -3077,6 +3594,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     if (
       !showLeafNativeNavigation ||
       !mapRef.current ||
+      !homeMapInteractiveReady ||
       !activeDriverNavigationCoordinate ||
       isSearchingMode ||
       shouldFreezeBackgroundMapCamera
@@ -3099,38 +3617,81 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       leafNativeNavigationCameraHeading ?? currentHeading,
     );
     lastNativeNavigationHeadingRef.current = resolvedCameraHeading;
+    const navigationSpeedKmh = Number(driverTripAssistNativeNavigation?.currentSpeedKmh);
+    const resolvedCameraZoom = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraZoom))
+      ? Number(driverTripAssistNativeNavigation.cameraZoom)
+      : resolveNavigationCameraZoom(navigationSpeedKmh);
+    const resolvedCameraPitch = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraPitch))
+      ? Number(driverTripAssistNativeNavigation.cameraPitch)
+      : resolveNavigationCameraPitch(navigationSpeedKmh);
+    const resolvedCameraAnchorY = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraAnchorY))
+      ? Number(driverTripAssistNativeNavigation.cameraAnchorY)
+      : NAVIGATION_CAMERA_ANCHOR_Y;
+    const lookAheadKm = Number.isFinite(Number(resolvedCameraHeading))
+      ? resolveNavigationCameraLookAheadKm({
+          coordinate: activeDriverNavigationCoordinate,
+          zoom: resolvedCameraZoom,
+          mapHeight,
+          anchorY: resolvedCameraAnchorY,
+        })
+      : 0;
+    const cameraCenterCoordinate = Number.isFinite(Number(resolvedCameraHeading))
+      ? offsetCoordinateByDistance(
+          activeDriverNavigationCoordinate,
+          lookAheadKm,
+          resolvedCameraHeading,
+        )
+      : activeDriverNavigationCoordinate;
+    const animationDurationMs = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraAnimationDurationMs))
+      ? Number(driverTripAssistNativeNavigation.cameraAnimationDurationMs)
+      : NAVIGATION_CAMERA_ANIMATION_MS;
     mapRef.current.animateCamera(
       {
         center: {
-          latitude: activeDriverNavigationCoordinate.latitude,
-          longitude: activeDriverNavigationCoordinate.longitude,
+          latitude: cameraCenterCoordinate.latitude,
+          longitude: cameraCenterCoordinate.longitude,
         },
-        zoom: LEAF_NATIVE_NAV_CAMERA_ZOOM,
+        zoom: resolvedCameraZoom,
         heading: resolvedCameraHeading ?? 0,
-        pitch: 0,
+        pitch: resolvedCameraPitch,
       },
-      { duration: LEAF_NATIVE_NAV_CAMERA_ANIMATION_MS }
+      { duration: animationDurationMs }
     );
     appendPrototypeRuntimeDebugStep('leaf_native_camera_follow', {
       key: leafNativeNavigationKey,
       latitude: Number(activeDriverNavigationCoordinate.latitude.toFixed(6)),
       longitude: Number(activeDriverNavigationCoordinate.longitude.toFixed(6)),
+      cameraLatitude: Number(cameraCenterCoordinate.latitude.toFixed(6)),
+      cameraLongitude: Number(cameraCenterCoordinate.longitude.toFixed(6)),
       heading: Number.isFinite(Number(resolvedCameraHeading))
         ? Number(Number(resolvedCameraHeading).toFixed(1))
         : 0,
       routeHeading: Number.isFinite(Number(leafNativeNavigationCameraHeading))
         ? Number(Number(leafNativeNavigationCameraHeading).toFixed(1))
         : null,
-      zoom: LEAF_NATIVE_NAV_CAMERA_ZOOM,
+      zoom: resolvedCameraZoom,
+      pitch: resolvedCameraPitch,
+      anchorY: resolvedCameraAnchorY,
+      speedKmh: Number.isFinite(navigationSpeedKmh)
+        ? Number(navigationSpeedKmh.toFixed(1))
+        : 0,
+      lookAheadKm,
       throttleMs: LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS,
-      animationMs: LEAF_NATIVE_NAV_CAMERA_ANIMATION_MS,
+      animationMs: animationDurationMs,
     });
   }, [
     activeDriverNavigationCoordinate,
     currentHeading,
+    driverTripAssistNativeNavigation?.cameraAnchorY,
+    driverTripAssistNativeNavigation?.cameraAnimationDurationMs,
+    driverTripAssistNativeNavigation?.cameraPitch,
+    driverTripAssistNativeNavigation?.cameraZoom,
+    driverTripAssistNativeNavigation?.currentSpeedKmh,
+    homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationCameraHeading,
     leafNativeNavigationKey,
+    mapHeight,
     shouldFreezeBackgroundMapCamera,
     showLeafNativeNavigation,
   ]);
@@ -3167,9 +3728,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [homePickupPickerVisible, resolveVisibleMapCenterCoordinate, showDriverH3Overlay]);
 
   const handleMapLayout = useCallback(event => {
+    const nextWidth = event?.nativeEvent?.layout?.width;
     const nextHeight = event?.nativeEvent?.layout?.height;
-    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+    if (Number.isFinite(nextWidth) && nextWidth > 0 && Number.isFinite(nextHeight) && nextHeight > 0) {
       setMapHeight(previous => (previous === nextHeight ? previous : nextHeight));
+      setHomeMapLayoutReady(true);
     }
   }, []);
 
@@ -3188,7 +3751,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, []);
 
   const focusHomePickupCoordinate = useCallback((coordinate = effectiveHomePickupCoordinate) => {
-    if (!mapRef.current || !isFiniteCoordinate(coordinate)) {
+    if (!mapRef.current || !homeMapInteractiveReady || !isFiniteCoordinate(coordinate)) {
       return;
     }
 
@@ -3201,7 +3764,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       },
       { duration: 520 }
     );
-  }, [effectiveHomePickupCoordinate]);
+  }, [effectiveHomePickupCoordinate, homeMapInteractiveReady]);
 
   const handleOpenHomePickupPicker = useCallback(() => {
     const nextCoordinate = isFiniteCoordinate(homePickupCoordinate)
@@ -3257,14 +3820,127 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, []);
 
   const handleOpenPassengerDestination = useCallback(
-    (extraParams = {}) => {
-      navigation.navigate('RobotaxiPrototypeDestination', {
-        ...destinationRoutePickupParams,
-        ...extraParams,
-      });
+    (_extraParams = {}) => {
+      setHomeDestinationQuery(
+        homeSelectedDestination?.name ||
+          homeSelectedDestination?.address ||
+          '',
+      );
+      setHomeDestinationSearchActive(true);
     },
-    [destinationRoutePickupParams, navigation]
+    [homeSelectedDestination?.address, homeSelectedDestination?.name]
   );
+
+  const handleCloseHomeDestinationSearch = useCallback(() => {
+    setHomeDestinationSearchActive(false);
+    setHomeDestinationQuery('');
+    setHomeDestinationResults([]);
+    setHomeDestinationSearching(false);
+    Keyboard.dismiss();
+  }, []);
+
+  const handleSelectHomeDestinationResult = useCallback(
+    async (item) => {
+      const fallbackDestination = {
+        name: String(homeDestinationQuery || '').trim(),
+        address: String(homeDestinationQuery || '').trim(),
+      };
+      const destinationInput = item || fallbackDestination;
+
+      try {
+        setHomeDestinationSearching(true);
+        const resolvedDestination =
+          typeof selectDestination === 'function'
+            ? await selectDestination(destinationInput)
+            : await resolveDestinationInput(destinationInput);
+
+        if (!resolvedDestination?.coordinate) {
+          Alert.alert(
+            'Destino indisponível',
+            'Não consegui confirmar esse destino agora. Tente buscar de novo.',
+          );
+          return;
+        }
+
+        setHomeDestinationSearchActive(false);
+        setHomeDestinationQuery('');
+        setHomeDestinationResults([]);
+        setHomeSelectedDestination(resolvedDestination);
+        setHomeSelectedCategoryId('plus');
+        setPrototypeMapRoute({
+          origin: effectiveHomePickupCoordinate,
+          destination: resolvedDestination.coordinate,
+          destinationLabel: resolvedDestination.name || 'Destino',
+          destinationAddress:
+            resolvedDestination.address ||
+            resolvedDestination.description ||
+            resolvedDestination.name ||
+            '',
+        });
+        Keyboard.dismiss();
+      } catch (_error) {
+        Alert.alert(
+          'Destino indisponível',
+          'Não consegui confirmar esse destino agora. Tente buscar de novo.',
+        );
+      } finally {
+        setHomeDestinationSearching(false);
+      }
+    },
+    [
+      effectiveHomePickupCoordinate,
+      homeDestinationQuery,
+      resolveDestinationInput,
+      selectDestination,
+    ],
+  );
+
+  const handleConfirmHomeCategory = useCallback(() => {
+    if (!homeSelectedDestination?.coordinate) {
+      handleOpenPassengerDestination();
+      return;
+    }
+
+    navigation.navigate('RobotaxiPrototypeDestination', {
+      ...destinationRoutePickupParams,
+      initialSelectedDestination: homeSelectedDestination,
+      initialSelectedPlan: homeSelectedCategory?.id || homeSelectedCategoryId || 'plus',
+      leafDelas: homeLeafDelasEnabled,
+      startAtConfirmation: true,
+      skipDestinationSearch: true,
+    });
+  }, [
+    destinationRoutePickupParams,
+    handleOpenPassengerDestination,
+    homeLeafDelasEnabled,
+    homeSelectedCategory?.id,
+    homeSelectedCategoryId,
+    homeSelectedDestination,
+    navigation,
+  ]);
+
+  useEffect(() => {
+    if (!homeSelectedDestination?.coordinate) {
+      return;
+    }
+
+    setPrototypeMapRoute({
+      origin: effectiveHomePickupCoordinate,
+      destination: homeSelectedDestination.coordinate,
+      destinationLabel: homeSelectedDestination.name || 'Destino',
+      destinationAddress:
+        homeSelectedDestination.address ||
+        homeSelectedDestination.description ||
+        homeSelectedDestination.name ||
+        '',
+    });
+  }, [
+    effectiveHomePickupCoordinate,
+    homeSelectedDestination?.address,
+    homeSelectedDestination?.coordinate,
+    homeSelectedDestination?.description,
+    homeSelectedDestination?.name,
+  ]);
 
   const handleDriverCtaLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -3330,20 +4006,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setDriverDestinationMode,
   ]);
 
-    const handleDriverOnlineToggle = useCallback(async () => {
-      appendPrototypeRuntimeDebugStep('driver_home_toggle_pressed', {
-        driverOnline,
-        driverOnlinePending,
-        driverCanGoOnline,
-        driverActivationResolved
-      });
-      const runToggle = async (nextValue) => {
-        try {
-          const result = await setDriverOnline(nextValue);
-          if (result?.blocked) {
+  const handleDriverOnlineToggle = useCallback(async () => {
+    appendPrototypeRuntimeDebugStep('driver_home_toggle_pressed', {
+      driverOnline,
+      driverOnlinePending,
+      driverCanGoOnline,
+      driverActivationResolved
+    });
+    const runToggle = async (nextValue) => {
+      try {
+        const result = await setDriverOnline(nextValue);
+        if (result?.blocked) {
           Alert.alert(
             'Ativação pendente',
-            'Conclua CNH, CRLV, MEI e consentimento antes de ficar online.',
+            'Conclua CNH, CRLV e consentimento antes de ficar online.',
             [
               { text: 'Depois' },
               {
@@ -3381,6 +4057,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }
     };
 
+    if (driverHasAcceptedOrActiveWork) {
+      appendPrototypeRuntimeDebugStep('driver_home_toggle_ignored_active_work', {
+        bookingStatus: normalizedBookingStatus,
+        activeRideBookingId: driverActiveRide?.bookingId || driverActiveRide?.id || '',
+        liveOfferBookingId: driverLiveOffer?.bookingId || driverLiveOffer?.id || '',
+      });
+      return;
+    }
+
     if (driverOnline) {
       Alert.alert(
         'Ficar offline',
@@ -3395,11 +4080,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     runToggle(true);
   }, [
+    driverActiveRide?.bookingId,
+    driverActiveRide?.id,
     driverActivationResolved,
     driverCanGoOnline,
+    driverHasAcceptedOrActiveWork,
+    driverLiveOffer?.bookingId,
+    driverLiveOffer?.id,
     driverOnline,
     driverOnlinePending,
     navigation,
+    normalizedBookingStatus,
     setDriverOnline
   ]);
 
@@ -4040,6 +4731,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    if (homeSelectedDestination?.coordinate) {
+      return;
+    }
+
     const hasPreviewDestination = Boolean(
       selectedDestination?.coordinate || selectedDestination?.name || selectedDestination?.address
     );
@@ -4055,6 +4750,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     activeRoute.coordinates,
     bookingStatus,
     clearFlowPreview,
+    homeSelectedDestination?.coordinate,
     isDriverRole,
     isHomeRoute,
     selectedDestination?.address,
@@ -4093,6 +4789,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           userAvatarUri={profileImage}
           userAvatarLetter={profileInitial}
           driverCoordinate={presentedDriverCoordinate}
+          driverHeading={presentedDriverHeading}
           showTraffic={shouldShowTrafficLayer}
           searchingMode={presentedSearchingMode}
           searchCenterCoordinate={presentedSearchingMode ? searchCenterCoordinate : null}
@@ -4100,6 +4797,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           searchPreviewRadiusKm={presentedSearchingMode ? searchPreviewRadiusKm : null}
           nearbyVehicles={presentedNearbyVehicles}
           routeCoordinates={presentedRouteCoordinates}
+          originCoordinate={activeRoute.origin}
           destinationCoordinate={presentedRouteDestination}
           destinationLabel={presentedRouteDestinationLabel}
           destinationAddress={presentedRouteDestinationAddress}
@@ -4110,7 +4808,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           routeMainColor={routeMainColor}
           routeShadowColor={routeShadowColor}
           routeHighlightColor={routeHighlightColor}
+          hideRouteEndpointMarkers={isLiveTripMapActive}
           driverMarkerMode={driverMarkerMode}
+          driverVehicleColor={presentedDriverVehicleColor}
+          driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
           driverMarkerLetter={driverMarkerLetter}
           destinationMarkerMode={destinationMarkerMode}
           destinationMarkerLetter={passengerMarkerLetter}
@@ -4124,16 +4825,19 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           interactionEnabled={
             (showHomeChrome || isDestinationRoute) &&
             shouldRenderRuntimeMapState &&
-            !homeSurfaceLoadingVisible
+            !homeSurfaceInteractionBlocked
           }
         />
 
-        {showHomeChrome && !homeSurfaceLoadingVisible && !homePickupPickerVisible ? (
+        {showHomeChrome &&
+        !homeSurfaceInteractionBlocked &&
+        !homePickupPickerVisible &&
+        !hasDriverLiveRideOverlay ? (
           <PrototypeTopControls
             insets={insets}
             leftIcon={isHomeRoute ? 'locate' : 'arrow-back'}
             rightIcon={hasMenuTopAction ? 'menu' : 'locate'}
-            showRightBadge={hasMenuTopAction && unreadNotificationCount > 0}
+            showRightBadge={false}
             onPressLeft={handleTopLeftPress}
             onPressRight={handleTopRightPress}
           />
@@ -4162,7 +4866,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   testID="passenger-home-pickup-cancel-button"
                   accessibilityLabel="Cancelar alteração de partida"
                 >
-                  <Ionicons name="chevron-back" size={20} color="#102018" />
+                  <Ionicons name="chevron-back" size={20} color="#171412" />
                 </TouchableOpacity>
                 <View style={styles.homePickupFloatingCopy}>
                   <Text style={styles.homePickupEyebrow}>Partida</Text>
@@ -4259,6 +4963,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             card={driverTransientCard}
             insetsBottom={insets.bottom}
             bottomOffset={DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight + 12}
+            suppressActivationStatusAlerts={driverHasAcceptedOrActiveWork}
           />
         ) : null}
 
@@ -4268,7 +4973,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             userId={profile?.uid}
             pickupLabel={homePickupDisplayLabel}
             pickupAddress={homePickupDisplayAddress}
-            destinationLabel={destination}
+            destinationLabel={
+              homeSelectedDestination?.name ||
+              homeSelectedDestination?.address ||
+              destination
+            }
             onCardLayout={handleSearchCardLayout}
             onPickupPress={handleOpenHomePickupPicker}
             onDestinationPress={() => handleOpenPassengerDestination()}
@@ -4277,6 +4986,33 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 autoStartVoice: true
               })
             }
+            destinationSearchActive={homeDestinationSearchActive}
+            destinationSearchQuery={homeDestinationQuery}
+            destinationSearchResults={homeDestinationResults}
+            destinationSearchSearching={homeDestinationSearching}
+            onDestinationSearchChange={setHomeDestinationQuery}
+            onDestinationSearchClose={handleCloseHomeDestinationSearch}
+            onDestinationResultPress={handleSelectHomeDestinationResult}
+            categoryVisible={Boolean(homeSelectedDestination?.coordinate)}
+            categoryOptions={homeCategoryOptions}
+            selectedCategoryId={homeSelectedCategoryId}
+            onCategorySelect={setHomeSelectedCategoryId}
+            onCategoryConfirm={handleConfirmHomeCategory}
+            categoryConfirmDisabled={!homeSelectedDestination?.coordinate}
+            categoryConfirmLabel="Confirmar"
+            tariffStatusLabel="Tarifa normal"
+            tariffHigh={false}
+            leafDelasEnabled={homeLeafDelasEnabled}
+            onLeafDelasToggle={() =>
+              setHomeLeafDelasEnabled((current) => !current)
+            }
+          />
+        ) : null}
+
+        {showPassengerHomeSkeleton ? (
+          <PassengerHomeOverlaySkeleton
+            insetsBottom={insets.bottom}
+            onCardLayout={handleSearchCardLayout}
           />
         ) : null}
 
@@ -4314,7 +5050,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               completeTripFlow={completeTripFlow}
               driverTripAssist={driverTripAssist}
               onOpenNavigation={handleOpenDriverNavigation}
-              onTripCompletedSuccess={() => navigation.navigate('RobotaxiPrototypeReceipt', { fromTrip: true })}
+              nativeNavigationVisible={showLeafNativeNavigation}
+              onTripCompletedSuccess={(result) =>
+                navigation.navigate('RobotaxiPrototypeReceipt', {
+                  fromTrip: true,
+                  receipt: result?.receipt || result?.lastReceipt || null,
+                })
+              }
             />
 
             {showDriverHomeOverlay ? (
@@ -4326,6 +5068,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 driverOnlinePending={driverOnlinePending}
                 driverCanGoOnline={driverCanGoOnline}
                 driverActivationResolved={driverActivationResolved}
+                driverWorkInProgress={driverHasAcceptedOrActiveWork}
+                suppressDaySummary={driverHasAcceptedOrActiveWork}
                 ridesCount={todayTrips}
                 formattedDriverEarnings={formattedDriverEarnings}
                 driverGrossAmount={driverTripTotals.totalGross}
@@ -4358,7 +5102,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           />
         ) : null}
 
-        {homeSurfaceLoadingVisible ? (
+        {effectiveHomeSurfaceLoadingVisible ? (
           <View
             style={styles.homeLoadingOverlay}
             testID="prototype-home-loading"
@@ -4369,7 +5113,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               <Text style={styles.homeLoadingTitle}>{homeLoadingTitle}</Text>
               <ActivityIndicator
                 size="small"
-                color="#0F3B16"
+                color="#1A330E"
                 style={styles.homeLoadingSpinner}
               />
             </View>
@@ -4397,11 +5141,11 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#FAFBF8',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#CFD8CD',
+    borderColor: '#ECE5DC',
     shadowColor: '#111611',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.14,
@@ -4427,8 +5171,8 @@ const styles = StyleSheet.create({
     minHeight: 86,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: '#DCE4DA',
-    backgroundColor: '#FAFBF8',
+    borderColor: '#ECE5DC',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 14,
     flexDirection: 'row',
@@ -4476,15 +5220,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     borderWidth: 1,
-    borderColor: '#CFD8CD',
-    backgroundColor: '#FAFBF8',
-    paddingHorizontal: 28,
-    paddingTop: 16,
+    borderColor: '#ECE5DC',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 24,
+    paddingTop: 14,
     paddingBottom: 18,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -14 },
@@ -4496,7 +5240,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 4,
     borderRadius: 3,
-    backgroundColor: '#CAD3C8',
+    backgroundColor: '#D8D0C7',
     alignSelf: 'center',
     marginBottom: 18,
   },
@@ -4524,8 +5268,8 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#CFD8CD',
-    backgroundColor: '#FAFBF8',
+    borderColor: '#E9E2D8',
+    backgroundColor: '#F8F6F1',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
@@ -4555,7 +5299,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 120,
     elevation: 120,
-    backgroundColor: '#F4F6F1',
+    backgroundColor: '#F8F6F1',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 28,
@@ -4565,10 +5309,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   homeLoadingTitle: {
-    color: '#111611',
+    color: '#171412',
     fontFamily: fonts.SemiBold,
-    fontSize: 22,
-    lineHeight: 29,
+    fontSize: 20,
+    lineHeight: 26,
     textAlign: 'center',
   },
   homeLoadingSpinner: {

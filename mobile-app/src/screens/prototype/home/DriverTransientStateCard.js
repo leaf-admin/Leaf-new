@@ -18,13 +18,45 @@ function resolveIcon(type) {
   return { name: "information-circle-outline", color: color.text.primary, tone: styles.defaultIconWrap };
 }
 
+function normalizeAlertText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isActivationStatusCard(card = {}) {
+  const combined = normalizeAlertText(
+    `${card?.type || ""} ${card?.title || ""} ${card?.message || ""}`,
+  );
+
+  if (!combined) {
+    return false;
+  }
+
+  return (
+    combined.includes("ativacao") ||
+    combined.includes("ativar seu status") ||
+    combined.includes("veiculo valido") ||
+    combined.includes("veiculo ativo") ||
+    combined.includes("driver_not_eligible") ||
+    combined.includes("vehicle_required")
+  );
+}
+
 export default function DriverTransientStateCard({
   card = null,
   insetsBottom = 0,
   bottomOffset = 0,
+  suppressActivationStatusAlerts = false,
 }) {
   const cardId = String(card?.id || "").trim();
   if (!cardId) {
+    return null;
+  }
+
+  if (suppressActivationStatusAlerts && isActivationStatusCard(card)) {
     return null;
   }
 
@@ -95,7 +127,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 16,
     lineHeight: 20,
     color: color.text.primary,

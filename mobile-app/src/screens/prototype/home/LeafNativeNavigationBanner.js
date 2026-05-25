@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   title: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 18,
     lineHeight: 22,
     color: color.text.primary,
@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   metaDistance: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 15,
     color: color.text.primary,
   },
@@ -233,7 +233,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(17,26,39,0.06)',
   },
   hideButtonText: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 11,
     color: '#365A6D',
   },

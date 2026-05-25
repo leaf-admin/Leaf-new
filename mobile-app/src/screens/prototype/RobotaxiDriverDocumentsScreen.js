@@ -30,7 +30,6 @@ const BACKDROP_COLOR = 'transparent';
 const DRIVER_DOCS = [
   { id: 'cnh', title: 'CNH com EAR', subtitle: 'Documento obrigatório para dirigir' },
   { id: 'crlv', title: 'CRLV do veículo', subtitle: 'Valida placa, modelo e ano' },
-  { id: 'mei', title: 'INSS / MEI', subtitle: 'Comprovante fiscal do parceiro' },
 ];
 
 function formatStatus(status) {
@@ -110,7 +109,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
             eyebrow="Motorista"
             title="Documentos"
             subtitle="Acompanhe a análise que libera o modo online."
-            badgeLabel={driverCanGoOnline ? 'liberado' : `${approvedCount}/3`}
+            badgeLabel={driverCanGoOnline ? 'liberado' : `${approvedCount}/${DRIVER_DOCS.length}`}
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -153,7 +152,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
                 <LeafEmptyState
                   icon="cloud-upload-outline"
                   title="Envie seus documentos na ativação"
-                  message="CNH, CRLV e MEI ficam no mesmo fluxo para evitar cadastro duplicado."
+                  message="CNH e CRLV ficam no mesmo fluxo para evitar cadastro duplicado."
                   testID="robotaxi-driver-documents-empty-state"
                 />
               ) : null}

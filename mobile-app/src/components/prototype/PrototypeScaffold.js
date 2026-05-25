@@ -21,6 +21,8 @@ function PrototypeTopControlGlyph({ name, tintColor }) {
   if (name === 'locate') {
     return (
       <View style={styles.locateGlyphWrap}>
+        <View style={[styles.locateGlyphCrosshairVertical, { backgroundColor: tintColor }]} />
+        <View style={[styles.locateGlyphCrosshairHorizontal, { backgroundColor: tintColor }]} />
         <View style={[styles.locateGlyphOuter, { borderColor: tintColor }]} />
         <View style={[styles.locateGlyphInner, { backgroundColor: tintColor }]} />
       </View>
@@ -48,7 +50,7 @@ export function PrototypeTopControls({
   showRightBadge = false
 }) {
   return (
-    <View style={[styles.topRow, { top: insets.top + 8 }]}>
+    <View style={[styles.topRow, { top: insets.top + 18 }]}>
       <TouchableOpacity style={styles.topButton} activeOpacity={0.85} onPress={onPressLeft}>
         <PrototypeTopControlGlyph name={leftIcon} tintColor={color.text.primary} />
       </TouchableOpacity>
@@ -114,9 +116,9 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   topButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: color.surface.primary,
     borderWidth: 1,
     borderColor: color.border.strong,
@@ -131,13 +133,13 @@ const styles = StyleSheet.create({
   },
   notificationDot: {
     position: 'absolute',
-    top: 15,
-    right: 15,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    top: -1,
+    right: -1,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
     backgroundColor: '#D61F2D',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#FFFFFF'
   },
   menuGlyphWrap: {
@@ -155,10 +157,24 @@ const styles = StyleSheet.create({
     width: 13,
   },
   locateGlyphWrap: {
-    width: 20,
-    height: 20,
+    width: 22,
+    height: 22,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  locateGlyphCrosshairVertical: {
+    position: 'absolute',
+    width: 2,
+    height: 22,
+    borderRadius: 1,
+    opacity: 0.58,
+  },
+  locateGlyphCrosshairHorizontal: {
+    position: 'absolute',
+    width: 22,
+    height: 2,
+    borderRadius: 1,
+    opacity: 0.58,
   },
   locateGlyphOuter: {
     width: 17,

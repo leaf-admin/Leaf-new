@@ -12,19 +12,20 @@ import {
   PrototypeMenuSection,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
+import { leafRideColors } from '../../components/prototype/LeafRideUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
-const { color, typography } = robotaxiPrototypeTokens;
+const { color } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
 const SUPPORT_OPTIONS = [
   { id: 's1', title: 'Alterar ponto de embarque', subtitle: 'Atualize a origem sem cancelar a corrida', icon: 'pin-outline' },
-  { id: 's2', title: 'Problema com pagamento', subtitle: 'Revisao de cobranca e recibo da viagem', icon: 'card-outline' },
-  { id: 's3', title: 'Objetos perdidos', subtitle: 'Abrir chamado rapido para itens esquecidos', icon: 'briefcase-outline' },
+  { id: 's2', title: 'Problema com Pix', subtitle: 'Revisão de cobrança e recibo da viagem', icon: 'card-outline' },
+  { id: 's3', title: 'Objetos perdidos', subtitle: 'Abra um chamado rápido para itens esquecidos', icon: 'briefcase-outline' },
 ];
 
 function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
@@ -37,7 +38,7 @@ function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
       accessibilityLabel={rowTestID}
     >
       <View style={styles.optionIconSlot}>
-        <Ionicons name={item.icon} size={18} color={active ? color.accent.strong : color.text.primary} />
+        <Ionicons name={item.icon} size={18} color={active ? leafRideColors.leaf : leafRideColors.text} />
       </View>
       <View style={styles.optionCopyWrap}>
         <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>{item.title}</Text>
@@ -88,9 +89,9 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
         type: selectedOption.id,
         description: selectedOption.title,
       });
-      Alert.alert('Incidente registrado', 'Recebemos sua sinalizacao de seguranca.');
+      Alert.alert('Incidente registrado', 'Recebemos sua sinalização de segurança.');
     } catch (error) {
-      Alert.alert('Nao foi possivel registrar', error?.message || 'Tente novamente em instantes.');
+      Alert.alert('Não foi possível registrar', error?.message || 'Tente novamente em instantes.');
     }
   }, [reportIncident, selectedOption.id, selectedOption.title]);
 
@@ -111,7 +112,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
         >
           <PrototypeMenuSurface
             onLayout={handlePanelLayout}
-            eyebrow="Ajuda e seguranca"
+            eyebrow="Ajuda e segurança"
             title="Suporte"
             subtitle="Escolha como deseja ajuda nesta corrida e siga para o canal certo."
             fullScreen
@@ -223,11 +224,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(17,26,39,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: leafRideColors.line,
   },
   optionRowActive: {
-    backgroundColor: 'rgba(42,77,29,0.05)',
+    backgroundColor: leafRideColors.bg,
   },
   optionRowLast: {
     borderBottomWidth: 0,
@@ -242,20 +243,20 @@ const styles = StyleSheet.create({
     paddingRight: 10,
   },
   optionTitle: {
-    color: color.text.primary,
+    color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 19,
   },
   optionTitleActive: {
-    color: color.accent.strong,
+    color: leafRideColors.leaf,
   },
   optionSubtitle: {
     marginTop: 1,
-    color: color.text.secondary,
+    color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
+    fontSize: 11,
+    lineHeight: 15,
   },
   actionsBlock: {
     marginTop: 4,
@@ -272,16 +273,16 @@ const styles = StyleSheet.create({
   },
   feedbackText: {
     marginTop: 8,
-    color: color.text.secondary,
+    color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    fontSize: 12,
+    lineHeight: 17,
   },
   errorText: {
     marginTop: 8,
-    color: color.feedback.danger,
+    color: leafRideColors.dangerText,
     fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    fontSize: 12,
+    lineHeight: 17,
   },
 });

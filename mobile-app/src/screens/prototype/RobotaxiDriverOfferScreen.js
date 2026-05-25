@@ -10,6 +10,7 @@ import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
 import {
   LeafButton,
   LeafRideSheet,
+  LeafStateHeader,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
@@ -20,6 +21,7 @@ import {
   hasAuthoritativeDriverOfferPricing,
   selectDisplayableDriverOffer,
 } from "./driverOfferPricingSnapshot";
+import useCampaignAssetOverride from "../../hooks/useCampaignAssetOverride";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
@@ -49,6 +51,30 @@ function isCompetitiveAcceptLossMessage(message) {
     .trim()
     .toLowerCase()
     .includes("outro motorista aceitou");
+}
+
+function normalizeDriverStatusError(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isActivationOrVehicleStatusError(message) {
+  const normalized = normalizeDriverStatusError(message);
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes("ativar seu status") ||
+    normalized.includes("veiculo valido") ||
+    normalized.includes("veiculo ativo") ||
+    normalized.includes("vehicle_required") ||
+    normalized.includes("driver_not_eligible") ||
+    normalized.includes("ativacao do motorista pendente")
+  );
 }
 
 function toNumber(value, fallback = 0) {
@@ -231,6 +257,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     driverCoordinate,
     driverOffers,
     driverTripMeta,
+    profile,
     acceptDriverOffer,
     rejectDriverOffer,
     lastError,
@@ -270,6 +297,8 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   }, [allowRouteFallback, liveRequest, routeRequest]);
 
   const hasRequest = Boolean(request?.bookingId || request?.id);
+  const visibleLastError =
+    hasRequest && isActivationOrVehicleStatusError(lastError) ? "" : lastError;
 
   const distanceMi = useMemo(() => {
     if (!hasRequest) {
@@ -363,6 +392,10 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       request?.fare,
   );
   const ridePreferenceItems = resolveRidePreferenceItems(request);
+  const routeDriverCoordinate =
+    normalizeMapCoordinate(request?.driverCoordinate) ||
+    normalizeMapCoordinate(request?.currentCoordinate) ||
+    normalizeMapCoordinate(request?.originCoordinate);
   const offerRouteCoordinates = useMemo(() => {
     const routePlan = driverTripMeta?.routePlan || {};
     const candidateRoute =
@@ -378,6 +411,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     }
 
     const origin =
+      routeDriverCoordinate ||
       normalizeMapCoordinate(driverCoordinate) ||
       normalizeMapCoordinate(currentCoordinate) ||
       PROTOTYPE_ORIGIN_COORDINATE;
@@ -394,12 +428,36 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     request?.pickupCoordinate,
     request?.pickupRouteCoordinates,
     request?.routeCoordinates,
+    routeDriverCoordinate,
   ]);
   const offerOriginCoordinate =
+    routeDriverCoordinate ||
     normalizeMapCoordinate(driverCoordinate) ||
     normalizeMapCoordinate(currentCoordinate) ||
     offerRouteCoordinates[0] ||
     PROTOTYPE_ORIGIN_COORDINATE;
+  const offerVehicleColor = String(
+    profile?.vehicleColor ||
+      profile?.vehicle?.color ||
+      profile?.carColor ||
+      profile?.car?.color ||
+      driverTripMeta?.vehicleColor ||
+      driverTripMeta?.vehicle?.color ||
+      '',
+  ).trim();
+  const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
+    surface: 'ride_map',
+    placement: 'vehicle_marker',
+    role: 'driver',
+    userId: profile?.uid || '',
+    context: {
+      city: 'rio_de_janeiro',
+    },
+    eventMetadata: {
+      screen: 'robotaxi_driver_offer',
+      state: hasRequest ? 'offer_visible' : 'empty',
+    },
+  });
   const offerPickupCoordinate =
     normalizeMapCoordinate(driverTripMeta?.pickupCoordinate) ||
     normalizeMapCoordinate(request?.pickupCoordinate) ||
@@ -526,24 +584,40 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
         <PrototypeMapLayer
           mapRef={mapRef}
           region={offerMapRegion}
+          forceRegionUpdate
           userCoordinate={offerOriginCoordinate}
           userHeading={currentHeading}
           userAvatarLetter="M"
           driverCoordinate={offerOriginCoordinate}
+          driverHeading={currentHeading}
           routeCoordinates={offerRouteCoordinates}
+          originCoordinate={offerOriginCoordinate}
           destinationCoordinate={offerPickupCoordinate}
           destinationLabel="Embarque"
           destinationAddress={pickupLabel}
           originLabel="Motorista"
           originAddress="Sua localização atual"
           interactionEnabled={false}
+          hideRouteEndpointMarkers
+          hideUserMarker
           animateRoute
-          driverMarkerMode="avatar"
+          driverMarkerMode="car"
+          driverVehicleColor={offerVehicleColor}
+          driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
           driverMarkerLetter="M"
           destinationMarkerMode="avatar"
           destinationMarkerLetter={passengerInitial}
           mapSafetyProfile="driver"
         />
+        {hasRequest ? (
+          <LeafStateHeader
+            title="Nova corrida"
+            subtitle="Pagamento confirmado"
+            rightLabel={countdownLabel}
+            rightTone="dark"
+            insetsTop={insets.top}
+          />
+        ) : null}
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
@@ -560,7 +634,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                 <View style={styles.offerHeader}>
                   <View style={styles.offerHeaderCopy}>
                     <Text style={styles.offerTitle} numberOfLines={1}>
-                      Nova corrida
+                      Nova solicitação
                     </Text>
                     <Text style={styles.offerTimer} numberOfLines={1}>
                       {countdownLabel} para responder
@@ -611,7 +685,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
 
                   <View style={styles.routeStep}>
                     <View style={styles.routeIcon}>
-                      <Ionicons name="location-outline" size={15} color={leafRideColors.dangerText} />
+                      <Ionicons name="location-outline" size={15} color={leafRideColors.leaf} />
                     </View>
                     <View style={styles.routeCopy}>
                       <Text style={styles.routeAddress} numberOfLines={1}>
@@ -691,7 +765,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
               </View>
             )}
 
-            {lastError ? <Text style={styles.errorText}>{lastError}</Text> : null}
+            {visibleLastError ? (
+              <Text style={styles.errorText}>{visibleLastError}</Text>
+            ) : null}
           </LeafRideSheet>
         </PrototypeDismissibleSheet>
       </View>
@@ -710,12 +786,12 @@ const styles = StyleSheet.create({
     right: 0,
   },
   offerCard: {
-    minHeight: 356,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    minHeight: 318,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingTop: 14,
+    paddingTop: 12,
     paddingBottom: 18,
   },
   sheetHandle: {
@@ -724,14 +800,14 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "#D8D0C7",
     alignSelf: "center",
-    marginBottom: 24,
+    marginBottom: 18,
   },
   offerHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: 18,
-    marginBottom: 18,
+    gap: 14,
+    marginBottom: 12,
   },
   offerHeaderCopy: {
     flex: 1,
@@ -747,25 +823,25 @@ const styles = StyleSheet.create({
   offerTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 18,
+    lineHeight: 23,
   },
   netPayout: {
-    minWidth: 126,
-    height: 28,
-    borderRadius: 14,
+    minWidth: 108,
+    minHeight: 30,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: "#D9E3D3",
-    backgroundColor: "#F1F5EE",
+    backgroundColor: "#EEF3EA",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12,
-    marginTop: 4,
+    paddingHorizontal: 10,
+    marginTop: 2,
   },
   netPayoutValue: {
     color: leafRideColors.leaf,
     fontFamily: fonts.Medium,
-    fontSize: 10.5,
+    fontSize: 11,
     lineHeight: 14,
   },
   passengerRow: {
@@ -812,8 +888,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: leafRideColors.line,
-    paddingVertical: 12,
-    gap: 12,
+    paddingVertical: 10,
+    gap: 8,
   },
   routeStep: {
     flexDirection: "row",
@@ -844,7 +920,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   confirmedLine: {
-    marginTop: 12,
+    marginTop: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -861,7 +937,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   preferencePanel: {
-    marginTop: 12,
+    marginTop: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
@@ -885,7 +961,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   offerActionsRow: {
-    marginTop: 16,
+    marginTop: 14,
     flexDirection: "row",
     gap: 12,
   },

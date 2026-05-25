@@ -27,20 +27,20 @@ import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import RatingService from "../../services/RatingService";
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 98;
+const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 336;
 
 const PASSENGER_REVIEW_TAGS = [
-  "Conducao segura",
+  "Condução segura",
   "Pontualidade",
-  "Veiculo limpo",
-  "Boa comunicacao",
+  "Veículo limpo",
+  "Boa comunicação",
 ];
 const DRIVER_REVIEW_TAGS = [
   "Pontualidade",
-  "Embarque rapido",
-  "Boa comunicacao",
-  "Respeitou o veiculo",
+  "Embarque rápido",
+  "Boa comunicação",
+  "Respeitou o veículo",
 ];
 
 function normalizeReviewerType(rawReviewerType, activeRole) {
@@ -109,7 +109,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   const quickTags =
     reviewerType === "driver" ? DRIVER_REVIEW_TAGS : PASSENGER_REVIEW_TAGS;
   const [selectedTags, setSelectedTags] = useState(() =>
-    reviewerType === "driver" ? ["Pontualidade"] : ["Conducao segura"],
+    reviewerType === "driver" ? ["Pontualidade"] : ["Condução segura"],
   );
   const [airConditioningOk, setAirConditioningOk] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -382,7 +382,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               <Text style={styles.subtitle}>
               {reviewerType === "driver"
                 ? `Seu feedback sobre ${targetName} ajuda a melhorar a comunidade Leaf.`
-                : "Sua opiniao ajuda a melhorar o pareamento no proximo trajeto."}
+                : "Sua opinião ajuda a melhorar a próxima viagem."}
               </Text>
 
             <View style={styles.starsRow}>
@@ -397,7 +397,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                     <Ionicons
                       name={active ? "star" : "star-outline"}
                       size={30}
-                      color={active ? "#303945" : "#94A0AF"}
+                      color={active ? color.accent.primary : color.border.strong}
                     />
                   </TouchableOpacity>
                 );
@@ -429,8 +429,8 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               onChangeText={setComment}
               placeholder={
                 reviewerType === "driver"
-                  ? "Comentario opcional sobre o passageiro"
-                  : "Comentario opcional"
+                  ? "Comentário opcional sobre o passageiro"
+                  : "Comentário opcional"
               }
               placeholderTextColor={color.text.muted}
               style={styles.input}
@@ -492,11 +492,11 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
             <Text numberOfLines={1} style={styles.summaryText}>
               {summary
                 ? `Resumo: ${summary}`
-                : "Selecione tags ou escreva um comentario."}
+                : "Selecione uma opção ou escreva um comentário."}
             </Text>
 
             <PrototypePrimaryButton
-              label={isSubmitting ? "Enviando..." : "Enviar avaliacao"}
+              label={isSubmitting ? "Enviando..." : "Enviar avaliação"}
               icon="checkmark-outline"
               onPress={handleSubmit}
               disabled={isSubmitting}
@@ -515,7 +515,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "rgba(241, 245, 249, 0.94)",
+    backgroundColor: "#F8F6F1",
   },
   sheetWrap: {
     position: "absolute",
@@ -523,12 +523,12 @@ const styles = StyleSheet.create({
     right: 0,
   },
   card: {
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 28,
-    paddingTop: 16,
+    paddingHorizontal: 24,
+    paddingTop: 14,
     paddingBottom: 16,
   },
   cardScroll: {
@@ -537,8 +537,8 @@ const styles = StyleSheet.create({
   title: {
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight,
+    fontSize: 18,
+    lineHeight: 24,
     textAlign: "center",
   },
   subtitle: {

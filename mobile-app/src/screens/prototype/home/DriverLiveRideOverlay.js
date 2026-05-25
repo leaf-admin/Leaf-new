@@ -16,7 +16,12 @@ import {
   PrototypeCard,
   PrototypePrimaryButton,
 } from "../../../components/prototype/PrototypeUI";
-import { LeafPersonIdentity } from "../../../components/prototype/LeafRideUI";
+import {
+  LeafAnimatedPressable,
+  LeafPersonIdentity,
+  LeafStateHeader,
+  leafButtonMetrics,
+} from "../../../components/prototype/LeafRideUI";
 import SecurePaymentBadge from "../../../components/payment/SecurePaymentBadge";
 import { fonts } from "../../../theme/runtimeTokens";
 import {
@@ -117,14 +122,7 @@ function formatPaymentMethod(method, compact = false) {
   if (normalized === "pix") {
     return compact ? "PIX" : "PIX confirmado";
   }
-  if (
-    normalized === "card" ||
-    normalized === "cartao" ||
-    normalized === "cartão"
-  ) {
-    return compact ? "Cartão" : "Cartão confirmado";
-  }
-  return compact ? "Pagamento" : "Pagamento confirmado";
+  return compact ? "PIX" : "PIX confirmado";
 }
 
 function splitLocationLabel(label = "") {
@@ -280,7 +278,11 @@ function isCompactTripStatus(status) {
     .trim()
     .toLowerCase();
 
-  return normalizedStatus === "accepted" || normalizedStatus === "started";
+  return (
+    normalizedStatus === "accepted" ||
+    normalizedStatus === "arrived" ||
+    normalizedStatus === "started"
+  );
 }
 
 function isCompetitiveAcceptLossMessage(message) {
@@ -313,6 +315,7 @@ function DriverLiveRideOverlay({
   completeTripFlow,
   onOpenNavigation,
   onTripCompletedSuccess,
+  nativeNavigationVisible = false,
 }) {
   const [busyAction, setBusyAction] = useState("");
   const [isTripExpanded, setIsTripExpanded] = useState(false);
@@ -530,10 +533,6 @@ function DriverLiveRideOverlay({
     onOpenNavigation &&
     ["accepted", "arrived", "started"].includes(normalizedActiveStatus),
   );
-  const showCompactNavigationButton = Boolean(
-    showNavigationButton &&
-      ["accepted", "started"].includes(normalizedActiveStatus),
-  );
   const canInterruptOperational =
     typeof interruptRideOperationalFlow === "function" &&
     normalizedActiveStatus === "started";
@@ -549,10 +548,24 @@ function DriverLiveRideOverlay({
     "driver_decision_pending",
     "pending_payment",
   ].includes(normalizedExtensionStatus);
+  const isDriverNavigationMode = Boolean(
+    nativeNavigationVisible &&
+      hasActiveRide &&
+      ["accepted", "arrived", "started"].includes(normalizedActiveStatus) &&
+      !hasPendingExtensionDecision,
+  );
+  const showNavigationActionInSheet = Boolean(
+    showNavigationButton && !isDriverNavigationMode,
+  );
+  const showCompactNavigationButton = Boolean(
+    showNavigationActionInSheet &&
+      ["accepted", "arrived", "started"].includes(normalizedActiveStatus),
+  );
   const shouldUseCompactTripCard =
     hasActiveRide &&
-    isCompactTripStatus(normalizedActiveStatus) &&
-    !hasPendingExtensionDecision;
+    (isDriverNavigationMode ||
+      (isCompactTripStatus(normalizedActiveStatus) &&
+        !hasPendingExtensionDecision));
   const activeTripTitle =
     normalizedActiveStatus === "accepted"
       ? "A caminho do embarque"
@@ -563,6 +576,31 @@ function DriverLiveRideOverlay({
     ["accepted", "started"].includes(normalizedActiveStatus)
       ? ""
       : tripPhase.subtitle;
+  const driverIslandTitle = hasOffer
+    ? isContinuationOffer
+      ? "Retomar corrida"
+      : "Nova corrida"
+    : activeTripTitle;
+  const driverIslandSubtitle = hasOffer
+    ? `${pickupLocation.title} → ${dropoffLocation.title}`
+    : normalizedActiveStatus === "started"
+      ? `${liveDistanceLabel} restantes`
+      : normalizedActiveStatus === "accepted"
+        ? pickupLocation.title
+        : activeTripSubtitle || passengerLabel;
+  const driverIslandRightLabel = hasOffer
+    ? fareLabel
+    : normalizedActiveStatus === "started"
+      ? "Em rota"
+      : liveEtaLabel;
+  const driverTripSheetTitle =
+    normalizedActiveStatus === "started"
+      ? "Progresso da viagem"
+      : normalizedActiveStatus === "arrived"
+        ? "Confirmar embarque"
+        : normalizedActiveStatus === "accepted"
+          ? "Ponto de embarque"
+          : activeTripTitle;
   const activeTripMetrics = useMemo(
     () => [
       {
@@ -596,6 +634,18 @@ function DriverLiveRideOverlay({
     () => activeTripMetrics.filter((metric) => metric.key !== "net"),
     [activeTripMetrics],
   );
+  const navigationModeLabel =
+    normalizedActiveStatus === "started"
+      ? "Em viagem"
+      : normalizedActiveStatus === "arrived"
+        ? "Embarque"
+        : "Até o passageiro";
+  const passengerMetaLabel =
+    normalizedActiveStatus === "started"
+      ? "A bordo"
+      : normalizedActiveStatus === "arrived"
+        ? "No ponto"
+        : "Local combinado";
   const tripStatusMessage =
     ["accepted", "started"].includes(normalizedActiveStatus)
       ? ""
@@ -724,8 +774,8 @@ function DriverLiveRideOverlay({
     testID,
     accessibilityLabel,
   }) => (
-    <TouchableOpacity
-      activeOpacity={0.84}
+    <LeafAnimatedPressable
+      activeScale={variant === "primary" ? 0.984 : 0.978}
       style={[
         styles.compactActionButton,
         variant === "primary" && styles.compactActionButtonPrimary,
@@ -739,7 +789,7 @@ function DriverLiveRideOverlay({
     >
       <Ionicons
         name={icon}
-        size={15}
+        size={leafButtonMetrics.iconSize}
         color={
           variant === "primary"
             ? "#FFFFFF"
@@ -760,7 +810,109 @@ function DriverLiveRideOverlay({
       >
         {label}
       </Text>
-    </TouchableOpacity>
+    </LeafAnimatedPressable>
+  );
+
+  const renderNavigationTripCard = () => (
+    <>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => setIsTripExpanded(true)}
+        style={styles.navigationSummaryPressable}
+        testID="driver-live-trip-compact-summary"
+        accessibilityLabel="driver-live-trip-compact-summary"
+      >
+        <View style={styles.navigationSummaryTopRow}>
+          <LeafPersonIdentity
+            compact
+            initial={passengerInitial}
+            photoUri={passengerPhotoUri}
+            name={passengerLabel}
+            meta={passengerMetaLabel}
+            style={styles.navigationPassengerIdentity}
+            testID="driver-live-passenger-identity"
+          />
+
+          <View style={styles.navigationMetaCluster}>
+            <Text style={styles.navigationModeLabel} numberOfLines={1}>
+              {navigationModeLabel}
+            </Text>
+            <Text
+              style={styles.navigationMetaPrimary}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+            >
+              {liveEtaLabel}
+            </Text>
+            <Text style={styles.navigationMetaSecondary} numberOfLines={1}>
+              {liveDistanceLabel}
+            </Text>
+          </View>
+
+          <View style={styles.navigationExpandButton}>
+            <Ionicons
+              name="chevron-up-outline"
+              size={18}
+              color={color.text.secondary}
+            />
+          </View>
+        </View>
+      </TouchableOpacity>
+
+      <View style={styles.compactActionsGroup}>
+        <View style={styles.navigationActionsRow}>
+          {canCancelActiveRide
+            ? renderCompactActionButton({
+                label: busyAction === "cancel" ? "Cancelando" : "Cancelar",
+                icon: "close-circle-outline",
+                onPress: handleOpenCancelPrompt,
+                disabled: busyAction === "cancel",
+                variant: "danger",
+                testID: "driver-live-trip-cancel-button",
+                accessibilityLabel: "Cancelar corrida",
+              })
+            : null}
+
+          {showCompactProblemButton ? (
+            renderCompactActionButton({
+              label: busyAction === "interrupt" ? "Reportando" : "Problema",
+              icon: "warning-outline",
+              onPress: handleInterruptOperational,
+              disabled: busyAction === "interrupt",
+              variant: "danger",
+              testID: "driver-live-trip-report-problem-button",
+              accessibilityLabel: "Reportar problema",
+            })
+          ) : null}
+
+          {primaryActionLabel
+            ? renderCompactActionButton({
+                label:
+                  busyAction === "trip"
+                    ? "Atualizando"
+                    : normalizedActiveStatus === "started"
+                      ? "Encerrar"
+                      : normalizedActiveStatus === "accepted"
+                        ? "Cheguei"
+                        : primaryActionLabel,
+                icon:
+                  normalizedActiveStatus === "started"
+                    ? "flag-outline"
+                    : normalizedActiveStatus === "arrived"
+                      ? "play-outline"
+                      : "checkmark-circle-outline",
+                disabled: busyAction === "trip" || !primaryActionEnabled,
+                onPress: handleTripPrimaryAction,
+                variant: "primary",
+                testID: primaryActionTestID,
+                accessibilityLabel:
+                  busyAction === "trip" ? "Atualizando..." : primaryActionLabel,
+              })
+            : null}
+        </View>
+      </View>
+    </>
   );
 
   const renderCompactTripCard = () => (
@@ -774,9 +926,8 @@ function DriverLiveRideOverlay({
       >
         <View style={styles.compactHeaderRow}>
           <View style={styles.compactHeaderCopy}>
-            <Text style={styles.eyebrow}>{tripPhase.chip}</Text>
             <Text style={styles.compactTitle} numberOfLines={2}>
-              {activeTripTitle}
+              {driverTripSheetTitle}
             </Text>
           </View>
 
@@ -794,7 +945,7 @@ function DriverLiveRideOverlay({
           initial={passengerInitial}
           photoUri={passengerPhotoUri}
           name={passengerLabel}
-          meta={normalizedActiveStatus === "started" ? "A bordo" : "Local combinado"}
+          meta={passengerMetaLabel}
           style={styles.compactPassengerIdentity}
           testID="driver-live-passenger-identity"
         />
@@ -887,9 +1038,8 @@ function DriverLiveRideOverlay({
     <>
       <View style={styles.expandedTripHeaderRow}>
         <View style={styles.expandedTripHeaderCopy}>
-          <Text style={styles.eyebrow}>{tripPhase.chip}</Text>
           <Text style={styles.expandedTripTitle} numberOfLines={2}>
-            {activeTripTitle}
+            {driverTripSheetTitle}
           </Text>
           <LeafPersonIdentity
             compact
@@ -1059,6 +1209,15 @@ function DriverLiveRideOverlay({
 
   return (
     <>
+      {!isDriverNavigationMode ? (
+        <LeafStateHeader
+          title={driverIslandTitle}
+          subtitle={driverIslandSubtitle}
+          rightLabel={driverIslandRightLabel}
+          rightTone={hasOffer || normalizedActiveStatus === "started" ? "dark" : "leaf"}
+          insetsTop={insetsTop}
+        />
+      ) : null}
       <View
         pointerEvents="box-none"
         onLayout={onCardLayout}
@@ -1068,7 +1227,10 @@ function DriverLiveRideOverlay({
           style={[
             styles.card,
             shouldUseCompactTripCard && !isTripExpanded
-              ? styles.compactCard
+              ? [
+                  styles.compactCard,
+                  isDriverNavigationMode && styles.navigationModeCard,
+                ]
               : shouldUseCompactTripCard
                 ? styles.expandedTripCard
                 : { maxHeight: maxCardHeight },
@@ -1076,7 +1238,7 @@ function DriverLiveRideOverlay({
           ]}
         >
         {shouldUseCompactTripCard && !isTripExpanded ? (
-          renderCompactTripCard()
+          isDriverNavigationMode ? renderNavigationTripCard() : renderCompactTripCard()
         ) : shouldUseCompactTripCard ? (
           renderExpandedTripCard()
         ) : (
@@ -1090,7 +1252,7 @@ function DriverLiveRideOverlay({
               <View style={styles.headerRow}>
                 <View style={styles.headerCopy}>
                   <Text style={styles.eyebrow}>
-                    {isContinuationOffer ? "Continuidade" : "Nova solicitação"}
+                    {isContinuationOffer ? "Continuidade" : "Detalhes"}
                   </Text>
                   <Text style={styles.title}>
                     {isContinuationOffer
@@ -1210,7 +1372,7 @@ function DriverLiveRideOverlay({
                   <View style={styles.preferenceChipRow}>
                     {ridePreferenceItems.map((item) => (
                       <View key={item.key} style={styles.preferenceChip}>
-                        <Ionicons name={item.icon} size={14} color="#174A2B" />
+                        <Ionicons name={item.icon} size={14} color="#1A330E" />
                         <Text style={styles.preferenceChipText} numberOfLines={1}>
                           {item.label}
                         </Text>
@@ -1281,8 +1443,8 @@ function DriverLiveRideOverlay({
 
               <View style={styles.headerRow}>
                 <View style={styles.headerCopy}>
-                  <Text style={styles.eyebrow}>{tripPhase.chip}</Text>
-                  <Text style={styles.title}>{activeTripTitle}</Text>
+                  <Text style={styles.eyebrow}>Detalhes</Text>
+                  <Text style={styles.title}>{driverTripSheetTitle}</Text>
                   <LeafPersonIdentity
                     compact
                     initial={passengerInitial}
@@ -1477,7 +1639,7 @@ function DriverLiveRideOverlay({
                 </View>
               ) : null}
 
-              {showNavigationButton ? (
+              {showNavigationActionInSheet ? (
                 <PrototypePrimaryButton
                   label="Abrir navegação"
                   icon="navigate-outline"
@@ -1497,7 +1659,7 @@ function DriverLiveRideOverlay({
                 >
                   <Ionicons
                     name="close-circle-outline"
-                    size={16}
+                    size={leafButtonMetrics.iconSize}
                     color="#8A1F2B"
                   />
                   <Text style={styles.tripCancelButtonText}>
@@ -1539,7 +1701,11 @@ function DriverLiveRideOverlay({
                   testID="driver-live-trip-interrupt-button"
                   accessibilityLabel="driver-live-trip-interrupt-button"
                 >
-                  <Ionicons name="warning-outline" size={16} color="#8A1F2B" />
+                  <Ionicons
+                    name="warning-outline"
+                    size={leafButtonMetrics.iconSize}
+                    color="#8A1F2B"
+                  />
                   <Text style={styles.tripInterruptButtonText}>
                     {busyAction === "interrupt"
                       ? "Reportando..."
@@ -1603,16 +1769,16 @@ const styles = StyleSheet.create({
     zIndex: 18,
   },
   card: {
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 28,
-    paddingTop: 18,
+    paddingHorizontal: 24,
+    paddingTop: 16,
     paddingBottom: 16,
-    backgroundColor: Platform.OS === "android" ? "#FAFBF8" : "rgba(250,251,248,0.94)",
-    borderColor: "rgba(207,216,205,0.64)",
-    shadowOpacity: 0.16,
+    backgroundColor: Platform.OS === "android" ? "#FFFFFF" : "rgba(255,255,255,0.96)",
+    borderColor: "#ECE5DC",
+    shadowOpacity: 0.1,
   },
   scrollContent: {
     paddingBottom: 2,
@@ -1628,16 +1794,17 @@ const styles = StyleSheet.create({
     paddingRight: 6,
   },
   eyebrow: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.Medium,
     fontSize: 11,
     textTransform: "uppercase",
-    letterSpacing: 1.8,
+    letterSpacing: 0.8,
     color: "#1A330E",
     marginBottom: 6,
   },
   title: {
-    fontFamily: fonts.Bold,
-    fontSize: 22,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 25,
     color: color.text.primary,
   },
   passengerCaption: {
@@ -1652,7 +1819,7 @@ const styles = StyleSheet.create({
   fareBadge: {
     minWidth: 108,
     borderRadius: 20,
-    backgroundColor: "rgba(238,244,234,0.94)",
+    backgroundColor: "#EEF3EA",
     paddingHorizontal: 14,
     paddingVertical: 10,
     alignItems: "center",
@@ -1661,7 +1828,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(26,51,14,0.14)",
     shadowColor: "#C8D7BF",
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.18,
+    shadowOpacity: 0.08,
     shadowRadius: 18,
     elevation: 6,
   },
@@ -1673,13 +1840,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.Medium,
     fontSize: 11,
     textTransform: "uppercase",
-    letterSpacing: 1.2,
+    letterSpacing: 0.8,
     color: "#53634D",
     marginBottom: 4,
   },
   fareBadgeValue: {
-    fontFamily: fonts.Bold,
-    fontSize: 18,
+    fontFamily: fonts.SemiBold,
+    fontSize: 17,
     color: "#1A330E",
   },
   offerMetaStrip: {
@@ -1706,7 +1873,7 @@ const styles = StyleSheet.create({
   },
   offerMetaValue: {
     marginTop: 3,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 15,
     lineHeight: 20,
     color: color.text.primary,
@@ -1724,8 +1891,8 @@ const styles = StyleSheet.create({
     minHeight: 68,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(250,251,248,0.78)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 14,
     paddingVertical: 12,
     flexDirection: "row",
@@ -1743,27 +1910,27 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   metricIconDistance: {
-    backgroundColor: "rgba(105, 198, 127, 0.22)",
+    backgroundColor: "#EEF3EA",
   },
   metricIconEta: {
-    backgroundColor: "rgba(112, 150, 175, 0.14)",
+    backgroundColor: "#F3F5F2",
   },
   metricIconFare: {
-    backgroundColor: "rgba(245, 238, 179, 0.84)",
+    backgroundColor: "#F7F8F4",
   },
   metricCopy: {
     flex: 1,
     minWidth: 0,
   },
   metricLabel: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.Medium,
     fontSize: 11,
     textTransform: "uppercase",
     color: "#6B7178",
     marginBottom: 4,
   },
   metricValue: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 16,
     color: color.text.primary,
   },
@@ -1771,8 +1938,8 @@ const styles = StyleSheet.create({
     marginTop: 14,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(250,251,248,0.78)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 15,
     paddingVertical: 14,
     flexDirection: "row",
@@ -1820,10 +1987,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   routeStopLabel: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.Medium,
     fontSize: 11,
     textTransform: "uppercase",
-    letterSpacing: 1.4,
+    letterSpacing: 0.8,
     color: "#1A330E",
     marginBottom: 4,
   },
@@ -1831,7 +1998,7 @@ const styles = StyleSheet.create({
     color: "#4D6575",
   },
   routeStopTitle: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 15,
     lineHeight: 20,
     flexShrink: 1,
@@ -1854,13 +2021,13 @@ const styles = StyleSheet.create({
     marginTop: 14,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(39,74,54,0.1)",
-    backgroundColor: "rgba(244,249,245,0.82)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
   preferencePanelTitle: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 12,
     lineHeight: 16,
     color: color.text.primary,
@@ -1887,7 +2054,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.SemiBold,
     fontSize: 11,
     lineHeight: 15,
-    color: "#174A2B",
+    color: "#1A330E",
   },
   statusPill: {
     marginTop: 14,
@@ -1895,7 +2062,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderRadius: 999,
-    backgroundColor: "#F5EEB3",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 16,
     paddingVertical: 9,
   },
@@ -1907,9 +2074,9 @@ const styles = StyleSheet.create({
   },
   statusPillText: {
     marginLeft: 6,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
-    color: "#6C651B",
+    color: "#756F68",
   },
   tripStatusPill: {
     alignSelf: "stretch",
@@ -1921,19 +2088,23 @@ const styles = StyleSheet.create({
   },
   offerPrimaryButton: {
     marginTop: 18,
-    minHeight: 60,
-    borderRadius: 24,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   declineTextButton: {
     marginTop: 12,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
+    borderWidth: 1,
+    borderColor: "rgba(92,100,107,0.18)",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
   declineText: {
-    fontFamily: fonts.Bold,
-    fontSize: 15,
-    letterSpacing: 1.8,
-    textTransform: "uppercase",
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 17,
     color: "#5C646B",
   },
   tripSubtitle: {
@@ -1948,7 +2119,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(39,74,54,0.12)",
-    backgroundColor: "#F4F9F5",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
@@ -1958,14 +2129,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   extensionHeaderText: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
     lineHeight: 17,
     color: color.text.primary,
   },
   extensionDestinationText: {
     marginTop: 8,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 16,
     lineHeight: 20,
     color: color.text.primary,
@@ -1984,8 +2155,8 @@ const styles = StyleSheet.create({
   },
   extensionSecondaryAction: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 14,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -2001,14 +2172,14 @@ const styles = StyleSheet.create({
   },
   extensionPrimaryAction: {
     flex: 1.35,
-    minHeight: 44,
-    borderRadius: 14,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#1A330E",
   },
   extensionPrimaryActionText: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
     color: "#FFFFFF",
   },
@@ -2021,15 +2192,15 @@ const styles = StyleSheet.create({
   },
   tripInterruptButton: {
     marginTop: 10,
-    minHeight: 44,
-    borderRadius: 14,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: "rgba(138,31,43,0.18)",
     backgroundColor: "#FFF4F5",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: leafButtonMetrics.iconGap,
   },
   tripInterruptButtonText: {
     fontFamily: fonts.SemiBold,
@@ -2038,20 +2209,73 @@ const styles = StyleSheet.create({
   },
   tripCancelButton: {
     marginTop: 10,
-    minHeight: 44,
-    borderRadius: 14,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: "rgba(138,31,43,0.18)",
     backgroundColor: "#FFF7F7",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: leafButtonMetrics.iconGap,
   },
   tripCancelButtonText: {
     fontFamily: fonts.SemiBold,
     fontSize: 13,
     color: "#8A1F2B",
+  },
+  navigationSummaryPressable: {
+    borderRadius: 22,
+  },
+  navigationSummaryTopRow: {
+    minHeight: 62,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  navigationPassengerIdentity: {
+    flex: 1,
+    minWidth: 0,
+  },
+  navigationMetaCluster: {
+    minWidth: 76,
+    alignItems: "flex-end",
+  },
+  navigationModeLabel: {
+    fontFamily: fonts.Medium,
+    fontSize: 10,
+    lineHeight: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+    color: "#6B7178",
+  },
+  navigationMetaPrimary: {
+    marginTop: 3,
+    fontFamily: fonts.SemiBold,
+    fontSize: 17,
+    lineHeight: 20,
+    color: color.text.primary,
+  },
+  navigationMetaSecondary: {
+    marginTop: 1,
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 15,
+    color: color.text.secondary,
+  },
+  navigationExpandButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(244,246,243,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(68,85,93,0.08)",
+  },
+  navigationActionsRow: {
+    flexDirection: "row",
+    gap: 8,
   },
   compactCard: {
     borderRadius: 28,
@@ -2061,8 +2285,13 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 12,
   },
+  navigationModeCard: {
+    paddingTop: 14,
+    backgroundColor:
+      Platform.OS === "android" ? "#FFFFFF" : "rgba(255,255,255,0.97)",
+  },
   expandedTripCard: {
-    borderRadius: 30,
+    borderRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     paddingHorizontal: 16,
@@ -2079,7 +2308,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   expandedTripTitle: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 18,
     lineHeight: 22,
     color: color.text.primary,
@@ -2099,19 +2328,19 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
   expandedTripFareLabel: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
     letterSpacing: 0.9,
-    color: "#7A7340",
+    color: "#827B73",
   },
   expandedTripFareValue: {
     marginTop: 2,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 15,
     lineHeight: 18,
-    color: "#4A4520",
+    color: "#171412",
   },
   expandedCollapseButton: {
     marginTop: 8,
@@ -2135,8 +2364,8 @@ const styles = StyleSheet.create({
     minHeight: 72,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(250,251,248,0.82)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 9,
     paddingVertical: 8,
   },
@@ -2149,7 +2378,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   expandedMetricLabel: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.Medium,
     fontSize: 9,
     lineHeight: 11,
     textTransform: "uppercase",
@@ -2158,7 +2387,7 @@ const styles = StyleSheet.create({
   },
   expandedMetricValue: {
     marginTop: 2,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 14,
     lineHeight: 17,
     color: color.text.primary,
@@ -2168,8 +2397,8 @@ const styles = StyleSheet.create({
     minHeight: 62,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(250,251,248,0.8)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: "row",
@@ -2181,7 +2410,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   expandedRouteLabel: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.Medium,
     fontSize: 9,
     lineHeight: 11,
     textTransform: "uppercase",
@@ -2193,7 +2422,7 @@ const styles = StyleSheet.create({
   },
   expandedRouteTitle: {
     marginTop: 4,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
     lineHeight: 16,
     color: color.text.primary,
@@ -2239,7 +2468,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   compactTitle: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 17,
     lineHeight: 21,
     color: color.text.primary,
@@ -2270,13 +2499,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(250,251,248,0.82)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
   compactRoutePreviewLabel: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.Medium,
     fontSize: 10,
     lineHeight: 13,
     textTransform: "uppercase",
@@ -2300,8 +2529,8 @@ const styles = StyleSheet.create({
     minHeight: 44,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(250,251,248,0.82)",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F7F8F4",
     paddingHorizontal: 9,
     paddingVertical: 8,
     flexDirection: "row",
@@ -2320,7 +2549,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   compactMetricLabel: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.Medium,
     fontSize: 10,
     textTransform: "uppercase",
     color: "#6B7178",
@@ -2328,7 +2557,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   compactMetricValue: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 14,
     lineHeight: 16,
     color: color.text.primary,
@@ -2343,15 +2572,15 @@ const styles = StyleSheet.create({
   compactActionButton: {
     flex: 1,
     minWidth: 0,
-    minHeight: 42,
-    borderRadius: 15,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: "rgba(39,74,54,0.14)",
-    backgroundColor: "#F6FAF5",
+    backgroundColor: "#F7F8F4",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
+    gap: leafButtonMetrics.iconGap,
     paddingHorizontal: 8,
   },
   compactActionButtonPrimary: {
@@ -2366,7 +2595,7 @@ const styles = StyleSheet.create({
     opacity: 0.54,
   },
   compactActionButtonText: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 12,
     lineHeight: 15,
     color: "#274A36",
@@ -2406,7 +2635,7 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 360,
     borderRadius: 26,
-    backgroundColor: "#FAFBF8",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.76)",
     paddingHorizontal: 20,
@@ -2418,7 +2647,7 @@ const styles = StyleSheet.create({
     elevation: 18,
   },
   cancelPromptTitle: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 20,
     lineHeight: 25,
     color: color.text.primary,
@@ -2437,8 +2666,8 @@ const styles = StyleSheet.create({
   },
   cancelPromptYesButton: {
     flex: 1,
-    minHeight: 48,
-    borderRadius: 16,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: "rgba(138,31,43,0.22)",
     backgroundColor: "#FFF7F7",
@@ -2446,20 +2675,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   cancelPromptYesText: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 15,
     color: "#8A1F2B",
   },
   cancelPromptNoButton: {
     flex: 1.2,
-    minHeight: 48,
-    borderRadius: 16,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: "#1A330E",
     alignItems: "center",
     justifyContent: "center",
   },
   cancelPromptNoText: {
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 15,
     color: "#FFFFFF",
   },

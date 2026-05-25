@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
     minHeight: 46,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#DFE8E1',
+    borderColor: '#E9E2D8',
     paddingHorizontal: 13,
     color: leafRideColors.text,
     fontFamily: fonts.Medium,

@@ -3,28 +3,38 @@ import { ActivityIndicator, Animated, Easing, Image, Platform, StyleSheet, Text,
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
 
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
 export const leafRideColors = {
-  bg: "#F8F6F1",
+  bg: "#F7F8F4",
   sheet: "#FFFFFF",
+  sheetTranslucent: "#FFFFFF",
   text: "#171412",
   secondary: "#756F68",
   muted: "#827B73",
   line: "#E9E2D8",
   borderStrong: "#E2DAD0",
-  field: "#F8F6F1",
+  field: "#F7F8F4",
   leaf: "#1A330E",
-  leafLight: "#F1F5EE",
+  leafLight: "#EEF3EA",
   accent: "#1A330E",
   accentDark: "#102307",
-  accentSoft: "#F1F5EE",
+  accentSoft: "#EEF3EA",
   accentBorder: "#D9E3D3",
-  blue: "#F2F4EF",
+  blue: "#F3F5F2",
   blueText: "#514B45",
-  warning: "#F8F6F1",
+  warning: "#F7F8F4",
   warningText: "#7A6337",
   danger: "#FFF1F2",
   dangerText: "#D7153A",
 };
+
+export const leafButtonMetrics = Object.freeze({
+  height: 48,
+  radius: 24,
+  iconSize: 16,
+  iconGap: 6,
+});
 
 const toneConfig = {
   leaf: {
@@ -68,6 +78,43 @@ function resolveAvatarSource(photoUri) {
   return uri ? { uri } : null;
 }
 
+function useLeafPressScale(disabled = false, pressedScale = 0.982) {
+  const scale = React.useRef(new Animated.Value(1)).current;
+
+  const settle = React.useCallback(
+    (toValue) => {
+      scale.stopAnimation();
+      Animated.spring(scale, {
+        toValue,
+        stiffness: 420,
+        damping: 34,
+        mass: 0.72,
+        overshootClamping: true,
+        useNativeDriver: true,
+      }).start();
+    },
+    [scale],
+  );
+
+  const onPressIn = React.useCallback(() => {
+    if (!disabled) {
+      settle(pressedScale);
+    }
+  }, [disabled, pressedScale, settle]);
+
+  const onPressOut = React.useCallback(() => {
+    settle(1);
+  }, [settle]);
+
+  React.useEffect(() => {
+    if (disabled) {
+      settle(1);
+    }
+  }, [disabled, settle]);
+
+  return { scale, onPressIn, onPressOut };
+}
+
 export function LeafStateHeader({
   title,
   subtitle,
@@ -75,10 +122,68 @@ export function LeafStateHeader({
   rightTone = "leaf",
   insetsTop = 0,
 }) {
-  const top = insetsTop + 54;
+  const top = insetsTop + 50;
+  const entrance = React.useRef(new Animated.Value(0)).current;
+  const settle = React.useRef(new Animated.Value(1)).current;
+  const stateKey = `${title || ""}|${subtitle || ""}|${rightLabel || ""}|${rightTone || ""}`;
+  const previousStateKeyRef = React.useRef(stateKey);
+
+  React.useEffect(() => {
+    const animation = Animated.spring(entrance, {
+      toValue: 1,
+      stiffness: 260,
+      damping: 24,
+      mass: 0.82,
+      overshootClamping: true,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [entrance]);
+
+  React.useEffect(() => {
+    if (previousStateKeyRef.current === stateKey) {
+      return undefined;
+    }
+    previousStateKeyRef.current = stateKey;
+    settle.stopAnimation();
+    settle.setValue(0.986);
+    const animation = Animated.spring(settle, {
+      toValue: 1,
+      stiffness: 360,
+      damping: 30,
+      mass: 0.76,
+      overshootClamping: true,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [settle, stateKey]);
+
+  const animatedStyle = {
+    opacity: entrance.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.96, 1],
+    }),
+    transform: [
+      {
+        translateY: entrance.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-8, 0],
+        }),
+      },
+      {
+        scale: entrance.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.985, 1],
+        }),
+      },
+      { scale: settle },
+    ],
+  };
 
   return (
-    <View pointerEvents="box-none" style={[styles.stateHeader, { top }]}>
+    <Animated.View pointerEvents="box-none" style={[styles.stateHeader, { top }, animatedStyle]}>
       <View style={styles.stateHeaderCopy}>
         <Text style={styles.stateHeaderTitle} numberOfLines={2}>
           {title}
@@ -92,7 +197,7 @@ export function LeafStateHeader({
       {rightLabel ? (
         <LeafPill label={rightLabel} tone={rightTone} style={styles.headerPill} />
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -100,10 +205,12 @@ export function LeafRideSheet({ children, style, onLayout, testID, accessibility
   const entrance = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
-    const animation = Animated.timing(entrance, {
+    const animation = Animated.spring(entrance, {
       toValue: 1,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
+      stiffness: 250,
+      damping: 25,
+      mass: 0.86,
+      overshootClamping: true,
       useNativeDriver: true,
     });
     animation.start();
@@ -119,7 +226,13 @@ export function LeafRideSheet({ children, style, onLayout, testID, accessibility
       {
         translateY: entrance.interpolate({
           inputRange: [0, 1],
-          outputRange: [6, 0],
+          outputRange: [14, 0],
+        }),
+      },
+      {
+        scale: entrance.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.99, 1],
         }),
       },
     ],
@@ -139,14 +252,38 @@ export function LeafRideSheet({ children, style, onLayout, testID, accessibility
 
 export function LeafPill({ label, tone = "leaf", style, testID }) {
   const palette = resolveTone(tone);
+  const settle = React.useRef(new Animated.Value(1)).current;
+  const pillKey = `${label || ""}|${tone || ""}`;
+  const previousPillKeyRef = React.useRef(pillKey);
+
+  React.useEffect(() => {
+    if (previousPillKeyRef.current === pillKey) {
+      return undefined;
+    }
+    previousPillKeyRef.current = pillKey;
+    settle.stopAnimation();
+    settle.setValue(0.97);
+    const animation = Animated.spring(settle, {
+      toValue: 1,
+      stiffness: 380,
+      damping: 32,
+      mass: 0.7,
+      overshootClamping: true,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [pillKey, settle]);
+
   return (
-    <View
+    <Animated.View
       style={[
         styles.pill,
         {
           backgroundColor: palette.fill,
           borderColor: palette.border,
         },
+        { transform: [{ scale: settle }] },
         style,
       ]}
       testID={testID}
@@ -154,7 +291,49 @@ export function LeafPill({ label, tone = "leaf", style, testID }) {
       <Text style={[styles.pillText, { color: palette.text }]} numberOfLines={1}>
         {label}
       </Text>
-    </View>
+    </Animated.View>
+  );
+}
+
+export function LeafAnimatedPressable({
+  children,
+  style,
+  disabled = false,
+  activeScale = 0.982,
+  onPressIn,
+  onPressOut,
+  activeOpacity = 1,
+  ...props
+}) {
+  const press = useLeafPressScale(disabled, activeScale);
+
+  const handlePressIn = React.useCallback(
+    (event) => {
+      press.onPressIn();
+      onPressIn?.(event);
+    },
+    [onPressIn, press],
+  );
+
+  const handlePressOut = React.useCallback(
+    (event) => {
+      press.onPressOut();
+      onPressOut?.(event);
+    },
+    [onPressOut, press],
+  );
+
+  return (
+    <AnimatedTouchableOpacity
+      activeOpacity={activeOpacity}
+      disabled={disabled}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={[style, { transform: [{ scale: press.scale }] }]}
+      {...props}
+    >
+      {children}
+    </AnimatedTouchableOpacity>
   );
 }
 
@@ -326,7 +505,7 @@ export function LeafInfoRow({
   style,
   titleLines = 1,
   subtitleLines = 1,
-  showMarker = true,
+  showMarker = false,
 }) {
   const palette = resolveTone(markerTone);
   return (
@@ -462,11 +641,12 @@ export function LeafButton({
   accessibilityLabel,
 }) {
   const palette = resolveTone(tone === "primary" ? "dark" : tone);
+
   return (
-    <TouchableOpacity
-      activeOpacity={disabled ? 1 : 0.86}
+    <LeafAnimatedPressable
       onPress={disabled ? undefined : onPress}
       disabled={disabled}
+      activeScale={tone === "primary" ? 0.984 : 0.978}
       style={[
         styles.button,
         {
@@ -484,7 +664,7 @@ export function LeafButton({
       {icon ? (
         <Ionicons
           name={icon}
-          size={14}
+          size={leafButtonMetrics.iconSize}
           color={palette.text}
           style={styles.buttonIcon}
         />
@@ -492,7 +672,7 @@ export function LeafButton({
       <Text style={[styles.buttonText, { color: palette.text }, textStyle]} numberOfLines={1}>
         {label}
       </Text>
-    </TouchableOpacity>
+    </LeafAnimatedPressable>
   );
 }
 
@@ -577,13 +757,25 @@ export function LeafEmptyState({
 const styles = StyleSheet.create({
   stateHeader: {
     position: "absolute",
-    left: 32,
-    right: 32,
+    left: 28,
+    right: 28,
     zIndex: 24,
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
-    gap: 14,
+    gap: 12,
+    minHeight: 62,
+    borderRadius: 31,
+    borderWidth: 1,
+    borderColor: "rgba(26,51,14,0.10)",
+    backgroundColor: Platform.OS === "android" ? "#FFFFFF" : "rgba(255,255,255,0.985)",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 8,
   },
   stateHeaderCopy: {
     flex: 1,
@@ -592,33 +784,34 @@ const styles = StyleSheet.create({
   stateHeaderTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 22,
-    lineHeight: 29,
+    fontSize: 15,
+    lineHeight: 19,
   },
   stateHeaderSubtitle: {
-    marginTop: 3,
+    marginTop: 2,
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 11,
+    lineHeight: 14,
   },
   headerPill: {
-    marginTop: 8,
-    minWidth: 66,
+    minWidth: 58,
+    height: 28,
+    paddingHorizontal: 10,
   },
   sheet: {
-    backgroundColor: leafRideColors.sheet,
-    borderRadius: 32,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: leafRideColors.sheetTranslucent,
+    borderRadius: 28,
+    borderWidth: 1,
     borderColor: leafRideColors.line,
-    paddingHorizontal: 28,
-    paddingTop: 32,
-    paddingBottom: 12,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 20,
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: -14 },
-    shadowOpacity: 0.08,
-    shadowRadius: 30,
-    elevation: Platform.OS === "android" ? 4 : 12,
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.07,
+    shadowRadius: 24,
+    elevation: Platform.OS === "android" ? 1 : 10,
   },
   pill: {
     height: 26,
@@ -723,7 +916,7 @@ const styles = StyleSheet.create({
   metricRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 8,
+    gap: 12,
   },
   metric: {
     flex: 1,
@@ -732,8 +925,8 @@ const styles = StyleSheet.create({
   metricValue: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 19,
-    lineHeight: 24,
+    fontSize: 18,
+    lineHeight: 23,
   },
   metricLabel: {
     marginTop: 1,
@@ -782,8 +975,8 @@ const styles = StyleSheet.create({
   infoTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 13.5,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 17,
   },
   infoSubtitle: {
     marginTop: 1,
@@ -796,8 +989,8 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     width: 76,
     color: leafRideColors.text,
-    fontFamily: fonts.Bold,
-    fontSize: 13,
+    fontFamily: fonts.SemiBold,
+    fontSize: 12.5,
     lineHeight: 17,
     textAlign: "right",
   },
@@ -827,7 +1020,7 @@ const styles = StyleSheet.create({
   },
   identityAvatarText: {
     color: leafRideColors.text,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 20,
     lineHeight: 27,
   },
@@ -879,14 +1072,14 @@ const styles = StyleSheet.create({
   identityRight: {
     maxWidth: 104,
     color: leafRideColors.text,
-    fontFamily: fonts.Bold,
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
     lineHeight: 18,
     textAlign: "right",
   },
   button: {
-    height: 44,
-    borderRadius: 22,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     paddingHorizontal: 18,
     alignItems: "center",
@@ -898,13 +1091,13 @@ const styles = StyleSheet.create({
     opacity: 0.56,
   },
   buttonIcon: {
-    marginRight: 5,
+    marginRight: leafButtonMetrics.iconGap,
     flexShrink: 0,
   },
   buttonText: {
     fontFamily: fonts.SemiBold,
-    fontSize: 12.5,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 17,
     flexShrink: 1,
   },
   divider: {
@@ -912,13 +1105,13 @@ const styles = StyleSheet.create({
     backgroundColor: leafRideColors.line,
   },
   emptyState: {
-    minHeight: 168,
-    borderRadius: 24,
+    minHeight: 148,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: "rgba(221,232,225,0.75)",
+    borderColor: leafRideColors.line,
     backgroundColor: leafRideColors.sheet,
-    paddingHorizontal: 20,
-    paddingVertical: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
     alignItems: "center",
     justifyContent: "center",
   },
