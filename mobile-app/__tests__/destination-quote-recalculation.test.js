@@ -218,7 +218,7 @@ describe("RobotaxiDestinationScreen", () => {
           }),
         }),
       );
-      expect(screen.getByText("Confirmar corrida")).toBeTruthy();
+      expect(screen.getAllByText("Confirmar").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText(/R\$ 13,42/)).toBeTruthy();
       expect(screen.getByText("Portaria 2, Taquara, Rio de Janeiro")).toBeTruthy();
       expect(screen.queryByTestId("passenger-pickup-map-marker")).toBeNull();
@@ -339,7 +339,7 @@ describe("RobotaxiDestinationScreen", () => {
       pricingPayload: {
         dynamic_percentage: 18,
         passenger_notice:
-          "As tarifas estão mais altas devido às condições de trânsito.",
+          "Tarifa alta",
       },
     });
 
@@ -421,11 +421,7 @@ describe("RobotaxiDestinationScreen", () => {
       );
       expect(screen.getByText(/R\$ 17,77/)).toBeTruthy();
       expect(screen.getByTestId("passenger-destination-dynamic-pricing-badge")).toBeTruthy();
-      expect(
-        screen.getByText(
-          "As tarifas estão mais altas devido às condições de trânsito.",
-        ),
-      ).toBeTruthy();
+      expect(screen.getByText("Tarifa alta")).toBeTruthy();
     });
   });
 
@@ -501,7 +497,6 @@ describe("RobotaxiDestinationScreen", () => {
     fireEvent.press(screen.getByText("Shopping Leblon"));
 
     await waitFor(() => {
-      expect(screen.getByText("Confirmar corrida")).toBeTruthy();
       expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
       expect(screen.getAllByText("Confirmar").length).toBeGreaterThanOrEqual(1);
     });

@@ -486,6 +486,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const latestRidePreferencesRef = useRef(null);
   const pendingPaymentConfirmationRef = useRef(null);
   const initialSelectedDestinationHydratedRef = useRef(false);
+  const loadRecentDestinationsRef = useRef(loadRecentDestinations);
+  const checkRideAvailabilityRef = useRef(checkRideAvailability);
   const autoStartVoiceRequested =
     route?.params?.autoStartVoice === true ||
     route?.params?.autoStartVoice === "true" ||
@@ -497,6 +499,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       setLeafDelasEnabled(true);
     }
   }, [route?.params]);
+
+  useEffect(() => {
+    loadRecentDestinationsRef.current = loadRecentDestinations;
+  }, [loadRecentDestinations]);
+
+  useEffect(() => {
+    checkRideAvailabilityRef.current = checkRideAvailability;
+  }, [checkRideAvailability]);
 
   const selectedTemperatureOption = useMemo(
     () => resolveOption(TEMPERATURE_OPTIONS, temperaturePreference),
@@ -716,7 +726,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
     const hydrateRecentDestinations = async () => {
       try {
-        const history = await loadRecentDestinations();
+        const history = await loadRecentDestinationsRef.current();
         if (cancelled) {
           return;
         }
@@ -738,7 +748,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     return () => {
       cancelled = true;
     };
-  }, [loadRecentDestinations]);
+  }, [profileUid]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1345,10 +1355,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
     return visiblePlans.map((plan, index) => {
       const planAvailability = planAvailabilityById?.[plan.id] || null;
+      const planUnavailable =
+        routeGuardBlocked ||
+        hasCoverageBlockedPlan ||
+        planAvailability?.available === false;
       const planFare =
-        plan.id === selectedPlan &&
-        selectedPlanFare != null &&
-        Number.isFinite(Number(selectedPlanFare))
+        planUnavailable
+          ? null
+          : plan.id === selectedPlan &&
+              selectedPlanFare != null &&
+              Number.isFinite(Number(selectedPlanFare))
           ? Number(selectedPlanFare)
           : Number(plan.value);
       const pickupEta =
@@ -1370,9 +1386,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               ? "Mais rápido para ir sozinho"
               : "Confortável e acessível",
         pickupEtaLabel: `${pickupEta} min`,
-        priceLabel: Number.isFinite(planFare) ? formatCurrency(planFare) : "--",
+        priceLabel:
+          planFare != null && Number.isFinite(Number(planFare))
+            ? formatCurrency(planFare)
+            : "--",
         arrivalLabel: arrivalTime,
-        unavailable: routeGuardBlocked || planAvailability?.available === false,
+        unavailable: planUnavailable,
         unavailableMessage: normalizeCoverageMessage(
           routeGuardBlocked
             ? routeGuardMessage
@@ -1383,6 +1402,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [
     arrivalTime,
     destinationInfo?.eta,
+    hasCoverageBlockedPlan,
     planAvailabilityById,
     routeGuardBlocked,
     routeGuardMessage,
@@ -1761,7 +1781,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
       for (const plan of visiblePlans) {
         try {
-          const availability = await checkRideAvailability({
+          const availability = await checkRideAvailabilityRef.current({
             destination: {
               name: destinationInfo?.name || "Destino",
               address: destinationInfo?.address || "",
@@ -1834,7 +1854,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       cancelled = true;
     };
   }, [
-    checkRideAvailability,
     destinationCoordinate,
     destinationInfo?.address,
     destinationInfo?.name,
@@ -1975,7 +1994,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
-      const availability = await checkRideAvailability({
+      const availability = await checkRideAvailabilityRef.current({
         destination: {
           name: destinationInfo?.name || "Destino",
           address: destinationInfo?.address || "",
@@ -2018,7 +2037,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [
     activePlanData?.value,
     canRequestRide,
-    checkRideAvailability,
     checkingAvailability,
     destinationCoordinate,
     destinationInfo?.address,
@@ -3242,13 +3260,20 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   </TouchableOpacity>
                 </View>
 
-                {availabilityNotice ? (
+                {selectedPlanUnavailable || routeGuardBlocked || availabilityNotice ? (
                   <Text
                     style={styles.availabilityNotice}
                     testID="passenger-destination-availability-notice"
                     accessibilityLabel="Aviso de disponibilidade da categoria"
                   >
-                    {availabilityNotice}
+                    {routeGuardBlocked || hasCoverageBlockedPlan
+                      ? OUT_OF_COVERAGE_MESSAGE
+                      : normalizeCoverageMessage(
+                          availabilityNotice ||
+                            selectedPlanAvailability?.message ||
+                            selectedCategoryOption?.unavailableMessage ||
+                            "Categoria indisponível nesta região no momento.",
+                        )}
                   </Text>
                 ) : null}
 
