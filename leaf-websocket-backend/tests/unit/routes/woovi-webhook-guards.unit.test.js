@@ -133,6 +133,8 @@ describe('woovi webhook guards', () => {
     delete process.env.WOOVI_WEBHOOK_REQUIRE_SIGNATURE;
     delete process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED;
     delete process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED;
+    delete process.env.WOOVI_ENVIRONMENT;
+    delete process.env.WOOVI_BASE_URL;
     process.env.NODE_ENV = 'test';
     firebaseConfig.getFirestore.mockReturnValue(null);
     mockRedisDel.mockResolvedValue(1);
@@ -190,6 +192,24 @@ describe('woovi webhook guards', () => {
 
     expect(result.valid).toBe(true);
     expect(result.method).toBe('unsigned_non_production');
+  });
+
+  it('allows unsigned sandbox webhook in production only through provider verification', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.WOOVI_ENVIRONMENT = 'sandbox';
+    process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
+    process.env.WOOVI_WEBHOOK_REQUIRE_SIGNATURE = 'false';
+    process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED = 'true';
+    process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED = 'true';
+
+    const result = verifyWooviWebhookSignature(createReq({
+      rawBody: Buffer.from(JSON.stringify({ event: 'CHARGE_COMPLETED' })),
+      body: { event: 'CHARGE_COMPLETED' }
+    }));
+
+    expect(result.valid).toBe(true);
+    expect(result.method).toBe('unsigned_provider_verification');
+    expect(result.providerVerificationRequired).toBe(true);
   });
 
   it('rejects unsigned webhook in production even when provider verification is enforced', () => {

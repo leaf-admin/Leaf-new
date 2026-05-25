@@ -166,6 +166,13 @@ function isProductionRuntime() {
   ].some((value) => ['production', 'prod'].includes(String(value || '').toLowerCase()));
 }
 
+function isWooviSandboxRuntime() {
+  return (
+    String(process.env.WOOVI_ENVIRONMENT || '').toLowerCase() === 'sandbox' ||
+    /sandbox/i.test(String(process.env.WOOVI_BASE_URL || ''))
+  );
+}
+
 function getWebhookRawBody(req) {
   if (Buffer.isBuffer(req.rawBody)) {
     return req.rawBody;
@@ -278,7 +285,9 @@ function verifyWooviWebhookSignature(req) {
   const signaturePresent = Boolean(recommendedSignature || deprecatedHmacSignature);
   const webhookRequireSignature = readBooleanEnv('WOOVI_WEBHOOK_REQUIRE_SIGNATURE', verifiersConfigured);
   const isProdRuntime = isProductionRuntime();
-  const signatureRequired = webhookRequireSignature || isProdRuntime;
+  const isSandboxRuntime = isWooviSandboxRuntime();
+  const strictSignatureRuntime = isProdRuntime && !isSandboxRuntime;
+  const signatureRequired = webhookRequireSignature || strictSignatureRuntime;
   const allowUnsignedWebhook = readBooleanEnv(
     'WOOVI_WEBHOOK_ALLOW_UNSIGNED',
     !verifiersConfigured
@@ -355,7 +364,9 @@ function verifyWooviWebhookSignature(req) {
   if (allowUnsignedWithoutVerifier) {
     return {
       valid: true,
-      method: isProdRuntime ? 'unsigned_provider_verification' : 'unsigned_non_production',
+      method: isProdRuntime || isSandboxRuntime
+        ? 'unsigned_provider_verification'
+        : 'unsigned_non_production',
       recommendedSignaturePresent: false,
       deprecatedHmacPresent: false,
       authorizationConfigured: authDecision.configured,

@@ -31,6 +31,7 @@
     "smoke:runtime-critical-events": "node scripts/tests/smoke-runtime-critical-events.cjs",
     "smoke:runtime-full-ride-flow": "node scripts/tests/smoke-runtime-full-ride-flow.cjs",
     "smoke:runtime-redis-adapter": "node scripts/tests/smoke-runtime-redis-adapter.cjs",
+    "smoke:woovi-sandbox": "node scripts/tests/smoke-woovi-sandbox.cjs",
     "smoke:supersede": "node scripts/tests/supersede-rebooking-smoke.cjs",
     "smoke:driver-ready": "node scripts/tests/smoke-driver-ready-booking.cjs",
     "ops:headroom:battery": "node scripts/tests/run-go-live-headroom-battery.cjs",

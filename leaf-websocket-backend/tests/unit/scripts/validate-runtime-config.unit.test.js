@@ -79,6 +79,67 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     expect(result.stdout).not.toContain('woovi-secret');
   });
 
+  it('allows real sandbox canary without webhook verifier only with provider verification fallback', () => {
+    const result = runValidator({
+      NODE_ENV: 'production',
+      WOOVI_ENVIRONMENT: 'sandbox',
+      WOOVI_BASE_URL: 'https://api.woovi-sandbox.com/api/v1',
+      WOOVI_API_TOKEN: 'woovi-token',
+      LEAF_PIX_KEY: 'pix-key',
+      CORS_ORIGIN: 'https://api.leaf.example',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'false',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'true',
+      WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: 'true'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.ok).toBe(true);
+    expect(result.report.summary.blockers).toEqual([]);
+    expect(result.report.summary.warnings).toContain(
+      'NODE_ENV=production está usando WOOVI_ENVIRONMENT diferente de production'
+    );
+    expect(result.report.diagnostics.webhookSignature).toMatchObject({
+      verifierKeysPresent: [],
+      hasVerifier: false,
+      requireSignature: {
+        value: false,
+        source: 'env',
+        expected: true
+      },
+      allowUnsigned: {
+        value: true,
+        source: 'env',
+        expected: false
+      },
+      providerVerificationRequired: {
+        value: true,
+        source: 'env',
+        expected: true
+      }
+    });
+  });
+
+  it('blocks real sandbox canary without verifier when provider verification fallback is not explicit', () => {
+    const result = runValidator({
+      NODE_ENV: 'production',
+      WOOVI_ENVIRONMENT: 'sandbox',
+      WOOVI_BASE_URL: 'https://api.woovi-sandbox.com/api/v1',
+      WOOVI_API_TOKEN: 'woovi-token',
+      LEAF_PIX_KEY: 'pix-key',
+      CORS_ORIGIN: 'https://api.leaf.example',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: 'false'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'WOOVI_WEBHOOK_REQUIRE_SIGNATURE=false obrigatório no sandbox sem verificador',
+      'WOOVI_WEBHOOK_ALLOW_UNSIGNED=true obrigatório no sandbox sem verificador',
+      'WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=true obrigatório no sandbox sem verificador'
+    ]));
+  });
+
   it('blocks each enabled payment bypass flag explicitly in production', () => {
     const result = runValidator({
       ...baseProdEnv,

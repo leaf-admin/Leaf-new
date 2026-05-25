@@ -150,8 +150,11 @@ function main() {
   const nodeEnv = String(process.env.NODE_ENV || 'development').toLowerCase();
   const wooviEnv = String(process.env.WOOVI_ENVIRONMENT || '').toLowerCase();
   const baseUrl = String(process.env.WOOVI_BASE_URL || '');
+  const wooviBaseUrlIsSandbox = /sandbox/i.test(baseUrl);
   const runtimeRole = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
   const paymentProviderConfigRequired = requiresPaymentProviderConfig(runtimeRole);
+  const paymentProviderSandboxRuntime =
+    paymentProviderConfigRequired && (wooviEnv === 'sandbox' || wooviBaseUrlIsSandbox);
 
   const missingCommon = checkRequired([
     ...REQUIRED_BASE,
@@ -215,13 +218,34 @@ function main() {
     if (Number.isFinite(geofenceRadiusKm) && geofenceRadiusKm >= 100) {
       blockers.push(`GEOFENCE_RADIUS_KM=${geofenceRadiusKm} abre demais a operação em produção`);
     }
-    if (paymentProviderConfigRequired && !hasWebhookVerifier) {
+    if (paymentProviderConfigRequired && !hasWebhookVerifier && !paymentProviderSandboxRuntime) {
       blockers.push('Webhook Woovi/OpenPix em produção exige ao menos um verificador de assinatura: WOOVI_WEBHOOK_PUBLIC_KEY, OPENPIX_WEBHOOK_PUBLIC_KEY, WOOVI_WEBHOOK_SIGNATURE_SECRET, OPENPIX_WEBHOOK_SIGNATURE_SECRET, WOOVI_WEBHOOK_HMAC_SECRET ou OPENPIX_WEBHOOK_HMAC_SECRET');
     }
-    if (paymentProviderConfigRequired && !webhookRequireSignature.value) {
+    if (
+      paymentProviderSandboxRuntime &&
+      !hasWebhookVerifier &&
+      webhookRequireSignature.value
+    ) {
+      blockers.push('WOOVI_WEBHOOK_REQUIRE_SIGNATURE=false obrigatório no sandbox sem verificador');
+    }
+    if (
+      paymentProviderSandboxRuntime &&
+      !hasWebhookVerifier &&
+      !webhookAllowUnsigned.value
+    ) {
+      blockers.push('WOOVI_WEBHOOK_ALLOW_UNSIGNED=true obrigatório no sandbox sem verificador');
+    }
+    if (
+      paymentProviderSandboxRuntime &&
+      !hasWebhookVerifier &&
+      !webhookProviderVerificationRequired.value
+    ) {
+      blockers.push('WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=true obrigatório no sandbox sem verificador');
+    }
+    if (paymentProviderConfigRequired && !paymentProviderSandboxRuntime && !webhookRequireSignature.value) {
       blockers.push('WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true obrigatório em produção');
     }
-    if (paymentProviderConfigRequired && webhookAllowUnsigned.value) {
+    if (paymentProviderConfigRequired && !paymentProviderSandboxRuntime && webhookAllowUnsigned.value) {
       blockers.push('WOOVI_WEBHOOK_ALLOW_UNSIGNED=false obrigatório em produção');
     }
     if (paymentProviderConfigRequired && !webhookProviderVerificationRequired.value) {

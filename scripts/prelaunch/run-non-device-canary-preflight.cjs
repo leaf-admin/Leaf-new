@@ -22,6 +22,7 @@ function parseArgs(argv) {
     skipBackendTest: false,
     skipDashboardBuild: false,
     skipFinancialLive: false,
+    skipWooviSandbox: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -44,6 +45,9 @@ function parseArgs(argv) {
         break;
       case '--skip-financial-live':
         options.skipFinancialLive = true;
+        break;
+      case '--skip-woovi-sandbox':
+        options.skipWooviSandbox = true;
         break;
       default:
         break;
@@ -141,6 +145,14 @@ function buildGates(options) {
       title: 'Backend sensitive route guards',
       command: 'npm run test:route-guards',
       cwd: backendDir,
+    },
+    {
+      id: 'woovi_sandbox_smoke',
+      title: 'Woovi Pix sandbox real',
+      command: 'npm run smoke:woovi-sandbox -- --out reports/woovi-sandbox-${CANARY_PREFLIGHT_RUN_ID:-manual}.json',
+      cwd: backendDir,
+      enabled: !options.skipWooviSandbox,
+      timeoutMs: 60000,
     },
     {
       id: 'backend_unit_integration',
