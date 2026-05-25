@@ -1,7 +1,8 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
+import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
@@ -11,20 +12,23 @@ import { useAccountDeletionFlow } from '../../hooks/useAccountDeletionFlow';
 import { useAccountSessionReset } from '../../hooks/useAccountSessionReset';
 import Logger from '../../utils/Logger';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 28;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 const SETTINGS_COLOR = {
-  bg: '#F6FAF6',
-  text: '#101C14',
-  title: '#102018',
-  secondary: '#66756B',
-  line: '#DFE8E1',
-  dot: '#26A66A',
+  bg: '#F8F6F1',
+  text: '#171412',
+  title: '#171412',
+  secondary: '#756F68',
+  line: '#E9E2D8',
+  dot: '#1A330E',
   danger: '#9F2424',
+  icon: '#514B45',
+  chevron: '#827B73',
 };
 
 function SettingRow({
+  icon,
   title,
   subtitle,
   onPress,
@@ -42,7 +46,13 @@ function SettingRow({
       testID={rowTestID}
       accessibilityLabel={rowTestID}
     >
-      <View style={[styles.rowDot, tone === 'danger' && styles.rowDotDanger]} />
+      <View style={styles.rowIconSlot}>
+        <Ionicons
+          name={icon || 'ellipse-outline'}
+          size={17}
+          color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.icon}
+        />
+      </View>
       <View style={styles.settingTextWrap}>
         <Text style={[styles.settingTitle, tone === 'danger' && styles.settingTitleDanger]}>
           {title}
@@ -50,7 +60,13 @@ function SettingRow({
         <Text style={styles.settingSubtitle}>{subtitle}</Text>
       </View>
       <View testID={switchTestID} accessibilityLabel={switchTestID} style={styles.hiddenSwitchTarget} />
-      {showChevron ? <Text style={styles.chevron}>›</Text> : null}
+      {showChevron ? (
+        <Ionicons
+          name="chevron-forward"
+          size={15}
+          color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.chevron}
+        />
+      ) : null}
     </TouchableOpacity>
   );
 }
@@ -73,6 +89,21 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
     navigation,
     profile: deletionProfile,
   });
+
+  useEffect(() => {
+    const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
+    const showStatusBar = () => StatusBar.setHidden(false, 'fade');
+
+    hideStatusBar();
+    const removeFocusListener = navigation?.addListener?.('focus', hideStatusBar);
+    const removeBlurListener = navigation?.addListener?.('blur', showStatusBar);
+
+    return () => {
+      removeFocusListener?.();
+      removeBlurListener?.();
+      showStatusBar();
+    };
+  }, [navigation]);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -147,29 +178,30 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
               },
             ]}
           >
-            <View style={styles.statusRow}>
-              <Text style={styles.statusText}>9:41</Text>
-              <Text style={styles.statusText}>100%</Text>
+            <View style={styles.headerRow}>
+              <View style={styles.headerCopy}>
+                <Text style={styles.screenTitle}>Configurações</Text>
+                <Text style={styles.screenSubtitle}>
+                  Preferências da conta sem complicação.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={handleDismiss}
+                activeOpacity={0.78}
+                testID="robotaxi-settings-close-button"
+                accessibilityLabel="robotaxi-settings-close-button"
+              >
+                <Ionicons name="close" size={18} color={SETTINGS_COLOR.text} />
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={styles.closeHit}
-              onPress={handleDismiss}
-              activeOpacity={0.78}
-              testID="robotaxi-settings-close-button"
-              accessibilityLabel="robotaxi-settings-close-button"
-            />
-
-            <Text style={styles.screenTitle}>Configurações</Text>
-            <Text style={styles.screenSubtitle}>
-              Ajuste acesso, privacidade e saída da conta.
-            </Text>
 
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.rowsContent}
             >
               <SettingRow
+                icon="notifications-outline"
                 title="Notificacoes"
                 subtitle={
                   notificationsEnabled
@@ -181,12 +213,14 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 switchTestID="robotaxi-settings-switch-notifications"
               />
               <SettingRow
+                icon="language-outline"
                 title="Idioma"
                 subtitle="Português do Brasil"
                 onPress={() => Alert.alert('Idioma', 'Português do Brasil está ativo.')}
                 rowTestID="robotaxi-settings-row-language"
               />
               <SettingRow
+                icon="map-outline"
                 title="Mapa e voz"
                 subtitle={
                   trafficLayerEnabled || voiceGuidanceEnabled
@@ -198,13 +232,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 switchTestID="robotaxi-settings-switch-traffic"
               />
               <SettingRow
-                title="Métodos de pagamento"
-                subtitle="PIX, recibo e próximos métodos"
-                onPress={() => navigation.navigate('RobotaxiPrototypePaymentMethods')}
-                rowTestID="robotaxi-settings-row-payment-methods"
-                showChevron
-              />
-              <SettingRow
+                icon="volume-medium-outline"
                 title="Instrucoes por voz"
                 subtitle={voiceGuidanceEnabled ? 'Orientacoes de audio ligadas' : 'Orientacoes de audio desligadas'}
                 onPress={() => updateSettings({ voiceGuidanceEnabled: !voiceGuidanceEnabled })}
@@ -212,18 +240,21 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 switchTestID="robotaxi-settings-switch-voice"
               />
               <SettingRow
+                icon="shield-checkmark-outline"
                 title="Privacidade"
                 subtitle="Dados, permissões e exclusão"
                 onPress={() => navigation.navigate('PrivacyPolicy')}
                 rowTestID="robotaxi-settings-row-privacy"
               />
               <SettingRow
+                icon="log-out-outline"
                 title="Sair da conta"
                 subtitle="Voltar para inserir telefone"
                 onPress={promptLogout}
                 rowTestID="robotaxi-settings-row-logout"
               />
               <SettingRow
+                icon="trash-outline"
                 title="Excluir conta"
                 subtitle="Iniciar exclusão permanente"
                 onPress={promptAccountDeletion}
@@ -232,6 +263,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 tone="danger"
               />
               <SettingRow
+                icon="help-circle-outline"
                 title="Falar com suporte"
                 subtitle="Ajuda sem sair do fluxo atual"
                 last
@@ -258,33 +290,33 @@ const styles = StyleSheet.create({
   surface: {
     flex: 1,
     backgroundColor: SETTINGS_COLOR.bg,
-    paddingHorizontal: 31,
+    paddingHorizontal: 24,
   },
-  statusRow: {
-    minHeight: 18,
+  headerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: 14,
   },
-  statusText: {
-    color: SETTINGS_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+  headerCopy: {
+    flex: 1,
+    paddingRight: 4,
   },
-  closeHit: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 72,
-    height: 88,
+  closeButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: SETTINGS_COLOR.line,
   },
   screenTitle: {
-    marginTop: 28,
     color: SETTINGS_COLOR.title,
-    fontFamily: fonts.Medium,
-    fontSize: 19,
-    lineHeight: 25,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   screenSubtitle: {
     marginTop: 8,
@@ -294,11 +326,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   rowsContent: {
-    paddingTop: 38,
+    paddingTop: 18,
     paddingBottom: 28,
   },
   settingRow: {
-    minHeight: 74,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -328,23 +360,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 13,
   },
-  rowDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: SETTINGS_COLOR.dot,
-    marginRight: 12,
-  },
-  rowDotDanger: {
-    backgroundColor: SETTINGS_COLOR.danger,
-  },
-  chevron: {
-    width: 18,
-    color: SETTINGS_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 14,
-    lineHeight: 18,
-    textAlign: 'right',
+  rowIconSlot: {
+    width: 28,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   hiddenSwitchTarget: {
     position: 'absolute',

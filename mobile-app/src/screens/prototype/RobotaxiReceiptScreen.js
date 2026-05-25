@@ -19,6 +19,7 @@ import {
   PrototypeCard,
   PrototypePrimaryButton,
 } from "../../components/prototype/PrototypeUI";
+import { leafButtonMetrics } from "../../components/prototype/LeafRideUI";
 import { PrototypeMenuCloseButton } from "../../components/prototype/PrototypeMenuSurface";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
@@ -72,14 +73,7 @@ function formatPaymentMethod(method) {
   if (normalized === "pix") {
     return "PIX recebido";
   }
-  if (
-    normalized === "card" ||
-    normalized === "cartão" ||
-    normalized === "cartao"
-  ) {
-    return "Cartão confirmado";
-  }
-  return "Pagamento confirmado";
+  return "PIX confirmado";
 }
 
 function splitLocationLabel(label = "") {
@@ -149,6 +143,14 @@ function buildReceiptHistoryRouteParts(item = {}) {
 }
 
 function normalizeCoordinate(value) {
+  if (typeof value === "string") {
+    try {
+      return normalizeCoordinate(JSON.parse(value));
+    } catch (_error) {
+      return null;
+    }
+  }
+
   const latitude = Number(value?.latitude ?? value?.lat);
   const longitude = Number(value?.longitude ?? value?.lng);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -213,6 +215,101 @@ function buildRoutePreviewRegion(coordinates = []) {
   };
 }
 
+function parseRouteReceipt(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function buildRouteReceiptFromParams(params = {}) {
+  if (!params || typeof params !== "object") {
+    return null;
+  }
+
+  const id = String(params.receiptId || "").trim();
+  const fare = toNumber(params.fare || params.grossAmount || params.value, NaN);
+  const driverName = String(params.driverName || "").trim();
+  const passengerName = String(params.passengerName || "").trim();
+  const pickupAddress = String(params.pickupAddress || params.pickup || "").trim();
+  const destinationAddress = String(
+    params.destinationAddress || params.dropoffAddress || params.drop || "",
+  ).trim();
+
+  if (
+    !id &&
+    !Number.isFinite(fare) &&
+    !driverName &&
+    !passengerName &&
+    !pickupAddress &&
+    !destinationAddress
+  ) {
+    return null;
+  }
+
+  const pickupCoordinate = normalizeCoordinate(params.pickupCoordinate);
+  const destinationCoordinate = normalizeCoordinate(params.destinationCoordinate);
+  const routeCoordinates = (() => {
+    if (!params.routeCoordinates) {
+      return [];
+    }
+    try {
+      const parsed =
+        typeof params.routeCoordinates === "string"
+          ? JSON.parse(params.routeCoordinates)
+          : params.routeCoordinates;
+      return Array.isArray(parsed) ? parsed.map(normalizeCoordinate).filter(Boolean) : [];
+    } catch (_error) {
+      return [];
+    }
+  })();
+
+  return {
+    id: id || "route-receipt",
+    date: String(params.date || "").trim(),
+    value: Number.isFinite(fare) ? formatCurrency(fare) : String(params.value || "").trim(),
+    fare,
+    grossAmount: toNumber(params.grossAmount || fare, fare),
+    distanceKm: toNumber(params.distanceKm, 0),
+    durationMin: toNumber(params.durationMin, 0),
+    paymentMethod: params.paymentMethod || "pix",
+    driverId: params.driverId || null,
+    driverName: driverName || "Motorista Leaf",
+    vehicleLabel: String(params.vehicleLabel || "").trim(),
+    vehiclePlate: String(params.vehiclePlate || "").trim(),
+    passengerId: params.passengerId || null,
+    passengerName: passengerName || "Passageiro Leaf",
+    operationalFee: toNumber(params.operationalFee, NaN),
+    paymentIntermediationFee: toNumber(params.paymentIntermediationFee, NaN),
+    totalFees: toNumber(params.totalFees, NaN),
+    driverNetAmount: toNumber(params.driverNetAmount, NaN),
+    tollAmount: toNumber(params.tollAmount, 0),
+    pickup: pickupAddress,
+    pickupAddress,
+    drop: destinationAddress,
+    destinationAddress,
+    pickupCoordinate,
+    destinationCoordinate,
+    routeCoordinates,
+  };
+}
+
 export default function RobotaxiReceiptScreen({ navigation, route }) {
   const {
     tripHistory,
@@ -227,14 +324,25 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
   const runtimeHistory = Array.isArray(tripHistory) ? tripHistory : [];
+  const routeReceipt =
+    parseRouteReceipt(route?.params?.receipt) ||
+    buildRouteReceiptFromParams(route?.params);
   const [selectedId, setSelectedId] = useState(
-    lastReceipt?.id || runtimeHistory[0]?.id || null,
+    routeReceipt?.id || lastReceipt?.id || runtimeHistory[0]?.id || null,
   );
   const fromTrip = Boolean(route?.params?.fromTrip);
-  const isDriverView = activeRole === "driver";
+  const routeActiveRole = String(route?.params?.activeRole || "").trim();
+  const isDriverView = routeActiveRole
+    ? routeActiveRole === "driver"
+    : activeRole === "driver";
   const compactDriverLayout = isDriverView && windowHeight <= 920;
 
   useEffect(() => {
+    if (routeReceipt?.id) {
+      setSelectedId(routeReceipt.id);
+      return;
+    }
+
     if (lastReceipt?.id) {
       setSelectedId(lastReceipt.id);
       return;
@@ -246,13 +354,17 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     ) {
       setSelectedId(runtimeHistory[0].id);
     }
-  }, [lastReceipt?.id, runtimeHistory, selectedId]);
+  }, [lastReceipt?.id, routeReceipt?.id, runtimeHistory, selectedId]);
 
   useEffect(() => {
     setShowFeeBreakdown(false);
   }, [selectedId, lastReceipt?.id]);
 
   const selected = useMemo(() => {
+    if (routeReceipt?.id && selectedId === routeReceipt.id) {
+      return routeReceipt;
+    }
+
     if (selectedId) {
       const fromHistory = runtimeHistory.find((item) => item.id === selectedId);
       if (fromHistory) {
@@ -260,12 +372,16 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       }
     }
 
+    if (routeReceipt?.id) {
+      return routeReceipt;
+    }
+
     if (lastReceipt?.id) {
       return lastReceipt;
     }
 
-    return runtimeHistory[0] || null;
-  }, [lastReceipt, runtimeHistory, selectedId]);
+    return runtimeHistory[0] || routeReceipt || null;
+  }, [lastReceipt, routeReceipt, runtimeHistory, selectedId]);
 
   const openRatingScreen = useCallback(
     (params) => {
@@ -416,9 +532,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const sheetTop =
     insets.top +
     (tightDriverLayout ? 16 : compactDriverLayout ? 12 : SHEET_TOP_OFFSET);
-  const sheetBottom =
-    insets.bottom +
-    (tightDriverLayout ? 8 : compactDriverLayout ? 6 : SHEET_BOTTOM_OFFSET);
+  const receiptCardBottomPadding =
+    insets.bottom + (tightDriverLayout ? 6 : compactDriverLayout ? 8 : 12);
+  const sheetBottom = 0;
   const driverRateButtonLabel = driverRatingSubmitted
     ? tightDriverLayout
       ? "Avaliado"
@@ -479,12 +595,13 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   }, [navigation]);
 
   const handleDismiss = () => {
-    if (!isDriverView) {
+    const shouldReturnToPrototypeHome = isDriverView
+      ? fromTrip || Boolean(route?.params?.fromRating)
+      : fromTrip && Boolean(route?.params?.fromRating);
+
+    if (!isDriverView || shouldReturnToPrototypeHome) {
       dismissCompletedReceipt();
     }
-
-    const shouldReturnToPrototypeHome =
-      fromTrip && Boolean(route?.params?.fromRating);
 
     if (shouldReturnToPrototypeHome) {
       navigateBackToPrototype();
@@ -822,6 +939,10 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         <Text style={styles.receiptCleanSectionTitle}>Corridas recentes</Text>
         {driverRecentHistory.slice(0, 2).map((item) => {
           const routeParts = buildReceiptHistoryRouteParts(item);
+          const driverRecentNet = resolveTripNetAmount(item);
+          const driverRecentValue = driverRecentNet > 0
+            ? driverRecentNet
+            : resolveTripGrossAmount(item);
           return (
             <TouchableOpacity
               key={item.id}
@@ -833,7 +954,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <Text style={styles.receiptCleanRowTitle} numberOfLines={1}>{routeParts.drop}</Text>
                 <Text style={styles.receiptCleanRowSubtitle} numberOfLines={1}>{routeParts.pickup}</Text>
               </View>
-              <Text style={styles.receiptCleanValueAmount}>{formatCurrency(resolveTripGrossAmount(item))}</Text>
+              <Text style={styles.receiptCleanValueAmount}>{formatCurrency(driverRecentValue)}</Text>
             </TouchableOpacity>
           );
         })}
@@ -1048,6 +1169,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               styles.receiptCard,
               compactDriverLayout && styles.receiptCardCompact,
               tightDriverLayout && styles.receiptCardTight,
+              { paddingBottom: receiptCardBottomPadding },
             ]}
             testID={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
             accessibilityLabel={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
@@ -2047,11 +2169,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "rgba(241, 245, 249, 0.94)",
+    backgroundColor: "#F8F6F1",
   },
   receiptCleanContainer: {
     flex: 1,
-    backgroundColor: "#F6FAF6",
+    backgroundColor: "#F8F6F1",
   },
   receiptCleanMapLayer: {
     position: "absolute",
@@ -2066,7 +2188,7 @@ const styles = StyleSheet.create({
   },
   receiptMockMap: {
     flex: 1,
-    backgroundColor: "#EAF2EC",
+    backgroundColor: "#F2F4EF",
     overflow: "hidden",
   },
   receiptWaterStrip: {
@@ -2135,8 +2257,8 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     borderWidth: 4,
-    borderColor: "#F6FAF6",
-    backgroundColor: "#0F3B16",
+    borderColor: "#F8F6F1",
+    backgroundColor: "#1A330E",
   },
   receiptRouteDotPickup: {
     left: 104,
@@ -2154,7 +2276,7 @@ const styles = StyleSheet.create({
     right: 0,
     minHeight: 162,
     paddingHorizontal: 31,
-    backgroundColor: "rgba(246,250,246,0.94)",
+    backgroundColor: "#F8FAF8",
   },
   receiptCleanHeaderTop: {
     flexDirection: "row",
@@ -2166,7 +2288,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   receiptCleanTitle: {
-    color: "#0A1410",
+    color: "#171412",
     fontFamily: fonts.SemiBold,
     fontSize: 22,
     lineHeight: 29,
@@ -2184,7 +2306,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.78)",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "rgba(221,232,225,0.8)",
     marginBottom: 8,
@@ -2197,22 +2319,22 @@ const styles = StyleSheet.create({
   },
   receiptCleanSheetViewport: {
     position: "absolute",
-    top: 131,
+    top: 132,
     left: 0,
     right: 0,
     bottom: 0,
   },
   receiptCleanSheetContent: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 14,
   },
   receiptCleanSheet: {
-    minHeight: 690,
+    minHeight: 620,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: "rgba(221,232,225,0.70)",
+    borderColor: "#ECE5DC",
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 21,
-    paddingTop: 23,
+    paddingHorizontal: 22,
+    paddingTop: 22,
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowOffset: { width: 0, height: -8 },
@@ -2234,24 +2356,24 @@ const styles = StyleSheet.create({
   },
   receiptCleanTotalValue: {
     marginTop: 6,
-    color: "#0A1410",
-    fontFamily: fonts.Bold,
-    fontSize: 32,
-    lineHeight: 43,
+    color: "#171412",
+    fontFamily: fonts.SemiBold,
+    fontSize: 30,
+    lineHeight: 38,
   },
   receiptCleanPill: {
     minWidth: 120,
     height: 26,
     borderRadius: 13,
     borderWidth: 1,
-    borderColor: "rgba(221,232,225,0.55)",
-    backgroundColor: "#E8F5EA",
+    borderColor: "#E9E2D8",
+    backgroundColor: "#F1F5EE",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
   },
   receiptCleanPillText: {
-    color: "#0F3B16",
+    color: "#1A330E",
     fontFamily: fonts.SemiBold,
     fontSize: 10.5,
     lineHeight: 14,
@@ -2264,7 +2386,7 @@ const styles = StyleSheet.create({
   },
   receiptCleanDivider: {
     height: 1,
-    backgroundColor: "#DDE8E1",
+    backgroundColor: "#E9E2D8",
     marginTop: 18,
   },
   receiptCleanAvatarRow: {
@@ -2279,13 +2401,13 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#E1F0E5",
+    backgroundColor: "#F1F5EE",
   },
   receiptCleanAvatarBlue: {
     backgroundColor: "#DCEAF6",
   },
   receiptCleanAvatarText: {
-    color: "#0F3B16",
+    color: "#1A330E",
     fontFamily: fonts.SemiBold,
     fontSize: 13,
     lineHeight: 17,
@@ -2298,22 +2420,22 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   receiptCleanRowTitle: {
-    color: "#0A1410",
+    color: "#171412",
     fontFamily: fonts.SemiBold,
     fontSize: 13.5,
     lineHeight: 18,
   },
   receiptCleanRowSubtitle: {
     marginTop: 2,
-    color: "#5D6A63",
+    color: "#756F68",
     fontFamily: fonts.Regular,
     fontSize: 11,
     lineHeight: 15,
   },
   receiptCleanRowRight: {
     maxWidth: 84,
-    color: "#0A1410",
-    fontFamily: fonts.Bold,
+    color: "#171412",
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
     lineHeight: 17,
     textAlign: "right",
@@ -2339,7 +2461,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   receiptCleanMetrics: {
-    minHeight: 78,
+    minHeight: 72,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -2348,20 +2470,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   receiptCleanMetricValue: {
-    color: "#0A1410",
+    color: "#171412",
     fontFamily: fonts.SemiBold,
     fontSize: 17,
     lineHeight: 23,
   },
   receiptCleanMetricLabel: {
     marginTop: 2,
-    color: "#8C9A92",
+    color: "#827B73",
     fontFamily: fonts.Medium,
     fontSize: 10.5,
     lineHeight: 14,
   },
   receiptCleanValueBlock: {
-    gap: 13,
+    gap: 11,
     paddingTop: 8,
   },
   receiptCleanValueRow: {
@@ -2375,30 +2497,30 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   receiptCleanValueTitle: {
-    color: "#0A1410",
+    color: "#171412",
     fontFamily: fonts.SemiBold,
     fontSize: 13.5,
     lineHeight: 18,
   },
   receiptCleanValueTitleMuted: {
-    color: "#5D6A63",
+    color: "#756F68",
   },
   receiptCleanValueSubtitle: {
     marginTop: 2,
-    color: "#5D6A63",
+    color: "#756F68",
     fontFamily: fonts.Regular,
     fontSize: 11,
     lineHeight: 15,
   },
   receiptCleanValueAmount: {
-    color: "#0A1410",
-    fontFamily: fonts.Bold,
+    color: "#171412",
+    fontFamily: fonts.SemiBold,
     fontSize: 13,
     lineHeight: 17,
     textAlign: "right",
   },
   receiptCleanValueAmountMuted: {
-    color: "#5D6A63",
+    color: "#756F68",
   },
   receiptCleanRecentBlock: {
     marginTop: 28,
@@ -2413,7 +2535,7 @@ const styles = StyleSheet.create({
   receiptCleanRecentRow: {
     minHeight: 48,
     borderTopWidth: 1,
-    borderTopColor: "#DDE8E1",
+    borderTopColor: "#E9E2D8",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -2427,30 +2549,30 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginTop: 54,
+    marginTop: 24,
     paddingBottom: 25,
   },
   receiptCleanSecondaryButton: {
     width: 100,
-    height: 38,
-    borderRadius: 19,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
-    borderColor: "#DDE8E1",
+    borderColor: "#E9E2D8",
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
   receiptCleanSecondaryButtonText: {
-    color: "#0F3B16",
+    color: "#1A330E",
     fontFamily: fonts.SemiBold,
     fontSize: 12.5,
     lineHeight: 17,
   },
   receiptCleanPrimaryButton: {
     flex: 1,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#0F3B16",
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
+    backgroundColor: "#1A330E",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2528,7 +2650,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   driverSummaryHeroCompact: {
-    gap: 6,
+    gap: leafButtonMetrics.iconGap,
     marginTop: 2,
   },
   driverSummaryHeroTight: {
@@ -2751,7 +2873,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.08)",
-    backgroundColor: "rgba(255,255,255,0.84)",
+    backgroundColor: "#FFFFFF",
   },
   driverSummaryBreakdownCardCompact: {
     borderRadius: 16,
@@ -3048,7 +3170,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.06)",
-    backgroundColor: "rgba(255,255,255,0.78)",
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 10,
     paddingVertical: 9,
   },
@@ -3445,40 +3567,40 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   driverRateButton: {
-    minHeight: 56,
-    borderRadius: 22,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   driverRateButtonCompact: {
-    minHeight: 50,
-    borderRadius: 18,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   driverRateButtonTight: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 16,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   driverBackSecondaryButton: {
     marginTop: 12,
-    minHeight: 52,
-    borderRadius: 18,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: "rgba(68,85,93,0.12)",
     backgroundColor: "rgba(255,255,255,0.72)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: leafButtonMetrics.iconGap,
   },
   driverBackSecondaryButtonCompact: {
     marginTop: 10,
-    minHeight: 46,
-    borderRadius: 16,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   driverBackSecondaryButtonTight: {
     marginTop: 0,
-    minHeight: 46,
+    minHeight: leafButtonMetrics.height,
     minWidth: 112,
-    borderRadius: 16,
+    borderRadius: leafButtonMetrics.radius,
     paddingHorizontal: 14,
   },
   driverBackSecondaryText: {
@@ -4003,8 +4125,8 @@ const styles = StyleSheet.create({
   },
   driverBackButton: {
     marginTop: 12,
-    minHeight: 56,
-    borderRadius: 18,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   title: {
     color: color.text.primary,
@@ -4211,15 +4333,15 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(248,250,249,0.96)",
   },
   passengerPrimaryAction: {
-    minHeight: 48,
-    borderRadius: 14,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: "rgba(26,51,14,0.16)",
     backgroundColor: "rgba(232,239,227,0.96)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
+    gap: leafButtonMetrics.iconGap,
   },
   passengerPrimaryActionText: {
     color: "#1A330E",
@@ -4228,20 +4350,20 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   passengerSecondaryAction: {
-    minHeight: 44,
-    borderRadius: 12,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.strong,
     backgroundColor: color.surface.secondary,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: leafButtonMetrics.iconGap,
   },
   secondaryAction: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 12,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.strong,
     backgroundColor: color.surface.secondary,

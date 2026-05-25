@@ -11,6 +11,7 @@ import {
   LeafMetricRow,
   LeafRideSheet,
   LeafStateHeader,
+  leafButtonMetrics,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
 import WooviPaymentModal from "../../components/payment/WooviPaymentModal";
@@ -19,7 +20,7 @@ import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
 
-const SHEET_BOTTOM_OFFSET = 16;
+const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
 
 function formatCurrency(value) {
@@ -39,6 +40,28 @@ function resolveLeafFee(fare) {
   return numeric > 25 ? 1.49 : 0.99;
 }
 
+function normalizeCoordinateParam(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    try {
+      return normalizeCoordinateParam(JSON.parse(value));
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  const latitude = Number(value.latitude ?? value.lat);
+  const longitude = Number(value.longitude ?? value.lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+
 export default function RobotaxiPaymentScreen({ navigation, route }) {
   const {
     selectedDestination,
@@ -48,6 +71,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     riderProfile,
     checkRideAvailability,
     paymentState,
+    selectDestination,
     requestRide,
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
@@ -60,12 +84,20 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
   const [submitting, setSubmitting] = useState(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
 
-  const destination = route?.params?.destination || "Destino";
+  const destination =
+    route?.params?.destination ||
+    route?.params?.initialSelectedDestination?.name ||
+    selectedDestination?.name ||
+    "Destino";
   const destinationAddress =
-    route?.params?.destinationAddress || selectedDestination?.address || "";
+    route?.params?.destinationAddress ||
+    route?.params?.initialSelectedDestination?.address ||
+    selectedDestination?.address ||
+    "";
   const destinationCoordinate =
-    route?.params?.destinationCoordinate ||
-    selectedDestination?.coordinate ||
+    normalizeCoordinateParam(route?.params?.destinationCoordinate) ||
+    normalizeCoordinateParam(route?.params?.initialSelectedDestination?.coordinate) ||
+    normalizeCoordinateParam(selectedDestination?.coordinate) ||
     null;
   const originAddress =
     resolveMeaningfulAddress(route?.params?.originAddress, currentAddress) ||
@@ -113,12 +145,57 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     setPixModalVisible(true);
   }, [canRequestRide, route?.params?.autoOpenPix]);
 
+  useEffect(() => {
+    if (!destinationCoordinate || typeof selectDestination !== "function") {
+      return;
+    }
+
+    const currentKey = [
+      selectedDestination?.name || "",
+      selectedDestination?.coordinate?.latitude || "",
+      selectedDestination?.coordinate?.longitude || "",
+    ].join(":");
+    const nextKey = [
+      destination || "",
+      destinationCoordinate.latitude,
+      destinationCoordinate.longitude,
+    ].join(":");
+
+    if (currentKey === nextKey) {
+      return;
+    }
+
+    selectDestination({
+      name: destination,
+      address: destinationAddress || destination,
+      coordinate: destinationCoordinate,
+    }).catch(() => {
+      // Route params still keep this payment screen usable if hydration fails.
+    });
+  }, [
+    destination,
+    destinationAddress,
+    destinationCoordinate,
+    selectDestination,
+    selectedDestination?.coordinate?.latitude,
+    selectedDestination?.coordinate?.longitude,
+    selectedDestination?.name,
+  ]);
+
   const handleOpenPixModal = useCallback(async () => {
     if (!canRequestRide) {
-      Alert.alert(
-        "Selecione um destino",
-        "Defina um destino válido antes de confirmar o pagamento.",
-      );
+      navigation.navigate("RobotaxiPrototypeDestination", {
+        initialSelectedDestination:
+          destination && destination !== "Destino"
+            ? {
+                name: destination,
+                address: destinationAddress || destination,
+                coordinate: destinationCoordinate,
+              }
+            : null,
+        initialSelectedPlan: route?.params?.initialSelectedPlan || "plus",
+        initialPickupAddress: originAddress,
+      });
       return;
     }
 
@@ -159,6 +236,9 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     destination,
     destinationAddress,
     destinationCoordinate,
+    navigation,
+    originAddress,
+    route?.params?.initialSelectedPlan,
     submitting,
     vehicle,
   ]);
@@ -199,6 +279,15 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
         navigation.replace("RobotaxiPrototypePaymentSuccess", {
           destination,
           destinationAddress,
+          destinationCoordinate,
+          initialSelectedDestination:
+            route?.params?.initialSelectedDestination || {
+              name: destination,
+              address: destinationAddress,
+              coordinate: destinationCoordinate,
+            },
+          selectedFare: route?.params?.selectedFare || fare,
+          fare,
           originAddress,
           vehicle,
           autoAdvance: true,
@@ -266,18 +355,19 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
           barStyle="dark-content"
         />
         <LeafStateHeader
+          title="Pagar corrida"
+          subtitle={destination}
+          rightLabel="Pix"
+          rightTone="dark"
           insetsTop={insets.top}
-          title="Confirmar corrida"
-          subtitle="Revise valor, tempo e pagamento antes de pedir."
         />
-
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
           <LeafRideSheet onLayout={handleCardLayout} style={styles.paymentCard}>
             <View style={styles.headerRow}>
-              <Text style={styles.title}>Sua corrida</Text>
+              <Text style={styles.title}>Código Pix</Text>
               <Text style={styles.price}>{formatCurrency(fare)}</Text>
             </View>
 
@@ -322,7 +412,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
                       ? "Verificando..."
                       : canRequestRide
                         ? "Confirmar"
-                        : "Sem destino"
+                        : "Escolher destino"
                 }
                 tone="primary"
                 testID="passenger-payment-pay-pix-button"
@@ -335,7 +425,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
 
             {!canRequestRide ? (
               <Text style={styles.pendingText}>
-                Abra Para onde? e escolha o destino antes de pagar.
+                Escolha um destino válido para seguir com o Pix.
               </Text>
             ) : null}
             {availabilityNotice ? (
@@ -391,12 +481,12 @@ const styles = StyleSheet.create({
   },
   paymentCard: {
     minHeight: 356,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 28,
-    paddingTop: 16,
+    paddingHorizontal: 24,
+    paddingTop: 14,
   },
   headerRow: {
     flexDirection: "row",
@@ -406,15 +496,15 @@ const styles = StyleSheet.create({
   },
   title: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
-    fontSize: 20,
-    lineHeight: 26,
+    fontFamily: fonts.SemiBold,
+    fontSize: 18,
+    lineHeight: 24,
   },
   price: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
-    fontSize: 22,
-    lineHeight: 29,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   divider: {
     marginTop: 16,
@@ -437,13 +527,13 @@ const styles = StyleSheet.create({
   },
   editButton: {
     flex: 1,
-    height: 46,
-    borderRadius: 23,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   ctaButton: {
     flex: 1.08,
-    height: 46,
-    borderRadius: 23,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   pendingText: {
     marginTop: 10,

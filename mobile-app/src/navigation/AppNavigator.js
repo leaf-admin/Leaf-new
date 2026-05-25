@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebaseAuth from '@react-native-firebase/auth';
 import featureFlagService from '../services/FeatureFlagService';
 import WebSocketManager from '../services/WebSocketManager';
+import realtimeConnectionOrchestrator from '../services/RealtimeConnectionOrchestrator';
 import { isE2ETestBuild, isSimulatorBuild } from '../config/runtimeAccessPolicy';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
 import { USER_SIGN_OUT } from '../common-local/types';
@@ -58,7 +59,6 @@ import SubscriptionManagementScreen from '../screens/SubscriptionManagementScree
 import PaymentSuccessScreen from '../screens/PaymentSuccessScreen';
 import PaymentFailedScreen from '../screens/PaymentFailedScreen';
 import PaymentDetails from '../screens/PaymentDetails';
-import AddPaymentMethod from '../screens/AddPaymentMethod';
 import AddMoney from '../screens/AddMoney';
 import WithdrawMoney from '../screens/WithdrawMoney';
 import WalletDetails from '../screens/WalletDetails';
@@ -112,7 +112,6 @@ import RobotaxiComplainScreen from '../screens/prototype/RobotaxiComplainScreen'
 import RobotaxiShareTripScreen from '../screens/prototype/RobotaxiShareTripScreen';
 import RobotaxiPublicTripTrackingScreen from '../screens/prototype/RobotaxiPublicTripTrackingScreen';
 import RobotaxiInvitesScreen from '../screens/prototype/RobotaxiInvitesScreen';
-import RobotaxiPaymentMethodsScreen from '../screens/prototype/RobotaxiPaymentMethodsScreen';
 import RobotaxiSupportTicketScreen from '../screens/prototype/RobotaxiSupportTicketScreen';
 import RobotaxiDriverDocumentsScreen from '../screens/prototype/RobotaxiDriverDocumentsScreen';
 import RobotaxiVehiclesScreen from '../screens/prototype/RobotaxiVehiclesScreen';
@@ -150,6 +149,35 @@ function getSessionTerminatedUserId(payload = {}) {
   }
 
   return String(payload.userId || payload.uid || payload.previousUserId || '').trim();
+}
+
+function getSessionTerminatedUserType(payload = {}) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  return normalizeNavigatorRole(
+    payload.userType ||
+      payload.usertype ||
+      payload.role ||
+      payload.accountType ||
+      payload.profile?.userType ||
+      payload.profile?.usertype ||
+      payload.profile?.role
+  );
+}
+
+function getProfileSessionRole(profile = {}) {
+  return normalizeNavigatorRole(
+    profile?.userType ||
+      profile?.usertype ||
+      profile?.role ||
+      profile?.user_role ||
+      profile?.accountType ||
+      profile?.profile?.userType ||
+      profile?.profile?.usertype ||
+      profile?.profile?.role
+  );
 }
 
 function buildSessionTerminatedStorageKeys(userId) {
@@ -196,12 +224,9 @@ async function clearLocalSessionAfterRemoteLogin({ dispatch, navigationRef, payl
   }
 
   try {
-    const webSocketManager = WebSocketManager.getInstance();
-    if (typeof webSocketManager.clearAuthenticationState === 'function') {
-      webSocketManager.clearAuthenticationState({ disconnect: true });
-    } else {
-      webSocketManager.disconnect();
-    }
+    realtimeConnectionOrchestrator.clearSession({
+      reason: 'remote_session_terminated',
+    });
   } catch (error) {
     Logger.warn('⚠️ [SessionTerminated] Falha ao encerrar socket local:', error?.message || error);
   }
@@ -320,7 +345,6 @@ const appLinking = {
       RobotaxiPrototypeShareTrip: 'robotaxi/trip/share',
       RobotaxiPrototypePublicTracking: 'robotaxi/trip/public/:tripId',
       RobotaxiPrototypeInvites: 'robotaxi/invites',
-      RobotaxiPrototypePaymentMethods: 'robotaxi/payment/methods',
       RobotaxiPrototypeDriverPanel: 'robotaxi/driver/panel',
       RobotaxiPrototypeDriverActivation: 'robotaxi/driver/activation',
       RobotaxiPrototypeDriverDocuments: 'robotaxi/driver/documents',
@@ -343,6 +367,7 @@ const appLinking = {
 
 const PROTOTYPE_QA_DEEP_LINK_ROUTES = {
   'robotaxi/trip': 'RobotaxiPrototypeTrip',
+  'robotaxi/receipt': 'RobotaxiPrototypeReceipt',
   'robotaxi/driver/offer': 'RobotaxiPrototypeDriverOffer',
   'robotaxi/driver/trip': 'RobotaxiPrototypeDriverTrip',
 };
@@ -579,7 +604,6 @@ function renderSharedPrivateScreens() {
       <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
       <Stack.Screen name="UserInfo" component={UserInfoScreen} />
       <Stack.Screen name="PaymentDetails" component={PaymentDetails} />
-      <Stack.Screen name="AddPaymentMethod" component={AddPaymentMethod} />
       <Stack.Screen name="AddMoney" component={AddMoney} />
       <Stack.Screen
         name="WithdrawMoney"
@@ -631,7 +655,6 @@ function renderSharedPrivateScreens() {
       <Stack.Screen name="HelpScreen" component={HelpScreen} />
       <Stack.Screen name="AccountStatement" component={WalletDetails} />
       <Stack.Screen name="addMoney" component={AddMoney} />
-      <Stack.Screen name="paymentMethod" component={AddPaymentMethod} />
       <Stack.Screen name="onlineChat" component={SupportChatScreen} />
     </>
   );
@@ -794,11 +817,6 @@ function renderSharedPrototypeScreens() {
         initialParams={prototypeReferralScreenParams}
       />
       <Stack.Screen
-        name="RobotaxiPrototypePaymentMethods"
-        component={RobotaxiPaymentMethodsScreen}
-        options={prototypeTransparentOverlayScreenOptions}
-      />
-      <Stack.Screen
         name="RobotaxiMenuEditProfile"
         component={RobotaxiProfileScreen}
         options={prototypeOverlayScreenOptions}
@@ -940,20 +958,36 @@ function SessionTerminatedGuard({ navigationRef }) {
   const dispatch = useDispatch();
   const currentProfile = useSelector(state => state.auth?.profile);
   const currentUidRef = useRef('');
+  const currentRoleRef = useRef(null);
   const handlingSessionTerminationRef = useRef(false);
 
   useEffect(() => {
     currentUidRef.current = String(currentProfile?.uid || '').trim();
-  }, [currentProfile?.uid]);
+    currentRoleRef.current = getProfileSessionRole(currentProfile);
+  }, [currentProfile]);
 
   useEffect(() => {
     const webSocketManager = WebSocketManager.getInstance();
 
     const handleSessionTerminated = (payload = {}) => {
       const payloadUserId = getSessionTerminatedUserId(payload);
+      const payloadRole = getSessionTerminatedUserType(payload);
       const currentUid = currentUidRef.current;
+      const currentRole = currentRoleRef.current;
 
       if (payloadUserId && currentUid && payloadUserId !== currentUid) {
+        return;
+      }
+
+      const shouldEnforceSessionTermination =
+        payloadRole === 'driver' || (!payloadRole && currentRole === 'driver');
+
+      if (!shouldEnforceSessionTermination) {
+        Logger.info('🔐 [SessionTerminated] Evento ignorado para passageiro/role não motorista', {
+          userId: payloadUserId || currentUid || null,
+          payloadRole: payloadRole || null,
+          currentRole: currentRole || null,
+        });
         return;
       }
 
@@ -992,6 +1026,58 @@ function SessionTerminatedGuard({ navigationRef }) {
       webSocketManager.off('sessionTerminated', handleSessionTerminated);
     };
   }, [dispatch, navigationRef]);
+
+  return null;
+}
+
+function RealtimeConnectionGuard() {
+  const profile = useSelector(state => state.auth?.profile);
+  const lastSessionKeyRef = useRef('');
+
+  useEffect(() => {
+    const userId = String(profile?.uid || profile?.id || '').trim();
+    const role = normalizeNavigatorRole(
+      profile?.usertype ||
+        profile?.userType ||
+        profile?.role ||
+        profile?.user_role ||
+        profile?.accountType
+    );
+    const sessionKey = userId && role ? `${userId}:${role}` : '';
+
+    if (!sessionKey) {
+      if (lastSessionKeyRef.current) {
+        realtimeConnectionOrchestrator.clearSession({
+          reason: 'profile_session_cleared',
+        });
+        lastSessionKeyRef.current = '';
+      }
+      return;
+    }
+
+    if (lastSessionKeyRef.current === sessionKey) {
+      return;
+    }
+
+    lastSessionKeyRef.current = sessionKey;
+    realtimeConnectionOrchestrator
+      .syncSession(
+        {
+          ...profile,
+          userType: role,
+        },
+        {
+          reason: 'profile_hydrated',
+          forceRefreshToken: false,
+        },
+      )
+      .catch(error => {
+        Logger.warn(
+          '⚠️ [RealtimeGuard] Falha ao preparar realtime autenticado:',
+          error?.message || error,
+        );
+      });
+  }, [profile]);
 
   return null;
 }
@@ -1239,6 +1325,7 @@ export default function AppNavigator() {
       </NavigationContainer>
       <PrototypeQaDeepLinkGuard navigationRef={rootNavigationRef} />
       <PrototypeReceiptDeepLinkGuard navigationRef={rootNavigationRef} />
+      <RealtimeConnectionGuard />
       <SessionTerminatedGuard navigationRef={rootNavigationRef} />
     </>
   );

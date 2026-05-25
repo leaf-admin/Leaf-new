@@ -299,7 +299,7 @@ const LegalScreen = ({ navigation, route }) => {
             <Text style={styles.complianceTitle}>PCI DSS - Segurança de Pagamentos</Text>
             <Text style={styles.complianceDescription}>
               Conformidade com padrões de segurança para processamento de pagamentos 
-              com cartão e PIX.
+              via PIX.
             </Text>
           </View>
         </View>
@@ -645,4 +645,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default LegalScreen; 
+export default LegalScreen;

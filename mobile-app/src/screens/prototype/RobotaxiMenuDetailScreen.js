@@ -8,6 +8,7 @@ import robotaxiPrototypeTokens from '../../components/design-system/robotaxiProt
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
+import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 import { getMenuItemByRoute } from './robotaxiMenuConfig';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
@@ -615,15 +616,15 @@ const styles = StyleSheet.create({
     marginTop: 2
   },
   inlineGhostButton: {
-    minHeight: 44,
-    borderRadius: 12,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.strong,
     backgroundColor: color.surface.secondary,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 6
+    gap: leafButtonMetrics.iconGap
   },
   inlineGhostButtonText: {
     color: color.text.primary,
@@ -637,20 +638,20 @@ const styles = StyleSheet.create({
   },
   halfGhostButton: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 12,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: color.border.strong,
     backgroundColor: color.surface.secondary,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 6
+    gap: leafButtonMetrics.iconGap
   },
   halfPrimaryButton: {
     flex: 1,
     marginTop: 0,
-    minHeight: 44
+    minHeight: leafButtonMetrics.height
   },
   preferenceRow: {
     minHeight: 68,

@@ -94,8 +94,9 @@ export default function AddMoneyScreen(props) {
         paymentType: 'walletCredit'
       }
       if (payData) {
-        props.navigation.navigate("paymentMethod", {
+        props.navigation.navigate("PaymentDetails", {
           payData: payData,
+          tripData: payData,
           userdata: state.userdata,
           settings: state.settings,
           providers: state.providers

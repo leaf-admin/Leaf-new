@@ -10,7 +10,7 @@ import robotaxiPrototypeTokens from '../../components/design-system/robotaxiProt
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 98;
+const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 244;
 
 export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
@@ -18,7 +18,7 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
 
-  const errorMessage = route?.params?.errorMessage || 'Nao foi possivel confirmar o pagamento nesta tentativa.';
+  const errorMessage = route?.params?.errorMessage || 'Não conseguimos confirmar o pagamento desta vez.';
   const retryRouteName = route?.params?.retryRouteName || 'RobotaxiPrototypeDestination';
   const retryParams = route?.params?.retryParams || {};
 
@@ -52,7 +52,7 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
               <Ionicons name="warning-outline" size={30} color="#FFFFFF" />
             </View>
 
-            <Text style={styles.title}>Pagamento nao confirmado</Text>
+            <Text style={styles.title}>Pagamento não confirmado</Text>
             <Text style={styles.subtitle}>{errorMessage}</Text>
 
             <PrototypePrimaryButton
@@ -86,12 +86,12 @@ const styles = StyleSheet.create({
     right: 0
   },
   card: {
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 28,
-    paddingTop: 16,
+    paddingHorizontal: 24,
+    paddingTop: 14,
     paddingBottom: 16
   },
   iconWrap: {
@@ -101,10 +101,10 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4A5565',
+    backgroundColor: color.text.primary,
     shadowColor: color.shadow.base,
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.26,
+    shadowOpacity: 0.14,
     shadowRadius: 14,
     elevation: 8
   },
@@ -112,8 +112,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight,
+    fontSize: 18,
+    lineHeight: 24,
     textAlign: 'center'
   },
   subtitle: {

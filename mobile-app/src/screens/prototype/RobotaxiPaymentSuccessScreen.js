@@ -14,9 +14,10 @@ import robotaxiPrototypeTokens from "../../components/design-system/robotaxiProt
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
+import { normalizePassengerBookingStatus } from "./passengerFlowRouting";
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 98;
+const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 250;
 
 export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
@@ -48,7 +49,14 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
       currentAddress,
     ) ||
     "Origem atual";
+  const destinationCoordinate =
+    route?.params?.destinationCoordinate ||
+    route?.params?.initialSelectedDestination?.coordinate ||
+    selectedDestination?.coordinate ||
+    activeBooking?.destinationLocation ||
+    null;
   const vehicle = route?.params?.vehicle || selectedVehicle || "Leaf Plus";
+  const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -58,25 +66,37 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
 
   useEffect(() => {
     if (
-      bookingStatus === "accepted" ||
-      bookingStatus === "arrived" ||
-      bookingStatus === "started"
+      normalizedBookingStatus === "accepted" ||
+      normalizedBookingStatus === "arrived" ||
+      normalizedBookingStatus === "started"
     ) {
       navigation.replace("RobotaxiPrototypeTrip", {
         destination,
         destinationAddress,
+        destinationCoordinate,
+        initialSelectedDestination:
+          route?.params?.initialSelectedDestination || {
+            name: destination,
+            address: destinationAddress,
+            coordinate: destinationCoordinate,
+          },
+        selectedFare: route?.params?.selectedFare || route?.params?.fare,
         originAddress,
         vehicle,
         driverName: driverInfo?.name || "Motorista",
       });
     }
   }, [
-    bookingStatus,
+    normalizedBookingStatus,
     destination,
     destinationAddress,
+    destinationCoordinate,
     driverInfo?.name,
     navigation,
     originAddress,
+    route?.params?.fare,
+    route?.params?.initialSelectedDestination,
+    route?.params?.selectedFare,
     vehicle,
   ]);
 
@@ -85,7 +105,10 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
       return;
     }
 
-    if (bookingStatus !== "searching" && bookingStatus !== "requesting") {
+    if (
+      normalizedBookingStatus !== "searching" &&
+      normalizedBookingStatus !== "requesting"
+    ) {
       return;
     }
 
@@ -93,6 +116,14 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
       navigation.replace("RobotaxiPrototypeDriverSearch", {
         destination,
         destinationAddress,
+        destinationCoordinate,
+        initialSelectedDestination:
+          route?.params?.initialSelectedDestination || {
+            name: destination,
+            address: destinationAddress,
+            coordinate: destinationCoordinate,
+          },
+        selectedFare: route?.params?.selectedFare || route?.params?.fare,
         originAddress,
         vehicle,
       });
@@ -100,12 +131,16 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
 
     return () => clearTimeout(timer);
   }, [
-    bookingStatus,
+    normalizedBookingStatus,
     destination,
     destinationAddress,
+    destinationCoordinate,
     navigation,
     originAddress,
     route?.params?.autoAdvance,
+    route?.params?.fare,
+    route?.params?.initialSelectedDestination,
+    route?.params?.selectedFare,
     vehicle,
   ]);
 
@@ -152,6 +187,15 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
                 navigation.replace("RobotaxiPrototypeDriverSearch", {
                   destination,
                   destinationAddress,
+                  destinationCoordinate,
+                  initialSelectedDestination:
+                    route?.params?.initialSelectedDestination || {
+                      name: destination,
+                      address: destinationAddress,
+                      coordinate: destinationCoordinate,
+                    },
+                  selectedFare: route?.params?.selectedFare || route?.params?.fare,
+                  fare: route?.params?.fare,
                   originAddress,
                   vehicle,
                 })
@@ -185,12 +229,12 @@ const styles = StyleSheet.create({
     right: 0,
   },
   card: {
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    paddingHorizontal: 28,
-    paddingTop: 16,
+    paddingHorizontal: 24,
+    paddingTop: 14,
     paddingBottom: 16,
   },
   iconWrap: {
@@ -203,7 +247,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.accent.primary,
     shadowColor: color.shadow.accent,
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.18,
     shadowRadius: 14,
     elevation: 8,
   },
@@ -211,8 +255,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight,
+    fontSize: 18,
+    lineHeight: 24,
     textAlign: "center",
   },
   subtitle: {

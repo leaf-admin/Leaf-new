@@ -5,7 +5,6 @@ import BookedCabScreen from './BookedCabScreen';
 import DriverRating from './DriverRating';
 import ProfileScreen from './ProfileScreen';
 import PaymentDetails from './PaymentDetails'
-import AddPaymentMethod from './AddPaymentMethod'
 import RideDetails from './RideDetails';
 import SearchScreen from './SearchScreen';
 import EditProfilePage from './EditProfile';
@@ -39,7 +38,6 @@ export {
     AboutPage,
     OnlineChat,
     PaymentDetails,
-    AddPaymentMethod,
     WalletDetails,
     AddMoneyScreen,
     LoginScreen,

@@ -17,7 +17,7 @@ import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 28;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
@@ -112,13 +112,21 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
             )}
           >
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-              {roleMenuSections.map(section => (
-                <PrototypeMenuSection key={section.key} title={section.title}>
+              {roleMenuSections.map((section, sectionIndex) => (
+                <PrototypeMenuSection
+                  key={section.key}
+                  title={section.title}
+                  style={[
+                    styles.menuSection,
+                    sectionIndex === roleMenuSections.length - 1 && styles.menuSectionLast,
+                  ]}
+                >
                   {section.items.map((item, index) => (
                     <PrototypeMenuRow
                       key={item.key}
                       icon={item.icon}
                       title={item.title}
+                      compact
                       last={index === section.items.length - 1}
                       onPress={() => handleOpenItem(item)}
                       testID={`robotaxi-menu-item-${item.key}`}
@@ -148,12 +156,19 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+    paddingTop: 14,
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 18,
+    paddingBottom: 16,
+  },
+  menuSection: {
+    marginBottom: 10,
+  },
+  menuSectionLast: {
+    marginBottom: 2,
   },
   footerNote: {
     color: color.text.muted,

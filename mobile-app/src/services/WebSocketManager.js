@@ -977,7 +977,10 @@ class WebSocketManager {
           attempt: index + 1,
           totalCandidates: candidateUrls.length,
         });
-        this.connectionPromise = this._waitForConnection(10000, socket);
+        this.connectionPromise = this._waitForConnection(
+          WS_CONNECT_TIMEOUT_MS,
+          socket,
+        );
         socket.connect();
         await this.connectionPromise;
         this.lastSocketUrl = candidateUrl;
@@ -1038,11 +1041,11 @@ class WebSocketManager {
       this.connectionAttempts = 0;
       return await this._connectFreshSocket({ forceRefreshAuth });
     } catch (error) {
-      Logger.error(
-        "❌ [WebSocketManager] Erro ao inicializar WebSocket:",
+      Logger.warn(
+        "⚠️ [WebSocketManager] Erro ao inicializar WebSocket:",
         error.message,
       );
-      Logger.error("❌ [WebSocketManager] Stack:", error.stack);
+      Logger.warn("⚠️ [WebSocketManager] Stack:", error.stack);
       this.isConnecting = false;
       this.connectionPromise = null;
       throw error; // ✅ Re-throw para que o chamador possa tratar
@@ -1158,8 +1161,13 @@ class WebSocketManager {
     return new Promise((resolve, reject) => {
       let settled = false;
       let lastError = null;
+      let timeoutId = null;
 
       const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
         socketRef?.off("connect", onConnect);
         socketRef?.off("connect_error", onConnectError);
       };
@@ -1181,7 +1189,7 @@ class WebSocketManager {
       socketRef.on("connect", onConnect);
       socketRef.on("connect_error", onConnectError);
 
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         finalize(() =>
           reject(
             buildSocketError(

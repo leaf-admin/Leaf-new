@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
+import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
@@ -16,25 +17,26 @@ import {
   resolvePrototypeProfilePhone,
 } from './prototypeProfileIdentity';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 28;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 const PROFILE_COLOR = {
-  bg: '#F6FAF6',
-  text: '#101C14',
-  title: '#102018',
-  secondary: '#66756B',
-  muted: '#5F6B62',
-  line: '#DFE8E1',
-  leaf: '#0F3B16',
-  dot: '#26A66A',
-  avatar: '#EAF6EE',
+  bg: '#F8F6F1',
+  text: '#171412',
+  title: '#171412',
+  secondary: '#756F68',
+  muted: '#827B73',
+  line: '#E9E2D8',
+  leaf: '#1A330E',
+  dot: '#1A330E',
+  avatar: '#F1F5EE',
   danger: '#9F2424',
+  icon: '#514B45',
+  chevron: '#827B73',
 };
 
 const PASSENGER_ACTIONS = Object.freeze([
   { id: 'history', label: 'Historico de viagens', icon: 'time-outline', route: 'RobotaxiMenuTripHistory' },
-  { id: 'payment', label: 'Métodos de pagamento', icon: 'card-outline', route: 'RobotaxiPrototypePaymentMethods' },
   { id: 'support', label: 'Seguranca e suporte', icon: 'shield-checkmark-outline', route: 'RobotaxiPrototypeSupport' },
 ]);
 
@@ -59,6 +61,7 @@ const ACCOUNT_LOGOUT_ACTION = Object.freeze({
 });
 
 function ProfileRow({
+  icon,
   title,
   subtitle,
   onPress,
@@ -75,16 +78,24 @@ function ProfileRow({
       testID={testID}
       accessibilityLabel={accessibilityLabel}
     >
-      <View style={[styles.rowDot, tone === 'danger' && styles.rowDotDanger]} />
+      <View style={styles.rowIconSlot}>
+        <Ionicons
+          name={icon || 'ellipse-outline'}
+          size={17}
+          color={tone === 'danger' ? PROFILE_COLOR.danger : PROFILE_COLOR.icon}
+        />
+      </View>
       <View style={styles.rowCopy}>
         <Text style={[styles.rowTitle, tone === 'danger' && styles.rowTitleDanger]}>
           {title}
         </Text>
         {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
       </View>
-      <Text style={[styles.rowChevron, tone === 'danger' && styles.rowTitleDanger]}>
-        ›
-      </Text>
+      <Ionicons
+        name="chevron-forward"
+        size={15}
+        color={tone === 'danger' ? PROFILE_COLOR.danger : PROFILE_COLOR.chevron}
+      />
     </TouchableOpacity>
   );
 }
@@ -125,6 +136,21 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     navigation,
     profile: deletionProfile,
   });
+
+  useEffect(() => {
+    const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
+    const showStatusBar = () => StatusBar.setHidden(false, 'fade');
+
+    hideStatusBar();
+    const removeFocusListener = navigation?.addListener?.('focus', hideStatusBar);
+    const removeBlurListener = navigation?.addListener?.('blur', showStatusBar);
+
+    return () => {
+      removeFocusListener?.();
+      removeBlurListener?.();
+      showStatusBar();
+    };
+  }, [navigation]);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -212,6 +238,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     const rows = [
       {
         id: 'personal-data',
+        icon: 'person-circle-outline',
         title: 'Dados pessoais',
         subtitle: 'Nome, email e telefone',
         onPress: () => {
@@ -225,13 +252,12 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
       },
       ...actions.map((item) => ({
         id: item.id,
+        icon: item.icon,
         title: item.label,
         subtitle:
           item.id === 'history'
             ? 'Recibos e detalhes'
-            : item.id === 'payment'
-              ? 'Metodo principal'
-              : item.id === 'support'
+            : item.id === 'support'
                 ? 'Ajuda e chamados'
                 : item.id === 'earnings'
                   ? 'Saldo e relatorio'
@@ -242,12 +268,14 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
       })),
       {
         id: 'settings',
+        icon: 'settings-outline',
         title: 'Configuracoes',
         subtitle: 'Conta e privacidade',
         onPress: () => navigation.replace('RobotaxiPrototypeSettings'),
       },
       {
         id: ACCOUNT_LOGOUT_ACTION.id,
+        icon: ACCOUNT_LOGOUT_ACTION.icon,
         title: ACCOUNT_LOGOUT_ACTION.label,
         subtitle: 'Voltar para entrada por telefone',
         onPress: () => handleActionPress(ACCOUNT_LOGOUT_ACTION),
@@ -256,6 +284,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
       },
       {
         id: ACCOUNT_DELETION_ACTION.id,
+        icon: ACCOUNT_DELETION_ACTION.icon,
         title: ACCOUNT_DELETION_ACTION.label,
         subtitle: 'Remover sua conta e dados associados',
         onPress: () => handleActionPress(ACCOUNT_DELETION_ACTION),
@@ -288,23 +317,25 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
               },
             ]}
           >
-            <View style={styles.statusRow}>
-              <Text style={styles.statusText}>9:41</Text>
-              <Text style={styles.statusText}>100%</Text>
+            <View style={styles.headerRow}>
+              <View style={styles.headerCopy}>
+                <Text style={styles.screenTitle}>
+                  {isDriverRole ? 'Perfil do motorista' : 'Perfil'}
+                </Text>
+                <Text style={styles.screenSubtitle}>
+                  Dados, atalhos e segurança em um só lugar.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={handleDismiss}
+                activeOpacity={0.78}
+                accessibilityRole="button"
+                accessibilityLabel="Fechar perfil"
+              >
+                <Ionicons name="close" size={18} color={PROFILE_COLOR.text} />
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={styles.closeHit}
-              onPress={handleDismiss}
-              activeOpacity={0.78}
-              accessibilityRole="button"
-              accessibilityLabel="Fechar perfil"
-            />
-
-            <Text style={styles.screenTitle}>Perfil</Text>
-            <Text style={styles.screenSubtitle}>
-              Gerencie seus dados, atalhos e segurança.
-            </Text>
 
             <View style={styles.identityRow}>
               <View style={styles.avatarWrap}>
@@ -329,6 +360,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
               {profileRows.map((item, index) => (
                 <ProfileRow
                   key={item.id}
+                  icon={item.icon}
                   title={item.title}
                   subtitle={item.subtitle}
                   onPress={item.onPress}
@@ -357,33 +389,33 @@ const styles = StyleSheet.create({
   surface: {
     flex: 1,
     backgroundColor: PROFILE_COLOR.bg,
-    paddingHorizontal: 31,
+    paddingHorizontal: 24,
   },
-  statusRow: {
-    minHeight: 18,
+  headerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: 14,
   },
-  statusText: {
-    color: PROFILE_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+  headerCopy: {
+    flex: 1,
+    paddingRight: 4,
   },
-  closeHit: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 72,
-    height: 88,
+  closeButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: PROFILE_COLOR.line,
   },
   screenTitle: {
-    marginTop: 28,
     color: PROFILE_COLOR.title,
-    fontFamily: fonts.Medium,
-    fontSize: 19,
-    lineHeight: 25,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   screenSubtitle: {
     marginTop: 8,
@@ -402,14 +434,14 @@ const styles = StyleSheet.create({
   },
   avatarLetter: {
     color: PROFILE_COLOR.leaf,
-    fontFamily: fonts.Medium,
-    fontSize: 22,
-    lineHeight: 29,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   identityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 38,
+    marginTop: 24,
   },
   identityCopy: {
     flex: 1,
@@ -418,9 +450,9 @@ const styles = StyleSheet.create({
   },
   identityName: {
     color: PROFILE_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 22,
-    lineHeight: 29,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   identityMeta: {
     marginTop: 2,
@@ -432,14 +464,14 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: PROFILE_COLOR.line,
-    marginTop: 28,
+    marginTop: 24,
   },
   rowsContent: {
-    paddingTop: 18,
+    paddingTop: 12,
     paddingBottom: 28,
   },
   profileRow: {
-    minHeight: 70,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -448,15 +480,10 @@ const styles = StyleSheet.create({
   profileRowLast: {
     borderBottomWidth: 0,
   },
-  rowDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: PROFILE_COLOR.dot,
-    marginRight: 12,
-  },
-  rowDotDanger: {
-    backgroundColor: PROFILE_COLOR.danger,
+  rowIconSlot: {
+    width: 28,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   rowCopy: {
     flex: 1,
@@ -478,13 +505,5 @@ const styles = StyleSheet.create({
     fontFamily: fonts.Regular,
     fontSize: 10,
     lineHeight: 13,
-  },
-  rowChevron: {
-    width: 18,
-    color: PROFILE_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 14,
-    lineHeight: 18,
-    textAlign: 'right',
   },
 });

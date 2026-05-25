@@ -72,16 +72,6 @@ const PASSENGER_ITEMS = [
     subtitle: 'Últimas corridas e recibos'
   },
   {
-    key: 'payment-methods',
-    title: 'Métodos de pagamento',
-    icon: 'card-outline',
-    route: 'RobotaxiPrototypePaymentMethods',
-    openDirect: true,
-    roles: ['customer'],
-    section: 'account',
-    subtitle: 'PIX, recibos e próximos métodos'
-  },
-  {
     key: 'passenger-invites',
     title: 'Convites',
     icon: 'people-outline',
@@ -134,7 +124,7 @@ const DRIVER_ITEMS = [
     openDirect: true,
     roles: ['driver'],
     section: 'operations',
-    subtitle: 'CNH, CRLV, MEI e análise'
+    subtitle: 'CNH, CRLV e análise'
   },
   {
     key: 'driver-vehicles',
