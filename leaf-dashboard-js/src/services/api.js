@@ -531,6 +531,15 @@ class LeafApiService {
     });
   }
 
+  async uploadInAppCampaignAsset(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.request("/campaign-center/assets", {
+      method: "POST",
+      body: formData,
+    });
+  }
+
   async updateInAppCampaign(campaignId, payload = {}) {
     return this.request(`/campaign-center/campaigns/${encodeURIComponent(campaignId)}`, {
       method: "PATCH",
@@ -554,6 +563,21 @@ class LeafApiService {
     });
     const suffix = query.toString();
     return this.request(`/campaign-center/stats${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async getInAppCampaignCommercialReport(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/campaign-center/commercial-report${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async listInAppCampaignSlots() {
+    return this.request("/campaign-center/slots");
   }
 
   async createGeofenceCity(payload = {}) {

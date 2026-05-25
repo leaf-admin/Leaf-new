@@ -44,7 +44,7 @@ class DashboardWsService {
     this.pendingConnectPromise = new Promise((resolve, reject) => {
       this.socket = io(this.resolveSocketUrl(namespace), {
         auth: { jwtToken: token },
-        transports: ["websocket", "polling"],
+        transports: config.ws.transports || ["websocket"],
         reconnection: true,
         reconnectionAttempts: 5,
       });

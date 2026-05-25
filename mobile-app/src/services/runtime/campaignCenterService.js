@@ -13,6 +13,23 @@ function normalizeText(value, fallback = "") {
   return text || fallback;
 }
 
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = normalizeSlug(value);
+    if (["true", "1", "yes", "sim", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "nao", "off"].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function normalizeDisplayMode(value, fallback = "text_overlay") {
+  const normalized = normalizeSlug(value, fallback);
+  if (["image_only", "creative_only", "full_art", "arte_completa"].includes(normalized)) return "image_only";
+  return "text_overlay";
+}
+
 function normalizeSlug(value, fallback = "") {
   return String(value || fallback)
     .trim()
@@ -24,6 +41,10 @@ function normalizeSlug(value, fallback = "") {
 function normalizeCampaign(raw = {}) {
   const content = raw.content && typeof raw.content === "object" ? raw.content : {};
   const cta = content.cta && typeof content.cta === "object" ? content.cta : {};
+  const displayMode = normalizeDisplayMode(
+    content.displayMode || content.creativeMode || content.renderMode,
+    normalizeBoolean(content.hideTextOverlay) ? "image_only" : "text_overlay",
+  );
   return {
     id: normalizeText(raw.id || raw.campaignId),
     name: normalizeText(raw.name),
@@ -39,6 +60,12 @@ function normalizeCampaign(raw = {}) {
       footnote: normalizeText(content.footnote),
       accent: normalizeText(content.accent, "#1A330E"),
       assetKey: normalizeSlug(content.assetKey),
+      imageUrl: normalizeText(content.imageUrl || content.imageURL || content.assetUrl),
+      imageAlt: normalizeText(content.imageAlt || content.altText),
+      displayMode,
+      hideTextOverlay: displayMode === "image_only" || normalizeBoolean(content.hideTextOverlay),
+      backgroundColor: normalizeText(content.backgroundColor, "#FBFCF8"),
+      textColor: normalizeText(content.textColor, "#171412"),
       cta: {
         label: normalizeText(cta.label),
         action: normalizeSlug(cta.action),
@@ -47,14 +74,45 @@ function normalizeCampaign(raw = {}) {
         payload: cta.payload && typeof cta.payload === "object" ? cta.payload : {},
       },
     },
+    rules: raw.rules && typeof raw.rules === "object"
+      ? {
+          autoRotateSeconds: Number(raw.rules.autoRotateSeconds || 6) || 6,
+          rotationWeight: Number(raw.rules.rotationWeight || 1) || 1,
+        }
+      : {
+          autoRotateSeconds: 6,
+          rotationWeight: 1,
+        },
     tracking: raw.tracking && typeof raw.tracking === "object" ? raw.tracking : {},
   };
 }
 
 function normalizeCampaignList(items = []) {
   return Array.isArray(items)
-    ? items.map(normalizeCampaign).filter((campaign) => campaign.id && campaign.content.title)
+    ? items.map(normalizeCampaign).filter((campaign) => (
+        campaign.id &&
+        (
+          campaign.content.title ||
+          campaign.content.imageUrl ||
+          campaign.content.assetKey
+        )
+      ))
     : [];
+}
+
+function campaignRoleMatches(campaignRole = '', requestedRole = '') {
+  const role = normalizeSlug(requestedRole);
+  const campaignRoleSlug = normalizeSlug(campaignRole);
+  if (!role || !campaignRoleSlug || campaignRoleSlug === 'all') return true;
+  if (role === 'customer' || role === 'passenger') {
+    return campaignRoleSlug === 'customer' || campaignRoleSlug === 'passenger';
+  }
+  return campaignRoleSlug === role;
+}
+
+function applyLimit(campaigns = [], context = {}) {
+  const limit = Math.max(1, Number(context.limit || campaigns.length || 1) || 1);
+  return campaigns.slice(0, limit);
 }
 
 function buildCacheKey(context = {}) {
@@ -77,12 +135,12 @@ function resolveTestCampaigns(context = {}) {
   const surface = normalizeSlug(context.surface);
   const placement = normalizeSlug(context.placement);
   const role = normalizeSlug(context.role || context.userType);
-  return normalizeCampaignList(fixtures).filter((campaign) => {
+  return applyLimit(normalizeCampaignList(fixtures).filter((campaign) => {
     if (surface && campaign.surface && campaign.surface !== surface) return false;
     if (placement && campaign.placement && campaign.placement !== placement) return false;
-    if (role && campaign.role && campaign.role !== role) return false;
+    if (role && campaign.role && !campaignRoleMatches(campaign.role, role)) return false;
     return true;
-  });
+  }), context);
 }
 
 async function loadDismissals(userId = "") {
@@ -122,10 +180,10 @@ export async function loadCachedEligibleCampaigns(context = {}) {
     }
     const parsed = JSON.parse(raw);
     const expiresAt = Number(parsed?.expiresAt || 0);
-    const campaigns = await filterDismissed(
+    const campaigns = applyLimit(await filterDismissed(
       normalizeCampaignList(parsed?.campaigns),
       context.userId,
-    );
+    ), context);
     return {
       campaigns,
       cached: true,
@@ -140,7 +198,7 @@ export async function loadCachedEligibleCampaigns(context = {}) {
 export async function refreshEligibleCampaigns(context = {}) {
   if (IS_TEST_ENV) {
     return {
-      campaigns: await filterDismissed(resolveTestCampaigns(context), context.userId),
+      campaigns: applyLimit(await filterDismissed(resolveTestCampaigns(context), context.userId), context),
       cached: false,
       stale: false,
       test: true,
@@ -160,10 +218,10 @@ export async function refreshEligibleCampaigns(context = {}) {
   }
 
   const response = await apiClient.get(`/api/campaign-center/eligible?${params.toString()}`);
-  const campaigns = await filterDismissed(
+  const campaigns = applyLimit(await filterDismissed(
     normalizeCampaignList(response?.data?.campaigns),
     context.userId,
-  );
+  ), context);
   const payload = {
     campaigns,
     updatedAt: new Date().toISOString(),

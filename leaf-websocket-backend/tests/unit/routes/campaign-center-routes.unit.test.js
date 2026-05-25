@@ -13,6 +13,9 @@ const mockGetStats = jest.fn();
 const mockCreateCampaign = jest.fn();
 const mockResolveEligibleCampaigns = jest.fn();
 const mockRecordEvent = jest.fn();
+const mockGetSlotDefinitions = jest.fn();
+const mockUploadAsset = jest.fn();
+const mockGetCommercialReport = jest.fn();
 const mockLogStructured = jest.fn();
 const mockIsLaunchFeatureEnabled = jest.fn(() => true);
 
@@ -28,7 +31,10 @@ jest.mock('../../../services/campaign-center-service', () => ({
   getCampaign: jest.fn(),
   updateCampaign: jest.fn(),
   resolveEligibleCampaigns: mockResolveEligibleCampaigns,
-  recordEvent: mockRecordEvent
+  recordEvent: mockRecordEvent,
+  getSlotDefinitions: mockGetSlotDefinitions,
+  uploadAsset: mockUploadAsset,
+  getCommercialReport: mockGetCommercialReport
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -73,6 +79,33 @@ describe('campaign-center routes', () => {
       evaluatedAt: '2026-05-20T12:00:00.000Z'
     });
     mockRecordEvent.mockResolvedValue({ id: 'evt_1', campaignId: 'cmp_1' });
+    mockUploadAsset.mockResolvedValue({
+      id: 'asset_1',
+      imageUrl: 'https://storage.leaf.test/campaign.webp',
+      filePath: 'campaign-center/assets/asset_1.webp',
+      fileSize: 9,
+      contentType: 'image/webp'
+    });
+    mockGetSlotDefinitions.mockReturnValue([
+      {
+        id: 'passenger_home_banner_stack',
+        surface: 'passenger_home',
+        placement: 'below_search_card',
+        dimensions: { heightDp: 188 }
+      }
+    ]);
+    mockGetCommercialReport.mockResolvedValue({
+      generatedAt: '2026-05-22T00:00:00.000Z',
+      totals: {
+        campaignValueCents: 150000,
+        impressions: 10000,
+        clicks: 250,
+        ctr: 0.025,
+        effectiveCpmCents: 15000,
+        effectiveCpcCents: 600
+      },
+      rows: [{ id: 'cmp_1', name: 'Teste', impressions: 10000, clicks: 250 }]
+    });
   });
 
   it('lists admin campaigns with stats', async () => {
@@ -181,6 +214,80 @@ describe('campaign-center routes', () => {
           eventType: 'impression',
           campaignId: 'cmp_1',
           userId: null
+      })
+    );
+  });
+
+  it('lists campaign slot definitions for the dashboard', async () => {
+    const response = await request(createApp())
+      .get('/api/campaign-center/slots');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      slots: [
+        {
+          id: 'passenger_home_banner_stack',
+          placement: 'below_search_card',
+          dimensions: { heightDp: 188 }
+        }
+      ]
+    });
+    expect(mockGetSlotDefinitions).toHaveBeenCalled();
+  });
+
+  it('returns commercial campaign report for future ad sales', async () => {
+    const response = await request(createApp())
+      .get('/api/campaign-center/commercial-report?surface=passenger_home');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      report: {
+        totals: {
+          campaignValueCents: 150000,
+          impressions: 10000,
+          clicks: 250,
+          ctr: 0.025,
+          effectiveCpmCents: 15000,
+          effectiveCpcCents: 600
+        }
+      }
+    });
+    expect(mockGetCommercialReport).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: 'passenger_home' })
+    );
+  });
+
+  it('uploads campaign assets through admin auth', async () => {
+    const response = await request(createApp())
+      .post('/api/campaign-center/assets')
+      .attach('file', Buffer.from('fake-webp'), {
+        filename: 'banner.webp',
+        contentType: 'image/webp'
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      success: true,
+      asset: {
+        id: 'asset_1',
+        imageUrl: 'https://storage.leaf.test/campaign.webp'
+      }
+    });
+    expect(mockUploadAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originalname: 'banner.webp',
+        mimetype: 'image/webp'
+      }),
+      expect.objectContaining({ id: 'admin_1' })
+    );
+    expect(mockLogStructured).toHaveBeenCalledWith(
+      'info',
+      'Asset de campanha enviado',
+      expect.objectContaining({
+        action: 'campaign_center.asset.upload',
+        entity: { type: 'campaign_asset', id: 'asset_1' }
       })
     );
   });

@@ -1838,10 +1838,15 @@ app.use('/api/ops', opsRoutes);
 const referralProgramsRoutes = require('./routes/referral-programs');
 app.use('/api/programs/referrals', referralProgramsRoutes);
 
+// ✅ Campaign Center / campanhas in-app controladas pelo dashboard
+const campaignCenterRoutes = require('./routes/campaign-center');
+app.use('/api/campaign-center', campaignCenterRoutes);
+
 // Nota: injeção de Socket.IO nas rotas de suporte ocorre após criação do io.
 logStructured('info', 'Rotas de Support (tickets+chat) registradas', { service: 'server' });
 logStructured('info', 'Rotas de Ops registradas', { service: 'server' });
 logStructured('info', 'Rotas de Referral Programs registradas', { service: 'server' });
+logStructured('info', 'Rotas de Campaign Center registradas', { service: 'server' });
 
 // ✅ Rotas de KYC Onboarding (CNH + Selfie)
 const kycOnboardingRoutes = require('./routes/kyc-onboarding');

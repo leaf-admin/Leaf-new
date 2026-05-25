@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const multer = require('multer');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const campaignCenterService = require('../services/campaign-center-service');
 const { logError, logStructured } = require('../utils/logger');
@@ -10,6 +11,29 @@ const {
 
 const router = express.Router();
 const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
+const assetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 4 * 1024 * 1024,
+    files: 1
+  },
+  fileFilter: (_req, file, cb) => {
+    const allowed = new Set(['image/jpeg', 'image/png', 'image/webp']);
+    if (allowed.has(file.mimetype)) return cb(null, true);
+    return cb(new Error('Use uma imagem JPG, PNG ou WebP'), false);
+  }
+});
+
+function handleAssetUpload(req, res, next) {
+  assetUpload.single('file')(req, res, (error) => {
+    if (!error) return next();
+    const status = error instanceof multer.MulterError ? 400 : 400;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Falha ao processar imagem'
+    });
+  });
+}
 
 function buildAuditOperator(user = {}) {
   return {
@@ -231,6 +255,67 @@ router.get('/stats', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res)
     return res.status(500).json({ success: false, error: 'Falha ao carregar estatisticas' });
   }
 });
+
+router.get('/commercial-report', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+  try {
+    const report = await campaignCenterService.getCommercialReport(req.query || {});
+    return res.json({ success: true, report });
+  } catch (error) {
+    logError(error, 'Erro ao gerar relatório comercial de campanhas', {
+      service: 'campaign-center',
+      operation: 'commercial-report'
+    });
+    return res.status(500).json({ success: false, error: 'Falha ao carregar relatório comercial' });
+  }
+});
+
+router.get('/slots', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, res) => {
+  try {
+    return res.json({
+      success: true,
+      slots: campaignCenterService.getSlotDefinitions()
+    });
+  } catch (error) {
+    logError(error, 'Erro ao listar slots de campanhas', {
+      service: 'campaign-center',
+      operation: 'slots'
+    });
+    return res.status(500).json({ success: false, error: 'Falha ao carregar slots' });
+  }
+});
+
+router.post(
+  '/assets',
+  authenticateJWT,
+  requireRole(ADMIN_ROLES),
+  requireAdminMutationsEnabled,
+  handleAssetUpload,
+  async (req, res) => {
+    try {
+      const asset = await campaignCenterService.uploadAsset(req.file, req.user || {});
+      logStructured('info', 'Asset de campanha enviado', {
+        service: 'campaign-center',
+        operation: 'upload-asset',
+        action: 'campaign_center.asset.upload',
+        entity: { type: 'campaign_asset', id: asset.id },
+        operator: buildAuditOperator(req.user || {}),
+        filePath: asset.filePath,
+        fileSize: asset.fileSize,
+        contentType: asset.contentType
+      });
+      return res.status(201).json({ success: true, asset });
+    } catch (error) {
+      logError(error, 'Erro ao enviar asset de campanha', {
+        service: 'campaign-center',
+        operation: 'upload-asset'
+      });
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        error: error.message || 'Falha ao enviar imagem'
+      });
+    }
+  }
+);
 
 router.get('/eligible', attachOptionalFirebaseUser, async (req, res) => {
   try {

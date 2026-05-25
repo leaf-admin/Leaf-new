@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const crypto = require('crypto');
+const path = require('path');
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
 const { isLaunchFeatureEnabled } = require('../utils/pilot-launch-flags');
@@ -11,8 +12,11 @@ const DAILY_STATS_COLLECTION = 'campaign_center_daily_stats';
 
 const VALID_STATUSES = ['draft', 'active', 'paused', 'archived', 'completed'];
 const VALID_EVENT_TYPES = ['impression', 'click', 'dismiss', 'conversion', 'close', 'deep_link_open'];
+const VALID_COMMERCIAL_MODELS = ['internal', 'fixed_fee', 'cpm', 'cpc', 'cpa', 'barter'];
 const DEFAULT_DISMISS_COOLDOWN_HOURS = 48;
 const DEFAULT_MAX_IMPRESSIONS_PER_USER = 5;
+const MAX_ASSET_BYTES = 4 * 1024 * 1024;
+const VALID_ASSET_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 function nowIso() {
   return new Date().toISOString();
@@ -35,14 +39,41 @@ function normalizeText(value, fallback = '') {
   return text || fallback;
 }
 
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = normalizeSlug(value);
+    if (['true', '1', 'yes', 'sim', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'nao', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function normalizeDisplayMode(value, fallback = 'text_overlay') {
+  const normalized = normalizeSlug(value, fallback);
+  if (['image_only', 'creative_only', 'full_art', 'arte_completa'].includes(normalized)) return 'image_only';
+  return 'text_overlay';
+}
+
 function normalizeNumber(value, fallback = 0) {
   const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeInteger(value, fallback = 0) {
+  const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function normalizeStatus(value, fallback = 'draft') {
   const safe = normalizeSlug(value, fallback);
   return VALID_STATUSES.includes(safe) ? safe : fallback;
+}
+
+function normalizeCommercialModel(value, fallback = 'internal') {
+  const safe = normalizeSlug(value, fallback);
+  return VALID_COMMERCIAL_MODELS.includes(safe) ? safe : fallback;
 }
 
 function normalizeArray(value, fallback = []) {
@@ -100,9 +131,112 @@ function buildCampaignId(name = '') {
   return `cmp_${slug}_${stamp}_${random}`;
 }
 
+function sanitizeFilename(value = 'campaign-asset') {
+  const safe = String(value || 'campaign-asset')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96);
+  return safe || 'campaign-asset';
+}
+
+function extensionFromMimeType(mimetype = '') {
+  if (mimetype === 'image/jpeg') return '.jpg';
+  if (mimetype === 'image/png') return '.png';
+  if (mimetype === 'image/webp') return '.webp';
+  return '';
+}
+
 function todayKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
+
+const CAMPAIGN_SLOT_DEFINITIONS = Object.freeze({
+  passenger_home_banner_stack: {
+    id: 'passenger_home_banner_stack',
+    label: 'Passageiro home - card abaixo de partida/destino',
+    surface: 'passenger_home',
+    placement: 'below_search_card',
+    role: 'customer',
+    template: 'home_banner_card',
+    maxItems: 3,
+    autoRotateSeconds: 6,
+    dimensions: {
+      widthDp: 'screen_width_minus_48',
+      horizontalInsetDp: 24,
+      heightDp: 188,
+      borderRadiusDp: 28,
+      gapFromSearchCardDp: 12,
+      innerPaddingHorizontalDp: 24,
+      innerPaddingTopDp: 22,
+      innerPaddingBottomDp: 18,
+      referenceFramePx: { width: 345, height: 188 },
+      exportPx: {
+        '@1x': { width: 345, height: 188 },
+        '@2x': { width: 690, height: 376 },
+        '@3x': { width: 1035, height: 564 }
+      },
+      safeContentPx: {
+        '@1x': { width: 297, height: 148 },
+        '@2x': { width: 594, height: 296 },
+        '@3x': { width: 891, height: 444 }
+      }
+    }
+  },
+  driver_home_banner_stack: {
+    id: 'driver_home_banner_stack',
+    label: 'Motorista home - card abaixo do painel inicial',
+    surface: 'driver_home',
+    placement: 'below_home_card',
+    role: 'driver',
+    template: 'home_banner_card',
+    maxItems: 3,
+    autoRotateSeconds: 6,
+    dimensions: {
+      widthDp: 'screen_width_minus_48',
+      horizontalInsetDp: 24,
+      heightDp: 188,
+      borderRadiusDp: 32,
+      gapFromDriverCardDp: 12,
+      innerPaddingHorizontalDp: 24,
+      innerPaddingTopDp: 22,
+      innerPaddingBottomDp: 18,
+      referenceFramePx: { width: 345, height: 188 },
+      exportPx: {
+        '@1x': { width: 345, height: 188 },
+        '@2x': { width: 690, height: 376 },
+        '@3x': { width: 1035, height: 564 }
+      },
+      safeContentPx: {
+        '@1x': { width: 297, height: 148 },
+        '@2x': { width: 594, height: 296 },
+        '@3x': { width: 891, height: 444 }
+      }
+    }
+  },
+  ride_map_vehicle_marker: {
+    id: 'ride_map_vehicle_marker',
+    label: 'Mapa da corrida - marcador de veiculo',
+    surface: 'ride_map',
+    placement: 'vehicle_marker',
+    role: 'all',
+    template: 'map_vehicle_marker',
+    maxItems: 1,
+    autoRotateSeconds: 0,
+    dimensions: {
+      widthPx: 512,
+      heightPx: 512,
+      transparentBackground: true,
+      safeContentPx: { width: 392, height: 456 },
+      notes: [
+        'Use PNG ou WebP transparente.',
+        'Preserve rodas, vidros e sombra para leitura no mapa.',
+        'O app usa o asset remoto somente após prefetch; sem asset ativo, usa o marcador local por cor do veiculo.'
+      ]
+    }
+  }
+});
 
 function rolesMatch(campaignRoles = [], requestedRole = '') {
   const role = normalizeSlug(requestedRole);
@@ -144,6 +278,10 @@ function resolveLaunchFeatureKey(value = '') {
 
 function normalizeContent(raw = {}) {
   const cta = raw.cta && typeof raw.cta === 'object' ? raw.cta : {};
+  const displayMode = normalizeDisplayMode(
+    raw.displayMode || raw.creativeMode || raw.renderMode,
+    normalizeBoolean(raw.hideTextOverlay) ? 'image_only' : 'text_overlay'
+  );
   return {
     eyebrow: normalizeText(raw.eyebrow),
     title: normalizeText(raw.title),
@@ -151,6 +289,12 @@ function normalizeContent(raw = {}) {
     footnote: normalizeText(raw.footnote),
     accent: normalizeText(raw.accent, '#1A330E'),
     assetKey: normalizeSlug(raw.assetKey),
+    imageUrl: normalizeText(raw.imageUrl || raw.imageURL || raw.assetUrl || raw.assetURL),
+    imageAlt: normalizeText(raw.imageAlt || raw.altText),
+    displayMode,
+    hideTextOverlay: displayMode === 'image_only' || normalizeBoolean(raw.hideTextOverlay),
+    backgroundColor: normalizeText(raw.backgroundColor, '#FBFCF8'),
+    textColor: normalizeText(raw.textColor, '#171412'),
     cta: {
       label: normalizeText(cta.label || raw.ctaLabel),
       action: normalizeSlug(cta.action || raw.ctaAction),
@@ -183,8 +327,24 @@ function normalizeRules(raw = {}) {
     maxImpressionsPerUser: Math.max(0, normalizeNumber(raw.maxImpressionsPerUser, DEFAULT_MAX_IMPRESSIONS_PER_USER)),
     maxImpressionsPerDay: Math.max(0, normalizeNumber(raw.maxImpressionsPerDay, 2)),
     cooldownHours: Math.max(0, normalizeNumber(raw.cooldownHours, 0)),
+    autoRotateSeconds: Math.max(0, normalizeNumber(raw.autoRotateSeconds, 6)),
+    rotationWeight: Math.max(0, normalizeNumber(raw.rotationWeight, 1)),
     requiresFeatureFlag: normalizeSlug(raw.requiresFeatureFlag),
     metadata: raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : {}
+  };
+}
+
+function normalizeCommercial(raw = {}) {
+  return {
+    advertiser: normalizeText(raw.advertiser || raw.sponsor || raw.brand),
+    campaignValueCents: Math.max(0, normalizeInteger(raw.campaignValueCents || raw.valueCents || raw.budgetCents, 0)),
+    contractedImpressions: Math.max(0, normalizeInteger(raw.contractedImpressions || raw.impressionsGoal, 0)),
+    contractedClicks: Math.max(0, normalizeInteger(raw.contractedClicks || raw.clicksGoal, 0)),
+    soldCpmCents: Math.max(0, normalizeInteger(raw.soldCpmCents || raw.cpmCents, 0)),
+    soldCpcCents: Math.max(0, normalizeInteger(raw.soldCpcCents || raw.cpcCents, 0)),
+    costModel: normalizeCommercialModel(raw.costModel || raw.pricingModel, 'internal'),
+    invoiceId: normalizeText(raw.invoiceId),
+    notes: normalizeText(raw.notes)
   };
 }
 
@@ -194,6 +354,7 @@ function normalizeCampaign(raw = {}, fallbackId = '') {
   const content = normalizeContent(raw.content || raw);
   const audience = normalizeAudience(raw.audience || raw);
   const rules = normalizeRules(raw.rules || {});
+  const commercial = normalizeCommercial(raw.commercial || raw.monetization || {});
   const surfaces = normalizeArray(raw.surfaces || raw.surface, ['passenger_home']);
   const placements = normalizeArray(raw.placements || raw.placement, ['default']);
 
@@ -207,6 +368,7 @@ function normalizeCampaign(raw = {}, fallbackId = '') {
     placements,
     audience,
     rules,
+    commercial,
     content,
     startAt: normalizeIso(raw.startAt || raw.startDate, null),
     endAt: normalizeIso(raw.endAt || raw.endDate, null),
@@ -255,6 +417,10 @@ function buildClientCampaign(campaign, context = {}) {
     placement,
     priority: campaign.priority,
     content: campaign.content,
+    rules: {
+      autoRotateSeconds: Number(campaign.rules?.autoRotateSeconds || 6),
+      rotationWeight: Number(campaign.rules?.rotationWeight || 1)
+    },
     tracking: {
       campaignId: campaign.id,
       surface,
@@ -318,13 +484,106 @@ function buildDefaultCampaigns() {
     }),
     normalizeCampaign({
       ...base,
+      id: 'cmp_leaf_rio_comfort_home_1',
+      name: 'Home banner Rio conforto 1',
+      template: 'home_banner_card',
+      priority: 60,
+      surfaces: ['passenger_home'],
+      placements: ['below_search_card'],
+      audience: { roles: ['customer', 'passenger'], cities: ['rio_de_janeiro'] },
+      rules: {
+        ...base.rules,
+        autoRotateSeconds: 6,
+        rotationWeight: 1,
+        metadata: {
+          slot: 'passenger_home_banner_stack',
+          creativeSpec: CAMPAIGN_SLOT_DEFINITIONS.passenger_home_banner_stack.dimensions
+        }
+      },
+      content: {
+        eyebrow: 'Leaf no Rio',
+        title: 'Viaje com mais conforto',
+        body: 'Motoristas verificados, ar ligado e uma experiência mais calma para chegar bem.',
+        cta: { label: 'Novidades', action: 'open_campaign_details' },
+        assetKey: 'figma_home_banner_rio_comfort_1',
+        backgroundColor: '#FBFCF8',
+        imageAlt: 'Campanha de conforto da Leaf no Rio de Janeiro'
+      }
+    }),
+    normalizeCampaign({
+      ...base,
+      id: 'cmp_leaf_rio_safety_home_2',
+      name: 'Home banner Rio seguranca 2',
+      template: 'home_banner_card',
+      priority: 55,
+      surfaces: ['passenger_home'],
+      placements: ['below_search_card'],
+      audience: { roles: ['customer', 'passenger'], cities: ['rio_de_janeiro'] },
+      rules: {
+        ...base.rules,
+        autoRotateSeconds: 6,
+        rotationWeight: 1,
+        metadata: {
+          slot: 'passenger_home_banner_stack',
+          creativeSpec: CAMPAIGN_SLOT_DEFINITIONS.passenger_home_banner_stack.dimensions
+        }
+      },
+      content: {
+        eyebrow: 'Segurança',
+        title: 'Motoristas verificados',
+        body: 'A Leaf acompanha a qualidade da operação para cada viagem começar melhor.',
+        cta: { label: 'Saiba mais', action: 'open_campaign_details' },
+        assetKey: 'figma_home_banner_rio_safety_2',
+        backgroundColor: '#FBFCF8',
+        imageAlt: 'Campanha de segurança e verificação de motoristas'
+      }
+    }),
+    normalizeCampaign({
+      ...base,
+      id: 'cmp_leaf_rio_zero_fee_home_3',
+      name: 'Home banner Rio taxa zero 3',
+      template: 'home_banner_card',
+      priority: 50,
+      surfaces: ['passenger_home'],
+      placements: ['below_search_card'],
+      audience: { roles: ['customer', 'passenger'], cities: ['rio_de_janeiro'] },
+      rules: {
+        ...base.rules,
+        autoRotateSeconds: 6,
+        rotationWeight: 1,
+        metadata: {
+          slot: 'passenger_home_banner_stack',
+          creativeSpec: CAMPAIGN_SLOT_DEFINITIONS.passenger_home_banner_stack.dimensions
+        }
+      },
+      content: {
+        eyebrow: 'Campanha',
+        title: 'Condição especial',
+        body: 'Ative campanhas por cidade sem precisar publicar uma nova versão do app.',
+        cta: { label: 'Ver oferta', action: 'open_campaign_details' },
+        assetKey: 'figma_home_banner_rio_zero_fee_3',
+        backgroundColor: '#FBFCF8',
+        imageAlt: 'Campanha promocional Leaf para passageiros'
+      }
+    }),
+    normalizeCampaign({
+      ...base,
       id: 'cmp_leaf_driver_online_nearby',
       name: 'Motorista ficar online',
       template: 'compact_banner',
       priority: 40,
       surfaces: ['driver_home'],
-      placements: ['above_driver_card'],
+      placements: ['below_home_card'],
       audience: { roles: ['driver'] },
+      rules: {
+        ...base.rules,
+        autoRotateSeconds: 6,
+        rotationWeight: 1,
+        metadata: {
+          slot: 'driver_home_banner_stack',
+          creativeSpec: CAMPAIGN_SLOT_DEFINITIONS.driver_home_banner_stack.dimensions
+        }
+      },
       content: {
         eyebrow: 'Perto de você',
         title: 'Corrida perto. Fica online?',
@@ -340,7 +599,7 @@ function buildDefaultCampaigns() {
       template: 'compact_banner',
       priority: 25,
       surfaces: ['driver_home', 'driver_earnings'],
-      placements: ['above_driver_card', 'earnings_top'],
+      placements: ['below_home_card', 'earnings_top'],
       audience: { roles: ['driver'] },
       content: {
         eyebrow: 'Ganhos',
@@ -505,6 +764,10 @@ class CampaignCenterService {
         ...(current.audience || {}),
         ...((patch && patch.audience) || {})
       },
+      commercial: {
+        ...(current.commercial || {}),
+        ...((patch && (patch.commercial || patch.monetization)) || {})
+      },
       rules: {
         ...(current.rules || {}),
         ...((patch && patch.rules) || {})
@@ -656,6 +919,27 @@ class CampaignCenterService {
   }
 
   async updateMemoryStateForEvent(event) {
+    const campaign = this.memoryCampaigns.get(event.campaignId);
+    if (campaign) {
+      const metricKey = {
+        impression: 'impressions',
+        click: 'clicks',
+        dismiss: 'dismissals',
+        conversion: 'conversions',
+        close: 'closes',
+        deep_link_open: 'deepLinkOpens'
+      }[event.eventType] || 'events';
+      const nextCampaign = normalizeCampaign({
+        ...campaign,
+        metrics: {
+          ...(campaign.metrics || {}),
+          [metricKey]: Number(campaign.metrics?.[metricKey] || 0) + 1
+        },
+        updatedAt: nowIso()
+      }, campaign.id);
+      this.memoryCampaigns.set(event.campaignId, nextCampaign);
+    }
+
     if (!event.userId) return;
     const stateId = `${event.userId}__${event.campaignId}`;
     const current = this.memoryUserState.get(stateId) || {
@@ -780,16 +1064,200 @@ class CampaignCenterService {
 
   async getStats(filters = {}) {
     const campaigns = await this.listCampaigns(filters);
+    const impressions = campaigns.reduce((sum, campaign) => sum + Number(campaign.metrics?.impressions || 0), 0);
+    const clicks = campaigns.reduce((sum, campaign) => sum + Number(campaign.metrics?.clicks || 0), 0);
+    const campaignValueCents = campaigns.reduce((sum, campaign) => sum + Number(campaign.commercial?.campaignValueCents || 0), 0);
     return {
       total: campaigns.length,
       active: campaigns.filter((campaign) => campaign.status === 'active').length,
       paused: campaigns.filter((campaign) => campaign.status === 'paused').length,
       draft: campaigns.filter((campaign) => campaign.status === 'draft').length,
       archived: campaigns.filter((campaign) => campaign.status === 'archived').length,
-      impressions: campaigns.reduce((sum, campaign) => sum + Number(campaign.metrics?.impressions || 0), 0),
-      clicks: campaigns.reduce((sum, campaign) => sum + Number(campaign.metrics?.clicks || 0), 0),
+      impressions,
+      clicks,
       dismissals: campaigns.reduce((sum, campaign) => sum + Number(campaign.metrics?.dismissals || 0), 0),
-      conversions: campaigns.reduce((sum, campaign) => sum + Number(campaign.metrics?.conversions || 0), 0)
+      conversions: campaigns.reduce((sum, campaign) => sum + Number(campaign.metrics?.conversions || 0), 0),
+      campaignValueCents,
+      ctr: impressions > 0 ? clicks / impressions : 0,
+      effectiveCpmCents: impressions > 0 ? (campaignValueCents / impressions) * 1000 : 0,
+      effectiveCpcCents: clicks > 0 ? campaignValueCents / clicks : 0
+    };
+  }
+
+  buildCommercialReportRow(campaign) {
+    const impressions = Number(campaign.metrics?.impressions || 0);
+    const clicks = Number(campaign.metrics?.clicks || 0);
+    const dismissals = Number(campaign.metrics?.dismissals || 0);
+    const conversions = Number(campaign.metrics?.conversions || 0);
+    const campaignValueCents = Number(campaign.commercial?.campaignValueCents || 0);
+    const contractedImpressions = Number(campaign.commercial?.contractedImpressions || 0);
+    const contractedClicks = Number(campaign.commercial?.contractedClicks || 0);
+    const startTs = parseTs(campaign.startAt);
+    const endTs = parseTs(campaign.endAt);
+    const nowTs = Date.now();
+    const totalDays = startTs && endTs
+      ? Math.max(1, Math.ceil((endTs - startTs) / 86_400_000))
+      : null;
+    const elapsedDays = startTs
+      ? Math.max(0, Math.ceil((Math.min(nowTs, endTs || nowTs) - startTs) / 86_400_000))
+      : null;
+    const remainingDays = endTs
+      ? Math.max(0, Math.ceil((endTs - nowTs) / 86_400_000))
+      : null;
+    const expectedProgress = totalDays && elapsedDays !== null
+      ? Math.min(1, Math.max(0, elapsedDays / totalDays))
+      : null;
+    const deliveryProgress = contractedImpressions > 0
+      ? Math.min(1, impressions / contractedImpressions)
+      : null;
+
+    return {
+      id: campaign.id,
+      name: campaign.name,
+      status: campaign.status,
+      template: campaign.template,
+      advertiser: campaign.commercial?.advertiser || 'Leaf',
+      costModel: campaign.commercial?.costModel || 'internal',
+      surface: campaign.surfaces?.[0] || '',
+      placement: campaign.placements?.[0] || '',
+      startAt: campaign.startAt || null,
+      endAt: campaign.endAt || null,
+      totalDays,
+      elapsedDays,
+      remainingDays,
+      campaignValueCents,
+      contractedImpressions,
+      contractedClicks,
+      impressions,
+      clicks,
+      dismissals,
+      conversions,
+      ctr: impressions > 0 ? clicks / impressions : 0,
+      cvr: clicks > 0 ? conversions / clicks : 0,
+      effectiveCpmCents: impressions > 0 ? (campaignValueCents / impressions) * 1000 : 0,
+      effectiveCpcCents: clicks > 0 ? campaignValueCents / clicks : 0,
+      soldCpmCents: Number(campaign.commercial?.soldCpmCents || 0),
+      soldCpcCents: Number(campaign.commercial?.soldCpcCents || 0),
+      deliveryProgress,
+      expectedProgress,
+      pacing: expectedProgress !== null && deliveryProgress !== null
+        ? deliveryProgress - expectedProgress
+        : null
+    };
+  }
+
+  async getCommercialReport(filters = {}) {
+    const campaigns = await this.listCampaigns(filters);
+    const rows = campaigns.map((campaign) => this.buildCommercialReportRow(campaign));
+    const totals = rows.reduce((acc, row) => {
+      acc.campaigns += 1;
+      acc.campaignValueCents += row.campaignValueCents;
+      acc.contractedImpressions += row.contractedImpressions;
+      acc.contractedClicks += row.contractedClicks;
+      acc.impressions += row.impressions;
+      acc.clicks += row.clicks;
+      acc.dismissals += row.dismissals;
+      acc.conversions += row.conversions;
+      return acc;
+    }, {
+      campaigns: 0,
+      campaignValueCents: 0,
+      contractedImpressions: 0,
+      contractedClicks: 0,
+      impressions: 0,
+      clicks: 0,
+      dismissals: 0,
+      conversions: 0
+    });
+
+    return {
+      generatedAt: nowIso(),
+      filters: {
+        status: normalizeSlug(filters.status),
+        surface: normalizeSlug(filters.surface),
+        role: normalizeSlug(filters.role || filters.userType),
+        query: normalizeText(filters.query)
+      },
+      totals: {
+        ...totals,
+        ctr: totals.impressions > 0 ? totals.clicks / totals.impressions : 0,
+        cvr: totals.clicks > 0 ? totals.conversions / totals.clicks : 0,
+        effectiveCpmCents: totals.impressions > 0 ? (totals.campaignValueCents / totals.impressions) * 1000 : 0,
+        effectiveCpcCents: totals.clicks > 0 ? totals.campaignValueCents / totals.clicks : 0,
+        deliveryProgress: totals.contractedImpressions > 0
+          ? Math.min(1, totals.impressions / totals.contractedImpressions)
+          : null
+      },
+      rows
+    };
+  }
+
+  getSlotDefinitions() {
+    return Object.values(CAMPAIGN_SLOT_DEFINITIONS);
+  }
+
+  async uploadAsset(file = {}, actor = {}) {
+    if (!file?.buffer || !file?.size) {
+      const error = new Error('Arquivo de imagem obrigatório');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!VALID_ASSET_MIME_TYPES.has(file.mimetype)) {
+      const error = new Error('Use uma imagem JPG, PNG ou WebP');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (Number(file.size || 0) > MAX_ASSET_BYTES) {
+      const error = new Error('Imagem muito grande. Limite atual: 4MB');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const storage = firebaseConfig.getStorage();
+    if (!storage) {
+      const error = new Error('Firebase Storage não configurado');
+      error.statusCode = 503;
+      throw error;
+    }
+
+    const bucketName = process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app';
+    const bucket = storage.bucket(bucketName);
+    const originalName = sanitizeFilename(file.originalname || 'campaign-asset');
+    const originalExtension = path.extname(originalName);
+    const extension = originalExtension || extensionFromMimeType(file.mimetype);
+    const basename = sanitizeFilename(originalName.replace(originalExtension, ''));
+    const assetId = `asset_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
+    const objectPath = `campaign-center/assets/${assetId}_${basename}${extension}`;
+    const storageFile = bucket.file(objectPath);
+
+    await storageFile.save(file.buffer, {
+      resumable: false,
+      metadata: {
+        contentType: file.mimetype,
+        cacheControl: 'public, max-age=31536000, immutable',
+        metadata: {
+          uploadedBy: String(actor.id || actor.email || 'admin'),
+          uploadedByEmail: String(actor.email || ''),
+          source: 'campaign-center'
+        }
+      }
+    });
+
+    const [imageUrl] = await storageFile.getSignedUrl({
+      action: 'read',
+      expires: '2035-01-01'
+    });
+
+    return {
+      id: assetId,
+      imageUrl,
+      filePath: objectPath,
+      bucket: bucketName,
+      contentType: file.mimetype,
+      fileName: originalName,
+      fileSize: Number(file.size || file.buffer.length || 0),
+      uploadedAt: nowIso(),
+      uploadedBy: actor.id || actor.email || 'admin'
     };
   }
 
@@ -805,3 +1273,4 @@ class CampaignCenterService {
 module.exports = new CampaignCenterService();
 module.exports.normalizeCampaign = normalizeCampaign;
 module.exports.buildDefaultCampaigns = buildDefaultCampaigns;
+module.exports.CAMPAIGN_SLOT_DEFINITIONS = CAMPAIGN_SLOT_DEFINITIONS;

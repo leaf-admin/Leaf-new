@@ -20,16 +20,37 @@ import {
 const defaultForm = {
   name: "",
   status: "paused",
-  template: "compact_banner",
+  template: "home_banner_card",
   roles: "customer",
   surfaces: "passenger_home",
-  placements: "above_search_card",
+  placements: "below_search_card",
   priority: 20,
   title: "",
   eyebrow: "",
   body: "",
+  imageUrl: "",
+  imageAlt: "",
+  displayMode: "text_overlay",
+  backgroundColor: "#FBFCF8",
+  textColor: "#171412",
   ctaLabel: "",
   ctaAction: "dismiss",
+  ctaUrl: "",
+  ctaRoute: "",
+  autoRotateSeconds: 6,
+  rotationWeight: 1,
+  maxImpressionsPerUser: 6,
+  maxImpressionsPerDay: 2,
+  dismissCooldownHours: 72,
+  advertiser: "",
+  campaignValueBRL: "",
+  costModel: "internal",
+  contractedImpressions: "",
+  contractedClicks: "",
+  soldCpmBRL: "",
+  soldCpcBRL: "",
+  invoiceId: "",
+  commercialNotes: "",
   startAt: "",
   endAt: "",
 };
@@ -39,18 +60,109 @@ const roleOptions = ["all", "customer", "driver"];
 const surfaceOptions = [
   "passenger_home",
   "driver_home",
+  "ride_map",
   "payment",
   "trip_active",
   "driver_earnings",
 ];
 const templateOptions = [
+  "home_banner_card",
   "compact_banner",
   "hero_banner",
   "bottom_sheet",
   "popup",
   "inline_card",
   "driver_goal_card",
+  "map_vehicle_marker",
 ];
+const costModelOptions = ["internal", "fixed_fee", "cpm", "cpc", "cpa", "barter"];
+
+const fallbackCampaignSlots = [
+  {
+    id: "passenger_home_banner_stack",
+    label: "Passageiro home - card abaixo de partida/destino",
+    surface: "passenger_home",
+    placement: "below_search_card",
+    role: "customer",
+    template: "home_banner_card",
+    maxItems: 3,
+    autoRotateSeconds: 6,
+    dimensions: {
+      widthDp: "screen_width_minus_48",
+      horizontalInsetDp: 24,
+      heightDp: 188,
+      borderRadiusDp: 28,
+      gapFromSearchCardDp: 12,
+      innerPaddingHorizontalDp: 24,
+      innerPaddingTopDp: 22,
+      innerPaddingBottomDp: 18,
+      referenceFramePx: { width: 345, height: 188 },
+      exportPx: {
+        "@1x": { width: 345, height: 188 },
+        "@2x": { width: 690, height: 376 },
+        "@3x": { width: 1035, height: 564 },
+      },
+      safeContentPx: {
+        "@1x": { width: 297, height: 148 },
+        "@2x": { width: 594, height: 296 },
+        "@3x": { width: 891, height: 444 },
+      },
+    },
+  },
+  {
+    id: "driver_home_banner_stack",
+    label: "Motorista home - card abaixo do painel inicial",
+    surface: "driver_home",
+    placement: "below_home_card",
+    role: "driver",
+    template: "home_banner_card",
+    maxItems: 3,
+    autoRotateSeconds: 6,
+    dimensions: {
+      widthDp: "screen_width_minus_48",
+      horizontalInsetDp: 24,
+      heightDp: 188,
+      borderRadiusDp: 32,
+      gapFromDriverCardDp: 12,
+      innerPaddingHorizontalDp: 24,
+      innerPaddingTopDp: 22,
+      innerPaddingBottomDp: 18,
+      referenceFramePx: { width: 345, height: 188 },
+      exportPx: {
+        "@1x": { width: 345, height: 188 },
+        "@2x": { width: 690, height: 376 },
+        "@3x": { width: 1035, height: 564 },
+      },
+      safeContentPx: {
+        "@1x": { width: 297, height: 148 },
+        "@2x": { width: 594, height: 296 },
+        "@3x": { width: 891, height: 444 },
+      },
+    },
+  },
+  {
+    id: "ride_map_vehicle_marker",
+    label: "Mapa da corrida - marcador de veículo",
+    surface: "ride_map",
+    placement: "vehicle_marker",
+    role: "all",
+    template: "map_vehicle_marker",
+    maxItems: 1,
+    autoRotateSeconds: 0,
+    dimensions: {
+      widthPx: 512,
+      heightPx: 512,
+      transparentBackground: true,
+      safeContentPx: { width: 392, height: 456 },
+      notes: [
+        "Use PNG ou WebP transparente.",
+        "Preserve rodas, vidros e sombra para leitura no mapa.",
+        "Sem campanha ativa, o app usa o marcador local por cor do veículo.",
+      ],
+    },
+  },
+];
+const fallbackHomeBannerSlot = fallbackCampaignSlots[0];
 
 function csvToArray(value) {
   return String(value || "")
@@ -72,6 +184,30 @@ function formatDate(value) {
   return parsed.toLocaleString("pt-BR");
 }
 
+function parseBRLCents(value) {
+  const normalized = String(value || "")
+    .replace(/[R$\s.]/g, "")
+    .replace(",", ".");
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.round(parsed * 100);
+}
+
+function formatCurrencyCents(value) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format((Number(value || 0) || 0) / 100);
+}
+
+function formatPercent(value) {
+  return `${((Number(value || 0) || 0) * 100).toFixed(2)}%`;
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("pt-BR").format(Number(value || 0) || 0);
+}
+
 export default function CampaignCenterPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -80,12 +216,17 @@ export default function CampaignCenterPage() {
   const [notice, setNotice] = useState("");
   const [rows, setRows] = useState([]);
   const [stats, setStats] = useState(null);
+  const [commercialReport, setCommercialReport] = useState(null);
+  const [slots, setSlots] = useState(fallbackCampaignSlots);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
   const [surfaceFilter, setSurfaceFilter] = useState("");
   const [queryFilter, setQueryFilter] = useState("");
   const [form, setForm] = useState(defaultForm);
+  const [assetFile, setAssetFile] = useState(null);
+  const [assetPreviewUrl, setAssetPreviewUrl] = useState("");
+  const [assetUploading, setAssetUploading] = useState(false);
   const [previewResult, setPreviewResult] = useState(null);
   const [busyCampaignId, setBusyCampaignId] = useState("");
   const allowedRoles = useMemo(() => ["admin", "super-admin", "manager", "development"], []);
@@ -128,8 +269,13 @@ export default function CampaignCenterPage() {
       const response = await leafAPI.listInAppCampaigns(params);
       setRows(response?.campaigns || []);
       setStats(response?.stats || null);
+      const reportResponse = await leafAPI.getInAppCampaignCommercialReport(params).catch(() => null);
+      setCommercialReport(reportResponse?.report || null);
+      const slotResponse = await leafAPI.listInAppCampaignSlots().catch(() => null);
+      setSlots(slotResponse?.slots?.length ? slotResponse.slots : fallbackCampaignSlots);
     } catch (err) {
       setError(err?.message || "Falha ao carregar campanhas in-app");
+      setCommercialReport(null);
     } finally {
       setLoading(false);
     }
@@ -175,18 +321,93 @@ export default function CampaignCenterPage() {
           cta: {
             label: form.ctaLabel.trim(),
             action: form.ctaAction.trim(),
+            url: form.ctaUrl.trim(),
+            route: form.ctaRoute.trim(),
           },
+          imageUrl: form.imageUrl.trim(),
+          imageAlt: form.imageAlt.trim(),
+          displayMode: form.displayMode,
+          hideTextOverlay: form.displayMode === "image_only",
+          backgroundColor: form.backgroundColor.trim(),
+          textColor: form.textColor.trim(),
+        },
+        rules: {
+          autoRotateSeconds: Number(form.autoRotateSeconds) || 6,
+          rotationWeight: Number(form.rotationWeight) || 1,
+          maxImpressionsPerUser: Number(form.maxImpressionsPerUser) || 6,
+          maxImpressionsPerDay: Number(form.maxImpressionsPerDay) || 2,
+          dismissCooldownHours: Number(form.dismissCooldownHours) || 72,
+          metadata: {
+            slot: selectedSlot.id,
+            creativeSpec: selectedSlot.dimensions,
+          },
+        },
+        commercial: {
+          advertiser: form.advertiser.trim(),
+          campaignValueCents: parseBRLCents(form.campaignValueBRL),
+          costModel: form.costModel,
+          contractedImpressions: Number(form.contractedImpressions) || 0,
+          contractedClicks: Number(form.contractedClicks) || 0,
+          soldCpmCents: parseBRLCents(form.soldCpmBRL),
+          soldCpcCents: parseBRLCents(form.soldCpcBRL),
+          invoiceId: form.invoiceId.trim(),
+          notes: form.commercialNotes.trim(),
         },
         startAt: form.startAt ? new Date(form.startAt).toISOString() : null,
         endAt: form.endAt ? new Date(form.endAt).toISOString() : null,
       });
       setForm(defaultForm);
+      setAssetFile(null);
+      setAssetPreviewUrl("");
       await load();
       setNotice("Campanha criada. Revise o status antes de publicar no app.");
     } catch (err) {
       setError(err?.message || "Falha ao criar campanha");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const selectAssetFile = (file) => {
+    setAssetFile(file || null);
+    setError("");
+    if (assetPreviewUrl && assetPreviewUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(assetPreviewUrl);
+    }
+    setAssetPreviewUrl(file ? URL.createObjectURL(file) : "");
+  };
+
+  const uploadAsset = async () => {
+    if (!assetFile) {
+      setError("Escolha uma imagem JPG, PNG ou WebP para enviar.");
+      return;
+    }
+    if (!canMutateCampaignCenter) {
+      setError(actionBlockedMessage || "Ação bloqueada para este perfil.");
+      return;
+    }
+
+    setAssetUploading(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await leafAPI.uploadInAppCampaignAsset(assetFile);
+      const imageUrl = response?.asset?.imageUrl || "";
+      if (!imageUrl) {
+        throw new Error("Upload concluído sem URL de imagem.");
+      }
+      setForm((prev) => ({
+        ...prev,
+        imageUrl,
+        imageAlt: prev.imageAlt || assetFile.name,
+      }));
+      setAssetFile(null);
+      setAssetPreviewUrl(imageUrl);
+      setNotice("Imagem enviada. A URL foi preenchida na campanha.");
+    } catch (err) {
+      setError(err?.message || "Falha ao enviar imagem");
+    } finally {
+      setAssetUploading(false);
     }
   };
 
@@ -231,6 +452,29 @@ export default function CampaignCenterPage() {
     } finally {
       setBusyCampaignId("");
     }
+  };
+
+  const selectedSlot =
+    slots.find((slot) =>
+      slot.surface === csvToArray(form.surfaces)[0] &&
+      slot.placement === csvToArray(form.placements)[0] &&
+      slot.role === csvToArray(form.roles)[0]
+    ) ||
+    slots.find((slot) => slot.id === "passenger_home_banner_stack") ||
+    fallbackHomeBannerSlot;
+  const homeBannerSlot = slots.find((slot) => slot.id === "passenger_home_banner_stack") || fallbackHomeBannerSlot;
+  const homeBannerDimensions = homeBannerSlot.dimensions || fallbackHomeBannerSlot.dimensions;
+  const applyCampaignSlot = (slotId) => {
+    const slot = slots.find((candidate) => candidate.id === slotId) || fallbackCampaignSlots.find((candidate) => candidate.id === slotId);
+    if (!slot) return;
+    setForm((prev) => ({
+      ...prev,
+      template: slot.template || prev.template,
+      roles: slot.role || prev.roles,
+      surfaces: slot.surface || prev.surfaces,
+      placements: slot.placement || prev.placements,
+      autoRotateSeconds: slot.autoRotateSeconds || prev.autoRotateSeconds,
+    }));
   };
 
   return (
@@ -299,7 +543,49 @@ export default function CampaignCenterPage() {
           </Panel>
         </section>
 
+        <section className="grid grid-kpi">
+          <Panel title="Valor contratado">
+            <strong>{formatCurrencyCents(commercialReport?.totals?.campaignValueCents)}</strong>
+            <p className="text-muted">receita potencial do inventário</p>
+          </Panel>
+          <Panel title="CTR">
+            <strong>{formatPercent(commercialReport?.totals?.ctr)}</strong>
+            <p className="text-muted">cliques / visualizações</p>
+          </Panel>
+          <Panel title="CPM efetivo">
+            <strong>{formatCurrencyCents(commercialReport?.totals?.effectiveCpmCents)}</strong>
+            <p className="text-muted">valor a cada mil visualizações</p>
+          </Panel>
+          <Panel title="CPC efetivo">
+            <strong>{formatCurrencyCents(commercialReport?.totals?.effectiveCpcCents)}</strong>
+            <p className="text-muted">valor por clique</p>
+          </Panel>
+        </section>
+
         <section className="grid">
+          <Panel
+            title="Slots de campanha"
+            subtitle="Passageiro e motorista são inventários separados. Cadastre até 3 campanhas por slot para virar carrossel."
+          >
+            <KeyValueGrid
+              data={{
+                passageiro: `${homeBannerSlot.surface} / ${homeBannerSlot.placement}`,
+                motorista: `${(slots.find((slot) => slot.id === "driver_home_banner_stack") || fallbackCampaignSlots[1]).surface} / ${(slots.find((slot) => slot.id === "driver_home_banner_stack") || fallbackCampaignSlots[1]).placement}`,
+                template: homeBannerSlot.template,
+                itens: homeBannerSlot.maxItems,
+                giro: `${homeBannerSlot.autoRotateSeconds || 6}s`,
+                largura: "tela - 48dp",
+                altura: `${homeBannerDimensions.heightDp}dp`,
+                figma: `${homeBannerDimensions.referenceFramePx?.width} x ${homeBannerDimensions.referenceFramePx?.height}`,
+                export3x: `${homeBannerDimensions.exportPx?.["@3x"]?.width} x ${homeBannerDimensions.exportPx?.["@3x"]?.height}`,
+              }}
+            />
+            <p className="text-muted">
+              Recomendação: peça 3 artes independentes no mesmo frame. O app mede impressões, cliques e troca a ordem por campanha.
+            </p>
+            <TechnicalDetails title="Especificação completa dos slots" data={slots} />
+          </Panel>
+
           <Panel
             title="Criar campanha"
             subtitle={
@@ -316,6 +602,22 @@ export default function CampaignCenterPage() {
                   onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
                   placeholder="Ex: Boas-vindas passageiro"
                 />
+              </label>
+              <label className="form-field">
+                Onde aparece
+                <select
+                  value={selectedSlot.id}
+                  onChange={(event) => applyCampaignSlot(event.target.value)}
+                >
+                  {slots.map((slot) => (
+                    <option key={slot.id} value={slot.id}>
+                      {slot.label || slot.id}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-muted">
+                  Define automaticamente role, surface e placement para passageiro ou motorista.
+                </span>
               </label>
               <label className="form-field">
                 Status
@@ -366,7 +668,7 @@ export default function CampaignCenterPage() {
                 <input
                   value={form.placements}
                   onChange={(event) => setForm((prev) => ({ ...prev, placements: event.target.value }))}
-                  placeholder="above_search_card"
+                  placeholder="below_search_card"
                 />
               </label>
               <label className="form-field">
@@ -394,6 +696,68 @@ export default function CampaignCenterPage() {
                 />
               </label>
               <label className="form-field">
+                URL da arte
+                <input
+                  value={form.imageUrl}
+                  onChange={(event) => setForm((prev) => ({ ...prev, imageUrl: event.target.value }))}
+                  placeholder="https://.../banner-rio-01.webp"
+                />
+              </label>
+              <label className="form-field">
+                Upload da arte
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => selectAssetFile(event.target.files?.[0] || null)}
+                />
+                <button
+                  type="button"
+                  onClick={uploadAsset}
+                  disabled={!canMutateCampaignCenter || !assetFile || assetUploading}
+                  title={!canMutateCampaignCenter ? actionBlockedMessage : undefined}
+                >
+                  {assetUploading ? "Enviando..." : "Enviar imagem"}
+                </button>
+                <span className="text-muted">JPG, PNG ou WebP até 4MB.</span>
+              </label>
+              <label className="form-field">
+                Texto alternativo da arte
+                <input
+                  value={form.imageAlt}
+                  onChange={(event) => setForm((prev) => ({ ...prev, imageAlt: event.target.value }))}
+                  placeholder="Descrição curta da imagem"
+                />
+              </label>
+              <label className="form-field">
+                Modo da arte
+                <select
+                  value={form.displayMode}
+                  onChange={(event) => setForm((prev) => ({ ...prev, displayMode: event.target.value }))}
+                >
+                  <option value="text_overlay">Texto do dashboard sobre a arte</option>
+                  <option value="image_only">Arte completa, sem texto do app</option>
+                </select>
+                <span className="text-muted">
+                  Use arte completa quando o texto e o CTA já estiverem dentro da imagem.
+                </span>
+              </label>
+              <label className="form-field">
+                Fundo fallback
+                <input
+                  value={form.backgroundColor}
+                  onChange={(event) => setForm((prev) => ({ ...prev, backgroundColor: event.target.value }))}
+                  placeholder="#FBFCF8"
+                />
+              </label>
+              <label className="form-field">
+                Cor do texto
+                <input
+                  value={form.textColor}
+                  onChange={(event) => setForm((prev) => ({ ...prev, textColor: event.target.value }))}
+                  placeholder="#171412"
+                />
+              </label>
+              <label className="form-field">
                 CTA
                 <input
                   value={form.ctaLabel}
@@ -409,6 +773,164 @@ export default function CampaignCenterPage() {
                   placeholder="dismiss, open_invites..."
                 />
               </label>
+              <label className="form-field">
+                URL CTA
+                <input
+                  value={form.ctaUrl}
+                  onChange={(event) => setForm((prev) => ({ ...prev, ctaUrl: event.target.value }))}
+                  placeholder="Opcional"
+                />
+              </label>
+              <label className="form-field">
+                Rota CTA
+                <input
+                  value={form.ctaRoute}
+                  onChange={(event) => setForm((prev) => ({ ...prev, ctaRoute: event.target.value }))}
+                  placeholder="Ex: invites, safety"
+                />
+              </label>
+              <label className="form-field">
+                Giro do carrossel em segundos
+                <input
+                  type="number"
+                  min="3"
+                  max="20"
+                  value={form.autoRotateSeconds}
+                  onChange={(event) => setForm((prev) => ({ ...prev, autoRotateSeconds: event.target.value }))}
+                />
+              </label>
+              <label className="form-field">
+                Peso de rotação
+                <input
+                  type="number"
+                  min="1"
+                  value={form.rotationWeight}
+                  onChange={(event) => setForm((prev) => ({ ...prev, rotationWeight: event.target.value }))}
+                />
+              </label>
+              <label className="form-field">
+                Máx. impressões por usuário
+                <input
+                  type="number"
+                  min="0"
+                  value={form.maxImpressionsPerUser}
+                  onChange={(event) => setForm((prev) => ({ ...prev, maxImpressionsPerUser: event.target.value }))}
+                />
+              </label>
+              <label className="form-field">
+                Máx. impressões por dia
+                <input
+                  type="number"
+                  min="0"
+                  value={form.maxImpressionsPerDay}
+                  onChange={(event) => setForm((prev) => ({ ...prev, maxImpressionsPerDay: event.target.value }))}
+                />
+              </label>
+              <label className="form-field">
+                Cooldown após dispensar
+                <input
+                  type="number"
+                  min="0"
+                  value={form.dismissCooldownHours}
+                  onChange={(event) => setForm((prev) => ({ ...prev, dismissCooldownHours: event.target.value }))}
+                />
+              </label>
+              <label className="form-field">
+                Anunciante / marca
+                <input
+                  value={form.advertiser}
+                  onChange={(event) => setForm((prev) => ({ ...prev, advertiser: event.target.value }))}
+                  placeholder="Leaf ou nome do parceiro"
+                />
+              </label>
+              <label className="form-field">
+                Modelo comercial
+                <select value={form.costModel} onChange={(event) => setForm((prev) => ({ ...prev, costModel: event.target.value }))}>
+                  {costModelOptions.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                Valor da campanha
+                <input
+                  value={form.campaignValueBRL}
+                  onChange={(event) => setForm((prev) => ({ ...prev, campaignValueBRL: event.target.value }))}
+                  placeholder="Ex: 1500,00"
+                />
+              </label>
+              <label className="form-field">
+                Meta de visualizações
+                <input
+                  type="number"
+                  min="0"
+                  value={form.contractedImpressions}
+                  onChange={(event) => setForm((prev) => ({ ...prev, contractedImpressions: event.target.value }))}
+                  placeholder="Ex: 50000"
+                />
+              </label>
+              <label className="form-field">
+                Meta de cliques
+                <input
+                  type="number"
+                  min="0"
+                  value={form.contractedClicks}
+                  onChange={(event) => setForm((prev) => ({ ...prev, contractedClicks: event.target.value }))}
+                  placeholder="Opcional"
+                />
+              </label>
+              <label className="form-field">
+                CPM vendido
+                <input
+                  value={form.soldCpmBRL}
+                  onChange={(event) => setForm((prev) => ({ ...prev, soldCpmBRL: event.target.value }))}
+                  placeholder="Ex: 30,00"
+                />
+              </label>
+              <label className="form-field">
+                CPC vendido
+                <input
+                  value={form.soldCpcBRL}
+                  onChange={(event) => setForm((prev) => ({ ...prev, soldCpcBRL: event.target.value }))}
+                  placeholder="Ex: 1,20"
+                />
+              </label>
+              <label className="form-field">
+                Pedido / invoice
+                <input
+                  value={form.invoiceId}
+                  onChange={(event) => setForm((prev) => ({ ...prev, invoiceId: event.target.value }))}
+                  placeholder="Opcional"
+                />
+              </label>
+              <label className="form-field">
+                Observações comerciais
+                <input
+                  value={form.commercialNotes}
+                  onChange={(event) => setForm((prev) => ({ ...prev, commercialNotes: event.target.value }))}
+                  placeholder="Ex: pacote Rio lançamento"
+                />
+              </label>
+              {(assetPreviewUrl || form.imageUrl) ? (
+                <div className="form-field">
+                  Preview da arte
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={assetPreviewUrl || form.imageUrl}
+                    alt={form.imageAlt || "Preview da campanha"}
+                    style={{
+                      width: "100%",
+                      maxWidth: 345,
+                      aspectRatio: "345 / 188",
+                      objectFit: "cover",
+                      borderRadius: 18,
+                      border: "1px solid rgba(20, 30, 18, 0.14)",
+                    }}
+                  />
+                </div>
+              ) : null}
               <label className="form-field">
                 Inicio
                 <input
@@ -447,6 +969,84 @@ export default function CampaignCenterPage() {
             ) : (
               <p className="text-muted">Use o botao Simular em qualquer campanha para validar surface, role e prioridade.</p>
             )}
+          </Panel>
+
+          <Panel
+            className="panel-span-full"
+            title="Relatório comercial"
+            subtitle="Base para venda futura desse inventário: visualizações, cliques, CTR, CPM, CPC, valor e prazo."
+          >
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Campanha</th>
+                    <th>Prazo</th>
+                    <th>Valor</th>
+                    <th>Visualizações</th>
+                    <th>Cliques</th>
+                    <th>CTR</th>
+                    <th>CPM efetivo</th>
+                    <th>CPC efetivo</th>
+                    <th>Entrega</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(commercialReport?.rows || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={9}>Nenhuma campanha para o relatório atual.</td>
+                    </tr>
+                  ) : (
+                    commercialReport.rows.map((row) => (
+                      <tr key={row.id}>
+                        <td>
+                          <strong>{row.name}</strong>
+                          <br />
+                          <span className="text-muted">{row.advertiser || "Leaf"} · {row.costModel}</span>
+                        </td>
+                        <td>
+                          {formatDate(row.startAt)}
+                          <br />
+                          <span className="text-muted">
+                            {formatDate(row.endAt)} · {row.remainingDays ?? "-"} dias restantes
+                          </span>
+                        </td>
+                        <td>{formatCurrencyCents(row.campaignValueCents)}</td>
+                        <td>
+                          {formatNumber(row.impressions)}
+                          <br />
+                          <span className="text-muted">meta {formatNumber(row.contractedImpressions)}</span>
+                        </td>
+                        <td>
+                          {formatNumber(row.clicks)}
+                          <br />
+                          <span className="text-muted">meta {formatNumber(row.contractedClicks)}</span>
+                        </td>
+                        <td>{formatPercent(row.ctr)}</td>
+                        <td>
+                          {formatCurrencyCents(row.effectiveCpmCents)}
+                          <br />
+                          <span className="text-muted">vendido {formatCurrencyCents(row.soldCpmCents)}</span>
+                        </td>
+                        <td>
+                          {formatCurrencyCents(row.effectiveCpcCents)}
+                          <br />
+                          <span className="text-muted">vendido {formatCurrencyCents(row.soldCpcCents)}</span>
+                        </td>
+                        <td>
+                          {row.deliveryProgress === null ? "-" : formatPercent(row.deliveryProgress)}
+                          <br />
+                          <span className="text-muted">
+                            pacing {row.pacing === null ? "-" : formatPercent(row.pacing)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <TechnicalDetails title="Payload do relatório comercial" data={commercialReport} />
           </Panel>
 
           <Panel className="panel-span-full" title="Campanhas cadastradas">
