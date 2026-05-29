@@ -1,16 +1,16 @@
-# 🖥️ Análise: VPS Dedicada para KYC (Hostinger)
+# Análise: Serviço Dedicado para KYC
 
-## 📊 Especificações da VPS Dedicada
+## Especificações do host dedicado
 
 - **vCPUs**: 2 núcleos
 - **RAM**: 8GB
 - **Storage**: 100GB NVMe SSD
 - **Bandwidth**: 8TB/mês
-- **Custo**: A verificar (Hostinger)
+- **Custo**: A verificar no provedor operacional escolhido
 
 ---
 
-## ✅ ANÁLISE DE ADEQUAÇÃO
+## ANÁLISE DE ADEQUAÇÃO
 
 ### **1. Memória (RAM) - 8GB**
 
@@ -87,7 +87,7 @@
 
 ---
 
-## 💰 ANÁLISE DE CUSTO-BENEFÍCIO
+## ANÁLISE DE CUSTO-BENEFÍCIO
 
 ### **Comparação de Opções:**
 
@@ -113,7 +113,7 @@
 
 ---
 
-## ✅ VANTAGENS DA VPS DEDICADA
+## VANTAGENS DO SERVIÇO DEDICADO
 
 1. **Isolamento Total** ✅
    - Não afeta servidor principal
@@ -142,7 +142,7 @@
 
 ---
 
-## ⚠️ DESVANTAGENS
+## DESVANTAGENS
 
 1. **Manutenção** ⚠️
    - Precisa gerenciar servidor adicional
@@ -160,9 +160,9 @@
 
 ---
 
-## 🎯 RECOMENDAÇÃO
+## RECOMENDAÇÃO
 
-### **✅ RECOMENDO FORTEMENTE VPS DEDICADA SE:**
+### **RECOMENDO FORTEMENTE SERVIÇO DEDICADO SE:**
 
 1. ✅ **Volume esperado**: >50 verificações/mês
 2. ✅ **Precisão real necessária**: Não pode usar simulação
@@ -177,7 +177,7 @@
 
 ---
 
-## 📋 CHECKLIST DE IMPLEMENTAÇÃO
+## CHECKLIST DE IMPLEMENTAÇÃO
 
 Se decidir usar VPS dedicada:
 
@@ -211,7 +211,7 @@ Se decidir usar VPS dedicada:
 
 ---
 
-## 🚀 PRÓXIMOS PASSOS
+## PRÓXIMOS PASSOS
 
 1. **Decidir**: VPS dedicada ou continuar com simulação?
 2. **Se VPS dedicada**: Criar script de setup automatizado
@@ -233,7 +233,6 @@ Se decidir usar VPS dedicada:
 ✅ **Recomendação**: **SIM, use VPS dedicada!**
 
 **Próximo passo**: Quer que eu crie um script de setup automatizado para a VPS dedicada?
-
 
 
 

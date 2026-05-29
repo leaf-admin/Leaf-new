@@ -29,10 +29,10 @@ O segundo host entra para dividir:
 ## Topologia
 
 ### Host principal
-- IP atual: `62.169.31.231`
+- host atual: Contabo principal, definido por segredo operacional
 - endpoints públicos:
-  - `https://api.62.169.31.231.sslip.io`
-  - `https://socket.62.169.31.231.sslip.io`
+  - `https://api.leaf.app.br`
+  - `https://socket.leaf.app.br`
 - continua rodando:
   - `redis`
   - `nginx`
@@ -94,7 +94,7 @@ No host secundário:
 3. rodar:
 
 ```bash
-PRIMARY_SSH_HOST=62.169.31.231 \
+PRIMARY_SSH_HOST=<host-contabo-principal> \
 PRIMARY_SSH_USER=root \
 TUNNEL_KEY_PATH=/root/.ssh/leaf-primary-redis \
 bash /root/install-secondary-redis-tunnel.sh
@@ -115,10 +115,10 @@ Da máquina de operação/local:
 ```bash
 cd /Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend
 VPS_IP=<ip-do-segundo-host> \
-SSH_KEY=/Users/izaakdias/Documents/Leaf-new/digitaloceankey \
+SSH_KEY=<caminho-da-chave-operacional> \
 PRIMARY_REDIS_HOST=host.docker.internal \
 PRIMARY_REDIS_PORT=6381 \
-PRIMARY_REDIS_PASSWORD=leaf_redis_2024 \
+PRIMARY_REDIS_PASSWORD=<senha-redis-via-segredo-operacional> \
 bash scripts/deploy/deploy-secondary-realtime-host.sh
 ```
 
@@ -148,7 +148,7 @@ docker compose restart nginx
 No host principal:
 
 ```bash
-curl -fsS https://api.62.169.31.231.sslip.io/health | jq
+curl -fsS https://api.leaf.app.br/health | jq
 docker stats --no-stream
 ```
 

@@ -521,3 +521,33 @@ Validação:
 
 - Varredura sem docs historicos passou a apontar apenas para suporte generico `sslip.io` de CORS e testes unitarios dessa funcao.
 - `node -c` nos scripts alterados: PASS.
+
+## Bloco 29 - Executado
+
+Escopo: alinhar documentacao operacional ativa aos dominios Leaf e ao runtime Contabo atual.
+
+- Atualizados runbooks ativos de teste, cutover, soft release, capacidade, segundo host realtime, Play Console e KYC dedicado.
+- Removidas instrucoes operacionais que ainda mandavam usar `sslip.io`, IP direto da VPS ou chave `digitaloceankey`.
+- Mantidos arquivos historicos como evidencia; eles devem ficar separados do caminho operacional atual.
+
+Validação:
+
+- Varredura final de documentacao ativa sem referencias antigas a IP direto, `sslip.io`, `digitaloceankey` ou provedores antigos: PASS.
+- `node -c scripts/prelaunch/assert-store-go-static.cjs`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `git diff --check`: PASS.
+
+## Bloco 30 - Executado
+
+Escopo: arquivar relatorios historicos que citavam provedores antigos, IP direto ou `sslip.io`.
+
+- Criado `docs/archive/legacy-infra-2026-05-29/`.
+- Movidos relatorios antigos de mobile, backend e arquitetura para o arquivo historico.
+- Atualizados links que ainda apontavam para esses relatorios em docs ativos.
+- Mantidos os arquivos como evidencia, mas fora da trilha operacional atual.
+
+Validação:
+
+- Varredura final de documentacao ativa sem referencias antigas a IP direto, `sslip.io`, `digitaloceankey` ou provedores antigos: PASS.
+- `node scripts/prelaunch/assert-store-go-static.cjs`: PASS com warnings historicos conhecidos e `Failures: 0`.
+- `git diff --check`: PASS.

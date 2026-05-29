@@ -20,16 +20,15 @@ Comportamento atual:
 - o app encerra a sessao e volta para a tela inicial
 
 ### 1.2 URLs publicas validadas agora
-URLs confirmadas respondendo `200`:
-- `https://api.62.169.31.231.sslip.io/privacy-policy`
-- `https://api.62.169.31.231.sslip.io/terms-of-service`
-- `https://api.62.169.31.231.sslip.io/account-deletion`
-- `https://api.62.169.31.231.sslip.io/api/legal/links`
+URLs públicas canônicas:
+- `https://api.leaf.app.br/privacy-policy`
+- `https://api.leaf.app.br/terms-of-service`
+- `https://api.leaf.app.br/account-deletion`
+- `https://api.leaf.app.br/api/legal/links`
 
 Observacao importante:
-- `https://api.leaf.app.br/...` nao resolveu a partir deste ambiente na data de 2026-03-26.
-- Para destravar teste interno agora, use as URLs `sslip.io`.
-- Para release publico, migrar para o dominio final da marca.
+- este pacote nasceu durante a fase temporaria de infraestrutura.
+- para qualquer envio novo, usar somente os dominios finais da marca.
 
 ### 1.3 Permissoes sensiveis declaradas no AndroidManifest
 Confirmadas no manifesto atual:
@@ -51,19 +50,19 @@ Nao encontrei no manifesto atual:
 ## 2. URLs para usar no Play Console agora
 
 ### 2.1 App content / Privacy policy URL
-`https://api.62.169.31.231.sslip.io/privacy-policy`
+`https://api.leaf.app.br/privacy-policy`
 
 ### 2.2 App content / Account deletion URL
-`https://api.62.169.31.231.sslip.io/account-deletion`
+`https://api.leaf.app.br/account-deletion`
 
 ### 2.3 Termos / support reference
-`https://api.62.169.31.231.sslip.io/terms-of-service`
+`https://api.leaf.app.br/terms-of-service`
 
 ### 2.4 Support email
 `suporte@leaf.app.br`
 
 ### 2.5 Support website (temporario, se o campo for obrigatorio)
-`https://api.62.169.31.231.sslip.io/privacy-policy`
+`https://api.leaf.app.br/privacy-policy`
 
 ## 3. Main store listing - textos prontos
 
@@ -114,7 +113,7 @@ A disponibilidade de recursos pode variar por cidade, perfil e etapa de liberaca
 ## 4. App content - respostas prontas
 
 ### 4.1 Privacy policy
-- URL: `https://api.62.169.31.231.sslip.io/privacy-policy`
+- URL: `https://api.leaf.app.br/privacy-policy`
 
 ### 4.2 Ads
 - Resposta: `No`
@@ -260,7 +259,7 @@ Use this only if the `Foreground service` declaration appears in App content.
 `Yes`
 
 ### 8.2 Account deletion URL
-`https://api.62.169.31.231.sslip.io/account-deletion`
+`https://api.leaf.app.br/account-deletion`
 
 ### 8.3 Support text if a freeform explanation field appears
 `Users can request account deletion from within the app under Privacy settings. The app also provides a public web page with deletion instructions and support contact information. After a valid request, the account is disabled and personal data is removed or anonymized according to the retention policy and applicable legal obligations.`
@@ -299,8 +298,7 @@ Use this only if the `Foreground service` declaration appears in App content.
 - disclosure text for background location in app: yes
 
 ### What should be used right now
-- use the `sslip.io` legal URLs for internal testing submission
+- use the canonical Leaf legal URLs under `https://api.leaf.app.br`
 
 ### What should not be assumed finished
-- branded domain `api.leaf.app.br` as legal URL target
 - financial features classification without a quick human check if the Play form wording looks broader than expected

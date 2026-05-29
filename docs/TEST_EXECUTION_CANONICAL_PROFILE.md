@@ -16,15 +16,15 @@ Todos esses comandos exibem automaticamente este perfil antes da execução.
 ## 2) Ambiente alvo (hoje)
 
 1. Infra remota principal de E2E/carga: Contabo (shared runtime)
-2. Endpoint socket padrão: `https://socket.62.169.31.231.sslip.io`
-3. Endpoint API padrão: `https://api.62.169.31.231.sslip.io`
+2. Endpoint socket padrão: `https://socket.leaf.app.br`
+3. Endpoint API padrão: `https://api.leaf.app.br`
 4. Backend local é opcional para unit/integration; E2E padrão usa ambiente remoto compartilhado
 
 ## 3) Variáveis críticas
 
 1. `APP_REVIEW=false` para teste funcional normal (evita bypass mascarar erro real)
 2. `E2E_RUN_ID` opcional (se ausente, testes geram tag única via `Date.now()`)
-3. `E2E_REMOTE_SSH_HOST=62.169.31.231`
+3. `E2E_REMOTE_SSH_HOST` apontando para o host Contabo atual, vindo de env/segredo operacional
 4. `E2E_REMOTE_SSH_USER=root`
 5. `E2E_REMOTE_SSH_KEY_PATH` apontando para chave válida da Contabo
 6. `E2E_REMOTE_REDIS_PASSWORD` definido explicitamente no shell/CI
