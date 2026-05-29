@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { store } from './src/state/appStore';
 import AppNavigator from './src/navigation/AppNavigator';
 import AuthProvider from './src/components/AuthProvider';
@@ -12,7 +13,6 @@ import { LanguageProvider } from './src/components/i18n/LanguageProvider';
 import FCMNotificationService from './src/services/FCMNotificationService';
 import InteractiveNotificationService from './src/services/InteractiveNotificationService';
 import PersistentRideNotificationService from './src/services/PersistentRideNotificationService';
-import realtimeConnectionOrchestrator from './src/services/RealtimeConnectionOrchestrator';
 import { setupAxiosInterceptor } from './src/utils/axiosInterceptor';
 import Logger from './src/utils/Logger';
 import NetworkStatusBanner from './src/components/NetworkStatusBanner';
@@ -129,6 +129,17 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function lockPortraitOrientation() {
+  if (Platform.OS === 'web') {
+    return;
+  }
+
+  ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+    .catch(error => {
+      Logger.warn('⚠️ [App] Não foi possível travar orientação portrait:', error?.message || error);
+    });
+}
+
 // ✅ CRÍTICO: Manter a splash screen nativa visível desde o início
 // Isso DEVE ser chamado antes de qualquer renderização
 // Usar try/catch para garantir que não quebra se já foi chamado
@@ -202,6 +213,7 @@ export default function App() {
   // ✅ Desabilitar DevMenu também no useEffect para garantir (dentro do componente)
   useEffect(() => {
     hideDevelopmentClientMenu();
+    lockPortraitOrientation();
   }, []);
 
   // Inicializar FCM e notificações interativas quando o app iniciar
@@ -226,21 +238,11 @@ export default function App() {
           await wait(__DEV__ ? 1800 : 450);
         }
 
-        // 1. Preparar o canal realtime sem bloquear FCM nem a navegação.
-        // A autenticação fica centralizada no orquestrador quando o perfil é hidratado.
-        realtimeConnectionOrchestrator
-          .bootstrap({ reason: 'app_boot' })
-          .catch(error => {
-            Logger.warn(
-              '⚠️ [App] Realtime bootstrap inicial não concluiu:',
-              error?.message || error
-            );
-          });
-        
-        // 2. Inicializar FCM (agora o WebSocket já está conectado ou tentando conectar)
+        // 1. Inicializar FCM sem abrir socket anônimo no boot.
+        // O realtime autentica somente quando o perfil já está hidratado no RealtimeConnectionGuard.
         await withTimeout(FCMNotificationService.initialize(), 8000, 'FCM initialize');
         
-        // 3. Inicializar serviços de notificação em modo não-bloqueante.
+        // 2. Inicializar serviços de notificação em modo não-bloqueante.
         // Eles podem demorar mais em simuladores/dev-client e não devem gerar erro visual no app.
         await initializeOptionalBootService(
           'InteractiveNotification initialize',

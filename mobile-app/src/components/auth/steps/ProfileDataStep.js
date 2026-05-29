@@ -1,19 +1,18 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Linking, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, Linking, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../../theme/runtimeTokens';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
+import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import { AppConfig } from '../../../../config/AppConfig';
 
-const { color, radius, spacing, elevation } = onboardingTheme;
+const { color, spacing } = onboardingTheme;
 const EMAIL_REGEX = /\S+@\S+\.\S+/;
 const PASSWORD_REGEX = /(?=.*[A-Za-z])(?=.*\d)/;
 
-const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
-  const insets = useSafeAreaInsets();
+const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) => {
 	  const [profileData, setProfileData] = useState({
 	    fullName: initialData.fullName || [initialData.firstName, initialData.lastName].filter(Boolean).join(' ').trim(),
 	    email: initialData?.documentData?.email || initialData?.email || '',
@@ -184,19 +183,20 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.title}>Complete seu cadastro</Text>
-
-      <Text style={styles.subtitle}>
-        Confirme seus dados antes de entrar.
-      </Text>
-
+    <EditorialOnboardingScreen
+      keyboard
+      title={'Complete\nseus dados'}
+      description="Confirme seu nome, e-mail e senha para deixar sua conta pronta."
+      onBack={onBack}
+      progressMeta={progressMeta}
+      footer={(
+        <ContinueButton
+          onPress={handleSubmit}
+          disabled={!isFormValid}
+          text="Salvar e entrar"
+        />
+      )}
+    >
       <View style={styles.card}>
         <View style={styles.fieldContainer}>
           <Text style={styles.label}>Nome completo *</Text>
@@ -320,23 +320,7 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {} }) => {
           </>
         ) : null}
       </View>
-
-      <ContinueButton
-        onPress={handleSubmit}
-        disabled={!isFormValid}
-        text="Salvar e entrar"
-        textStyle={styles.continueButtonText}
-        style={[
-          styles.continueButton,
-          {
-            marginBottom:
-            Platform.OS === 'android'
-              ? Math.max(spacing.xl, insets.bottom + spacing.lg)
-              : Math.max(spacing.md, insets.bottom + spacing.sm)
-          }
-        ]}
-      />
-    </View>
+    </EditorialOnboardingScreen>
   );
 };
 
@@ -409,42 +393,42 @@ const styles = StyleSheet.create({
     marginBottom: 18
   },
   label: {
-    fontSize: 11,
-    lineHeight: 15,
-    color: '#5F6B62',
-    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
+    color: color.textSecondary,
+    fontFamily: fonts.SemiBold,
     marginBottom: 8
   },
 	  input: {
     borderWidth: 1,
-    borderColor: '#DFE8E1',
-    borderRadius: 18,
+    borderColor: color.border,
+    borderRadius: 20,
     paddingHorizontal: 20,
     paddingVertical: 0,
-    minHeight: 52,
-    fontSize: 14,
-    lineHeight: 18,
+    minHeight: 54,
+    fontSize: 15,
+    lineHeight: 20,
     fontFamily: fonts.Regular,
-    color: '#101C14',
+    color: color.textPrimary,
 	    backgroundColor: '#FFFFFF'
 	  },
 	  passwordContainer: {
 	    flexDirection: 'row',
 	    alignItems: 'center',
 	    borderWidth: 1,
-	    borderColor: '#DFE8E1',
-	    borderRadius: 18,
+	    borderColor: color.border,
+	    borderRadius: 20,
 	    backgroundColor: '#FFFFFF',
-      minHeight: 52
+      minHeight: 54
 	  },
 	  passwordInput: {
 	    flex: 1,
-	    paddingHorizontal: 10,
+	    paddingHorizontal: 20,
 	    paddingVertical: 9,
-	    fontSize: 14,
-	    lineHeight: 18,
+	    fontSize: 15,
+	    lineHeight: 20,
 	    fontFamily: fonts.Regular,
-	    color: '#101C14'
+	    color: color.textPrimary
 	  },
 	  eyeButton: {
 	    paddingHorizontal: 8,

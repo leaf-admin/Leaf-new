@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
+import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 
-const { color, radius, spacing } = onboardingTheme;
+const { color, spacing } = onboardingTheme;
 const EMAIL_REGEX = /\S+@\S+\.\S+/;
 
-const DriverEmailStep = ({ onSubmitted, onBack, initialData = {} }) => {
+const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) => {
   const [email, setEmail] = useState(initialData.email || '');
   const [error, setError] = useState('');
 
@@ -33,19 +33,33 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {} }) => {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.title}>Contato por e-mail</Text>
-
-      <Text style={styles.subtitle}>
-        Adicione para recibos, notificações do sistema e informe de rendimentos. Você pode pular e preencher depois.
-      </Text>
-
+    <EditorialOnboardingScreen
+      keyboard
+      title={'Contato\npor e-mail'}
+      description="Use para recibos, notificações importantes e informes. Dá para preencher depois."
+      onBack={onBack}
+      progressMeta={progressMeta}
+      footer={(
+        <View>
+          <ContinueButton
+            onPress={() => handleSubmit(false)}
+            disabled={!isEmailValid}
+            text="Finalizar cadastro"
+            testID="driver-email-continue-btn"
+            accessibilityLabel="driver-email-continue-btn"
+          />
+          <TouchableOpacity
+            style={styles.skipButton}
+            onPress={() => handleSubmit(true)}
+            activeOpacity={0.86}
+            testID="driver-email-skip-btn"
+            accessibilityLabel="driver-email-skip-btn"
+          >
+            <Text style={styles.skipLabel}>Preencher depois</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    >
       <View style={styles.card}>
         <Text style={styles.label}>E-mail (opcional por agora)</Text>
         <TextInput
@@ -65,24 +79,7 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {} }) => {
         />
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </View>
-
-      <ContinueButton
-        onPress={() => handleSubmit(false)}
-        disabled={!isEmailValid}
-        text="Finalizar cadastro"
-        testID="driver-email-continue-btn"
-        accessibilityLabel="driver-email-continue-btn"
-      />
-      <TouchableOpacity
-        style={styles.skipButton}
-        onPress={() => handleSubmit(true)}
-        activeOpacity={0.86}
-        testID="driver-email-skip-btn"
-        accessibilityLabel="driver-email-skip-btn"
-      >
-        <Text style={styles.skipLabel}>Preencher depois</Text>
-      </TouchableOpacity>
-    </View>
+    </EditorialOnboardingScreen>
   );
 };
 
@@ -125,26 +122,23 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg
   },
   card: {
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: color.glassStroke,
-    backgroundColor: color.panel,
-    shadowColor: color.accent,
-    ...onboardingTheme.elevation.soft,
-    padding: spacing.sm,
-    marginBottom: 'auto'
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    padding: 0
   },
   label: {
-    fontSize: 13,
-    color: color.textPrimary,
+    fontSize: 12,
+    lineHeight: 16,
+    color: color.textSecondary,
     fontFamily: fonts.SemiBold,
-    marginBottom: 6
+    marginBottom: 8
   },
   input: {
     borderWidth: 1,
     borderColor: color.border,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
+    borderRadius: 20,
+    paddingHorizontal: 18,
     paddingVertical: 12,
     fontSize: 15,
     lineHeight: 19,

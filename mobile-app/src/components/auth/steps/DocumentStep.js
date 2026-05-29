@@ -12,10 +12,11 @@ import * as DocumentPicker from 'expo-document-picker';
 import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
+import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import driverDocumentExtractionService from '../../../services/DriverDocumentExtractionService';
 import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
-const { color, radius, spacing } = onboardingTheme;
+const { color, spacing } = onboardingTheme;
 
 const EMAIL_REGEX = /\S+@\S+\.\S+/;
 const CPF_REGEX = /^(?:\d{3}\.\d{3}\.\d{3}-\d{2}|\d{11})$/;
@@ -97,7 +98,7 @@ function formatExtractionLabel(result) {
   return `Extraído com ${result?.model || 'IA'}`;
 }
 
-const DocumentStep = ({ onSubmitted, onBack, initialData = {} }) => {
+const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) => {
   const isDriver = initialData?.profileSelection?.userType === 'driver';
   const userId = initialData?.user?.uid || null;
   const initialCnhIdentity = resolveCnhIdentityData(initialData?.documentData?.cnhExtraction || null);
@@ -341,21 +342,21 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {} }) => {
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.title}>{isDriver ? 'Validar sua CNH' : 'Cadastro de passageiro'}</Text>
-
-      <Text style={styles.subtitle}>
-        {isDriver
-          ? 'Envie a CNH Digital em PDF. A Leaf lê os dados automaticamente e libera os próximos passos.'
-          : 'Informe seu e-mail para recibos e recuperação de conta.'}
-      </Text>
-
+    <EditorialOnboardingScreen
+      title={isDriver ? 'Envie sua\nCNH Digital' : 'Cadastro\nde passageiro'}
+      description={isDriver
+        ? 'A Leaf lê os dados do PDF automaticamente para deixar sua validação mais simples.'
+        : 'Informe seu e-mail para recibos e recuperação da conta.'}
+      onBack={onBack}
+      progressMeta={progressMeta}
+      footer={(
+        <ContinueButton
+          onPress={handleSubmit}
+          disabled={!isFormValid || isExtracting.cnh || isExtracting.vehicle}
+          text="Continuar"
+        />
+      )}
+    >
       <View style={styles.card}>
         {!isDriver ? (
           <View style={styles.fieldContainer}>
@@ -449,9 +450,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {} }) => {
           </>
         )}
       </View>
-
-      <ContinueButton onPress={handleSubmit} disabled={!isFormValid || isExtracting.cnh || isExtracting.vehicle} text="Continuar" />
-    </View>
+    </EditorialOnboardingScreen>
   );
 };
 
@@ -494,22 +493,20 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg
   },
   card: {
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: color.glassStroke,
-    backgroundColor: color.panel,
-    shadowColor: color.accent,
-    ...onboardingTheme.elevation.soft,
-    padding: spacing.sm
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    padding: 0
   },
   fieldContainer: {
     marginBottom: spacing.xs
   },
   label: {
     fontSize: 12,
-    color: color.textPrimary,
+    lineHeight: 16,
+    color: color.textSecondary,
     fontFamily: fonts.SemiBold,
-    marginBottom: 4
+    marginBottom: 8
   },
   optionalTag: {
     color: color.textMuted,
@@ -518,9 +515,9 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: color.border,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     fontSize: 13,
     lineHeight: 17,
     fontFamily: fonts.Medium,
@@ -536,17 +533,17 @@ const styles = StyleSheet.create({
   uploadButton: {
     borderWidth: 1,
     borderColor: color.border,
-    borderRadius: radius.md,
+    borderRadius: 22,
     backgroundColor: color.surfaceMuted,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'flex-start'
   },
   uploadIconWrap: {
     width: 38,
     height: 38,
-    borderRadius: 15,
+    borderRadius: 19,
     backgroundColor: color.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',

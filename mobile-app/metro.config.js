@@ -17,7 +17,7 @@ const axiosBrowserEntry = resolveAxiosBrowserEntry();
 
 // Usar extensões padrão do Expo + algumas extras necessárias
 config.resolver.sourceExts.push('cjs');
-config.resolver.assetExts.push('lottie');
+config.resolver.assetExts.push('lottie', 'onnx', 'ort', 'tflite');
 
 // Configurar aliases para facilitar imports
 config.resolver.alias = {

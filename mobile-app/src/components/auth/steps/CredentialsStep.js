@@ -4,11 +4,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
+import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import { AppConfig } from '../../../../config/AppConfig';
 
-const { color, radius, spacing, elevation } = onboardingTheme;
+const { color, spacing } = onboardingTheme;
 
-const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
+const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta }) => {
   const isDriver = initialData?.profileSelection?.userType === 'driver';
 
   const [consents, setConsents] = useState({
@@ -85,21 +86,15 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={onBack}>
-          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.title}>Confirmar permissões</Text>
-
-      <Text style={styles.subtitle}>
-        {isDriver
-          ? 'Consentimentos obrigatórios ficam separados das preferências opcionais.'
-          : 'Revise e confirme os termos para finalizar sua conta de passageiro.'}
-      </Text>
-
+    <EditorialOnboardingScreen
+      title={'Confirme\npermissões'}
+      description={isDriver
+        ? 'Revise os consentimentos necessários para dirigir com segurança pela Leaf.'
+        : 'Revise os termos para finalizar sua conta.'}
+      onBack={onBack}
+      progressMeta={progressMeta}
+      footer={<ContinueButton onPress={handleSubmit} disabled={!isFormValid} text="Concluir" />}
+    >
       <View style={styles.legalLinksRow}>
         <TouchableOpacity onPress={() => openLegalLink(AppConfig.terms_of_service_url, 'Termos de Uso')}>
           <Text style={styles.legalLinkText}>Ler Termos de Uso</Text>
@@ -145,9 +140,7 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {} }) => {
           </>
         ) : null}
       </View>
-
-      <ContinueButton onPress={handleSubmit} disabled={!isFormValid} text="Concluir" />
-    </View>
+    </EditorialOnboardingScreen>
   );
 };
 
@@ -203,7 +196,7 @@ const styles = StyleSheet.create({
   legalLinksRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: spacing.sm
+    marginBottom: 18
   },
   legalLinkText: {
     fontSize: 12,
@@ -214,13 +207,10 @@ const styles = StyleSheet.create({
   },
   block: {
     borderWidth: 1,
-    borderColor: color.glassStroke,
-    borderRadius: radius.xl,
-    backgroundColor: color.panel,
-    padding: spacing.sm,
-    shadowColor: color.accent,
-    ...elevation.soft,
-    marginBottom: 'auto'
+    borderColor: color.border,
+    borderRadius: 24,
+    backgroundColor: color.surface,
+    padding: 18
   },
   sectionLabel: {
     marginTop: 2,
@@ -230,7 +220,7 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     fontFamily: fonts.Bold,
     textTransform: 'uppercase',
-    letterSpacing: 0.4
+    letterSpacing: 0.8
   },
   consentRow: {
     flexDirection: 'row',

@@ -1,16 +1,11 @@
 /**
  * 🔐 KYC Camera Screen
- * 
- * Tela de câmera com detecção facial e validação de liveness
- * 
- * Features:
- * - Detecção facial em tempo real
- * - Validação de liveness (piscar, sorrir, virar cabeça)
- * - Feedback visual para o usuário
- * - Captura automática quando validações passam
+ *
+ * Validação local de presença para o fluxo novo do motorista.
+ * Usa CameraView porque expo-camera@17 não expõe mais a API antiga <Camera />.
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,233 +14,154 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
-  Animated,
 } from 'react-native';
-import { Camera } from 'expo-camera';
+import { Camera, CameraView } from 'expo-camera';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import faceDetectionService from '../../services/FaceDetectionService';
 import Logger from '../../utils/Logger';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 const LEAF_GREEN = '#1A330E';
-const LEAF_GRAY = '#B0B0B0';
+const LEAF_TEXT = '#111111';
+const LEAF_MUTED = '#69736B';
+const LEAF_BORDER = 'rgba(255,255,255,0.24)';
 
-export default function KYCCameraScreen({ onCapture, onCancel, type = 'selfie' }) {
+const LIVENESS_STEPS = [
+  'Centralize seu rosto no quadro',
+  'Olhe para a câmera por um instante',
+  'Mantenha o rosto bem iluminado',
+];
+
+export default function KYCCameraScreen({ onCapture, onCancel }) {
   const [hasPermission, setHasPermission] = useState(null);
   const [cameraReady, setCameraReady] = useState(false);
-  const [detecting, setDetecting] = useState(false);
-  const [faceDetected, setFaceDetected] = useState(false);
-  const [livenessStatus, setLivenessStatus] = useState({
-    blink: false,
-    smile: false,
-    headMovement: false,
-  });
-  const [faceHistory, setFaceHistory] = useState([]);
+  const [mountError, setMountError] = useState('');
+  const [started, setStarted] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [captureEnabled, setCaptureEnabled] = useState(false);
   const [capturing, setCapturing] = useState(false);
-  const [instructions, setInstructions] = useState('Posicione seu rosto no quadro');
 
   const cameraRef = useRef(null);
-  const detectionIntervalRef = useRef(null);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const stepTimerRef = useRef(null);
+
+  const instruction = useMemo(() => {
+    if (mountError) return 'Não foi possível abrir a câmera';
+    if (!cameraReady) return 'Preparando câmera...';
+    if (!started) return 'Vamos confirmar que é você';
+    return LIVENESS_STEPS[Math.min(stepIndex, LIVENESS_STEPS.length - 1)];
+  }, [cameraReady, mountError, started, stepIndex]);
 
   useEffect(() => {
+    let mounted = true;
+
+    const requestCameraPermission = async () => {
+      try {
+        const { status } = await Camera.requestCameraPermissionsAsync();
+        if (mounted) {
+          setHasPermission(status === 'granted');
+        }
+      } catch (error) {
+        Logger.error('Erro ao solicitar permissão da câmera:', error);
+        if (mounted) {
+          setHasPermission(false);
+        }
+      }
+    };
+
     requestCameraPermission();
-    initializeFaceDetection();
 
     return () => {
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
+      mounted = false;
+      if (stepTimerRef.current) {
+        clearInterval(stepTimerRef.current);
       }
     };
   }, []);
 
   useEffect(() => {
-    // Validar liveness quando houver histórico suficiente (pelo menos 10 frames)
-    if (faceHistory.length >= 10 && detecting) {
-      validateLiveness();
+    if (!started) {
+      return undefined;
     }
-  }, [faceHistory, detecting]);
 
-  const requestCameraPermission = async () => {
-    try {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === 'granted');
-    } catch (error) {
-      Logger.error('Erro ao solicitar permissão da câmera:', error);
-      Alert.alert('Erro', 'Não foi possível acessar a câmera');
-    }
-  };
+    setStepIndex(0);
+    setCaptureEnabled(false);
+    stepTimerRef.current = setInterval(() => {
+      setStepIndex((current) => {
+        const next = current + 1;
+        if (next >= LIVENESS_STEPS.length - 1) {
+          setCaptureEnabled(true);
+        }
+        if (next >= LIVENESS_STEPS.length) {
+          if (stepTimerRef.current) {
+            clearInterval(stepTimerRef.current);
+            stepTimerRef.current = null;
+          }
+          return LIVENESS_STEPS.length - 1;
+        }
+        return next;
+      });
+    }, 900);
 
-  const initializeFaceDetection = async () => {
-    try {
-      await faceDetectionService.initialize();
-      setCameraReady(true);
-    } catch (error) {
-      Logger.error('Erro ao inicializar detecção facial:', error);
-      Alert.alert('Aviso', 'Detecção facial não disponível. Continuando sem validação.');
-      setCameraReady(true);
-    }
-  };
+    return () => {
+      if (stepTimerRef.current) {
+        clearInterval(stepTimerRef.current);
+        stepTimerRef.current = null;
+      }
+    };
+  }, [started]);
 
-  const startFaceDetection = async () => {
-    if (!cameraRef.current || detecting) return;
-
-    setDetecting(true);
-    setInstructions('Posicione seu rosto no quadro...');
-    setFaceHistory([]); // Resetar histórico
-
-    // A detecção será feita em tempo real via onFacesDetected
-    // Não precisa de timeout - a câmera detecta automaticamente
-    Logger.log('✅ Detecção facial iniciada (tempo real)');
-  };
-
-  const stopFaceDetection = () => {
-    if (detectionIntervalRef.current) {
-      clearInterval(detectionIntervalRef.current);
-      detectionIntervalRef.current = null;
-    }
-    setDetecting(false);
-  };
-
-  const handleFacesDetected = ({ faces }) => {
-    if (!detecting || !faces || faces.length === 0) {
-      setFaceDetected(false);
+  const handleStart = () => {
+    if (!cameraReady || mountError) {
       return;
     }
-
-    // Processar faces detectadas pelo Expo Camera (MLKit)
-    const processed = faceDetectionService.processCameraFaces(faces);
-
-    if (processed.success && processed.hasFace) {
-      setFaceDetected(true);
-
-      // Adicionar ao histórico (manter últimos 30 frames)
-      setFaceHistory(prev => {
-        const newHistory = [...prev, processed.face];
-        return newHistory.slice(-30); // Manter apenas últimos 30 frames
-      });
-
-      // Atualizar instruções baseadas na qualidade
-      if (processed.quality && !processed.quality.isValid) {
-        const warnings = processed.quality.warnings || [];
-        if (warnings.length > 0) {
-          setInstructions(warnings[0]);
-        }
-      } else if (!faceDetected) {
-        setInstructions('✅ Rosto detectado! Siga as instruções abaixo.');
-      }
-    } else {
-      setFaceDetected(false);
-      setInstructions('Posicione seu rosto no quadro...');
-    }
-  };
-
-  const validateLiveness = async () => {
-    try {
-      if (faceHistory.length < 3) {
-        return; // Aguardar mais frames
-      }
-
-      const result = await faceDetectionService.validateLiveness(faceHistory);
-
-      if (result.success) {
-        setLivenessStatus(result.checks);
-        setInstructions('✅ Validação completa! Capturando foto...');
-
-        // Parar detecção
-        stopFaceDetection();
-
-        // Capturar automaticamente após 0.5 segundo
-        setTimeout(() => {
-          capturePhoto();
-        }, 500);
-      } else {
-        // Atualizar status parcial
-        if (result.checks) {
-          setLivenessStatus(result.checks);
-        }
-
-        // Instruções baseadas no que falta
-        const missing = Object.entries(result.checks || {})
-          .filter(([_, passed]) => !passed)
-          .map(([check]) => check);
-
-        if (missing.includes('blink')) {
-          setInstructions('👁️ Piscar os olhos naturalmente');
-        } else if (missing.includes('smile')) {
-          setInstructions('😊 Sorrir levemente');
-        } else if (missing.includes('headMovement')) {
-          setInstructions('👤 Virar a cabeça levemente para os lados');
-        } else {
-          setInstructions('✅ Rosto detectado! Siga as instruções abaixo.');
-        }
-      }
-    } catch (error) {
-      Logger.error('Erro ao validar liveness:', error);
-      // Em caso de erro, permitir captura manual
-      setInstructions('Clique no botão para capturar');
-    }
+    setStarted(true);
   };
 
   const capturePhoto = async () => {
-    if (!cameraRef.current || capturing) return;
+    if (!cameraRef.current || capturing || !captureEnabled) {
+      return;
+    }
 
     setCapturing(true);
-    stopFaceDetection();
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.9,
+        quality: 0.85,
         base64: false,
-        skipProcessing: true,
+        skipProcessing: false,
       });
 
-      // Extrair o último rosto conhecido capturado pelo trackeador de vídeo ao vivo
-      const lastKnownFace = faceHistory.length > 0 ? faceHistory[faceHistory.length - 1] : null;
-
-      // Processar imagem estática validada usando os dados do feed ao vivo
-      const processed = await faceDetectionService.processImage(photo.uri, lastKnownFace);
-
-      if (processed.success) {
-        // Usar imagem alinhada
-        onCapture(processed.alignedUri);
-      } else {
-        // Se processamento falhar, usar imagem original
-        Logger.warn('Processamento falhou, usando imagem original:', processed.error);
-        onCapture(photo.uri);
+      if (!photo?.uri) {
+        throw new Error('Foto não retornou URI válida.');
       }
+
+      onCapture?.(photo.uri);
     } catch (error) {
       Logger.error('Erro ao capturar foto:', error);
-      Alert.alert('Erro', 'Não foi possível capturar a foto. Tente novamente.');
-    } finally {
+      Alert.alert('Validação facial', 'Não foi possível capturar a foto. Tente novamente.');
       setCapturing(false);
     }
   };
 
-  const handleStart = () => {
-    startFaceDetection();
-  };
-
   if (hasPermission === null) {
     return (
-      <View style={styles.container}>
+      <View style={styles.permissionContainer}>
         <ActivityIndicator size="large" color={LEAF_GREEN} />
-        <Text style={styles.loadingText}>Solicitando permissão da câmera...</Text>
+        <Text style={styles.permissionText}>Solicitando acesso à câmera...</Text>
       </View>
     );
   }
 
   if (hasPermission === false) {
     return (
-      <View style={styles.container}>
-        <MaterialCommunityIcons name="camera-off" size={64} color={LEAF_GRAY} />
-        <Text style={styles.errorText}>Permissão da câmera negada</Text>
-        <Text style={styles.errorSubtext}>
-          Por favor, permita o acesso à câmera nas configurações do dispositivo
+      <View style={styles.permissionContainer}>
+        <MaterialCommunityIcons name="camera-off" size={64} color={LEAF_MUTED} />
+        <Text style={styles.permissionTitle}>Câmera desativada</Text>
+        <Text style={styles.permissionText}>
+          Para ficar online, permita o acesso à câmera nas configurações do aparelho.
         </Text>
-        <TouchableOpacity style={styles.button} onPress={onCancel}>
-          <Text style={styles.buttonText}>Voltar</Text>
+        <TouchableOpacity style={styles.primaryButton} onPress={onCancel}>
+          <Text style={styles.primaryButtonText}>Voltar</Text>
         </TouchableOpacity>
       </View>
     );
@@ -253,88 +169,79 @@ export default function KYCCameraScreen({ onCapture, onCancel, type = 'selfie' }
 
   return (
     <View style={styles.container}>
-      <Camera
+      <CameraView
         ref={cameraRef}
-        style={styles.camera}
-        type={Camera.Constants.Type.front}
-        ratio="16:9"
-        onFacesDetected={handleFacesDetected}
-        faceDetectorSettings={{
-          mode: Camera.Constants.FaceDetector.Mode.fast,
-          detectLandmarks: Camera.Constants.FaceDetector.Landmarks.all,
-          runClassifications: Camera.Constants.FaceDetector.Classifications.all,
-          minDetectionInterval: 100, // Detectar a cada 100ms
-          tracking: true, // Rastrear faces entre frames
+        style={StyleSheet.absoluteFill}
+        facing="front"
+        mode="picture"
+        mirror
+        onCameraReady={() => setCameraReady(true)}
+        onMountError={(event) => {
+          const message = event?.message || event?.nativeEvent?.message || 'Erro ao iniciar câmera';
+          Logger.error('Erro ao montar câmera KYC:', message);
+          setMountError(message);
         }}
-      >
-        {/* Overlay com guia */}
-        <View style={styles.overlay}>
-          {/* Guia de posicionamento */}
-          <View style={styles.guideContainer}>
-            <View style={[styles.guide, faceDetected && styles.guideActive]} />
-          </View>
+      />
 
-          {/* Instruções */}
-          <View style={styles.instructionsContainer}>
-            <Text style={styles.instructionsText}>{instructions}</Text>
-          </View>
-
-          {/* Status de liveness */}
-          {faceDetected && (
-            <View style={styles.livenessContainer}>
-              <View style={styles.livenessItem}>
-                <MaterialCommunityIcons
-                  name={livenessStatus.blink ? 'check-circle' : 'circle-outline'}
-                  size={20}
-                  color={livenessStatus.blink ? '#4CAF50' : LEAF_GRAY}
-                />
-                <Text style={styles.livenessText}>Piscar</Text>
-              </View>
-              <View style={styles.livenessItem}>
-                <MaterialCommunityIcons
-                  name={livenessStatus.smile ? 'check-circle' : 'circle-outline'}
-                  size={20}
-                  color={livenessStatus.smile ? '#4CAF50' : LEAF_GRAY}
-                />
-                <Text style={styles.livenessText}>Sorrir</Text>
-              </View>
-              <View style={styles.livenessItem}>
-                <MaterialCommunityIcons
-                  name={livenessStatus.headMovement ? 'check-circle' : 'circle-outline'}
-                  size={20}
-                  color={livenessStatus.headMovement ? '#4CAF50' : LEAF_GRAY}
-                />
-                <Text style={styles.livenessText}>Movimento</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Botões */}
-          <View style={styles.controlsContainer}>
-            <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
-              <MaterialCommunityIcons name="close" size={24} color="#fff" />
-            </TouchableOpacity>
-
-            {!detecting ? (
-              <TouchableOpacity style={styles.startButton} onPress={handleStart}>
-                <Text style={styles.startButtonText}>Iniciar</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[styles.captureButton, capturing && styles.captureButtonDisabled]}
-                onPress={capturePhoto}
-                disabled={capturing}
-              >
-                {capturing ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <MaterialCommunityIcons name="camera" size={32} color="#fff" />
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
+      <View style={styles.overlay} pointerEvents="box-none">
+        <View style={styles.topBar}>
+          <TouchableOpacity style={styles.iconButton} onPress={onCancel}>
+            <MaterialCommunityIcons name="close" size={24} color="#fff" />
+          </TouchableOpacity>
         </View>
-      </Camera>
+
+        <View style={styles.guideContainer} pointerEvents="none">
+          <View style={[styles.guide, started && styles.guideActive]} />
+        </View>
+
+        <View style={styles.bottomPanel}>
+          <View style={styles.stepRow}>
+            {LIVENESS_STEPS.map((step, index) => (
+              <View
+                key={step}
+                style={[
+                  styles.stepDot,
+                  started && index <= stepIndex ? styles.stepDotActive : null,
+                ]}
+              />
+            ))}
+          </View>
+
+          <Text style={styles.title}>Confirmação rápida</Text>
+          <Text style={styles.instruction}>{instruction}</Text>
+
+          {mountError ? (
+            <Text style={styles.errorText}>{mountError}</Text>
+          ) : null}
+
+          {!started ? (
+            <TouchableOpacity
+              style={[styles.primaryButton, (!cameraReady || mountError) && styles.buttonDisabled]}
+              onPress={handleStart}
+              disabled={!cameraReady || Boolean(mountError)}
+            >
+              <Text style={styles.primaryButtonText}>Iniciar validação</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                (!captureEnabled || capturing) && styles.buttonDisabled,
+              ]}
+              onPress={capturePhoto}
+              disabled={!captureEnabled || capturing}
+            >
+              {capturing ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  {captureEnabled ? 'Capturar foto' : 'Preparando...'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
@@ -343,147 +250,111 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  permissionContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 28,
   },
-  camera: {
-    flex: 1,
-    width: '100%',
+  permissionTitle: {
+    marginTop: 18,
+    color: LEAF_TEXT,
+    fontSize: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  permissionText: {
+    marginTop: 12,
+    color: LEAF_MUTED,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
   },
   overlay: {
-    flex: 1,
-    backgroundColor: 'transparent',
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-between',
-    padding: 20,
+  },
+  topBar: {
+    paddingTop: 56,
+    paddingHorizontal: 20,
+    alignItems: 'flex-end',
+  },
+  iconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.44)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   guideContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   guide: {
-    width: width * 0.7,
-    height: width * 0.7,
-    borderRadius: width * 0.35,
-    borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    borderStyle: 'dashed',
+    width: width * 0.68,
+    height: width * 0.86,
+    borderRadius: width * 0.34,
+    borderWidth: 2,
+    borderColor: LEAF_BORDER,
   },
   guideActive: {
-    borderColor: '#4CAF50',
-    borderStyle: 'solid',
+    borderColor: 'rgba(255,255,255,0.86)',
   },
-  instructionsContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
+  bottomPanel: {
+    margin: 16,
+    padding: 20,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.96)',
   },
-  instructionsText: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  livenessContainer: {
+  stepRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
+    gap: 6,
+    marginBottom: 16,
   },
-  livenessItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  livenessText: {
-    color: '#fff',
-    fontSize: 12,
-    marginLeft: 4,
-  },
-  controlsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  cancelButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  startButton: {
+  stepDot: {
     flex: 1,
-    marginLeft: 20,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E5E7E2',
+  },
+  stepDotActive: {
     backgroundColor: LEAF_GREEN,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 8,
-    alignItems: 'center',
   },
-  startButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+  title: {
+    color: LEAF_TEXT,
+    fontSize: 21,
+    fontWeight: '700',
   },
-  captureButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: LEAF_GREEN,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 20,
-  },
-  captureButtonDisabled: {
-    opacity: 0.5,
-  },
-  manualCaptureButton: {
-    marginTop: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    alignSelf: 'center',
-  },
-  manualCaptureText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  loadingText: {
-    color: '#fff',
-    marginTop: 16,
-    fontSize: 16,
+  instruction: {
+    marginTop: 8,
+    color: LEAF_MUTED,
+    fontSize: 15,
+    lineHeight: 22,
   },
   errorText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
-    textAlign: 'center',
+    marginTop: 10,
+    color: '#B42318',
+    fontSize: 13,
+    lineHeight: 18,
   },
-  errorSubtext: {
-    color: LEAF_GRAY,
-    fontSize: 14,
-    marginTop: 8,
-    textAlign: 'center',
-    paddingHorizontal: 32,
-  },
-  button: {
+  primaryButton: {
+    marginTop: 18,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: LEAF_GREEN,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    marginTop: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  buttonText: {
-    color: '#fff',
+  primaryButtonText: {
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  buttonDisabled: {
+    opacity: 0.54,
   },
 });
-

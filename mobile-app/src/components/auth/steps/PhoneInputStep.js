@@ -6,12 +6,9 @@ import {
     StyleSheet,
     Text,
     TextInput,
-    ScrollView,
-    KeyboardAvoidingView,
     Keyboard,
     Platform
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import { fonts } from '../../../theme/runtimeTokens';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +23,7 @@ import UserAuthService from '../../../services/UserAuthService';
 import Logger from '../../../utils/Logger';
 import onboardingTheme from '../common/onboardingTheme';
 import ContinueButton from '../common/ContinueButton';
+import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import { toUserFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
 const { color, radius, spacing } = onboardingTheme;
@@ -110,9 +108,7 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
     return 'Erro de Autenticacao';
 }
 
-const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
-    const insets = useSafeAreaInsets();
-    const isAndroid = Platform.OS === 'android';
+const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMeta }) => {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(false);
@@ -136,14 +132,6 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
         allowForcedQaOtpFlow ||
         isE2ETestBuild() ||
         isSimulatorBuild();
-    const containerPaddingBottom = isAndroid
-        ? (requiresPassword ? spacing.xxl + spacing.lg : spacing.lg) + insets.bottom
-        : spacing.lg;
-    const footerPaddingBottom = isAndroid
-        ? (requiresPassword
-            ? Math.max(spacing.md, insets.bottom + spacing.sm)
-            : Math.max(spacing.xs, insets.bottom + spacing.xs))
-        : null;
     const FORCE_CUSTOM_OTP_NUMBERS = new Set(['21102938475', '21123456789']);
 
     const requestOtpWithFallback = async (fullPhoneNumber) => {
@@ -514,30 +502,51 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
     };
 
     return (
-        <KeyboardAvoidingView
-            style={styles.keyboardContainer}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
-        >
-            <ScrollView
-                style={styles.scrollView}
-                scrollEnabled={false}
-                contentContainerStyle={[
-                    styles.container,
-                    isAndroid && requiresPassword ? styles.containerWithExpandedForm : null,
-                    { paddingBottom: containerPaddingBottom }
-                ]}
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-                showsVerticalScrollIndicator={false}
-            >
-                <View style={styles.header}>
-                    <Text style={styles.title}>Bem-vindo à Leaf</Text>
-                    <Text style={styles.subtitle}>
-                        Digite seu celular para entrar ou criar sua conta. Vamos enviar um código por SMS.
-                    </Text>
-                </View>
+        <EditorialOnboardingScreen
+            keyboard
+            showBack={false}
+            progressMeta={progressMeta}
+            title="Bem-vindo à Leaf"
+            description="Digite seu celular para entrar ou criar sua conta. Vamos enviar um código por SMS."
+            scrollEnabled={requiresPassword || forgotPasswordMode}
+            childrenStyle={styles.childrenWrap}
+            footer={(
+                <View>
+                    <ContinueButton
+                        testID="auth-continue-btn"
+                        accessibilityLabel="auth-continue-btn"
+                        onPress={handleContinue}
+                        text={loading || checking
+                            ? 'Continuando...'
+                            : requiresPassword
+                                ? (forgotPasswordMode ? 'Redefinir senha' : 'Entrar')
+                                : 'Continuar'}
+                        disabled={phoneNumber.length < 10}
+                    />
 
+                    {!requiresPassword ? (
+                        <>
+                            <Text style={styles.firstAccessHint}>
+                                Esse passo ajuda a manter sua conta segura.
+                            </Text>
+                            <Text style={styles.hiddenText}>
+                                Informe seu celular para confirmar sua conta com segurança.
+                            </Text>
+                            <TouchableOpacity
+                                activeOpacity={0.82}
+                                onPress={handlePasswordFallbackPressed}
+                                disabled={loading || checking || phoneNumber.length < 10}
+                                style={styles.passwordFallbackButton}
+                                testID="auth-password-fallback-btn"
+                                accessibilityLabel="auth-password-fallback-btn"
+                            >
+                                <Text style={styles.passwordFallbackText}>Já tenho senha</Text>
+                            </TouchableOpacity>
+                        </>
+                    ) : null}
+                </View>
+            )}
+        >
                 <View style={styles.contentCard}>
                     <View style={styles.inputContainer}>
                         <TouchableOpacity style={styles.countrySelector}>
@@ -680,58 +689,17 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess }) => {
                         </View>
                     ) : null}
                 </View>
-
-                <View
-                    style={[
-                        styles.footer,
-                        isAndroid && requiresPassword ? styles.footerExpanded : null,
-                        isAndroid && footerPaddingBottom !== null ? { paddingBottom: footerPaddingBottom } : null
-                    ]}
-                >
-                    <ContinueButton
-                        testID="auth-continue-btn"
-                        accessibilityLabel="auth-continue-btn"
-                        onPress={handleContinue}
-                        text={loading || checking
-                            ? 'Continuando...'
-                            : requiresPassword
-                                ? (forgotPasswordMode ? 'Redefinir senha' : 'Entrar')
-                                : 'Continuar'}
-                        disabled={phoneNumber.length < 10}
-                        style={styles.continueButton}
-                        textStyle={styles.continueButtonText}
-                    />
-
-                    {!requiresPassword ? (
-                        <>
-                            <Text style={styles.firstAccessHint}>
-                                Esse passo ajuda a manter sua conta segura.
-                            </Text>
-                            <Text style={styles.hiddenText}>
-                                Informe seu celular para confirmar sua conta com segurança.
-                            </Text>
-                            <TouchableOpacity
-                                activeOpacity={0.82}
-                                onPress={handlePasswordFallbackPressed}
-                                disabled={loading || checking || phoneNumber.length < 10}
-                                style={styles.passwordFallbackButton}
-                                testID="auth-password-fallback-btn"
-                                accessibilityLabel="auth-password-fallback-btn"
-                            >
-                                <Text style={styles.passwordFallbackText}>Já tenho senha</Text>
-                            </TouchableOpacity>
-                        </>
-                    ) : null}
-                </View>
-            </ScrollView>
-        </KeyboardAvoidingView>
+        </EditorialOnboardingScreen>
     );
 };
 
 const styles = StyleSheet.create({
+    childrenWrap: {
+        marginTop: 54
+    },
     keyboardContainer: {
         flex: 1,
-        backgroundColor: '#F6FAF6'
+        backgroundColor: color.background
     },
     scrollView: {
         flex: 1
@@ -842,8 +810,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: '#DFE8E1',
-        borderRadius: 20,
+        borderColor: color.border,
+        borderRadius: 24,
         paddingRight: 18,
         minHeight: 58
     },
@@ -852,12 +820,12 @@ const styles = StyleSheet.create({
         paddingHorizontal: 0,
         justifyContent: 'center',
         borderRightWidth: 1,
-        borderRightColor: '#DFE8E1',
+        borderRightColor: color.border,
         height: 58
     },
     countryCode: {
         marginTop: 1,
-        color: '#101C14',
+        color: color.textPrimary,
         fontSize: 16,
         lineHeight: 21,
         fontFamily: fonts.Medium,
@@ -870,7 +838,7 @@ const styles = StyleSheet.create({
         fontSize: 16,
         lineHeight: 21,
         letterSpacing: 0,
-        color: '#101C14',
+        color: color.textPrimary,
         fontFamily: fonts.Regular
     },
     footer: {
@@ -898,7 +866,7 @@ const styles = StyleSheet.create({
     firstAccessHint: {
         marginTop: 0,
         textAlign: 'center',
-        color: '#A5B0A8',
+        color: color.textMuted,
         fontSize: 11,
         lineHeight: 15,
         fontFamily: fonts.Regular,

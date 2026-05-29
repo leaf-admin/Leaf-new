@@ -1,9 +1,9 @@
 import React, { useRef } from 'react';
-import { Animated, Text, StyleSheet, Pressable, Platform } from 'react-native';
+import { Animated, Text, StyleSheet, Pressable } from 'react-native';
 import { fonts } from '../../../theme/runtimeTokens';
 import onboardingTheme from './onboardingTheme';
 
-const { color, radius, spacing } = onboardingTheme;
+const { color } = onboardingTheme;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const ContinueButton = ({
@@ -57,19 +57,20 @@ const ContinueButton = ({
 const styles = StyleSheet.create({
     continueButton: {
         backgroundColor: color.accent,
-        borderRadius: radius.md,
-        borderWidth: 0,
+        borderRadius: 24,
+        borderWidth: 1,
+        borderColor: color.border,
         paddingVertical: 0,
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: spacing.sm,
-        marginBottom: Platform.OS === 'android' ? spacing.xl : spacing.md,
+        marginTop: 0,
+        marginBottom: 0,
         shadowColor: color.accent,
         shadowOffset: { width: 0, height: 16 },
-        shadowOpacity: 0.20,
+        shadowOpacity: 0,
         shadowRadius: 30,
-        elevation: 8,
-        minHeight: 58
+        elevation: 0,
+        minHeight: 48
     },
     continueButtonDisabled: {
         backgroundColor: color.accentSoft,
@@ -77,7 +78,8 @@ const styles = StyleSheet.create({
     },
     continueButtonText: {
         color: color.accentText,
-        fontSize: 16,
+        fontSize: 13,
+        lineHeight: 17,
         fontFamily: fonts.SemiBold,
         textAlign: 'center'
     },

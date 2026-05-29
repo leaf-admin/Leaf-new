@@ -287,7 +287,7 @@ describe('WebSocketManager auth QA bypass', () => {
     );
   });
 
-  it('waits the configured socket connect timeout before trying the fallback endpoint', async () => {
+  it('waits the configured socket connect timeout without falling back to the API host', async () => {
     jest.useFakeTimers();
     const sockets = [];
     let createSocketClientSpy = null;
@@ -334,30 +334,42 @@ describe('WebSocketManager auth QA bypass', () => {
       expect(createSocketClientSpy).toHaveBeenCalledTimes(1);
 
       await jest.advanceTimersByTimeAsync(1);
-      expect(createSocketClientSpy).toHaveBeenCalledTimes(2);
-      expect(createSocketClientSpy).toHaveBeenLastCalledWith(
-        'https://api.test',
-        expect.objectContaining({
-          qaAuthBypass: true,
-          qaAutomation: true,
-        }),
-        expect.objectContaining({
-          qaAuthBypass: 'true',
-          qaAutomation: 'true',
-        }),
-      );
+      expect(createSocketClientSpy).toHaveBeenCalledTimes(1);
 
       await jest.advanceTimersByTimeAsync(30000);
 
       const error = await connectPromise;
       expect(error.code).toBe('WS_CONNECT_TIMEOUT');
       expect(sockets[0].disconnect).toHaveBeenCalled();
-      expect(sockets[1].disconnect).toHaveBeenCalled();
     } finally {
       createSocketClientSpy?.mockRestore();
       buildSocketAuthPayloadSpy?.mockRestore();
       jest.useRealTimers();
     }
+  });
+
+  it('singleflights concurrent connect calls before socket creation', async () => {
+    const manager = WebSocketManager.getInstance();
+    let resolveFreshSocket;
+    const connectFreshSocketSpy = jest
+      .spyOn(manager, '_connectFreshSocket')
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveFreshSocket = resolve;
+          }),
+      );
+
+    const firstConnect = manager.connect();
+    const secondConnect = manager.connect();
+
+    expect(connectFreshSocketSpy).toHaveBeenCalledTimes(1);
+
+    resolveFreshSocket(true);
+    await expect(firstConnect).resolves.toBe(true);
+    await expect(secondConnect).resolves.toBe(true);
+
+    connectFreshSocketSpy.mockRestore();
   });
 
   it('correlates availability responses by requestId', async () => {

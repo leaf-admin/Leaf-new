@@ -1,11 +1,11 @@
 import Logger from '../../../utils/Logger';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet, Alert as NativeAlert, KeyboardAvoidingView, Platform, Text } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, Alert as NativeAlert, Text } from 'react-native';
 import { fonts } from '../../../theme/runtimeTokens';
 import auth from '@react-native-firebase/auth';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
-import { AnimatedButton } from '../../design-system/AnimatedButton';
+import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import {
     allowQaOtpForceFlow,
     allowReviewAccess,
@@ -26,7 +26,7 @@ function resolveQaFixedOtp(phoneNumber) {
     return QA_FIXED_OTP_BY_PHONE.get(String(phoneNumber || '').trim()) || QA_FIXED_OTP;
 }
 
-const { color, radius, spacing, elevation } = onboardingTheme;
+const { color, spacing } = onboardingTheme;
 
 const Alert = {
     ...NativeAlert,
@@ -42,7 +42,7 @@ const Alert = {
         )
 };
 
-const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
+const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }) => {
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
     const [loading, setLoading] = useState(false);
     const [timer, setTimer] = useState(30);
@@ -328,94 +328,71 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack }) => {
     };
 
     return (
-        <KeyboardAvoidingView
-            style={styles.keyboardView}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        <EditorialOnboardingScreen
+            keyboard
+            title={'Confirme\nseu celular'}
+            description="Digite o código de 6 dígitos que enviamos por SMS."
+            onBack={onBack}
+            backTestID="auth-otp-back-btn"
+            backAccessibilityLabel="auth-otp-back-btn"
+            progressMeta={progressMeta}
+            childrenStyle={styles.childrenWrap}
+            footer={(
+                <ContinueButton
+                    onPress={() => handleVerifyOTP()}
+                    disabled={!otp.every(digit => digit) || loading}
+                    text={loading ? 'Confirmando...' : 'Confirmar'}
+                    testID="auth-otp-verify-btn"
+                    accessibilityLabel="auth-otp-verify-btn"
+                />
+            )}
         >
-            <View style={styles.container}>
-                <View style={styles.header}>
-                    <Text style={styles.title}>Confira seu SMS</Text>
-                    <Text style={styles.subtitle}>
-                        Enviamos um código de 6 dígitos para confirmar seu celular.
-                    </Text>
-                </View>
-
-                {/* Inputs do OTP */}
-                <View style={styles.card}>
-                    <View style={styles.otpContainer}>
-                        {otp.map((digit, index) => (
-                            <TextInput
-                                key={index}
-                                ref={ref => inputRefs.current[index] = ref}
-                                style={styles.otpInput}
-                                value={digit}
-                                onChangeText={(value) => handleOtpChange(value, index)}
-                                onKeyPress={(e) => handleKeyPress(e, index)}
-                                keyboardType="number-pad"
-                                maxLength={1}
-                                selectTextOnFocus
-                                autoFocus={index === 0}
-                                testID={`auth-otp-digit-${index}`}
-                                accessibilityLabel={`auth-otp-digit-${index}`}
-                            />
-                        ))}
-                    </View>
-                    {otp.every(Boolean) ? <Text style={styles.successTick}>✓</Text> : null}
-
-                    {/* Botão de verificação */}
-                    <View style={styles.buttonContainer}>
-                        <ContinueButton
-                            onPress={handleVerifyOTP}
-                            disabled={!otp.every(digit => digit) || loading}
-                            text={loading ? 'Confirmando...' : 'Confirmar'}
-                            testID="auth-otp-verify-btn"
-                            accessibilityLabel="auth-otp-verify-btn"
-                            style={styles.verifyButton}
-                            textStyle={styles.verifyButtonText}
-                        />
-                    </View>
-                </View>
-
-                {/* Reenvio do código */}
-                <View style={styles.resendContainer}>
-                    <Text style={styles.resendText}>
-                    </Text>
-                    {canResend ? (
-                        <TouchableOpacity
-                            onPress={handleResendCode}
-                            disabled={loading}
-                            testID="auth-otp-resend-btn"
-                            accessibilityLabel="auth-otp-resend-btn"
-                        >
-                            <Text style={styles.resendLink}>Enviar novamente</Text>
-                        </TouchableOpacity>
-                    ) : (
-                        <Text style={styles.resendTimer}>Novo código em 00:{String(timer).padStart(2, '0')}</Text>
-                    )}
-                </View>
-
-                <View style={styles.footer}>
-                    {/* Botão voltar */}
-                    <AnimatedButton
-                        variant="ghost"
-                        title="Voltar"
-                        onPress={onBack}
-                        style={styles.backButton}
-                        testID="auth-otp-back-btn"
-                        accessibilityLabel="auth-otp-back-btn"
+            <View style={styles.otpContainer}>
+                {otp.map((digit, index) => (
+                    <TextInput
+                        key={index}
+                        ref={ref => inputRefs.current[index] = ref}
+                        style={styles.otpInput}
+                        value={digit}
+                        onChangeText={(value) => handleOtpChange(value, index)}
+                        onKeyPress={(e) => handleKeyPress(e, index)}
+                        keyboardType="number-pad"
+                        maxLength={1}
+                        selectTextOnFocus
+                        autoFocus={index === 0}
+                        testID={`auth-otp-digit-${index}`}
+                        accessibilityLabel={`auth-otp-digit-${index}`}
                     />
-                </View>
+                ))}
             </View>
-        </KeyboardAvoidingView>
+            {otp.every(Boolean) ? <Text style={styles.successTick}>✓</Text> : null}
+
+            <View style={styles.resendContainer}>
+                {canResend ? (
+                    <TouchableOpacity
+                        onPress={handleResendCode}
+                        disabled={loading}
+                        testID="auth-otp-resend-btn"
+                        accessibilityLabel="auth-otp-resend-btn"
+                    >
+                        <Text style={styles.resendLink}>Enviar novamente</Text>
+                    </TouchableOpacity>
+                ) : (
+                    <Text style={styles.resendTimer}>Novo código em 00:{String(timer).padStart(2, '0')}</Text>
+                )}
+            </View>
+        </EditorialOnboardingScreen>
     );
 };
 
 const styles = StyleSheet.create({
+    childrenWrap: {
+        marginTop: 64
+    },
     keyboardView: {
         flex: 1,
         width: '100%',
-        backgroundColor: '#F6FAF6'
+        backgroundColor: color.background
     },
     container: {
         width: '100%',
@@ -457,16 +434,16 @@ const styles = StyleSheet.create({
         gap: 10
     },
     otpInput: {
-        width: 44,
-        height: 54,
+        width: 46,
+        height: 56,
         borderWidth: 1,
-        borderColor: '#DFE8E1',
-        borderRadius: 17,
+        borderColor: color.border,
+        borderRadius: 18,
         textAlign: 'center',
         fontSize: 18,
         lineHeight: 24,
-        fontFamily: fonts.Medium,
-        color: '#101C14',
+        fontFamily: fonts.SemiBold,
+        color: color.textPrimary,
         backgroundColor: '#FFFFFF'
     },
     successTick: {
@@ -506,7 +483,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: 28,
+        marginTop: 26,
         marginBottom: spacing.md
     },
     resendText: {
@@ -519,13 +496,13 @@ const styles = StyleSheet.create({
         textDecorationLine: 'underline',
         fontSize: 12,
         lineHeight: 16,
-        color: '#0F3B16',
-        fontFamily: fonts.Medium
+        color: color.accent,
+        fontFamily: fonts.SemiBold
     },
     resendTimer: {
         fontSize: 12,
         lineHeight: 16,
-        color: '#5F6B62',
+        color: color.textSecondary,
         fontFamily: fonts.Medium
     },
     footer: {

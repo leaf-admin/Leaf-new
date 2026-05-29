@@ -1,25 +1,23 @@
 import Logger from '../../../utils/Logger';
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../../theme/runtimeTokens';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
+import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 
-const { color, radius, spacing, elevation } = onboardingTheme;
+const { color } = onboardingTheme;
 
 const options = [
   {
     key: 'customer',
     title: 'Quero viajar',
-    icon: 'car-outline',
     description: 'Solicite viagens com experiência premium'
   },
   {
     key: 'driver',
     title: 'Quero dirigir',
-    icon: 'navigate-outline',
     description: 'Dirija com a Leaf e receba por corrida'
   }
 ];
@@ -31,7 +29,7 @@ function normalizeUserType(userType) {
   return userType;
 }
 
-const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {} }) => {
+const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {}, progressMeta }) => {
   const [selected, setSelected] = useState(options[0]);
 
   useEffect(() => {
@@ -68,21 +66,23 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {} }) =
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.iconBackButton}
-          onPress={onBack}
-          testID="auth-profile-selection-back-btn"
-          accessibilityLabel="auth-profile-selection-back-btn"
-        >
-          <Ionicons name="chevron-back" size={22} color={color.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.title}>Como você quer usar a Leaf?</Text>
-      <Text style={styles.subtitle}>Escolha agora. Você pode trocar depois no perfil.</Text>
-
+    <EditorialOnboardingScreen
+      title={'Escolha\nde perfil'}
+      description="Conta pra gente como você quer usar a Leaf agora. Dá pra ajustar isso depois no perfil."
+      onBack={onBack}
+      backTestID="auth-profile-selection-back-btn"
+      backAccessibilityLabel="auth-profile-selection-back-btn"
+      progressMeta={progressMeta}
+      footer={(
+        <ContinueButton
+          onPress={handleContinue}
+          disabled={!selected}
+          text="Continuar"
+          testID="auth-profile-selection-continue-btn"
+          accessibilityLabel="auth-profile-selection-continue-btn"
+        />
+      )}
+    >
       <View style={styles.roleList}>
         {options.map(option => {
           const selectedOption = selected?.key === option.key;
@@ -95,167 +95,94 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {} }) =
               testID={`auth-profile-option-${option.key}`}
               accessibilityLabel={`auth-profile-option-${option.key}`}
             >
-              <View style={[styles.roleIcon, selectedOption ? styles.roleIconSelected : null]}>
-                <View style={styles.leafGlyph} />
-              </View>
               <View style={styles.roleTextWrap}>
+                <View style={styles.roleTopRow}>
+                  <View style={[styles.leafGlyph, selectedOption ? styles.leafGlyphSelected : null]} />
+                  {selectedOption ? (
+                    <View style={styles.checkDot}>
+                      <Text style={styles.checkDotText}>✓</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={styles.roleTitle}>{option.title}</Text>
                 <Text style={styles.roleDescription}>{option.description}</Text>
               </View>
-              {selectedOption ? (
-                <View style={styles.checkBadge}>
-                  <Text style={styles.checkBadgeText}>Selecionado</Text>
-                </View>
-              ) : null}
             </TouchableOpacity>
           );
         })}
       </View>
-
-      <ContinueButton
-        onPress={handleContinue}
-        disabled={!selected}
-        text="Continuar"
-        testID="auth-profile-selection-continue-btn"
-        accessibilityLabel="auth-profile-selection-continue-btn"
-        style={styles.continueButton}
-        textStyle={styles.continueButtonText}
-      />
-    </View>
+    </EditorialOnboardingScreen>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingHorizontal: 32,
-    paddingTop: 66,
-    paddingBottom: 84,
-    backgroundColor: '#F6FAF6'
-  },
-  header: {
-    position: 'absolute',
-    top: 14,
-    left: 12,
-    minHeight: 44,
-    justifyContent: 'center',
-    marginBottom: 0,
-    opacity: 0
-  },
-  iconBackButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: color.border,
-    backgroundColor: color.panelSoft,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  title: {
-    color: '#102018',
-    fontSize: 18,
-    lineHeight: 24,
-    fontFamily: fonts.Medium,
-    textAlign: 'left',
-    letterSpacing: 0
-  },
-  subtitle: {
-    marginTop: 7,
-    marginBottom: 66,
-    color: '#66756B',
-    fontSize: 13,
-    lineHeight: 18,
-    fontFamily: fonts.Regular,
-    textAlign: 'left'
-  },
   roleList: {
-    gap: 22,
-    marginBottom: 'auto'
+    gap: 20
   },
   roleCard: {
-    minHeight: 122,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    minHeight: 128,
     paddingHorizontal: 24,
-    paddingTop: 24,
+    paddingTop: 22,
+    paddingBottom: 20,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#DFE8E1',
+    borderColor: color.border,
     backgroundColor: '#FFFFFF'
   },
   roleCardSelected: {
-    borderColor: '#1FA76F',
-    backgroundColor: '#FFFFFF',
-    shadowOpacity: 0,
-    elevation: 0
+    borderWidth: 2,
+    borderColor: color.accent,
+    backgroundColor: '#FFFFFF'
   },
-  roleIcon: {
-    width: 18,
-    height: 28,
-    borderRadius: 0,
+  roleTopRow: {
+    minHeight: 24,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    marginRight: 18,
-    marginTop: 4
-  },
-  roleIconSelected: {
-    backgroundColor: 'transparent'
+    justifyContent: 'space-between',
+    marginBottom: 12
   },
   leafGlyph: {
-    width: 12,
-    height: 16,
+    width: 15,
+    height: 21,
     borderTopLeftRadius: 10,
     borderTopRightRadius: 10,
     borderBottomRightRadius: 10,
     borderBottomLeftRadius: 3,
-    backgroundColor: '#0F3B16',
+    backgroundColor: color.textMuted,
     transform: [{ rotate: '-34deg' }]
+  },
+  leafGlyphSelected: {
+    backgroundColor: color.accent
   },
   roleTextWrap: {
     flex: 1
   },
   roleTitle: {
-    color: '#101C14',
-    fontSize: 18,
-    lineHeight: 24,
-    fontFamily: fonts.Medium
+    color: color.textPrimary,
+    fontSize: 20,
+    lineHeight: 25,
+    fontFamily: fonts.Bold
   },
   roleDescription: {
-    marginTop: 6,
-    color: '#66756B',
-    fontSize: 12,
-    lineHeight: 16,
+    marginTop: 5,
+    color: color.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
     fontFamily: fonts.Regular
   },
-  checkBadge: {
-    width: 86,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#EAF6EE',
+  checkDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: color.accent,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 10
+    justifyContent: 'center'
   },
-  checkBadgeText: {
-    color: '#0F3B16',
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15
-  },
-  continueButton: {
-    minHeight: 46,
-    borderRadius: 23,
-    marginTop: 0,
-    marginBottom: 0,
-    shadowOpacity: 0,
-    elevation: 0
-  },
-  continueButtonText: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontFamily: fonts.Medium
+  checkDotText: {
+    color: color.accentText,
+    fontFamily: fonts.Bold,
+    fontSize: 13,
+    lineHeight: 18
   }
 });
 

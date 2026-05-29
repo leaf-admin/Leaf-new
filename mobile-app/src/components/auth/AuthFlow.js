@@ -1,6 +1,6 @@
 import Logger from '../../utils/Logger';
 import React, { useState, useCallback } from 'react';
-import { StatusBar, View, StyleSheet, Platform } from 'react-native';
+import { StatusBar, View, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FETCH_USER_SUCCESS } from '../../state/actionTypes';
 import store from '../../state/appStore';
@@ -11,6 +11,7 @@ import UserDatabaseService from '../../utils/userDatabaseService';
 import { createInitialDriverOnboardingState } from '../../services/DriverOnboardingService';
 import { allowReviewAccess } from '../../config/runtimeAccessPolicy';
 import onboardingTheme from './common/onboardingTheme';
+import { resolveEditorialProgressMeta } from './common/EditorialOnboardingLayout';
 import {
   buildRestoredAuthFlowData,
   normalizeAuthFlowProfileData,
@@ -49,6 +50,10 @@ const AuthFlow = ({
   ));
   const [authData, setAuthData] = useState(() => screenshotAuthData || {});
   const isReviewEnv = allowReviewAccess();
+  const editorialProgressMeta = React.useMemo(
+    () => resolveEditorialProgressMeta(currentStep, authData?.profileSelection?.userType),
+    [authData?.profileSelection?.userType, currentStep]
+  );
 
   const persistAuthenticatedProfile = useCallback(async (profile, fallbackUserType = null) => {
     try {
@@ -745,6 +750,7 @@ const AuthFlow = ({
           <PhoneInputStep
             onVerificationSent={handlePhoneVerificationSent}
             onPasswordLoginSuccess={handlePasswordLoginSuccess}
+            progressMeta={editorialProgressMeta}
           />
         );
       case 1:
@@ -754,6 +760,7 @@ const AuthFlow = ({
             confirmation={authData.confirmation}
             onVerified={handleOTPVerified}
             onBack={goToPreviousStep}
+            progressMeta={editorialProgressMeta}
           />
         );
       case 2:
@@ -762,6 +769,7 @@ const AuthFlow = ({
             onProfileSelected={handleProfileSelected}
             onBack={goToPreviousStep}
             initialData={authData.profileSelection || {}}
+            progressMeta={editorialProgressMeta}
           />
         );
       case 3:
@@ -775,6 +783,7 @@ const AuthFlow = ({
               documentData: authData.documentData || {},
               credentials: authData.credentials || {}
             }}
+            progressMeta={editorialProgressMeta}
           />
         );
       case 4:
@@ -788,6 +797,7 @@ const AuthFlow = ({
               documentData: authData.documentData || {},
               user: authData.user || null
             }}
+            progressMeta={editorialProgressMeta}
           />
         );
       case 5:
@@ -801,6 +811,7 @@ const AuthFlow = ({
               profileSelection: authData.profileSelection || {},
               ...(authData.credentials || {})
             }}
+            progressMeta={editorialProgressMeta}
           />
         );
       case 6:
@@ -811,6 +822,7 @@ const AuthFlow = ({
             initialData={{
               email: authData?.documentData?.email || authData?.driverContactData?.email || ''
             }}
+            progressMeta={editorialProgressMeta}
           />
         );
       default:
@@ -829,18 +841,9 @@ const AuthFlow = ({
         backgroundColor={color.background}
         barStyle="dark-content"
       />
-      <View style={styles.backgroundCanvas}>
-        <View style={styles.mapLineVerticalA} pointerEvents="none" />
-        <View style={styles.mapLineVerticalB} pointerEvents="none" />
-        <View style={styles.mapLineHorizontalA} pointerEvents="none" />
-        <View style={styles.mapLineHorizontalB} pointerEvents="none" />
-        <View style={styles.routeLineA} pointerEvents="none" />
-        <View style={styles.routeLineB} pointerEvents="none" />
-        <View style={styles.routeLineC} pointerEvents="none" />
-        <View style={styles.contentHost}>
-          <View style={styles.contentFrame}>
-            {renderCurrentStep()}
-          </View>
+      <View style={styles.contentHost}>
+        <View style={styles.contentFrame}>
+          {renderCurrentStep()}
         </View>
       </View>
     </View>
@@ -852,94 +855,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: color.background
   },
-  backgroundCanvas: {
-    flex: 1,
-    backgroundColor: color.background,
-    overflow: 'hidden'
-  },
-  mapLineVerticalA: {
-    position: 'absolute',
-    top: -80,
-    bottom: -80,
-    left: '26%',
-    width: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(17,23,25,0.035)'
-  },
-  mapLineVerticalB: {
-    position: 'absolute',
-    top: -100,
-    bottom: -100,
-    right: '30%',
-    width: 18,
-    borderRadius: 999,
-    backgroundColor: color.skyLine,
-    transform: [{ rotate: '14deg' }],
-    opacity: 0.45
-  },
-  mapLineHorizontalA: {
-    position: 'absolute',
-    left: -80,
-    right: -80,
-    top: '46%',
-    height: 14,
-    borderRadius: 999,
-    backgroundColor: color.mapLine,
-    transform: [{ rotate: '-24deg' }],
-    opacity: 0.5
-  },
-  mapLineHorizontalB: {
-    position: 'absolute',
-    left: -60,
-    right: -60,
-    bottom: '18%',
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(17,23,25,0.035)'
-  },
-  routeLineA: {
-    position: 'absolute',
-    width: 98,
-    height: 3,
-    left: 38,
-    bottom: '36%',
-    borderRadius: 999,
-    backgroundColor: 'rgba(126,161,107,0.55)',
-    transform: [{ rotate: '-42deg' }]
-  },
-  routeLineB: {
-    position: 'absolute',
-    width: 96,
-    height: 3,
-    left: 120,
-    bottom: '43%',
-    borderRadius: 999,
-    backgroundColor: 'rgba(126,161,107,0.42)',
-    transform: [{ rotate: '-22deg' }]
-  },
-  routeLineC: {
-    position: 'absolute',
-    width: 92,
-    height: 3,
-    left: 212,
-    bottom: '49%',
-    borderRadius: 999,
-    backgroundColor: 'rgba(126,161,107,0.50)',
-    transform: [{ rotate: '-48deg' }]
-  },
   contentHost: {
     flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: Platform.OS === 'android' ? 18 : 14,
-    paddingTop: Platform.OS === 'android' ? 28 : 18,
-    paddingBottom: Platform.OS === 'android' ? 18 : 12
+    backgroundColor: color.background
   },
   contentFrame: {
     width: '100%',
-    maxWidth: 392,
-    alignSelf: 'center',
-    flex: 1,
-    maxHeight: 844
+    alignSelf: 'stretch',
+    flex: 1
   }
 });
 

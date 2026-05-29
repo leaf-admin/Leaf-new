@@ -7,6 +7,7 @@
 
 import Logger from '../utils/Logger';
 import faceDetectionService from './FaceDetectionService';
+import deviceFaceEmbeddingService from './DeviceFaceEmbeddingService';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import auth from '@react-native-firebase/auth';
@@ -387,50 +388,124 @@ class KYCService {
       const verificationMode = options?.mode
         || (awsSessionId ? this.getAwsProviderName() : 'device_signature_v1');
       const useAwsSessionOnly = Boolean(awsSessionId) && !selfieImageUri;
+      const allowRawSelfieFallback = options?.allowRawSelfieFallback === true;
+      const serverSideFallbackOnDeviceEmbeddingUnavailable =
+        options?.serverSideFallbackOnDeviceEmbeddingUnavailable === true;
+      const preferServerSideSelfieVerification =
+        options?.preferServerSideSelfieVerification !== false;
 
       let similarity = null;
       let threshold = null;
       let isMatch = null;
       let currentSignatureHash = null;
       let anchorSignatureHash = null;
+      let deviceEmbeddingPayload = null;
+      let effectiveVerificationMode = verificationMode;
+
+      if (awsSessionId && selfieImageUri && preferServerSideSelfieVerification) {
+        return this.verifyDriverServerSideSelfie(driverId, selfieImageUri, {
+          ...options,
+          awsSessionId,
+          challengeId,
+          requirement,
+        });
+      }
 
       if (!useAwsSessionOnly) {
-        // Processar selfie (deve ter face)
+        let signatureSourceUri = selfieImageUri;
+
+        // Processar selfie quando houver metadados de face disponíveis.
         const selfieProcessed = await faceDetectionService.processImage(selfieImageUri);
-        if (!selfieProcessed.success || !selfieProcessed.detection.hasFace) {
+        if (selfieProcessed.success && selfieProcessed.detection?.hasFace) {
+          signatureSourceUri = selfieProcessed.alignedUri || selfieImageUri;
+        } else if (allowRawSelfieFallback && selfieImageUri) {
+          Logger.warn(
+            '⚠️ [KYC] Detecção facial local indisponível; usando selfie bruta como assinatura de verificação diária.',
+            selfieProcessed?.error
+          );
+        } else {
           throw new Error('Nenhuma face detectada na selfie. Por favor, tire outra foto.');
         }
 
-        // Device-first: gerar assinatura da selfie atual
-        const currentSig = await this.buildSignature(selfieProcessed.alignedUri || selfieImageUri);
-        let anchorSignature = await AsyncStorage.getItem(this.getAnchorStorageKey(driverId));
-
-        if (!anchorSignature) {
-          const anchorUrl = getSelfHostedApiUrl(`/api/kyc/device-anchor/${driverId}`);
-          const anchorResp = await fetch(anchorUrl, {
-            method: 'GET',
-            headers: await buildKycAuthHeaders({ json: false })
+        try {
+          deviceEmbeddingPayload = await deviceFaceEmbeddingService.generateEmbeddingPayload(signatureSourceUri, {
+            challengeId,
+            livenessSessionId: awsSessionId,
           });
-          const anchorData = await anchorResp.json().catch(() => ({}));
-          if (anchorResp.ok && anchorData?.anchorSignature) {
-            anchorSignature = anchorData.anchorSignature;
-            await AsyncStorage.setItem(this.getAnchorStorageKey(driverId), anchorSignature);
+        } catch (embeddingError) {
+          Logger.warn(
+            '⚠️ [KYC] Embedding facial no dispositivo indisponível; usando assinatura local legada.',
+            embeddingError
+          );
+          deviceEmbeddingPayload = null;
+        }
+
+        if (deviceEmbeddingPayload?.embedding) {
+          effectiveVerificationMode = deviceEmbeddingPayload.mode || 'mobile_arcface_w600k_r50_v1';
+        } else if (serverSideFallbackOnDeviceEmbeddingUnavailable && awsSessionId) {
+          Logger.warn(
+            '⚠️ [KYC] Embedding facial no dispositivo indisponível; usando fallback server-side pós-liveness.'
+          );
+          return this.verifyDriverServerSideSelfie(driverId, selfieImageUri, {
+            ...options,
+            awsSessionId,
+            challengeId,
+            requirement,
+          });
+        } else {
+          // Device-first legado: gerar assinatura da selfie atual
+          const currentSig = await this.buildSignature(signatureSourceUri);
+          let anchorSignature = await AsyncStorage.getItem(this.getAnchorStorageKey(driverId));
+
+          if (!anchorSignature) {
+            const anchorUrl = getSelfHostedApiUrl(`/api/kyc/device-anchor/${driverId}`);
+            const anchorResp = await fetch(anchorUrl, {
+              method: 'GET',
+              headers: await buildKycAuthHeaders({ json: false })
+            });
+            const anchorData = await anchorResp.json().catch(() => ({}));
+            if (anchorResp.ok && anchorData?.anchorSignature) {
+              anchorSignature = anchorData.anchorSignature;
+              await AsyncStorage.setItem(this.getAnchorStorageKey(driverId), anchorSignature);
+            }
           }
-        }
 
-        if (!anchorSignature) {
-          throw new Error('Assinatura âncora não encontrada. Faça onboarding KYC novamente.');
-        }
+          if (!anchorSignature) {
+            throw new Error('Assinatura âncora não encontrada. Faça onboarding KYC novamente.');
+          }
 
-        similarity = this.similarityFromSignatures(anchorSignature, currentSig.signature);
-        threshold = 0.5;
-        isMatch = similarity >= threshold;
-        currentSignatureHash = currentSig.signature.slice(0, 12);
-        anchorSignatureHash = anchorSignature.slice(0, 12);
+          similarity = this.similarityFromSignatures(anchorSignature, currentSig.signature);
+          threshold = 0.5;
+          isMatch = similarity >= threshold;
+          currentSignatureHash = currentSig.signature.slice(0, 12);
+          anchorSignatureHash = anchorSignature.slice(0, 12);
+        }
       }
 
       // Enviar resultado leve para backend
       const backendUrl = getSelfHostedApiUrl('/api/kyc/verify-driver/device');
+      const deviceKycPayload = {
+        ...(deviceEmbeddingPayload || {}),
+        mode: effectiveVerificationMode,
+        provider: deviceEmbeddingPayload?.provider || effectiveVerificationMode,
+        recoverBlocked: true,
+        isMatch: typeof isMatch === 'boolean' ? isMatch : undefined,
+        similarityScore: typeof similarity === 'number' ? similarity : undefined,
+        confidence: typeof similarity === 'number' ? similarity : undefined,
+        threshold: typeof threshold === 'number' ? threshold : undefined,
+        processingTime: Number(deviceEmbeddingPayload?.processingTime || 0),
+        livenessPassed,
+        awsSessionId: awsSessionId || undefined,
+        aws: awsSessionId
+          ? {
+            sessionId: awsSessionId,
+            provider: this.getAwsProviderName()
+          }
+          : undefined,
+        currentSignatureHash: currentSignatureHash || undefined,
+        anchorSignatureHash: anchorSignatureHash || undefined
+      };
+
       const response = await fetch(backendUrl, {
         method: 'POST',
         headers: await buildKycAuthHeaders(),
@@ -438,26 +513,7 @@ class KYCService {
           userId: driverId,
           challengeId,
           requirement,
-          deviceKyc: {
-            mode: verificationMode,
-            provider: verificationMode,
-            recoverBlocked: true,
-            isMatch: typeof isMatch === 'boolean' ? isMatch : undefined,
-            similarityScore: typeof similarity === 'number' ? similarity : undefined,
-            confidence: typeof similarity === 'number' ? similarity : undefined,
-            threshold: typeof threshold === 'number' ? threshold : undefined,
-            processingTime: 0,
-            livenessPassed,
-            awsSessionId: awsSessionId || undefined,
-            aws: awsSessionId
-              ? {
-                sessionId: awsSessionId,
-                provider: this.getAwsProviderName()
-              }
-              : undefined,
-            currentSignatureHash: currentSignatureHash || undefined,
-            anchorSignatureHash: anchorSignatureHash || undefined
-          }
+          deviceKyc: deviceKycPayload
         }),
       });
 
@@ -478,6 +534,61 @@ class KYCService {
       return {
         success: false,
         error: error.message,
+      };
+    }
+  }
+
+  async verifyDriverServerSideSelfie(driverId, selfieImageUri, options = {}) {
+    try {
+      Logger.log('🔐 Verificando identidade do motorista no backend:', driverId);
+      const awsSessionId = options?.awsSessionId || null;
+      if (!awsSessionId) {
+        throw new Error('Sessão AWS de liveness é obrigatória para validar a selfie.');
+      }
+      if (!selfieImageUri) {
+        throw new Error('Selfie é obrigatória para validar a identidade.');
+      }
+
+      const formData = new FormData();
+      formData.append('userId', driverId);
+      formData.append('awsSessionId', awsSessionId);
+      if (options?.challengeId) {
+        formData.append('challengeId', options.challengeId);
+      }
+      if (options?.requirement) {
+        formData.append('requirement', options.requirement);
+      }
+      if (options?.forceRecheck === true) {
+        formData.append('forceRecheck', 'true');
+      }
+      formData.append('currentImage', {
+        uri: selfieImageUri,
+        name: 'driver-selfie.jpg',
+        type: 'image/jpeg'
+      });
+
+      const backendUrl = getSelfHostedApiUrl('/api/kyc/verify-driver/server-side-selfie');
+      const response = await fetch(backendUrl, {
+        method: 'POST',
+        headers: await buildKycAuthHeaders({ json: false }),
+        body: formData
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+      }
+
+      Logger.log('✅ Verificação server-side concluída:', result);
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      Logger.error('❌ Erro ao verificar identidade no backend:', error);
+      return {
+        success: false,
+        error: error.message
       };
     }
   }

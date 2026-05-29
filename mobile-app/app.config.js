@@ -167,6 +167,7 @@ module.exports = {
         "ios",
         "android"
     ],
+    orientation: "portrait",
     version: AppConfig.ios_app_version,
     icon: "./assets/images/logo1024x1024.png",
     splash: {
@@ -233,13 +234,26 @@ module.exports = {
             backgroundColor: "#002C00"
         },
         jsEngine: "hermes",
-        intentFilters: [{
-            action: "VIEW",
-            data: {
-                scheme: "br.com.leaf.ride"
+        intentFilters: [
+            {
+                action: "VIEW",
+                data: {
+                    scheme: "br.com.leaf.ride"
+                },
+                category: ["BROWSABLE", "DEFAULT"]
             },
-            category: ["BROWSABLE", "DEFAULT"]
-        }],
+            {
+                action: "VIEW",
+                autoVerify: true,
+                data: [
+                    { scheme: "https", host: "leaf.app.br", pathPrefix: "/convite" },
+                    { scheme: "https", host: "www.leaf.app.br", pathPrefix: "/convite" },
+                    { scheme: "https", host: "leaf.app.br", pathPrefix: "/motorista/convite" },
+                    { scheme: "https", host: "www.leaf.app.br", pathPrefix: "/motorista/convite" }
+                ],
+                category: ["BROWSABLE", "DEFAULT"]
+            }
+        ],
         config: {
             googleMaps: {
                 apiKey: GoogleMapApiConfig.android
@@ -249,6 +263,10 @@ module.exports = {
     ios: {
         bundleIdentifier: "br.com.leaf.ride",
         jsEngine: "hermes",
+        associatedDomains: [
+            "applinks:leaf.app.br",
+            "applinks:www.leaf.app.br"
+        ],
         config: {
             googleMapsApiKey: GoogleMapApiConfig.ios
         },
@@ -258,6 +276,9 @@ module.exports = {
         deploymentTarget: "17.0",
         infoPlist: {
             ITSAppUsesNonExemptEncryption: false,
+            UIRequiresFullScreen: true,
+            UISupportedInterfaceOrientations: ["UIInterfaceOrientationPortrait"],
+            "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationPortrait"],
             NSAppTransportSecurity: iosTransportSecurity,
             UIBackgroundModes: ["fetch", "location", "remote-notification"],
             NSMicrophoneUsageDescription: "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
@@ -309,6 +330,8 @@ module.exports = {
         "./plugins/withGradleNodeFix",
         "./plugins/withExpoModulesCoreFix",
         "./plugins/withNetworkSecurityConfig",
+        "./plugins/withLeafAwsLiveness",
+        "./plugins/withLeafFaceEmbedding",
         [
             "expo-notifications",
             {
