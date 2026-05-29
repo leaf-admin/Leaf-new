@@ -201,3 +201,16 @@ Validação:
 - `git ls-files` nao lista os segredos/artefatos locais sensiveis.
 - `.gitignore` cobre `.env`, `.env.*`, Firebase config, plist, keystores e chaves.
 - Nenhuma credencial real foi movida, exibida ou alterada neste bloco.
+
+## Bloco 9 - Executado
+
+Escopo: criar exemplo versionado para materializar segredos fora do repo.
+
+- Criado `scripts/local/materialize-secrets.example.sh`.
+- O script nao contem valores reais e espera `LEAF_SECRETS_ROOT` fora do workspace.
+- Atualizado o runbook para apontar o exemplo.
+
+Validação:
+
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `git diff --check`: PASS.

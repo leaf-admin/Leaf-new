@@ -58,7 +58,7 @@ Nao remover esses arquivos no meio de uma rodada de build/canary. Primeiro criar
 6. Depois de validado, apagar copias locais dentro do repo.
 7. Rotacionar credenciais se algum arquivo sensivel tiver sido exposto fora do ambiente local controlado.
 
-## Proximo Bloco Sugerido
+## Exemplo Versionado
 
-Criar `scripts/local/materialize-secrets.example.sh` sem valores reais, documentando os caminhos esperados. O script real deve ficar fora do git.
-
+- `scripts/local/materialize-secrets.example.sh` documenta a estrutura esperada do cofre local e os destinos dentro do workspace.
+- O script real, com eventuais ajustes de ambiente, deve ficar fora do git.
