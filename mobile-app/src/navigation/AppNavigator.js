@@ -546,7 +546,6 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
       <Stack.Screen name="CNHUpload" component={CNHUploadScreen} options={{ headerShown: false }} />
       <Stack.Screen name="CRLVUpload" component={CRLVUploadScreen} options={{ headerShown: false }} />
       <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="AuthLoadingScreen" component={AuthLoadingScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PhoneInputScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PhoneScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Login" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
