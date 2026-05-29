@@ -29,8 +29,8 @@ Este plano consolida as frentes estrategicas que sairam das auditorias recentes 
 ## Proximos blocos recomendados
 
 1. Persistir runs do orquestrador em Firestore/Postgres quando houver infra definida. O JSON duravel resolve restart local/VPS simples, mas nao substitui banco operacional multi-instancia.
-2. Criar paginas web/deep links para `/convite/:code` e `/motorista/convite/:code`.
-3. Ligar beneficio de convite de passageiro ao pricing/checkout com idempotencia.
+2. Validar em device os deep links `/convite/:code` e `/motorista/convite/:code` apos publicar `.well-known` na Cloudflare Pages.
+3. Confirmar o App Store ID publico para atualizar o fallback iOS das paginas de convite.
 4. Criar cockpit dashboard para Leaf Delas, destino do motorista, dynamic pricing e smart push.
 5. Persistir serie temporal H3 e feedback de smart push para evoluir de heuristica para ML treinavel.
 6. Fazer rodada de UI final pos-canary, sem mexer nos cards iniciais de passageiro/motorista.

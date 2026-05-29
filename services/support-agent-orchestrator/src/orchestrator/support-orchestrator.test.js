@@ -176,6 +176,34 @@ test("escalates safety or legal risk to N3 diagnostics", () => {
   assertNoAutosendOrAutoresolve(run);
 });
 
+test("escalates passenger report of different driver to guarded N3 identity flow", () => {
+  const orchestrator = createOrchestrator();
+
+  const run = orchestrator.analyzeChat({
+    userId: "customer_identity_1",
+    ticket: {
+      id: "ticket_identity_1",
+      subject: "Motorista diferente do cadastro",
+      metadata: { bookingId: "booking_identity_1", driverId: "driver_identity_1" },
+    },
+    messages: [
+      {
+        senderType: "customer",
+        message: "O motorista era diferente da foto que apareceu no app.",
+      },
+    ],
+  });
+
+  assert.equal(run.classification.supportTier, "N3");
+  assert.equal(run.classification.category, "driver_kyc");
+  assert.equal(run.recommendation.nextAction, "technical_or_risk_escalation");
+  assert.match(
+    run.recommendation.n3.diagnosticChecklist.join(" "),
+    /revalidacao de identidade/
+  );
+  assertNoAutosendOrAutoresolve(run);
+});
+
 test("keeps N1 in guarded copilot mode without autosend or autoresolve", () => {
   const orchestrator = createOrchestrator({
     config: {

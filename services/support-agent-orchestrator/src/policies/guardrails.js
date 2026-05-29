@@ -1,6 +1,7 @@
 const RULES = {
   emergency: ["sos", "emergencia", "acidente", "assedio", "ameaca", "violencia", "roubo", "agressao", "risco fisico"],
   fraud: ["fraude", "golpe", "conta invadida", "vazamento", "lgpd", "dados pessoais", "phishing"],
+  identity_mismatch: ["motorista diferente", "nao era o motorista", "outro motorista", "condutor diferente", "pessoa diferente", "foto diferente", "diferente do cadastro", "wrong driver", "different driver"],
   payment: ["pagamento", "pix", "cobranca", "reembolso", "charge", "woovi", "openpix", "saldo", "saque"],
   kyc: ["documento", "kyc", "cnh", "crlv", "antecedentes", "biometria", "cadastro motorista"],
   technical: ["bug", "erro", "falha", "travou", "websocket", "redis", "timeout", "indisponivel", "app fora"],
@@ -9,6 +10,7 @@ const RULES = {
 const CATEGORY_BY_RULE = {
   emergency: "safety",
   fraud: "fraud",
+  identity_mismatch: "driver_kyc",
   payment: "payment",
   kyc: "driver_kyc",
   technical: "technical",
@@ -35,13 +37,13 @@ function categoryFromFlags(flags, fallback = "general") {
 
 function priorityFromFlags(flags, ticketPriority) {
   const current = String(ticketPriority || "").toUpperCase();
-  if (flags.some((flag) => ["emergency", "fraud"].includes(flag))) return "N1";
+  if (flags.some((flag) => ["emergency", "fraud", "identity_mismatch"].includes(flag))) return "N1";
   if (flags.some((flag) => ["payment", "kyc", "technical"].includes(flag))) return current === "N1" ? "N1" : "N2";
   return ["N1", "N2", "N3"].includes(current) ? current : "N3";
 }
 
 function supportTierFromFlags(flags) {
-  if (flags.includes("emergency") || flags.includes("fraud")) return "N3";
+  if (flags.includes("emergency") || flags.includes("fraud") || flags.includes("identity_mismatch")) return "N3";
   if (flags.includes("payment") || flags.includes("kyc") || flags.includes("technical")) return "N2";
   return "N1";
 }
@@ -51,7 +53,7 @@ function canAutoReply({ flags, confidence, minConfidence, autonomousMode, playbo
   if (confidence < minConfidence) return false;
   if (!playbookMatches?.length) return false;
   if (!approvedMacro) return false;
-  if (flags.some((flag) => ["emergency", "fraud", "payment", "kyc"].includes(flag))) return false;
+  if (flags.some((flag) => ["emergency", "fraud", "identity_mismatch", "payment", "kyc"].includes(flag))) return false;
   return true;
 }
 

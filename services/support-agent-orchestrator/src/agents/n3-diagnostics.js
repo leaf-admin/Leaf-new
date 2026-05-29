@@ -14,6 +14,7 @@ class N3Diagnostics {
         "Correlacionar ticket com incidentes e alertas ativos.",
         "Buscar traceId, bookingId, userId, paymentId ou incidentId no contexto do ticket.",
         "Verificar logs e metricas da janela do evento.",
+        "Se houver relato de motorista diferente do cadastro, acionar revalidacao de identidade sem expor o motivo ao app.",
         "Registrar mitigacao ou pedido objetivo para engenharia/seguranca.",
       ],
       correlationKeys: {
