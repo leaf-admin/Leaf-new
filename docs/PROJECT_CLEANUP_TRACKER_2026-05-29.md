@@ -285,3 +285,18 @@ Validação:
 
 - `rg` confirmou `LEAF_SERVER_RUNTIME=modular` no compose ativo.
 - `git diff --check`: PASS.
+
+## Bloco 14 - Executado
+
+Escopo: remover configs Vultr restantes sem uso.
+
+- Removidos:
+  - `leaf-websocket-backend/config/docker/docker-compose-vultr-8gb.yml`
+  - `leaf-websocket-backend/config/nginx/nginx-vultr.conf`
+- Esses arquivos se referenciavam apenas entre si apos a remocao dos scripts Vultr.
+
+Validação:
+
+- `rg` sem referencias remanescentes para `docker-compose-vultr-8gb` e `nginx-vultr` fora do tracker.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
