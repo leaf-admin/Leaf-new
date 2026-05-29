@@ -49,9 +49,9 @@ function looksRemoteWsUrl(wsUrl) {
   return false;
 }
 
-const wsUrl = String(process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io').trim();
-const apiBaseUrl = String(process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io').trim();
-const remoteSshHost = String(process.env.E2E_REMOTE_SSH_HOST || '62.169.31.231').trim();
+const wsUrl = String(process.env.WS_URL || 'https://socket.leaf.app.br').trim();
+const apiBaseUrl = String(process.env.API_BASE_URL || 'https://api.leaf.app.br').trim();
+const remoteSshHost = String(process.env.E2E_REMOTE_SSH_HOST || '(set E2E_REMOTE_SSH_HOST)').trim();
 const remoteSshUser = String(process.env.E2E_REMOTE_SSH_USER || 'root').trim();
 const runId = String(process.env.E2E_RUN_ID || '(auto: Date.now())').trim();
 const appReview = String(process.env.APP_REVIEW || 'false').trim().toLowerCase();

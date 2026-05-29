@@ -106,7 +106,7 @@ function resolveHealthUrl(explicitHealthUrl, mobileEnv, backendEnv) {
     mobileEnv.EXPO_PUBLIC_BACKEND_URL,
     backendEnv.API_URL,
     backendEnv.BACKEND_URL,
-    'https://api.147.182.204.181.sslip.io',
+    'https://api.leaf.app.br',
   ]
     .map(normalizeBaseUrl)
     .filter(Boolean);

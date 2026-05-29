@@ -10,10 +10,10 @@ const LOCAL_PORT = Number.parseInt(
   10,
 );
 const REMOTE_API_ORIGIN =
-  process.env.LEAF_REMOTE_API_ORIGIN || "https://api.62.169.31.231.sslip.io";
+  process.env.LEAF_REMOTE_API_ORIGIN || "https://api.leaf.app.br";
 const REMOTE_SOCKET_ORIGIN =
   process.env.LEAF_REMOTE_SOCKET_ORIGIN ||
-  "https://socket.62.169.31.231.sslip.io";
+  "https://socket.leaf.app.br";
 
 const remoteApiUrl = new URL(REMOTE_API_ORIGIN);
 const remoteSocketUrl = new URL(REMOTE_SOCKET_ORIGIN);

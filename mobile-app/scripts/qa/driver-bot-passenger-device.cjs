@@ -4,7 +4,7 @@ const path = require('path');
 const axios = require('axios');
 const io = require('socket.io-client');
 
-const SERVER_URL = process.env.BACKEND_URL || 'https://api.147.182.204.181.sslip.io';
+const SERVER_URL = process.env.BACKEND_URL || 'https://api.leaf.app.br';
 const BASE_LAT = Number(process.env.QA_BASE_LAT || '37.779026');
 const BASE_LNG = Number(process.env.QA_BASE_LNG || '-122.419906');
 const RADIUS = Number(process.env.QA_COORD_RADIUS || '0.002');

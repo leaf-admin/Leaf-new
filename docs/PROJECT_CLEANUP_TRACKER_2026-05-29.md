@@ -343,3 +343,21 @@ Validação:
 - `rg` usado para confirmar ausencia de chamada por `package.json`, workflows e scripts canonicos.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
+
+## Bloco 17 - Executado
+
+Escopo: atualizar scripts vivos de QA/prelaunch/validation para dominios canonicos Leaf e remover defaults antigos de VPS.
+
+- Scripts de prelaunch, validation e QA mobile agora usam `https://api.leaf.app.br` e `https://socket.leaf.app.br` como defaults.
+- Removidos defaults hardcoded de hosts antigos `147.182.*` e `62.169.*` nos scripts vivos.
+- Removido default local de chave SSH antiga nos fluxos de QA mobile; host/chave remotos agora precisam vir de env (`REMOTE_HOST`, `VPS_HOST`, `REMOTE_SSH_KEY`, `VPS_KEY`, `SSH_KEY_PATH` ou `REMOTE_KEY`).
+- Renomeado o caminho remoto de ambiente nos scripts ajustados para `REMOTE_ENV_PATH`.
+- Mantida apenas deteccao generica de `sslip.io` onde ela serve para classificar endpoint HTTPS de teste, sem apontar para host antigo.
+
+Validação:
+
+- `node -c` nos scripts JS alterados: PASS.
+- `bash -n` nos scripts shell alterados: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+- `npm --prefix mobile-app run qa:production-guards`: PASS.

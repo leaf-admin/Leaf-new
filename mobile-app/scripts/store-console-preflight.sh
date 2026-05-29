@@ -132,7 +132,7 @@ RUNTIME_FILES=(
 )
 
 if rg -n "147\\.182\\.204\\.181|api\\.147\\.182\\.204\\.181|socket\\.147\\.182\\.204\\.181" "${RUNTIME_FILES[@]}" >/dev/null 2>&1; then
-  bad "Host antigo da DigitalOcean ainda encontrado em arquivos de runtime/release"
+  bad "Host antigo de VPS ainda encontrado em arquivos de runtime/release"
 else
   ok "Sem referência ao host antigo nos arquivos de runtime/release"
 fi

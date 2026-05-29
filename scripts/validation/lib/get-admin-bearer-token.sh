@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_BASE_URL="${1:-${API_BASE_URL:-${LEAF_API_BASE_URL:-https://api.147.182.204.181.sslip.io}}}"
+API_BASE_URL="${1:-${API_BASE_URL:-${LEAF_API_BASE_URL:-https://api.leaf.app.br}}}"
 EXISTING_TOKEN="${AUTH_TOKEN:-${LEAF_ADMIN_BEARER_TOKEN:-}}"
 AUTO_LOGIN_ENABLED="${AUTO_LOGIN_ADMIN_TOKEN:-true}"
 LOGIN_EMAIL="${ADMIN_AUTH_EMAIL:-${TEST_ADMIN_EMAIL:-admin@leaf.com}}"

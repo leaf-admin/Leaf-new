@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const WebSocketTestClient = require("../../leaf-websocket-backend/tests/e2e/backend/__helpers__/websocket-test-client");
 
-const WS_URL = process.env.WS_URL || "https://socket.62.169.31.231.sslip.io";
+const WS_URL = process.env.WS_URL || "https://socket.leaf.app.br";
 const PASSENGER_UID = String(process.env.PASSENGER_UID || "").trim();
 const DRIVER_UID = String(process.env.DRIVER_UID || "").trim();
 

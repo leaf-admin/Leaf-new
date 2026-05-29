@@ -127,7 +127,7 @@ async function repairDriverAvailability({ driverUid, lat, lng, outputEvents }) {
 }
 
 async function main() {
-  const apiBaseUrl = readArg('--api-base-url', process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io');
+  const apiBaseUrl = readArg('--api-base-url', process.env.API_BASE_URL || 'https://api.leaf.app.br');
   const driverUid = readArg('--driver-uid', process.env.TEST_DRIVER_UID || '');
   const lat = readNumberArg('--lat', Number.NaN);
   const lng = readNumberArg('--lng', Number.NaN);

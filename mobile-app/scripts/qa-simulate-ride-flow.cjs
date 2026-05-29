@@ -43,7 +43,7 @@ function resolveFirebaseApiKey() {
   return '';
 }
 
-const SERVER_URL = arg('--url', process.env.BACKEND_URL || 'https://api.147.182.204.181.sslip.io');
+const SERVER_URL = arg('--url', process.env.BACKEND_URL || 'https://api.leaf.app.br');
 const OUT_FILE = arg('--out', '');
 const FIREBASE_API_KEY = resolveFirebaseApiKey();
 const QA_BASE_LAT = Number.parseFloat(arg('--base-lat', process.env.QA_BASE_LAT || '-23.55052'));
@@ -52,9 +52,9 @@ const QA_DEST_LAT = Number.parseFloat(arg('--dest-lat', process.env.QA_DEST_LAT 
 const QA_DEST_LNG = Number.parseFloat(arg('--dest-lng', process.env.QA_DEST_LNG || '-46.655881'));
 const QA_COORD_RADIUS = Number.parseFloat(arg('--radius', process.env.QA_COORD_RADIUS || '0.006'));
 const QA_SKIP_REMOTE_DRIVER_CLEANUP = String(process.env.QA_SKIP_REMOTE_DRIVER_CLEANUP || 'false').toLowerCase() === 'true';
-const QA_REMOTE_SSH_HOST = process.env.E2E_REMOTE_SSH_HOST || process.env.QA_REMOTE_SSH_HOST || '147.182.204.181';
+const QA_REMOTE_SSH_HOST = process.env.E2E_REMOTE_SSH_HOST || process.env.QA_REMOTE_SSH_HOST || process.env.REMOTE_HOST || process.env.VPS_HOST || '';
 const QA_REMOTE_SSH_USER = process.env.E2E_REMOTE_SSH_USER || process.env.QA_REMOTE_SSH_USER || 'root';
-const QA_REMOTE_SSH_KEY_PATH = process.env.E2E_REMOTE_SSH_KEY_PATH || process.env.QA_REMOTE_SSH_KEY_PATH || path.resolve(__dirname, '..', '..', 'digitaloceankey');
+const QA_REMOTE_SSH_KEY_PATH = process.env.E2E_REMOTE_SSH_KEY_PATH || process.env.QA_REMOTE_SSH_KEY_PATH || process.env.REMOTE_SSH_KEY || process.env.VPS_KEY || process.env.SSH_KEY_PATH || '';
 const QA_REMOTE_REDIS_CONTAINER = process.env.E2E_REMOTE_REDIS_CONTAINER || process.env.QA_REMOTE_REDIS_CONTAINER || 'leaf-redis';
 const QA_REMOTE_REDIS_PASSWORD = process.env.E2E_REMOTE_REDIS_PASSWORD || process.env.QA_REMOTE_REDIS_PASSWORD || 'leaf_redis_2024';
 
@@ -292,7 +292,7 @@ async function cleanupRemoteDriverState(driverUid) {
     return { skipped: true, reason: 'skip_flag' };
   }
 
-  if (!fs.existsSync(QA_REMOTE_SSH_KEY_PATH)) {
+  if (!QA_REMOTE_SSH_HOST || !QA_REMOTE_SSH_KEY_PATH || !fs.existsSync(QA_REMOTE_SSH_KEY_PATH)) {
     return { skipped: true, reason: 'ssh_key_not_found' };
   }
 

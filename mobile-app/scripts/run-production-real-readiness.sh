@@ -8,8 +8,8 @@ STAMP="$(date +%Y%m%d_%H%M%S)"
 RUN_DIR="${ROOT_DIR}/reports/production-real/${STAMP}_production-real-readiness"
 mkdir -p "${RUN_DIR}/artifacts" "${RUN_DIR}/logs"
 
-APP_API_URL="${EXPO_PUBLIC_API_URL:-https://api.62.169.31.231.sslip.io}"
-APP_WS_URL="${EXPO_PUBLIC_WS_URL:-https://socket.62.169.31.231.sslip.io}"
+APP_API_URL="${EXPO_PUBLIC_API_URL:-https://api.leaf.app.br}"
+APP_WS_URL="${EXPO_PUBLIC_WS_URL:-https://socket.leaf.app.br}"
 LEGAL_BASE_URL="${EXPO_PUBLIC_LEGAL_BASE_URL:-${APP_API_URL}}"
 
 command_exists() {
