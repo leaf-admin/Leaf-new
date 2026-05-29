@@ -36,6 +36,9 @@ assert_no_match 'WOOVI_API_TOKEN\s*=\s*["'\''][^"'\'']{20,}["'\'']' \
 assert_no_match "WOOVI_API_TOKEN\\s*=\\s*process\\.env\\.WOOVI_API_TOKEN\\s*\\|\\|" \
   "leaf-websocket-backend/scripts/fix-woovi-webhook.js" \
   "fallback inseguro de WOOVI_API_TOKEN"
+assert_no_match "apiToken:\\s*process\\.env\\.WOOVI_API_TOKEN\\s*\\|\\|\\s*['\"][^'\"]{8,}['\"]" \
+  "leaf-websocket-backend/scripts/utils/start-ngrok-auto.js" \
+  "fallback inseguro de WOOVI_API_TOKEN"
 assert_no_match "leaf_redis_2024" \
   "leaf-websocket-backend/docker-compose.ops-workers.yml" \
   "senha Redis default insegura"
