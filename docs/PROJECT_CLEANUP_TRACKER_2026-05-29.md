@@ -156,3 +156,18 @@ Validação:
 - `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs`: reduziu de 31 para 29 achados. Os achados restantes continuam sendo artefatos sensiveis locais e bypasses/validadores que exigem bloco proprio, sem delecao cega para nao quebrar builds ou ambiente.
+
+## Bloco 6 - Executado Localmente
+
+Escopo: remover backups locais de `.env` que nao sao rastreados nem carregados pelo runtime.
+
+- Removidos:
+  - `leaf-websocket-backend/.env.backup.20251218_083038`
+  - `leaf-websocket-backend/.env.production.sandbox.backup-20260529T153415Z`
+- Mantidos `.env` ativos, keystores, plist/json de Firebase e credenciais necessarias para builds locais.
+
+Validação:
+
+- `git ls-files` confirmou que os backups removidos nao eram versionados.
+- `git check-ignore -v` confirmou que eram arquivos locais ignorados por `.env.*`.
+- `node scripts/maintenance/security/scan-secrets.cjs`: reduziu de 29 para 27 achados. Os achados restantes sao sensiveis ativos ou itens que precisam de migracao/isolamento antes de remover.
