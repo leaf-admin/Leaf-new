@@ -670,3 +670,32 @@ Validação:
 - `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
 - `cd leaf-websocket-backend && npx jest --config config/jest.unit.config.js --runInBand --runTestsByPath tests/unit/services/dashboard-report-metrics.unit.test.js tests/unit/services/dashboard-user-management-service.unit.test.js tests/unit/services/dashboard-ride-monitoring-service.unit.test.js`: PASS (`10/10`).
 - `npm --prefix leaf-websocket-backend run config:validate`: BLOCKED por ambiente atual (`WOOVI_WEBHOOK_AUTHORIZATION/WOOVI_WEBHOOK_AUTH_TOKEN` ausente na `.env` carregada para producao); nao foi causado pelo bloco.
+
+## Bloco 36 - Executado
+
+Escopo: desligar superficies financeiras legadas no mobile sem remover arquivos de rollback.
+
+- Rotas antigas de wallet/BaaS/plano semanal continuam registradas como aliases de compatibilidade.
+- Essas rotas nao montam mais diretamente telas que chamam BaaS ou `walletCredit`:
+  - `DriverBalance`
+  - `WeeklyPayment`
+  - `WeeklyPaymentScreen`
+  - `FreeTrial`
+  - `PlanSelection`
+  - `AddMoney`
+  - `addMoney`
+  - `WalletDetails`
+  - `AccountStatement`
+- `BaaSAccount` e `BaaSAccountScreen` seguem apontando para a tela indisponivel/repasse pelo saldo Leaf.
+- Mantidos intactos:
+  - ledger financeiro
+  - `DriverBalanceService` moderno em `/api/payment`
+  - telas/servicos de ganhos, saldo e saque atuais
+  - arquivos legados para rollback ate prova final de ausencia de uso.
+- Adicionado teste estatico para impedir que o `AppNavigator` volte a montar diretamente telas legadas de wallet/BaaS/plano.
+
+Validação:
+
+- `rg` de imports/componentes legados no `AppNavigator`: PASS sem resultados.
+- `npm --prefix mobile-app run qa:production-guards`: PASS.
+- `cd mobile-app && npx jest --config jest.config.js --runInBand --runTestsByPath __tests__/legacy-financial-routes.test.js __tests__/driver-balance-service-pilot.test.js __tests__/trip-financial-summary.test.js`: PASS (`11/11`).
