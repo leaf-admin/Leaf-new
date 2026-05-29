@@ -8,14 +8,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PROJECT_ROOT="$(cd "$BACKEND_DIR/.." && pwd)"
 
-CONTABO_HOST="${CONTABO_HOST:-62.169.31.231}"
+CONTABO_HOST="${CONTABO_HOST:-${VPS_HOST:-}}"
 CONTABO_USER="${CONTABO_USER:-root}"
 CONTABO_KEY="${CONTABO_KEY:-$HOME/.ssh/leaf_contabo_20260412_ed25519}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/leaf-app}"
 REMOTE_CANARY_DIR="${REMOTE_CANARY_DIR:-/opt/leaf-runtime-canary}"
 CANARY_PORT="${CANARY_PORT:-3901}"
-RUNTIME_MODE="${RUNTIME_MODE:-vps}"
+RUNTIME_MODE="${RUNTIME_MODE:-modular}"
 RUN_FULL_FLOW_CANARY="${RUN_FULL_FLOW_CANARY:-false}"
+
+if [[ -z "$CONTABO_HOST" ]]; then
+  echo "[canary][error] Configure CONTABO_HOST ou VPS_HOST para o host Contabo" >&2
+  exit 2
+fi
 
 if [[ ! -f "$CONTABO_KEY" ]]; then
   echo "[canary][error] Chave Contabo nao encontrada: $CONTABO_KEY" >&2

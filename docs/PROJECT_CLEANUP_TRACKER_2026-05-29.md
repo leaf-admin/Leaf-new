@@ -432,3 +432,22 @@ Validação:
 
 - `rg` confirmou que os arquivos removidos eram chamados apenas por configs/docs antigas do mesmo pacote.
 - Configs de waitlist e compose ativo preservados.
+
+## Bloco 23 - Executado
+
+Escopo: alinhar scripts operacionais ativos com Contabo, runtime modular e dominios Leaf.
+
+- Removidos defaults para IPs antigos, `sslip.io` e `digitaloceankey` dos scripts atuais de deploy/canary/rollout.
+- Scripts de deploy agora exigem host/chave explicitos via `VPS_IP`/`CONTABO_HOST` e `VPS_SSH_KEY`/`SSH_KEY_PATH`/`CONTABO_KEY`.
+- `check-vps-runtime-parity.sh` passa a assumir `RUNTIME_MODE=modular` por default.
+- Deploy/canary de dashboard e realtime passam a publicar defaults para `https://api.leaf.app.br`, `https://socket.leaf.app.br` e `https://dashboard.leaf.app.br`.
+- Emissao Let's Encrypt da Contabo passa a usar apenas os dominios Leaf canonicos.
+
+Validação:
+
+- `bash -n` nos scripts shell alterados: PASS.
+- `rg` direcionado nos scripts alterados confirmou ausencia de `147.182`, `62.169`, `digitaloceankey` e `sslip.io`: PASS.
+- `git diff --check`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.

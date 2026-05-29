@@ -8,7 +8,7 @@ set -euo pipefail
 # Uso:
 #   bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh
 # Opcional:
-#   VPS_IP=147.182.204.181 VPS_USER=root SSH_KEY_PATH=/path/key \
+#   VPS_IP=<host-contabo> VPS_USER=root SSH_KEY_PATH=/path/key \
 #   REMOTE_BACKEND_DIR=/opt/leaf-app REMOTE_DASHBOARD_DIR=/opt/leaf/leaf-dashboard-js \
 #   bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh
 
@@ -17,15 +17,20 @@ BACKEND_LOCAL_DIR="$ROOT_DIR/leaf-websocket-backend"
 DASH_LOCAL_DIR="$ROOT_DIR/leaf-dashboard-js"
 MOBILE_LOCAL_DIR="$ROOT_DIR/mobile-app"
 
-VPS_IP="${VPS_IP:-147.182.204.181}"
+VPS_IP="${VPS_IP:-${CONTABO_HOST:-}}"
 VPS_USER="${VPS_USER:-root}"
-SSH_KEY_PATH="${SSH_KEY_PATH:-$ROOT_DIR/digitaloceankey}"
+SSH_KEY_PATH="${SSH_KEY_PATH:-${CONTABO_KEY:-}}"
 REMOTE_BACKEND_DIR="${REMOTE_BACKEND_DIR:-}"
 REMOTE_DASHBOARD_DIR="${REMOTE_DASHBOARD_DIR:-}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-3020}"
 
-if [[ ! -f "$SSH_KEY_PATH" ]]; then
-  echo "[deploy] chave SSH não encontrada: $SSH_KEY_PATH" >&2
+if [[ -z "$VPS_IP" ]]; then
+  echo "[deploy] configure VPS_IP ou CONTABO_HOST para o host Contabo" >&2
+  exit 1
+fi
+
+if [[ -z "$SSH_KEY_PATH" || ! -f "$SSH_KEY_PATH" ]]; then
+  echo "[deploy] configure SSH_KEY_PATH ou CONTABO_KEY com uma chave SSH válida" >&2
   exit 1
 fi
 
@@ -216,9 +221,9 @@ rsync -az --delete \
 
 echo "[deploy] Aplicando env de produção do dashboard..."
 ssh_cmd "cat > '$REMOTE_DASHBOARD_DIR/.env.production.local' <<'ENV_EOF'
-NEXT_PUBLIC_API_URL=https://api.62.169.31.231.sslip.io
-NEXT_PUBLIC_WS_URL=https://socket.62.169.31.231.sslip.io
-NEXT_PUBLIC_API_DOCS_URL=https://api.62.169.31.231.sslip.io/api/docs
+NEXT_PUBLIC_API_URL=https://api.leaf.app.br
+NEXT_PUBLIC_WS_URL=https://socket.leaf.app.br
+NEXT_PUBLIC_API_DOCS_URL=https://api.leaf.app.br/api/docs
 ENV_EOF"
 
 if [[ -n "$GOOGLE_MAPS_PUBLIC_KEY" ]]; then
@@ -334,5 +339,5 @@ ssh_cmd "
 "
 
 echo "[deploy] OK"
-echo "[deploy] Backend:   https://api.62.169.31.231.sslip.io/api/health"
-echo "[deploy] Dashboard: http://$VPS_IP:$DASHBOARD_PORT/login"
+echo "[deploy] Backend:   https://api.leaf.app.br/api/health"
+echo "[deploy] Dashboard: https://dashboard.leaf.app.br/login"

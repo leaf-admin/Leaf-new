@@ -9,10 +9,10 @@ WORKSPACE_ROOT="$(cd "$PROJECT_ROOT/.." && pwd)"
 VPS_USER="${VPS_USER:-root}"
 VPS_IP="${VPS_IP:-${1:-}}"
 VPS_PATH="${VPS_PATH:-/opt/leaf-realtime-secondary}"
-SSH_KEY="${SSH_KEY:-$WORKSPACE_ROOT/digitaloceankey}"
+SSH_KEY="${SSH_KEY:-${CONTABO_KEY:-}}"
 BASE_ENV_SOURCE="${BASE_ENV_SOURCE:-$BACKEND_DIR/.tmp-contabo.env}"
-PRIMARY_PUBLIC_API_URL="${PRIMARY_PUBLIC_API_URL:-https://api.62.169.31.231.sslip.io}"
-PRIMARY_PUBLIC_SOCKET_URL="${PRIMARY_PUBLIC_SOCKET_URL:-https://socket.62.169.31.231.sslip.io}"
+PRIMARY_PUBLIC_API_URL="${PRIMARY_PUBLIC_API_URL:-https://api.leaf.app.br}"
+PRIMARY_PUBLIC_SOCKET_URL="${PRIMARY_PUBLIC_SOCKET_URL:-https://socket.leaf.app.br}"
 PRIMARY_REDIS_PASSWORD="${PRIMARY_REDIS_PASSWORD-}"
 PRIMARY_REDIS_DB="${PRIMARY_REDIS_DB:-0}"
 PRIMARY_REDIS_HOST="${PRIMARY_REDIS_HOST:-host.docker.internal}"
@@ -23,8 +23,8 @@ if [ -z "$VPS_IP" ]; then
     exit 1
 fi
 
-if [ ! -f "$SSH_KEY" ]; then
-    echo "Chave SSH não encontrada em $SSH_KEY" >&2
+if [ -z "$SSH_KEY" ] || [ ! -f "$SSH_KEY" ]; then
+    echo "Configure SSH_KEY ou CONTABO_KEY com uma chave SSH válida" >&2
     exit 1
 fi
 
