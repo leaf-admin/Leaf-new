@@ -376,3 +376,17 @@ Validação:
 - Parser YAML local nos composes alterados: PASS.
 - Checagem de balanceamento de blocos Nginx nos arquivos alterados: PASS.
 - `git diff --check`: PASS.
+
+## Bloco 19 - Executado
+
+Escopo: remover excecoes nativas mobile para IP antigo.
+
+- Removida excecao ATS hardcoded para `62.169.31.231` do plugin de Google Maps iOS.
+- Removido `62.169.31.231` da lista default de HTTP liberado no Android.
+- `EXPO_PUBLIC_INSECURE_HTTP_HOSTS` segue disponivel como override explicito quando algum teste local precisar de cleartext.
+
+Validação:
+
+- `node -c` nos plugins alterados: PASS.
+- `npx expo config --json`: PASS.
+- `npm --prefix mobile-app run qa:production-guards`: PASS.
