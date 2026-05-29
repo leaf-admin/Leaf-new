@@ -1483,7 +1483,7 @@ export default function EarningsReportScreen({ navigation, route }) {
 
             <View style={styles.withdrawFeeNote}>
               <Text style={styles.withdrawFeeNoteText}>
-                Saques abaixo de R$ 500,00 possuem tarifa de R$ 1,00.
+                Saques abaixo de R$ 500,00 têm tarifa de R$ 1,00. A partir de R$ 500,00, não há tarifa.
               </Text>
             </View>
 

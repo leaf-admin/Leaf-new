@@ -1769,6 +1769,13 @@ function sanitizePersistedRuntimeSessionForProfile(session, profile = null) {
       restored.driverOnlinePending = false;
     }
 
+    if (!hasPersistedDriverRideInProgress && !hasPersistedDriverActiveRide) {
+      restored.currentCoordinate = null;
+      restored.driverCoordinate = null;
+      restored.currentHeading = null;
+      restored.currentAddress = "";
+    }
+
     restored.driverLocationHeartbeat = {
       ...DEFAULT_RUNTIME_STATE.driverLocationHeartbeat,
       ...(restored.driverLocationHeartbeat &&
@@ -2628,6 +2635,10 @@ function buildCompletedReceiptRouteLabel(
 }
 
 function toFiniteRuntimeMoney(value) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -4711,6 +4722,21 @@ export function resolveDriverPayoutAmount(...sources) {
   return 0;
 }
 
+function resolveDriverExplicitPayoutAmount(...sources) {
+  const normalizedSources = sources.filter(
+    (source) => source && typeof source === "object",
+  );
+
+  for (const source of normalizedSources) {
+    const netAmount = getDriverOfferNetAmount(source);
+    if (Number.isFinite(netAmount) && netAmount > 0) {
+      return netAmount;
+    }
+  }
+
+  return null;
+}
+
 function resolveCompletedTripGrossAmount(source = {}) {
   if (!source || typeof source !== "object") {
     return null;
@@ -4842,7 +4868,7 @@ export function resolveCompletedTripFinancialSnapshot(
             );
   const payloadFeeBreakdown = extractBestPayloadFeeBreakdown(payload);
   const lockedFeeBreakdown = extractBestPayloadFeeBreakdown(lockedRideSnapshot);
-  const payoutFallback = resolveDriverPayoutAmount(
+  const payoutFallback = resolveDriverExplicitPayoutAmount(
     previousState?.lastReceipt,
     lockedRideSnapshot,
     previousState?.driverTripMeta,
@@ -7275,6 +7301,10 @@ function attachSocketListeners() {
       acceptedRide,
       runtimeState.driverTripMeta,
     );
+    const acceptedRideExplicitPayout = resolveDriverExplicitPayoutAmount(
+      acceptedRide,
+      runtimeState.driverTripMeta,
+    );
     const acceptedVehicleMake = sanitizeText(
       driver?.vehicle?.make ||
         driver?.vehicle?.brand ||
@@ -7461,8 +7491,18 @@ function attachSocketListeners() {
         : {}),
       ...(runtimeRole === "driver"
         ? {
-            fare: acceptedRideFare,
-            fareLabel: formatCurrencyBR(acceptedRideFare),
+            ...(Number.isFinite(acceptedRideFare)
+              ? {
+                  fare: acceptedRideFare,
+                  fareLabel: formatCurrencyBR(acceptedRideFare),
+                }
+              : {}),
+            ...(Number.isFinite(acceptedRideExplicitPayout)
+              ? {
+                  driverNetAmount: acceptedRideExplicitPayout,
+                  estimatedDriverNetAmount: acceptedRideExplicitPayout,
+                }
+              : {}),
           }
         : {}),
       routePlan:
@@ -9419,6 +9459,10 @@ function applySyncedActiveRideSnapshot(snapshot) {
     mergedSyncedRide,
     runtimeState.driverTripMeta,
   );
+  const resolvedDriverExplicitPayout = resolveDriverExplicitPayoutAmount(
+    mergedSyncedRide,
+    runtimeState.driverTripMeta,
+  );
   const syncedDriverRoutePlan = ensurePersistedDriverRoutePlan({
     bookingId: snapshot.bookingId || runtimeState.activeBookingId || null,
     pickupCoordinate,
@@ -9521,8 +9565,18 @@ function applySyncedActiveRideSnapshot(snapshot) {
               "Destino",
             ...(pickupCoordinate ? { pickupCoordinate } : {}),
             ...(destinationCoordinate ? { destinationCoordinate } : {}),
-            fare: resolvedDriverFare,
-            fareLabel: formatCurrencyBR(resolvedDriverFare),
+            ...(Number.isFinite(resolvedDriverFare)
+              ? {
+                  fare: resolvedDriverFare,
+                  fareLabel: formatCurrencyBR(resolvedDriverFare),
+                }
+              : {}),
+            ...(Number.isFinite(resolvedDriverExplicitPayout)
+              ? {
+                  driverNetAmount: resolvedDriverExplicitPayout,
+                  estimatedDriverNetAmount: resolvedDriverExplicitPayout,
+                }
+              : {}),
             routePlan:
               syncedDriverRoutePlan ||
               previous.driverTripMeta?.routePlan ||
@@ -9927,8 +9981,11 @@ async function bootstrapRuntime(profile) {
     beginRuntimePresentationSync();
     setRuntimeState({ initializing: true });
     try {
+      const bootstrapRole = resolveRuntimeRole(profile);
+      const shouldForceFreshBootstrapLocation = bootstrapRole === "driver";
       const initialLocationPromise = ensureCurrentLocation({
-        allowCurrentPosition: Platform.OS !== "android",
+        allowCurrentPosition:
+          shouldForceFreshBootstrapLocation || Platform.OS !== "android",
       }).catch((error) => {
         Logger.warn(
           "⚠️ [PrototypeRuntime] Falha ao resolver localização no bootstrap:",
@@ -9978,7 +10035,7 @@ async function bootstrapRuntime(profile) {
       }
       await waitForRuntimeBootstrapLocation(
         initialLocationPromise,
-        !hasHydratedLocationSnapshot,
+        !hasHydratedLocationSnapshot || shouldForceFreshBootstrapLocation,
       );
       setRuntimeState({
         ready: true,
@@ -10137,9 +10194,8 @@ async function previewDestinationOnMap(destination, payload = {}) {
       const telemetryContext = resolveRuntimeRideTelemetryContext({
         surface: "destination_preview",
         cacheMode: "sticky_destination",
-        forceFresh: true,
         routeScope: [
-          "prebooking_quote",
+          "passenger_home_preview",
           Number(origin.latitude).toFixed(3),
           Number(origin.longitude).toFixed(3),
         ].join(":"),
@@ -11161,6 +11217,19 @@ async function requestPrototypeRide(profile, payload) {
     paymentAmountInCentsCandidate > 0
       ? Math.round(paymentAmountInCentsCandidate)
       : paymentAmountFallbackInCents;
+  const paymentDiscountBenefit =
+    paymentConfirmation?.discountBenefit &&
+    typeof paymentConfirmation.discountBenefit === "object"
+      ? { ...paymentConfirmation.discountBenefit }
+      : null;
+  const paymentGrossAmountInCentsCandidate = Number(
+    paymentConfirmation?.grossAmountInCents,
+  );
+  const paymentGrossAmountInCents =
+    Number.isFinite(paymentGrossAmountInCentsCandidate) &&
+    paymentGrossAmountInCentsCandidate > 0
+      ? Math.round(paymentGrossAmountInCentsCandidate)
+      : paymentAmountInCents;
   const ridePreferences =
     payload?.preferences && typeof payload.preferences === "object"
       ? { ...payload.preferences }
@@ -11199,6 +11268,8 @@ async function requestPrototypeRide(profile, payload) {
       chargeId: paymentChargeId,
       rideId: paymentReferenceRideId,
       amountInCents: paymentAmountInCents,
+      grossAmountInCents: paymentGrossAmountInCents,
+      discountBenefit: paymentDiscountBenefit,
       paymentStatus: "in_holding",
       confirmedAt: new Date().toISOString(),
     },
@@ -11229,6 +11300,8 @@ async function requestPrototypeRide(profile, payload) {
       destinationLocation: bookingData.destinationLocation,
       carType: operationalVehicleType,
       paymentStatus: "in_holding",
+      grossEstimatedFare: paymentGrossAmountInCents / 100,
+      discountBenefit: paymentDiscountBenefit,
       preferences: ridePreferences,
     },
     selectedDestination: destination,
@@ -13957,6 +14030,18 @@ async function enablePrototypeDriverOnline(profile, options = {}) {
         isOnline: true,
       };
     } catch (error) {
+      const errorPayload =
+        error?.payload && typeof error.payload === "object"
+          ? error.payload
+          : {};
+      const isKycRequired =
+        Boolean(error?.kycRequired) ||
+        Boolean(errorPayload?.kycRequired) ||
+        ["kycrequired", "kyc_required", "kyccheckfailed", "kyc_check_failed"].includes(
+          String(error?.code || errorPayload?.code || "")
+            .trim()
+            .toLowerCase(),
+        );
       stopDriverLocationHeartbeat();
       setRuntimeState({
         ...(preserveOnlineOnFailure
@@ -13975,8 +14060,14 @@ async function enablePrototypeDriverOnline(profile, options = {}) {
       });
       await writeRuntimeDebugProbe("driver_online_enable_failure", {
         driverId: profile?.uid || null,
-        code: error?.code || null,
-        message: error?.message || "Falha ao atualizar status remoto",
+        code: error?.code || errorPayload?.code || null,
+        message:
+          error?.message ||
+          errorPayload?.message ||
+          errorPayload?.error ||
+          "Falha ao atualizar status remoto",
+        kycRequired: isKycRequired,
+        reason: errorPayload?.reason || null,
         retryAfterSec: Number(error?.retryAfterSec || 0) || null,
       });
       Logger.warn(
@@ -13987,7 +14078,16 @@ async function enablePrototypeDriverOnline(profile, options = {}) {
         success: false,
         isOnline: preserveOnlineOnFailure,
         pendingReconnect: preserveOnlineOnFailure,
-        error: error?.message || "Falha ao atualizar status remoto",
+        error:
+          error?.message ||
+          errorPayload?.message ||
+          errorPayload?.error ||
+          "Falha ao atualizar status remoto",
+        reason: errorPayload?.reason || null,
+        code: error?.code || errorPayload?.code || null,
+        kycRequired: isKycRequired,
+        challengeId: errorPayload?.challengeId || null,
+        requirement: errorPayload?.requirement || null,
       };
     }
   })();
@@ -14421,12 +14521,13 @@ async function acceptPrototypeDriverOffer(profile, offerInput = null) {
       pickupPreview?.durationMinutes,
   );
   const fallbackDurationMinutes = Number(runtimeState.tripDurationMin || 0);
-  const resolvedFare = Number(
-    resolveDriverPayoutAmount(
-      normalizedActiveRide,
-      runtimeState.driverTripMeta,
-      { fare: runtimeState.selectedFare ?? 0 },
-    ),
+  const resolvedFare = resolveDriverPayoutAmount(
+    normalizedActiveRide,
+    runtimeState.driverTripMeta,
+  );
+  const resolvedExplicitPayout = resolveDriverExplicitPayoutAmount(
+    normalizedActiveRide,
+    runtimeState.driverTripMeta,
   );
 
   setRuntimeState((previous) => ({
@@ -14484,8 +14585,18 @@ async function acceptPrototypeDriverOffer(profile, offerInput = null) {
         "Destino",
       pickupCoordinate,
       destinationCoordinate,
-      fare: resolvedFare,
-      fareLabel: formatCurrencyBR(resolvedFare),
+      ...(Number.isFinite(resolvedFare)
+        ? {
+            fare: resolvedFare,
+            fareLabel: formatCurrencyBR(resolvedFare),
+          }
+        : {}),
+      ...(Number.isFinite(resolvedExplicitPayout)
+        ? {
+            driverNetAmount: resolvedExplicitPayout,
+            estimatedDriverNetAmount: resolvedExplicitPayout,
+          }
+        : {}),
       routePlan:
         persistedRoutePlan ||
         previous.driverTripMeta?.routePlan ||
@@ -15077,10 +15188,9 @@ export function usePrototypeRideRuntime() {
     }
 
     const previewKey = [
-      Math.round(Number(originCoordinate.latitude) * 10000),
-      Math.round(Number(originCoordinate.longitude) * 10000),
       Math.round(Number(destinationCoordinate.latitude) * 10000),
       Math.round(Number(destinationCoordinate.longitude) * 10000),
+      sanitizeText(destination?.name || destination?.address || "", "").toLowerCase(),
     ].join(":");
     const originAddressKey = [
       Math.round(Number(originCoordinate.latitude) * 10000),
@@ -15455,12 +15565,24 @@ export function usePrototypeRideRuntime() {
           snapshot.activeBooking?.customerName ||
           snapshot.profileName ||
           "Passageiro",
-        fare: snapshot.driverTripMeta?.fare || snapshot.selectedFare || 0,
-        fareLabel:
-          snapshot.driverTripMeta?.fareLabel ||
-          formatCurrencyBR(
-            snapshot.selectedFare || snapshot.activeBooking?.estimatedFare || 0,
-          ),
+        ...(Number.isFinite(Number(snapshot.driverTripMeta?.driverNetAmount))
+          ? {
+              fare: Number(snapshot.driverTripMeta.driverNetAmount),
+              driverNetAmount: Number(snapshot.driverTripMeta.driverNetAmount),
+              fareLabel:
+                snapshot.driverTripMeta?.fareLabel ||
+                formatCurrencyBR(
+                  Number(snapshot.driverTripMeta.driverNetAmount),
+                ),
+            }
+          : Number.isFinite(Number(snapshot.driverTripMeta?.fare))
+            ? {
+                fare: Number(snapshot.driverTripMeta.fare),
+                fareLabel:
+                  snapshot.driverTripMeta?.fareLabel ||
+                  formatCurrencyBR(Number(snapshot.driverTripMeta.fare)),
+              }
+          : {}),
       })
       .catch((error) => {
         Logger.warn(

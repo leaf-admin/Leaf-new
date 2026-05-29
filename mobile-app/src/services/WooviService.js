@@ -32,6 +32,9 @@ class WooviService {
             const response = await this.backendApi.post('/api/payment/advance', {
                 passengerId: paymentData.passengerId,
                 amount: paymentData.amount,
+                grossAmountInCents: paymentData.grossAmountInCents,
+                grossAmount: paymentData.grossAmount,
+                discountBenefit: paymentData.discountBenefit || null,
                 rideId: paymentData.rideId,
                 rideDetails: paymentData.rideDetails,
                 passengerName: paymentData.passengerName,

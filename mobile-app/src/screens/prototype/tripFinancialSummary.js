@@ -1,4 +1,8 @@
 function toFiniteMoney(value, fallback = null) {
+  if (value === null || value === undefined || String(value).trim() === '') {
+    return fallback;
+  }
+
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -149,7 +153,7 @@ export function resolveTripFeeAmount(item = {}) {
   return null;
 }
 
-export function resolveTripNetAmount(item = {}) {
+export function resolveTripNetAmountOrNull(item = {}) {
   const explicitNet =
     toFiniteMoney(item?.driverNetAmount, null) ??
     toFiniteMoney(item?.netAmount, null);
@@ -163,12 +167,25 @@ export function resolveTripNetAmount(item = {}) {
     return roundMoney(Math.max(0, gross - fees));
   }
 
-  const parsedValue = parseCurrencyText(item?.value);
-  if (parsedValue !== null) {
-    return roundMoney(Math.max(0, parsedValue));
+  return null;
+}
+
+export function resolveTripNetAmount(item = {}, { fallbackToGross = false } = {}) {
+  const resolvedNet = resolveTripNetAmountOrNull(item);
+  if (resolvedNet !== null) {
+    return resolvedNet;
   }
 
-  return gross;
+  if (fallbackToGross) {
+    const parsedValue = parseCurrencyText(item?.value);
+    if (parsedValue !== null) {
+      return roundMoney(Math.max(0, parsedValue));
+    }
+
+    return resolveTripGrossAmount(item);
+  }
+
+  return 0;
 }
 
 export function resolveTripDisplayAmount(item = {}, { role = 'driver' } = {}) {

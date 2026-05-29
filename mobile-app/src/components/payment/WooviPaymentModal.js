@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Icon } from 'react-native-elements';
+import auth from '@react-native-firebase/auth';
 import WooviService from '../../services/WooviService';
 import WebSocketManager from '../../services/WebSocketManager';
 import PaymentBypassService from '../../services/PaymentBypassService';
@@ -57,7 +58,9 @@ export default function WooviPaymentModal({
     prefilledPaymentData = null,
     preserveChargeOnClose = false,
     paymentTitle = 'Pagamento PIX',
-    qaAutoConfirm = false
+    qaAutoConfirm = false,
+    discountBenefit = null,
+    grossEstimatedFare = null
 }) {
     const qaAutoConfirmEnabled = Boolean(qaAutoConfirm);
     // Estados
@@ -122,6 +125,19 @@ export default function WooviPaymentModal({
         }
     };
 
+    const resolveAuthenticatedPassengerId = () => {
+        const directPassengerId = String(passengerId || '').trim();
+        if (directPassengerId) {
+            return directPassengerId;
+        }
+
+        try {
+            return String(auth()?.currentUser?.uid || '').trim();
+        } catch (_error) {
+            return '';
+        }
+    };
+
     const confirmPaymentOnce = (confirmationPayload = null, source = 'unknown') => {
         if (paymentConfirmedRef.current) {
             Logger.log(`ℹ️ [WooviPaymentModal] Confirmação duplicada ignorada (${source})`);
@@ -150,6 +166,9 @@ export default function WooviPaymentModal({
             rideId: normalizedPayload.rideId,
             amount: normalizedPayload.amount,
             amountInCents: normalizedPayload.amountInCents,
+            grossAmount: normalizedPayload.grossAmount,
+            grossAmountInCents: normalizedPayload.grossAmountInCents,
+            discountBenefit: normalizedPayload.discountBenefit || null,
             bypassed: normalizedPayload.bypassed === true,
             mockPayment:
                 normalizedPayload.mockPayment === true ||
@@ -210,6 +229,13 @@ export default function WooviPaymentModal({
                         Number.isFinite(amountInCentsValue) && amountInCentsValue > 0
                             ? Math.round(amountInCentsValue)
                             : Math.round((Number.isFinite(amountValue) ? amountValue : 0) * 100),
+                    grossAmount: Number(prefilledPaymentData.grossAmount || prefilledPaymentData.grossAmountInCents / 100 || amountValue || 0),
+                    grossAmountInCents:
+                        Number.isFinite(Number(prefilledPaymentData.grossAmountInCents)) &&
+                        Number(prefilledPaymentData.grossAmountInCents) > 0
+                            ? Math.round(Number(prefilledPaymentData.grossAmountInCents))
+                            : Math.round(Number(prefilledPaymentData.grossAmount || amountValue || 0) * 100),
+                    discountBenefit: prefilledPaymentData.discountBenefit || null,
                     expiresAt:
                         prefilledPaymentData.expiresAt ||
                         new Date(Date.now() + PAYMENT_TIMEOUT * 1000)
@@ -261,7 +287,11 @@ export default function WooviPaymentModal({
         prefilledPaymentData?.qrCodeImage,
         prefilledPaymentData?.qrCodeText,
         prefilledPaymentData?.rideId,
+        discountBenefit?.benefitId,
+        discountBenefit?.discountAmountInCents,
+        grossEstimatedFare,
         tripData?.estimatedFare,
+        tripData?.grossEstimatedFare,
         tripData?.rideId,
         visible
     ]);
@@ -478,10 +508,24 @@ export default function WooviPaymentModal({
             setLoading(true);
             setPaymentGenerationError(null);
             Logger.log('💳 Gerando pagamento PIX via Woovi Sandbox...');
+
+            const resolvedPassengerId = resolveAuthenticatedPassengerId();
+            if (!resolvedPassengerId) {
+                throw new Error('Sessão de pagamento ainda não está pronta. Tente novamente em alguns segundos.');
+            }
             
             // Calcular valor em centavos - usar o mesmo valor do card selecionado
             const amount = estimates?.estimateFare || tripData?.estimatedFare || 25.00;
             const amountInCents = Math.round(amount * 100);
+            const grossAmount = Number(
+                grossEstimatedFare ||
+                discountBenefit?.grossFare ||
+                tripData?.grossEstimatedFare ||
+                amount
+            );
+            const grossAmountInCents = Number.isFinite(Number(discountBenefit?.grossAmountInCents))
+                ? Math.round(Number(discountBenefit.grossAmountInCents))
+                : Math.round((Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount : amount) * 100);
             
             Logger.log('💰 [Woovi] Valor calculado:', { 
                 amount, 
@@ -496,7 +540,7 @@ export default function WooviPaymentModal({
             const timestamp = Date.now();
             const randomSuffix = Math.random().toString(36).substring(2, 9);
             const nanoRandom = Math.random().toString(36).substring(2, 7); // Segundo random para garantir unicidade
-            const tempRideId = `temp_ride_${timestamp}_${randomSuffix}_${nanoRandom}_${passengerId}`;
+            const tempRideId = `temp_ride_${timestamp}_${randomSuffix}_${nanoRandom}_${resolvedPassengerId}`;
             
             Logger.log('🆔 [WooviPaymentModal] Gerando NOVO tempRideId único:', tempRideId);
             Logger.log('🆔 [WooviPaymentModal] Timestamp:', timestamp, '| Random:', randomSuffix, nanoRandom);
@@ -511,8 +555,11 @@ export default function WooviPaymentModal({
                     paymentLink: null,
                     amount: amount,
                     amountInCents: amountInCents,
+                    grossAmount: grossAmountInCents / 100,
+                    grossAmountInCents,
+                    discountBenefit,
                     expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
-                    passengerId,
+                    passengerId: resolvedPassengerId,
                     bypassed: true,
                     mockPayment: true
                 };
@@ -530,8 +577,11 @@ export default function WooviPaymentModal({
             
             // Preparar dados do pagamento
             paymentRequest = {
-                passengerId: passengerId,
+                passengerId: resolvedPassengerId,
                 amount: amountInCents,
+                grossAmountInCents,
+                grossAmount: grossAmountInCents / 100,
+                discountBenefit,
                 rideId: tempRideId,
                 rideDetails: {
                     origin: tripData?.pickup?.add || 'Origem',
@@ -559,8 +609,11 @@ export default function WooviPaymentModal({
                 paymentLink: result.paymentLink,
                 amount: amount,
                 amountInCents: amountInCents,
+                grossAmount: grossAmountInCents / 100,
+                grossAmountInCents,
+                discountBenefit: result.discountBenefit || discountBenefit || null,
                 expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
-                passengerId
+                passengerId: resolvedPassengerId
             };
             
             setPaymentData(paymentInfo);
@@ -646,13 +699,7 @@ export default function WooviPaymentModal({
             };
 
             const chargeStatus = await resolveStatus(paymentData.chargeId, 'chargeId');
-            const rideStatus =
-                !chargeStatus?.isPaymentCompleted &&
-                paymentData?.rideId &&
-                paymentData.rideId !== paymentData.chargeId
-                    ? await resolveStatus(paymentData.rideId, 'rideId')
-                    : null;
-            const confirmedStatus = [chargeStatus, rideStatus].find(
+            const confirmedStatus = [chargeStatus].find(
                 (entry) => entry?.isPaymentCompleted,
             );
 
@@ -670,7 +717,10 @@ export default function WooviPaymentModal({
                         chargeId: paymentData.chargeId,
                         rideId: paymentData.rideId,
                         amount: paymentData.amount,
-                        amountInCents: paymentData.amountInCents
+                        amountInCents: paymentData.amountInCents,
+                        grossAmount: paymentData.grossAmount,
+                        grossAmountInCents: paymentData.grossAmountInCents,
+                        discountBenefit: paymentData.discountBenefit || null
                     },
                     'polling'
                 );
@@ -697,26 +747,11 @@ export default function WooviPaymentModal({
         setPaymentStatus('expired');
         setCountdown(0);
         
-        // Tentar cancelar cobrança na Woovi
         if (paymentData?.chargeId) {
             if (preserveChargeOnClose) {
                 Logger.log('ℹ️ [WooviPaymentModal] Preservando cobrança ao expirar:', paymentData.chargeId);
             } else {
-            try {
-                Logger.log('🚫 Cancelando cobrança na Woovi:', paymentData.chargeId);
-                const cancelResult = await WooviService.cancelPayment(paymentData.chargeId);
-                if (cancelResult?.success) {
-                    if (cancelResult?.alreadyFinalized) {
-                        Logger.log('ℹ️ Cobrança já finalizada/indisponível para cancelamento na Woovi');
-                    } else {
-                        Logger.log('✅ Cobrança cancelada na Woovi');
-                    }
-                } else {
-                    Logger.warn('⚠️ Falha ao cancelar cobrança na Woovi:', cancelResult?.error || cancelResult);
-                }
-            } catch (error) {
-                Logger.error('⚠️ Erro ao cancelar cobrança na Woovi:', error);
-            }
+                Logger.log('ℹ️ [WooviPaymentModal] Pagamento expirou; cobrança será abandonada sem chamada administrativa.', paymentData.chargeId);
             }
         }
         
@@ -727,7 +762,7 @@ export default function WooviPaymentModal({
         
         Alert.alert(
             '⏰ Tempo Esgotado',
-            'O tempo para realizar o pagamento expirou. A cobrança foi cancelada.',
+            'O tempo para realizar o pagamento expirou. Gere um novo PIX para continuar.',
             [{ 
                 text: 'OK', 
                 onPress: () => {
@@ -771,27 +806,9 @@ export default function WooviPaymentModal({
                             setPaymentStatus('cancelled');
                             cleanup();
                             
-                            // Cancelar cobrança na Woovi
-                            if (paymentData?.chargeId) {
-                                try {
-                                    Logger.log('🔄 [WooviPaymentModal] Cancelando cobrança na Woovi:', paymentData.chargeId);
-                                    const cancelResult = await WooviService.cancelPayment(paymentData.chargeId);
-                                    if (cancelResult?.success) {
-                                        if (cancelResult?.alreadyFinalized) {
-                                            Logger.log('ℹ️ [WooviPaymentModal] Cobrança já finalizada/indisponível para cancelamento');
-                                        } else {
-                                            Logger.log('✅ [WooviPaymentModal] Cobrança cancelada na Woovi');
-                                        }
-                                    } else {
-                                        Logger.warn('⚠️ [WooviPaymentModal] Falha ao cancelar cobrança:', cancelResult?.error || cancelResult);
-                                    }
-                                } catch (error) {
-                                    Logger.error('⚠️ [WooviPaymentModal] Erro ao cancelar cobrança:', error);
-                                    Logger.error('⚠️ [WooviPaymentModal] Detalhes do erro:', error?.response?.data || error.message);
-                                }
-                            } else {
-                                Logger.warn('⚠️ [WooviPaymentModal] Nenhum chargeId disponível para cancelar');
-                            }
+                            Logger.log('ℹ️ [WooviPaymentModal] Cancelamento local; cobrança ativa não chama rota administrativa.', {
+                                chargeId: paymentData?.chargeId || null
+                            });
                             
                             Logger.log('🚪 [WooviPaymentModal] Fechando modal após cancelamento');
                             onClose();

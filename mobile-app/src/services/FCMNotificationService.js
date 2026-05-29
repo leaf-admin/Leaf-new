@@ -35,6 +35,7 @@ const ALLOWED_NOTIFICATION_ROUTES = new Set([
     'RobotaxiPrototypeShareTrip',
     'RobotaxiPrototypePublicTracking',
     'RobotaxiPrototypeDriverDocuments',
+    'RobotaxiPrototypeDriverWaitlistStatus',
     'RobotaxiPrototypeNoDrivers',
     'RobotaxiPrototypeCancellation',
     'RobotaxiPrototypeComplain',
@@ -63,6 +64,14 @@ const NOTIFICATION_SCREEN_ALIASES = {
     driver_documents: 'RobotaxiPrototypeDriverDocuments',
     documents: 'RobotaxiPrototypeDriverDocuments',
     driverdocuments: 'RobotaxiPrototypeDriverDocuments',
+    kyc_reverification_required: 'RobotaxiPrototype',
+    identity_reverification: 'RobotaxiPrototype',
+    driver_waitlist_update: 'RobotaxiPrototypeDriverWaitlistStatus',
+    driver_waitlist_joined: 'RobotaxiPrototypeDriverWaitlistStatus',
+    driver_waitlist_approved: 'RobotaxiPrototypeDriverWaitlistStatus',
+    driver_waitlist_rejected: 'RobotaxiPrototypeDriverWaitlistStatus',
+    driver_waitlist_position_updated: 'RobotaxiPrototypeDriverWaitlistStatus',
+    waitlist: 'RobotaxiPrototypeDriverWaitlistStatus',
     share_trip: 'RobotaxiPrototypeShareTrip',
     public_tracking: 'RobotaxiPrototypePublicTracking',
     no_drivers: 'RobotaxiPrototypeNoDrivers',
@@ -446,14 +455,12 @@ class FCMNotificationService {
             try {
                 const wsManager = WebSocketManager.getInstance();
 
-                // Se não estiver conectado, tentar conectar
+                // Se não estiver conectado, guardar o token e deixar o orquestrador
+                // abrir o realtime quando a sessão já estiver hidratada.
                 if (!wsManager.isConnected()) {
                     Logger.log('⏳ WebSocket não conectado, registrando token FCM quando conectar...');
                     this.pendingTokenRegistration = { token, userId, userType };
                     this.ensureWebSocketConnectListener(wsManager);
-                    void Promise.resolve(wsManager.connect()).catch((connectError) => {
-                        Logger.warn('⚠️ Erro ao conectar WebSocket para FCM:', connectError?.message || connectError);
-                    });
                     return;
                 }
 
@@ -781,6 +788,9 @@ class FCMNotificationService {
                 status: status || null,
                 notificationType: data.type || data.notificationType || null,
                 userType: userType || null,
+                challengeId: data.challengeId || null,
+                requirement: data.requirement || null,
+                reason: data.reason || null,
                 documentType: data.documentType || null,
                 ...(hasUntrustedExplicitScreen ? { originalScreen: explicitScreen } : {}),
             }

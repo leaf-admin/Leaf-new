@@ -10,6 +10,7 @@ let currentRoute = DEFAULT_ROUTE;
 const listeners = new Set();
 let currentCamera = null;
 const cameraListeners = new Set();
+const COORDINATE_EQUALITY_TOLERANCE = 0.00001;
 
 function notify() {
   listeners.forEach(listener => listener(currentRoute));
@@ -32,7 +33,10 @@ function areCoordinatesEqual(left, right) {
     return false;
   }
 
-  return left.latitude === right.latitude && left.longitude === right.longitude;
+  return (
+    Math.abs(Number(left.latitude) - Number(right.latitude)) <= COORDINATE_EQUALITY_TOLERANCE &&
+    Math.abs(Number(left.longitude) - Number(right.longitude)) <= COORDINATE_EQUALITY_TOLERANCE
+  );
 }
 
 function areCoordinateListsEqual(left = [], right = []) {
@@ -71,10 +75,10 @@ function areRoutesEqual(left, right) {
   );
 }
 
-function buildCurvePoints(origin, destination) {
+export function buildFallbackRouteCoordinates(origin, destination) {
   const latDiff = destination.latitude - origin.latitude;
   const lonDiff = destination.longitude - origin.longitude;
-  const curveFactor = 0.09;
+  const curveFactor = 0.14;
   const controlOffsetLat = -lonDiff * curveFactor;
   const controlOffsetLon = latDiff * curveFactor;
 
@@ -106,10 +110,23 @@ export function setPrototypeMapRoute(payload) {
     return;
   }
 
+  const explicitCoordinates = Array.isArray(payload?.coordinates)
+    ? payload.coordinates.filter(isCoordinateValid)
+    : [];
+  const canReuseCurrentRouteCoordinates = Boolean(
+    explicitCoordinates.length < 2 &&
+      currentRoute !== DEFAULT_ROUTE &&
+      areCoordinatesEqual(currentRoute.origin, origin) &&
+      areCoordinatesEqual(currentRoute.destination, destination) &&
+      Array.isArray(currentRoute.coordinates) &&
+      currentRoute.coordinates.length >= 2
+  );
   const coordinates =
-    Array.isArray(payload?.coordinates) && payload.coordinates.length >= 2
-      ? payload.coordinates
-      : buildCurvePoints(origin, destination);
+    explicitCoordinates.length >= 2
+      ? explicitCoordinates
+      : canReuseCurrentRouteCoordinates
+        ? currentRoute.coordinates
+        : buildFallbackRouteCoordinates(origin, destination);
 
   const nextRoute = {
     origin,

@@ -1,6 +1,10 @@
 import { formatCurrencyBRL } from './tripFinancialSummary';
 
 export function toFiniteMoney(value) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -18,6 +22,51 @@ function pickPreferredMoneyValue(...candidates) {
 
 export function formatCurrencyBR(value) {
   return formatCurrencyBRL(value);
+}
+
+function roundMoney(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Number(parsed.toFixed(2));
+}
+
+function resolveOfferGrossAmount(offer = {}) {
+  return (
+    toFiniteMoney(offer?.grossFare) ??
+    toFiniteMoney(offer?.grossAmount) ??
+    toFiniteMoney(offer?.totalAmount) ??
+    toFiniteMoney(offer?.finalFare) ??
+    toFiniteMoney(offer?.finalPrice) ??
+    toFiniteMoney(offer?.fare) ??
+    toFiniteMoney(offer?.amount)
+  );
+}
+
+function resolveOfferTotalFees(offer = {}) {
+  const totalFees = pickPreferredMoneyValue(
+    offer?.estimatedTotalFees,
+    offer?.totalFees,
+    offer?.retainedFeesInReais,
+    offer?.paymentBreakdown?.totalFees,
+    offer?.paymentDistribution?.retainedFeesInReais,
+  );
+  if (totalFees !== null) {
+    return totalFees;
+  }
+
+  const operationalFee =
+    toFiniteMoney(offer?.estimatedOperationalFee) ??
+    toFiniteMoney(offer?.operationalFee);
+  const paymentIntermediationFee =
+    toFiniteMoney(offer?.estimatedPaymentIntermediationFee) ??
+    toFiniteMoney(offer?.paymentIntermediationFee);
+  if (operationalFee !== null || paymentIntermediationFee !== null) {
+    return Number(operationalFee || 0) + Number(paymentIntermediationFee || 0);
+  }
+
+  return null;
 }
 
 export function hasLockedPricingSnapshot(offer = {}) {
@@ -48,7 +97,7 @@ export function getDriverOfferNetAmount(offer = {}) {
     return null;
   }
 
-  return pickPreferredMoneyValue(
+  const explicitNet = pickPreferredMoneyValue(
     offer?.estimatedDriverNetAmount,
     offer?.driverNetAmount,
     offer?.driverNetAmountLocked,
@@ -59,6 +108,17 @@ export function getDriverOfferNetAmount(offer = {}) {
     offer?.paymentBreakdown?.driverNetAmount,
     offer?.paymentDistribution?.netAmountInReais,
   );
+  if (explicitNet !== null) {
+    return explicitNet;
+  }
+
+  const grossFare = resolveOfferGrossAmount(offer);
+  const totalFees = resolveOfferTotalFees(offer);
+  if (grossFare !== null && totalFees !== null) {
+    return roundMoney(Math.max(0, grossFare - totalFees));
+  }
+
+  return null;
 }
 
 export function hasAuthoritativeDriverOfferPricing(offer = {}) {
@@ -71,8 +131,7 @@ export function hasAuthoritativeDriverOfferPricing(offer = {}) {
     return true;
   }
 
-  const payoutLabel = String(offer?.payout || "").trim();
-  return hasLockedPricingSnapshot(offer) && payoutLabel.length > 0;
+  return false;
 }
 
 export function getDriverOfferPayoutLabel(offer = {}) {
@@ -112,28 +171,15 @@ export function normalizeDriverOfferPricingSnapshot(offer = {}) {
     return offer;
   }
 
-  const grossFare =
-    toFiniteMoney(offer?.grossFare) ??
-    toFiniteMoney(offer?.grossAmount) ??
-    toFiniteMoney(offer?.totalAmount) ??
-    toFiniteMoney(offer?.finalFare) ??
-    toFiniteMoney(offer?.finalPrice) ??
-    toFiniteMoney(offer?.fare) ??
-    toFiniteMoney(offer?.amount);
+  const grossFare = resolveOfferGrossAmount(offer);
   const operationalFee =
     toFiniteMoney(offer?.estimatedOperationalFee) ??
     toFiniteMoney(offer?.operationalFee);
   const paymentIntermediationFee =
     toFiniteMoney(offer?.estimatedPaymentIntermediationFee) ??
     toFiniteMoney(offer?.paymentIntermediationFee);
-  const totalFees = pickPreferredMoneyValue(
-    offer?.estimatedTotalFees,
-    offer?.totalFees,
-    offer?.retainedFeesInReais,
-    offer?.paymentBreakdown?.totalFees,
-    offer?.paymentDistribution?.retainedFeesInReais,
-  );
-  const driverNetAmount = pickPreferredMoneyValue(
+  const totalFees = resolveOfferTotalFees(offer);
+  const explicitDriverNetAmount = pickPreferredMoneyValue(
     offer?.estimatedDriverNetAmount,
     offer?.driverNetAmount,
     offer?.driverNetAmountLocked,
@@ -144,6 +190,12 @@ export function normalizeDriverOfferPricingSnapshot(offer = {}) {
     offer?.paymentBreakdown?.driverNetAmount,
     offer?.paymentDistribution?.netAmountInReais,
   );
+  const driverNetAmount =
+    explicitDriverNetAmount !== null
+      ? explicitDriverNetAmount
+      : grossFare !== null && totalFees !== null
+        ? roundMoney(Math.max(0, grossFare - totalFees))
+        : null;
   const payoutLabel = String(offer?.payout || "").trim();
   const hasAuthoritativeSnapshot = hasLockedPricingSnapshot({
     ...offer,
@@ -184,9 +236,7 @@ export function normalizeDriverOfferPricingSnapshot(offer = {}) {
         }
       : payoutLabel
         ? { payout: payoutLabel }
-        : grossFare !== null
-          ? { payout: formatCurrencyBR(grossFare) }
-          : {}),
+        : {}),
     ...(hasAuthoritativeSnapshot ? { pricingSnapshotLocked: true } : {}),
   };
 }

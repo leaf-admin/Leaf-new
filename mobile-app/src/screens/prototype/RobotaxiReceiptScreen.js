@@ -19,6 +19,7 @@ import {
   PrototypeCard,
   PrototypePrimaryButton,
 } from "../../components/prototype/PrototypeUI";
+import mapStyleAppleLike from "../../components/prototype/mapStyleAppleLike";
 import { leafButtonMetrics } from "../../components/prototype/LeafRideUI";
 import { PrototypeMenuCloseButton } from "../../components/prototype/PrototypeMenuSurface";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
@@ -28,7 +29,7 @@ import {
   formatCurrencyBRL,
   resolveTripFeeAmount,
   resolveTripGrossAmount,
-  resolveTripNetAmount,
+  resolveTripNetAmountOrNull,
   resolveTripTollAmount,
 } from "./tripFinancialSummary";
 
@@ -36,6 +37,17 @@ const { color } = robotaxiPrototypeTokens;
 const SHEET_TOP_OFFSET = 8;
 const SHEET_BOTTOM_OFFSET = 8;
 const FALLBACK_CARD_HEIGHT = 420;
+const receiptMapStyle = [
+  ...mapStyleAppleLike,
+  {
+    featureType: "poi",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "transit",
+    stylers: [{ visibility: "off" }],
+  },
+];
 
 function toNumber(value, fallback = 0) {
   const numeric = Number(value);
@@ -446,7 +458,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   );
   const resolvedFeeAmount = resolveTripFeeAmount(selected);
   const finalTotalFees = toNumber(resolvedFeeAmount, NaN);
-  const finalDriverNetAmount = toNumber(resolveTripNetAmount(selected), NaN);
+  const resolvedDriverNetAmount = resolveTripNetAmountOrNull(selected);
+  const finalDriverNetAmount = toNumber(resolvedDriverNetAmount, NaN);
+  const hasDriverNetAmount = resolvedDriverNetAmount !== null;
   const safeFeeAmount = Number.isFinite(finalTotalFees) ? finalTotalFees : 0;
   const safeTollAmount = Number.isFinite(tollAmount) ? tollAmount : 0;
   const passengerRideSubtotal = Math.max(
@@ -569,9 +583,12 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const heroSubtitle = [selected?.date, paymentStatusLabel]
     .filter(Boolean)
     .join(" • ");
-  const driverReceivedAmount = formatCurrency(
-    Number.isFinite(finalDriverNetAmount) ? finalDriverNetAmount : totalAmount,
-  );
+  const driverReceivedAmount = hasDriverNetAmount
+    ? formatCurrency(finalDriverNetAmount)
+    : "--";
+  const driverReceiptAmountLabel = hasDriverNetAmount
+    ? "Valor recebido"
+    : "Repasse pendente";
   const passengerRecentHistory = runtimeHistory.filter(
     (item) => item.id !== selected?.id,
   );
@@ -852,10 +869,18 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           style={styles.receiptCleanMapNative}
           provider={PROVIDER_GOOGLE}
           initialRegion={routePreviewRegion}
+          customMapStyle={receiptMapStyle}
+          mapType="standard"
           scrollEnabled={false}
           zoomEnabled={false}
           rotateEnabled={false}
           pitchEnabled={false}
+          toolbarEnabled={false}
+          showsCompass={false}
+          showsScale={false}
+          showsPointsOfInterest={false}
+          showsBuildings={false}
+          showsTraffic={false}
           pointerEvents="none"
         >
           <Polyline
@@ -939,10 +964,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         <Text style={styles.receiptCleanSectionTitle}>Corridas recentes</Text>
         {driverRecentHistory.slice(0, 2).map((item) => {
           const routeParts = buildReceiptHistoryRouteParts(item);
-          const driverRecentNet = resolveTripNetAmount(item);
-          const driverRecentValue = driverRecentNet > 0
-            ? driverRecentNet
-            : resolveTripGrossAmount(item);
+          const driverRecentNet = resolveTripNetAmountOrNull(item);
+          const driverRecentValueLabel =
+            driverRecentNet !== null ? formatCurrency(driverRecentNet) : "--";
           return (
             <TouchableOpacity
               key={item.id}
@@ -954,7 +978,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <Text style={styles.receiptCleanRowTitle} numberOfLines={1}>{routeParts.drop}</Text>
                 <Text style={styles.receiptCleanRowSubtitle} numberOfLines={1}>{routeParts.pickup}</Text>
               </View>
-              <Text style={styles.receiptCleanValueAmount}>{formatCurrency(driverRecentValue)}</Text>
+              <Text style={styles.receiptCleanValueAmount}>{driverRecentValueLabel}</Text>
             </TouchableOpacity>
           );
         })}
@@ -982,7 +1006,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           <View style={styles.receiptCleanSheet}>
             <View style={styles.receiptCleanTotalRow}>
               <View>
-                <Text style={styles.receiptCleanTotalLabel}>{isDriverView ? "Valor recebido" : "Total pago"}</Text>
+                <Text style={styles.receiptCleanTotalLabel}>{isDriverView ? driverReceiptAmountLabel : "Total pago"}</Text>
                 <Text style={styles.receiptCleanTotalValue}>{receiptTotalLabel}</Text>
               </View>
               <View style={styles.receiptCleanPillColumn}>
@@ -1067,7 +1091,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   })}
                   {renderCleanValueRow({
                     title: "Repasse Leaf",
-                    subtitle: "Líquido desta corrida",
+                    subtitle: hasDriverNetAmount
+                      ? "Líquido desta corrida"
+                      : "Aguardando dados de repasse",
                     value: driverReceivedAmount,
                   })}
                 </>
@@ -1281,7 +1307,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                               styles.driverSummaryAmountLabelTight,
                           ]}
                         >
-                          Valor recebido
+                          {driverReceiptAmountLabel}
                         </Text>
                         <Text
                           style={[
@@ -1573,6 +1599,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                           provider={PROVIDER_GOOGLE}
                           initialRegion={routePreviewRegion}
                           region={routePreviewRegion}
+                          customMapStyle={receiptMapStyle}
+                          mapType="standard"
                           scrollEnabled={false}
                           zoomEnabled={false}
                           rotateEnabled={false}

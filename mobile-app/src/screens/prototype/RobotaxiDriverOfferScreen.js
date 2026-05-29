@@ -21,12 +21,18 @@ import {
   hasAuthoritativeDriverOfferPricing,
   selectDisplayableDriverOffer,
 } from "./driverOfferPricingSnapshot";
+import {
+  RIDE_CARD_ROLES,
+  RIDE_CARD_STATES,
+  createRideCardFieldTestIDs,
+  defineRideCardRenderedFields,
+} from "./rideCardContract";
 import useCampaignAssetOverride from "../../hooks/useCampaignAssetOverride";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
 
-export const DRIVER_OFFER_RENDERED_CARD_FIELDS = Object.freeze([
+const DRIVER_OFFER_RENDERED_CARD_FIELD_IDS = Object.freeze([
   "net_payout",
   "gross_fare",
   "pickup_address",
@@ -45,6 +51,26 @@ export const DRIVER_OFFER_RENDERED_CARD_FIELDS = Object.freeze([
   "accept_action",
   "reject_action",
 ]);
+
+const DRIVER_OFFER_FIELD_TEST_ID_OVERRIDES = Object.freeze({
+  accept_action: "driver-offer-screen-accept-button",
+  reject_action: "driver-offer-screen-reject-button",
+  ride_preferences: "driver-offer-screen-preferences",
+});
+
+const DRIVER_OFFER_FIELD_TEST_IDS = createRideCardFieldTestIDs(
+  RIDE_CARD_ROLES.DRIVER,
+  RIDE_CARD_STATES.DRIVER_NEW_OFFER,
+  DRIVER_OFFER_RENDERED_CARD_FIELD_IDS,
+  DRIVER_OFFER_FIELD_TEST_ID_OVERRIDES,
+);
+
+export const DRIVER_OFFER_RENDERED_CARD_FIELDS = defineRideCardRenderedFields(
+  RIDE_CARD_ROLES.DRIVER,
+  RIDE_CARD_STATES.DRIVER_NEW_OFFER,
+  DRIVER_OFFER_RENDERED_CARD_FIELD_IDS,
+  { testIDs: DRIVER_OFFER_FIELD_TEST_ID_OVERRIDES },
+);
 
 function isCompetitiveAcceptLossMessage(message) {
   return String(message || "")
@@ -636,12 +662,17 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     <Text style={styles.offerTitle} numberOfLines={1}>
                       Nova solicitação
                     </Text>
-                    <Text style={styles.offerTimer} numberOfLines={1}>
+                    <Text
+                      style={styles.offerTimer}
+                      numberOfLines={1}
+                      testID={DRIVER_OFFER_FIELD_TEST_IDS.response_timer}
+                    >
                       {countdownLabel} para responder
                     </Text>
                   </View>
                   <View
                     style={styles.netPayout}
+                    testID={DRIVER_OFFER_FIELD_TEST_IDS.net_payout}
                     accessibilityLabel={`Líquido ${fareLabel}`}
                   >
                     <Text style={styles.netPayoutValue} numberOfLines={1}>
@@ -651,14 +682,25 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                 </View>
 
                 <View style={styles.passengerRow}>
-                  <View style={styles.passengerAvatar}>
+                  <View
+                    style={styles.passengerAvatar}
+                    testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_photo}
+                  >
                     <Text style={styles.passengerAvatarText}>{passengerInitial}</Text>
                   </View>
                   <View style={styles.passengerCopy}>
-                    <Text style={styles.passengerName} numberOfLines={1}>
+                    <Text
+                      style={styles.passengerName}
+                      numberOfLines={1}
+                      testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_name}
+                    >
                       {passengerName}
                     </Text>
-                    <Text style={styles.passengerMeta} numberOfLines={1}>
+                    <Text
+                      style={styles.passengerMeta}
+                      numberOfLines={1}
+                      testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_rating}
+                    >
                       Passageiro verificado · {passengerRatingLabel}
                     </Text>
                   </View>
@@ -669,36 +711,61 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                   testID="driver-offer-screen-summary"
                   accessibilityLabel={`Resumo da corrida. Embarque em ${pickupEtaLabel}, ${pickupDistanceLabel}. Viagem de ${tripDurationLabel}, ${tripDistanceLabel}. Total ${grossFareLabel}.`}
                 >
-                  <View style={styles.routeStep}>
+                  <View
+                    style={styles.routeStep}
+                    testID={DRIVER_OFFER_FIELD_TEST_IDS.pickup_eta}
+                  >
                     <View style={styles.routeIcon}>
                       <Ionicons name="locate-outline" size={15} color={leafRideColors.text} />
                     </View>
                     <View style={styles.routeCopy}>
-                      <Text style={styles.routeAddress} numberOfLines={1}>
+                      <Text
+                        style={styles.routeAddress}
+                        numberOfLines={1}
+                        testID={DRIVER_OFFER_FIELD_TEST_IDS.pickup_address}
+                      >
                         {pickupLabel}
                       </Text>
-                      <Text style={styles.routeMeta} numberOfLines={1}>
+                      <Text
+                        style={styles.routeMeta}
+                        numberOfLines={1}
+                        testID={DRIVER_OFFER_FIELD_TEST_IDS.pickup_distance}
+                      >
                         {pickupEtaLabel} · {pickupDistanceLabel} até o embarque
                       </Text>
                     </View>
                   </View>
 
-                  <View style={styles.routeStep}>
+                  <View
+                    style={styles.routeStep}
+                    testID={DRIVER_OFFER_FIELD_TEST_IDS.trip_duration}
+                  >
                     <View style={styles.routeIcon}>
                       <Ionicons name="location-outline" size={15} color={leafRideColors.leaf} />
                     </View>
                     <View style={styles.routeCopy}>
-                      <Text style={styles.routeAddress} numberOfLines={1}>
+                      <Text
+                        style={styles.routeAddress}
+                        numberOfLines={1}
+                        testID={DRIVER_OFFER_FIELD_TEST_IDS.destination_address}
+                      >
                         {dropoffLabel}
                       </Text>
-                      <Text style={styles.routeMeta} numberOfLines={1}>
+                      <Text
+                        style={styles.routeMeta}
+                        numberOfLines={1}
+                        testID={DRIVER_OFFER_FIELD_TEST_IDS.trip_distance}
+                      >
                         {tripDurationLabel} · {tripDistanceLabel} de viagem
                       </Text>
                     </View>
                   </View>
                 </View>
 
-                <View style={styles.confirmedLine}>
+                <View
+                  style={styles.confirmedLine}
+                  testID={DRIVER_OFFER_FIELD_TEST_IDS.payment_confirmed}
+                >
                   <Ionicons name="checkmark-circle" size={15} color={leafRideColors.leaf} />
                   <Text style={styles.confirmedText} numberOfLines={1}>
                     PIX confirmado
@@ -709,7 +776,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                 {ridePreferenceItems.length > 0 ? (
                   <View
                     style={styles.preferencePanel}
-                    testID="driver-offer-screen-preferences"
+                    testID={DRIVER_OFFER_FIELD_TEST_IDS.ride_preferences}
                     accessibilityLabel="Preferências do passageiro"
                   >
                     <Text style={styles.hiddenText}>Preferências</Text>
@@ -732,7 +799,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     disabled={Boolean(busyAction)}
                     onPress={handleReject}
                     style={styles.rejectButton}
-                    testID="driver-offer-screen-reject-button"
+                    testID={DRIVER_OFFER_FIELD_TEST_IDS.reject_action}
                     accessibilityLabel="driver-offer-screen-reject-button"
                   />
                   <LeafButton
@@ -745,7 +812,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     disabled={Boolean(busyAction)}
                     onPress={handleAccept}
                     style={styles.acceptButton}
-                    testID="driver-offer-screen-accept-button"
+                    testID={DRIVER_OFFER_FIELD_TEST_IDS.accept_action}
                     accessibilityLabel="driver-offer-screen-accept-button"
                   />
                 </View>

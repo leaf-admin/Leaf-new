@@ -528,6 +528,122 @@ function normalizeState(state) {
   return String(state || "").trim().toLowerCase();
 }
 
+function normalizeFieldId(fieldId) {
+  return String(fieldId || "").trim().toLowerCase();
+}
+
+function uniqueNonEmptyValues(values = []) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function normalizeRenderedFieldTestIDs(value) {
+  if (Array.isArray(value)) {
+    return uniqueNonEmptyValues(value);
+  }
+
+  if (value && typeof value === "object") {
+    return uniqueNonEmptyValues(
+      value.testIDs ||
+        value.testIds ||
+        value.renderedTestIDs ||
+        value.renderedTestIds ||
+        [value.testID || value.testId],
+    );
+  }
+
+  return uniqueNonEmptyValues([value]);
+}
+
+function normalizeRenderedFieldEntries(renderedFields = []) {
+  const rawEntries = Array.isArray(renderedFields)
+    ? renderedFields
+    : Object.entries(renderedFields || {}).map(([id, value]) => {
+        const entry =
+          value && typeof value === "object" && !Array.isArray(value)
+            ? value
+            : { testIDs: normalizeRenderedFieldTestIDs(value) };
+
+        return { id, ...entry };
+      });
+
+  const renderedMap = new Map();
+
+  rawEntries.forEach((entry) => {
+    const id = normalizeFieldId(
+      typeof entry === "string" ? entry : entry?.id || entry?.fieldId,
+    );
+
+    if (!id) {
+      return;
+    }
+
+    const previous = renderedMap.get(id);
+    const nextTestIDs =
+      typeof entry === "string" ? [] : normalizeRenderedFieldTestIDs(entry);
+
+    renderedMap.set(
+      id,
+      Object.freeze({
+        id,
+        testIDs: uniqueNonEmptyValues([
+          ...(previous?.testIDs || []),
+          ...nextTestIDs,
+        ]),
+      }),
+    );
+  });
+
+  return renderedMap;
+}
+
+export function getRideCardFieldTestID(role, state, fieldId) {
+  const normalizedRole = normalizeRole(role);
+  const normalizedState = normalizeState(state);
+  const normalizedFieldId = normalizeFieldId(fieldId);
+
+  return `ride-card-field-${normalizedRole}-${normalizedState}-${normalizedFieldId}`;
+}
+
+export function createRideCardFieldTestIDs(role, state, fieldIds = [], testIDOverrides = {}) {
+  return Object.freeze(
+    fieldIds.reduce((acc, fieldId) => {
+      const normalizedFieldId = normalizeFieldId(fieldId);
+      if (!normalizedFieldId) {
+        return acc;
+      }
+
+      acc[normalizedFieldId] =
+        testIDOverrides[normalizedFieldId] ||
+        getRideCardFieldTestID(role, state, normalizedFieldId);
+      return acc;
+    }, {}),
+  );
+}
+
+export function defineRideCardRenderedFields(role, state, fieldIds = [], options = {}) {
+  const testIDsByFieldId = createRideCardFieldTestIDs(
+    role,
+    state,
+    fieldIds,
+    options.testIDs || options.testIDOverrides || {},
+  );
+
+  return Object.freeze(
+    fieldIds.map((fieldId) =>
+      Object.freeze({
+        id: normalizeFieldId(fieldId),
+        testID: testIDsByFieldId[normalizeFieldId(fieldId)],
+      }),
+    ),
+  );
+}
+
 export function getRideCardContract(role, state) {
   const normalizedRole = normalizeRole(role);
   const normalizedState = normalizeState(state);
@@ -563,12 +679,46 @@ export function getRideCardRequiredFields(role, state, options = {}) {
 
 export function validateRideCardRenderedFields(role, state, renderedFieldIds = [], options = {}) {
   const requiredFields = getRideCardRequiredFields(role, state, options);
-  const renderedSet = new Set(renderedFieldIds);
-  const missing = requiredFields.filter((candidate) => !renderedSet.has(candidate.id));
+  const renderedMap = normalizeRenderedFieldEntries(renderedFieldIds);
+  const isTestIDRendered =
+    typeof options.isTestIDRendered === "function"
+      ? options.isTestIDRendered
+      : typeof options.queryByTestId === "function"
+        ? (testID) => Boolean(options.queryByTestId(testID))
+        : null;
+  const requireTestIDs = options.requireTestIDs === true || Boolean(isTestIDRendered);
+  const missing = requiredFields.filter((candidate) => !renderedMap.has(candidate.id));
+  const presentRequiredFields = requiredFields.filter((candidate) =>
+    renderedMap.has(candidate.id),
+  );
+  const missingRenderTargets = requireTestIDs
+    ? presentRequiredFields.filter((candidate) => {
+        const renderedEntry = renderedMap.get(candidate.id);
+        return !renderedEntry?.testIDs?.length;
+      })
+    : [];
+  const missingRendered = isTestIDRendered
+    ? presentRequiredFields.filter((candidate) => {
+        const renderedEntry = renderedMap.get(candidate.id);
+        if (!renderedEntry?.testIDs?.length) {
+          return false;
+        }
+
+        return !renderedEntry.testIDs.some((testID) =>
+          isTestIDRendered(testID, candidate),
+        );
+      })
+    : [];
 
   return Object.freeze({
-    ok: missing.length === 0,
+    ok:
+      missing.length === 0 &&
+      missingRenderTargets.length === 0 &&
+      missingRendered.length === 0,
     missing,
+    missingRenderTargets,
+    missingRendered,
     requiredFields,
+    renderedFields: Object.freeze(Array.from(renderedMap.values())),
   });
 }

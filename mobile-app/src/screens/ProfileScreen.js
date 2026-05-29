@@ -71,9 +71,22 @@ export default function ProfileScreen({ navigation }) {
         Logger.warn('⚠️ DriverBalanceService não disponível:', error);
         DriverBalanceService = {
             getDriverBalance: async () => ({ success: false, error: 'Serviço não disponível' }),
-            getTransactionHistory: async () => ({ success: false, error: 'Serviço não disponível' })
+            getTransactionHistory: async () => ({ success: false, error: 'Serviço não disponível' }),
+            calculateWithdrawFee: (amount) => (Number(amount || 0) > 0 && Number(amount || 0) < 500 ? 1 : 0)
         };
     }
+
+    const getWithdrawAmountNumber = () => parseFloat(String(withdrawAmount || '').replace(',', '.')) || 0;
+    const getWithdrawFee = (amount) => (
+        typeof DriverBalanceService.calculateWithdrawFee === 'function'
+            ? DriverBalanceService.calculateWithdrawFee(amount)
+            : (amount > 0 && amount < 500 ? 1 : 0)
+    );
+    const currentWithdrawAmount = getWithdrawAmountNumber();
+    const currentWithdrawFee = getWithdrawFee(currentWithdrawAmount);
+    const currentWithdrawTotalDebit = currentWithdrawAmount + currentWithdrawFee;
+    const currentWithdrawExceedsBalance = withdrawAmount.length > 0 && currentWithdrawAmount > 0 && currentWithdrawTotalDebit > driverBalance;
+    const withdrawContinueDisabled = !withdrawAmount || !pixKey || !appPassword || isProcessingWithdraw || currentWithdrawExceedsBalance;
     
 
     // Carregar saldo do motorista
@@ -171,15 +184,20 @@ export default function ProfileScreen({ navigation }) {
     // Funções do modal de saque
     const handleContinueWithdraw = () => {
         // Validações
-        const amount = parseFloat(withdrawAmount.replace(',', '.'));
+        const amount = getWithdrawAmountNumber();
+        const fee = getWithdrawFee(amount);
+        const totalDebit = amount + fee;
         
         if (!amount || amount <= 0) {
             Alert.alert('Atenção', 'Informe um valor válido para o saque.');
             return;
         }
         
-        if (amount > driverBalance) {
-            Alert.alert('Saldo insuficiente', 'O valor solicitado é maior que o saldo disponível em sua conta.');
+        if (totalDebit > driverBalance) {
+            Alert.alert(
+                'Saldo insuficiente',
+                `Este saque debita R$ ${totalDebit.toFixed(2).replace('.', ',')}${fee > 0 ? ' incluindo tarifa de R$ 1,00' : ''}.`
+            );
             return;
         }
         
@@ -718,13 +736,12 @@ export default function ProfileScreen({ navigation }) {
                                 </View>
                                 {/* Mensagem de saldo insuficiente */}
                                 {(() => {
-                                    const amount = parseFloat(withdrawAmount.replace(',', '.')) || 0;
-                                    if (amount > driverBalance && withdrawAmount.length > 0) {
+                                    if (currentWithdrawExceedsBalance) {
                                         return (
                                             <View style={styles.withdrawErrorContainer}>
                                                 <Ionicons name="alert-circle-outline" size={16} color="#F44336" />
                                                 <Text style={[cardTypography.subtitle, styles.withdrawErrorText]}>
-                                                    Saldo insuficiente
+                                                    Saldo insuficiente para saque + tarifa
                                                 </Text>
                                             </View>
                                         );
@@ -733,13 +750,13 @@ export default function ProfileScreen({ navigation }) {
                                 })()}
                                 {/* Mensagem de taxa para valores abaixo de R$ 500 */}
                                 {(() => {
-                                    const amount = parseFloat(withdrawAmount.replace(',', '.')) || 0;
-                                    if (amount > 0 && amount < 500 && amount <= driverBalance) {
+                                    const amount = getWithdrawAmountNumber();
+                                    if (amount > 0 && getWithdrawFee(amount) > 0 && !currentWithdrawExceedsBalance) {
                                         return (
                                             <View style={styles.withdrawTaxWarningContainer}>
                                                 <Ionicons name="information-circle-outline" size={16} color="#FF9800" />
                                                 <Text style={[cardTypography.subtitle, styles.withdrawTaxWarningText]}>
-                                                    Taxa de R$ 1,00 será aplicada
+                                                    Tarifa de R$ 1,00 será aplicada
                                                 </Text>
                                             </View>
                                         );
@@ -813,7 +830,7 @@ export default function ProfileScreen({ navigation }) {
                             <View style={[styles.withdrawTaxInfo, { backgroundColor: isDarkMode ? '#2a2a2a' : '#FFF8E1' }]}>
                                 <Ionicons name="information-circle-outline" size={18} color="#FF9800" />
                                 <Text style={[cardTypography.helper, styles.withdrawTaxText, { color: isDarkMode ? '#ccc' : '#E65100' }]}>
-                                    *Saques abaixo de R$ 500,00 possuem taxa de R$ 1,00
+                                    *Saques abaixo de R$ 500,00 têm tarifa de R$ 1,00. A partir de R$ 500,00, não há tarifa.
                                 </Text>
                             </View>
 
@@ -835,10 +852,10 @@ export default function ProfileScreen({ navigation }) {
                             <TouchableOpacity
                                 style={[
                                     styles.withdrawContinueButton,
-                                    (!withdrawAmount || !pixKey || !appPassword || isProcessingWithdraw) && styles.withdrawContinueButtonDisabled
+                                    withdrawContinueDisabled && styles.withdrawContinueButtonDisabled
                                 ]}
                                 onPress={handleContinueWithdraw}
-                                disabled={!withdrawAmount || !pixKey || !appPassword || isProcessingWithdraw}
+                                disabled={withdrawContinueDisabled}
                                 activeOpacity={0.8}
                             >
                                 {isProcessingWithdraw ? (
@@ -891,7 +908,7 @@ export default function ProfileScreen({ navigation }) {
                                     </Text>
                                 </View>
                                 
-                                {parseFloat(withdrawAmount.replace(',', '.')) < 500 && (
+                                {getWithdrawFee(getWithdrawAmountNumber()) > 0 && (
                                     <View style={styles.confirmRow}>
                                         <Text style={[cardTypography.subtitle, styles.confirmRowLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
                                             Taxa:
@@ -918,13 +935,13 @@ export default function ProfileScreen({ navigation }) {
                                 
                                 <View style={[styles.confirmRow, styles.confirmRowTotal]}>
                                     <Text style={[cardTypography.subtitle, styles.confirmRowLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
-                                        Total a receber:
+                                        Total debitado:
                                     </Text>
                                     <Text style={[styles.confirmRowValueTotal, { color: MAIN_COLOR }]}>
                                         R$ {(() => {
-                                            const amount = parseFloat(withdrawAmount.replace(',', '.')) || 0;
-                                            const fee = amount < 500 ? 1 : 0;
-                                            const total = amount - fee;
+                                            const amount = getWithdrawAmountNumber();
+                                            const fee = getWithdrawFee(amount);
+                                            const total = amount + fee;
                                             return total.toFixed(2).replace('.', ',');
                                         })()}
                                     </Text>

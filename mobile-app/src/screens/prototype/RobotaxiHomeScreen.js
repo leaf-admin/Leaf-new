@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Linking, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -71,6 +71,9 @@ import {
   shouldRunPrototypeConnectionAutomation,
 } from './prototypeConnectionStatus';
 import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
+import kycService from '../../services/KYCService';
+import nativeAwsLivenessService from '../../services/NativeAwsLivenessService';
+import Logger from '../../utils/Logger';
 
 const { color } = robotaxiPrototypeTokens;
 const HOME_CARD_BOTTOM_OFFSET = 16;
@@ -83,14 +86,32 @@ const MAP_MIN_VISIBLE_HEIGHT = 180;
 const OVERLAY_ZOOM_OUT_GAIN = 0.42;
 const MAX_OVERLAY_ZOOM_OUT_RATIO = 0.62;
 const IS_TEST_ENV = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
-const HOME_MAP_READY_FALLBACK_MS = Platform.OS === 'android' ? 4500 : 3500;
-const HOME_MAP_READY_WARMUP_MS = Platform.OS === 'android' ? 700 : 180;
+const HOME_MAP_READY_WARMUP_MS = Platform.OS === 'android' ? 1400 : 180;
+const HOME_MAP_READY_FROM_READY_MS = Platform.OS === 'android' ? 2600 : 320;
+const HOME_MAP_READY_FALLBACK_MS = Platform.OS === 'android' ? 9000 : 4500;
 const SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP = true;
 const PLACES_CACHE_LOOKUP_TIMEOUT_MS = 2500;
 const DEFAULT_USER_COORDINATE = {
   latitude: PROTOTYPE_REGION.latitude,
   longitude: PROTOTYPE_REGION.longitude
 };
+
+function pickHomeMapCoordinate(...values) {
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+
+    const latitude = Number(value.latitude ?? value.lat);
+    const longitude = Number(value.longitude ?? value.lng);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return { latitude, longitude };
+    }
+  }
+
+  return null;
+}
+
 const QA_SEEDED_DESTINATION = Object.freeze({
   id: 'qa-copacabana-palace',
   name: 'Copacabana Palace',
@@ -112,6 +133,8 @@ const MAP_OCCLUSION_REPOSITION_MS = 760;
 const MAP_RETURN_REPOSITION_MS = 820;
 const DRIVER_H3_VIEWPORT_DEBOUNCE_MS = 420;
 const DRIVER_H3_SOCKET_REFRESH_DEBOUNCE_MS = 900;
+const DRIVER_H3_MIN_FETCH_INTERVAL_MS = 30000;
+const DRIVER_H3_AUTH_COOLDOWN_MS = 120000;
 const HOME_AUTOMATION_POLL_MS = 350;
 const HOME_AUTOMATION_WATCHDOG_MS = 250;
 const LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS = 800;
@@ -119,6 +142,23 @@ const LEAF_NATIVE_NAV_MANUAL_PAN_PAUSE_MS = 8000;
 const LEAF_NATIVE_NAV_CAMERA_MIN_LOOKAHEAD_KM = 0.045;
 const LEAF_NATIVE_NAV_CAMERA_MAX_LOOKAHEAD_KM = 0.28;
 const MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
+
+let CachedKYCCameraScreen = null;
+let CachedAWSNativeLivenessScreen = null;
+
+function resolveKYCCameraScreen() {
+  if (!CachedKYCCameraScreen) {
+    CachedKYCCameraScreen = require('../../components/KYC/KYCCameraScreen').default;
+  }
+  return CachedKYCCameraScreen;
+}
+
+function resolveAWSNativeLivenessScreen() {
+  if (!CachedAWSNativeLivenessScreen) {
+    CachedAWSNativeLivenessScreen = require('../../components/KYC/AWSNativeLivenessScreen').default;
+  }
+  return CachedAWSNativeLivenessScreen;
+}
 const SHOULD_AUTO_OPEN_DRIVER_NAVIGATION = false;
 const CONNECTION_STATUS_STABILITY_MS = 10000;
 const MAX_DEPTH_DEBUG_STORAGE_KEY = '@prototype_runtime_debug_max_depth';
@@ -198,6 +238,69 @@ function extractPrototypeHomeQaParamsFromUrl(url) {
   }
 
   return Object.keys(qaParams).length > 0 ? qaParams : null;
+}
+
+function DriverHomeHydrationSkeleton({
+  insetsBottom = 0,
+  onCtaLayout,
+}) {
+  const safeBottom = Math.max(0, Number(insetsBottom) || 0);
+
+  return (
+    <View
+      pointerEvents="none"
+      onLayout={onCtaLayout}
+      style={[
+        styles.driverHomeSkeletonStack,
+        { bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET },
+      ]}
+      testID="driver-home-overlay-skeleton"
+      accessibilityRole="progressbar"
+      accessibilityLabel="Carregando área do motorista"
+    >
+      <View style={styles.driverHomeSkeletonCard}>
+        <View style={styles.driverHomeSkeletonTopRow}>
+          <View style={styles.driverHomeSkeletonMainColumn}>
+            <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonLabel]} />
+            <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonAmount]} />
+            <View style={styles.driverHomeSkeletonProgressTrack}>
+              <View style={styles.driverHomeSkeletonProgressFill} />
+            </View>
+            <View style={styles.driverHomeSkeletonCaptionRow}>
+              <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonCaption]} />
+              <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonPercent]} />
+            </View>
+            <View style={styles.driverHomeSkeletonPill} />
+          </View>
+
+          <View style={styles.driverHomeSkeletonDivider} />
+
+          <View style={styles.driverHomeSkeletonSideColumn}>
+            <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonSideValue]} />
+            <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonSideLabel]} />
+            <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonSideValue]} />
+            <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonSideLabel]} />
+          </View>
+        </View>
+
+        <View style={styles.driverHomeSkeletonHorizontalDivider} />
+
+        <View style={styles.driverHomeSkeletonActionRow}>
+          <View style={styles.driverHomeSkeletonSlider}>
+            <View style={styles.driverHomeSkeletonThumb} />
+            <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonActionLabel]} />
+          </View>
+          <View style={styles.driverHomeSkeletonGear} />
+        </View>
+      </View>
+
+      <View style={styles.driverHomeSkeletonPromoCard}>
+        <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonPromoTitle]} />
+        <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonPromoBody]} />
+        <View style={[styles.driverHomeSkeletonLine, styles.driverHomeSkeletonPromoBodyShort]} />
+      </View>
+    </View>
+  );
 }
 
 function normalizeCameraHeadingDegrees(value) {
@@ -822,7 +925,6 @@ const HOME_CATEGORY_RATE_CARDS = Object.freeze({
     title: 'Leaf Plus',
     label: 'Plus',
     description: 'Confortável e acessível',
-    icon: 'leaf-outline',
     base_fare: 2.79,
     fixed_fee: 1.1,
     rate_per_hour: 15.6,
@@ -833,7 +935,6 @@ const HOME_CATEGORY_RATE_CARDS = Object.freeze({
     title: 'Leaf Elite',
     label: 'Elite',
     description: 'Mais conforto para sua viagem',
-    icon: 'diamond-outline',
     base_fare: 4.98,
     fixed_fee: 1.8,
     rate_per_hour: 17.4,
@@ -844,7 +945,6 @@ const HOME_CATEGORY_RATE_CARDS = Object.freeze({
     title: 'Leaf Moto',
     label: 'Moto',
     description: 'Mais rápido para ir sozinho',
-    icon: 'bicycle-outline',
     base_fare: 2.18,
     fixed_fee: 0.86,
     rate_per_hour: 12.17,
@@ -873,6 +973,28 @@ function formatHomeArrivalTime(durationMin) {
     minute: '2-digit',
   }).format(now);
 }
+
+function isDriverKycRequiredResult(result = {}) {
+  const payload = result?.payload && typeof result.payload === 'object'
+    ? result.payload
+    : {};
+  const code = String(result?.code || payload?.code || '').trim().toLowerCase();
+  const message = String(
+    result?.reason ||
+    result?.error ||
+    result?.message ||
+    payload?.reason ||
+    payload?.error ||
+    payload?.message ||
+    ''
+  ).trim().toLowerCase();
+
+  return Boolean(result?.kycRequired || payload?.kycRequired) ||
+    ['kycrequired', 'kyc_required', 'kyccheckfailed', 'kyc_check_failed', 'kyc_liveness_required'].includes(code) ||
+    /verifica[cç][aã]o.*(facial|kyc|di[aá]ria|encontrada)/i.test(message);
+}
+
+const DRIVER_IDENTITY_REVERIFICATION_REASON = 'Por segurança, precisamos validar sua identidade.';
 
 export default function RobotaxiHomeScreen({ navigation, route }) {
   const {
@@ -1010,9 +1132,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [showRecoveredConnectionHint, setShowRecoveredConnectionHint] = useState(false);
   const [qaConnectionVisualState, setQaConnectionVisualState] = useState(null);
   const [displayedConnectionIndicatorModel, setDisplayedConnectionIndicatorModel] = useState(null);
+  const [driverKycModalVisible, setDriverKycModalVisible] = useState(false);
+  const [driverKycPendingReason, setDriverKycPendingReason] = useState('');
+  const [driverKycChallengeContext, setDriverKycChallengeContext] = useState({
+    challengeId: null,
+    requirement: null,
+  });
+  const [driverKycLivenessMode, setDriverKycLivenessMode] = useState('local');
+  const [driverKycAwsSessionId, setDriverKycAwsSessionId] = useState(null);
+  const [driverKycProviderLoading, setDriverKycProviderLoading] = useState(false);
+  const [driverKycProcessing, setDriverKycProcessing] = useState(false);
   const driverH3RefreshTimerRef = useRef(null);
-  const homeMapReadyFallbackTimerRef = useRef(null);
+  const driverH3OverlayWasVisibleRef = useRef(false);
+  const driverH3LastFetchKeyRef = useRef('');
+  const driverH3LastFetchAtRef = useRef(0);
+  const driverH3DisabledUntilRef = useRef(0);
   const homeMapReadyWarmupTimerRef = useRef(null);
+  const homeMapReadyFallbackTimerRef = useRef(null);
   const connectionIndicatorStableTimerRef = useRef(null);
   const displayedConnectionIndicatorKeyRef = useRef('none');
   const [destination] = useState('Para onde vamos?');
@@ -1148,7 +1284,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           title: rateCard.title,
           label: rateCard.label,
           description: rateCard.description,
-          icon: rateCard.icon,
           pickupEtaLabel: `${pickupEta} min`,
           arrivalLabel: homeArrivalTime,
           priceLabel: formatCurrencyBRL(
@@ -1402,8 +1537,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return '';
     }
 
+    const isPassengerPreBookingPreview =
+      !isDriverRole && !activeBookingId && normalizedBookingStatus === 'idle';
+    if (isPassengerPreBookingPreview) {
+      return routeSignature;
+    }
+
     return `${routeSignature}|${Math.round(activeOcclusion.top)}|${Math.round(activeOcclusion.bottom)}|${Math.round(mapHeight)}`;
-  }, [activeOcclusion.bottom, activeOcclusion.top, hasActiveRoute, mapHeight, routeSignature]);
+  }, [
+    activeBookingId,
+    activeOcclusion.bottom,
+    activeOcclusion.top,
+    hasActiveRoute,
+    isDriverRole,
+    mapHeight,
+    normalizedBookingStatus,
+    routeSignature,
+  ]);
   const passengerOccludedBottom = insets.bottom + HOME_CARD_BOTTOM_OFFSET + homeCardHeight;
   const driverOccludedBottom = insets.bottom + DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight;
   const driverLiveOffer = useMemo(
@@ -2434,7 +2584,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   const shouldRenderRuntimeMapState = runtimeVisualStateReady;
   const presentedSearchingMode = Boolean(
-    shouldRenderRuntimeMapState && isSearchingMode,
+    shouldRenderRuntimeMapState && !isDriverRole && isSearchingMode,
   );
   const presentedNearbyVehicles = presentedSearchingMode
     ? nearbyDriverCoordinates
@@ -2460,35 +2610,49 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     normalizedBookingStatus === 'accepted' ||
     normalizedBookingStatus === 'arrived';
   const mapShouldHideUserMarker =
-    shouldRenderRuntimeMapState && (isDriverRole || isLiveTripMapActive || hasActiveRoute);
+    isDriverRole ||
+    (shouldRenderRuntimeMapState && (isLiveTripMapActive || hasActiveRoute));
+  const shouldRenderDriverCurrentLocationCar = Boolean(isDriverRole && isHomeRoute);
   const activeDriverNavigationCoordinate =
     shouldRenderRuntimeMapState && isDriverRole
       ? isLiveTripMapActive
-        ? driverTripAssistNativeNavigation?.currentCoordinate ||
-          driverCoordinate ||
-          currentCoordinate ||
-          null
-        : driverCoordinate ||
-          currentCoordinate ||
-          null
-      : currentCoordinate || null;
-  const presentedDriverCoordinate = shouldRenderRuntimeMapState
-    ? isDriverRole
-      ? activeDriverNavigationCoordinate
-      : driverCoordinate
-    : null;
-  const presentedDriverHeading = shouldRenderRuntimeMapState
-    ? isDriverRole
+        ? pickHomeMapCoordinate(
+            driverTripAssistNativeNavigation?.currentCoordinate,
+            driverCoordinate,
+            currentCoordinate,
+          )
+        : pickHomeMapCoordinate(driverCoordinate, currentCoordinate)
+      : pickHomeMapCoordinate(currentCoordinate);
+  const fallbackDriverMapCoordinate =
+    pickHomeMapCoordinate(
+      currentCoordinate,
+      driverCoordinate,
+      targetRegion,
+      DEFAULT_USER_COORDINATE,
+    );
+  const presentedDriverCoordinate = isDriverRole
+    ? activeDriverNavigationCoordinate
+      || fallbackDriverMapCoordinate
+    : shouldRenderRuntimeMapState
+      ? driverCoordinate
+      : null;
+  const presentedDriverHeading = isDriverRole
+    ? isLiveTripMapActive
       ? driverTripAssistNativeNavigation?.heading ??
         driverTripAssistNativeNavigation?.bearing ??
-        currentHeading
-      : driverCoordinate?.heading ??
+        driverCoordinate?.heading ??
+        driverCoordinate?.bearing ??
+        driverCoordinate?.course ??
+        null
+      : 0
+    : shouldRenderRuntimeMapState
+      ? driverCoordinate?.heading ??
         driverCoordinate?.bearing ??
         driverCoordinate?.course ??
         driverInfo?.heading ??
         driverInfo?.bearing ??
         null
-    : null;
+      : null;
   const presentedDriverVehicleColor = useMemo(() => {
     const candidates = [
       driverInfo?.color,
@@ -2621,11 +2785,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       showDriverHomeOverlay
   );
   const homeMapInteractiveReady = Boolean(homeMapReady && homeMapLayoutReady);
-  const homeMapFirstPaintReady = Boolean(homeMapReady);
+  const driverHomeCoordinateReady = Boolean(
+    !isDriverRole ||
+      !isHomeRoute ||
+      activeDriverNavigationCoordinate ||
+      fallbackDriverMapCoordinate
+  );
+  const homeMapFirstPaintReady = Boolean(
+    homeMapReady &&
+      (!isDriverRole ||
+        !isHomeRoute ||
+        homeMapLayoutReady ||
+        hasDriverLiveRideOverlay ||
+        showDriverHomeOverlay)
+  );
   const homeSurfaceReadyForFirstPaint = Boolean(
     (!SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP || homeMapFirstPaintReady) &&
       runtimeVisualStateReady &&
       hasPrimaryHomeSurfaceForFirstPaint &&
+      driverHomeCoordinateReady &&
       (!isDriverRole || !isHomeRoute || canRenderDriverRideChrome)
   );
   const homeSurfaceLoadingVisible = Boolean(
@@ -2640,13 +2818,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     : 'Bem vindo(a)';
 
   const clearHomeMapReadyTimers = useCallback(() => {
-    if (homeMapReadyFallbackTimerRef.current) {
-      clearTimeout(homeMapReadyFallbackTimerRef.current);
-      homeMapReadyFallbackTimerRef.current = null;
-    }
     if (homeMapReadyWarmupTimerRef.current) {
       clearTimeout(homeMapReadyWarmupTimerRef.current);
       homeMapReadyWarmupTimerRef.current = null;
+    }
+    if (homeMapReadyFallbackTimerRef.current) {
+      clearTimeout(homeMapReadyFallbackTimerRef.current);
+      homeMapReadyFallbackTimerRef.current = null;
     }
   }, []);
 
@@ -2661,16 +2839,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     homeMapReadyWarmupTimerRef.current = setTimeout(() => {
       homeMapReadyWarmupTimerRef.current = null;
-      if (homeMapReadyFallbackTimerRef.current) {
-        clearTimeout(homeMapReadyFallbackTimerRef.current);
-        homeMapReadyFallbackTimerRef.current = null;
-      }
       setHomeMapReady(true);
     }, delayMs);
   }, []);
 
   const handleHomeMapReady = useCallback(() => {
-    scheduleHomeMapReady();
+    scheduleHomeMapReady(HOME_MAP_READY_FROM_READY_MS);
   }, [scheduleHomeMapReady]);
 
   const handleHomeMapLoaded = useCallback(() => {
@@ -2965,28 +3139,37 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       !isDriverRoute &&
       !homePickupPickerVisible &&
       !canShowPassengerHomeOverlay &&
-      !activeBookingId &&
-      !passengerAutoRoute &&
-      (!normalizedBookingStatus || normalizedBookingStatus === 'idle')
+      !showPassengerBottomIsland
+  );
+  const showDriverHomeSkeleton = Boolean(
+    showHomeChrome &&
+      isDriverRole &&
+      isHomeRoute &&
+      !homePickupPickerVisible &&
+      !hasDriverLiveRideOverlay &&
+      !showDriverHomeOverlay
   );
   const hasPrimaryHomeBottomSurface = Boolean(
     homePickupPickerVisible ||
       canShowPassengerHomeOverlay ||
       showPassengerHomeSkeleton ||
+      showDriverHomeSkeleton ||
       hasDriverLiveRideOverlay ||
       showDriverHomeOverlay
   );
   const shouldCoverBareHomeMap = Boolean(
     showHomeChrome &&
-      runtimeVisualStateReady &&
       !hasPrimaryHomeBottomSurface
   );
   const effectiveHomeSurfaceLoadingVisible = Boolean(
     (homeSurfaceLoadingVisible || shouldCoverBareHomeMap) &&
-      !showPassengerHomeSkeleton
+      !showPassengerHomeSkeleton &&
+      !showDriverHomeSkeleton
   );
   const homeSurfaceInteractionBlocked = Boolean(
-    effectiveHomeSurfaceLoadingVisible || showPassengerHomeSkeleton
+    effectiveHomeSurfaceLoadingVisible ||
+      showPassengerHomeSkeleton ||
+      showDriverHomeSkeleton
   );
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -3080,10 +3263,42 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!showDriverH3Overlay) {
+      driverH3OverlayWasVisibleRef.current = false;
+      driverH3LastFetchKeyRef.current = '';
+      driverH3LastFetchAtRef.current = 0;
+      driverH3DisabledUntilRef.current = 0;
+      setDriverH3Cells([]);
       return;
     }
-    setVisibleMapRegion(targetRegion);
+
+    if (!driverH3OverlayWasVisibleRef.current) {
+      driverH3OverlayWasVisibleRef.current = true;
+      setVisibleMapRegion(targetRegion);
+    }
   }, [showDriverH3Overlay, targetRegion]);
+
+  const buildDriverH3RequestKey = useCallback((region) => {
+    const latitude = Number(region?.latitude);
+    const longitude = Number(region?.longitude);
+    const latitudeDelta = Number(region?.latitudeDelta);
+    const longitudeDelta = Number(region?.longitudeDelta);
+
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      !Number.isFinite(latitudeDelta) ||
+      !Number.isFinite(longitudeDelta)
+    ) {
+      return '';
+    }
+
+    return [
+      latitude.toFixed(3),
+      longitude.toFixed(3),
+      latitudeDelta.toFixed(3),
+      longitudeDelta.toFixed(3),
+    ].join(':');
+  }, []);
 
   const scheduleDriverH3Refresh = useCallback(() => {
     if (!showDriverH3Overlay) {
@@ -3107,8 +3322,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     const controller = new AbortController();
     const timer = setTimeout(async () => {
+      const regionForFetch = visibleMapRegion || targetRegion;
+      const requestKey = buildDriverH3RequestKey(regionForFetch);
+      const now = Date.now();
+
+      if (!requestKey || driverH3DisabledUntilRef.current > now) {
+        return;
+      }
+
+      const fetchedRecently =
+        now - driverH3LastFetchAtRef.current < DRIVER_H3_MIN_FETCH_INTERVAL_MS;
+      if (fetchedRecently) {
+        return;
+      }
+
+      driverH3LastFetchKeyRef.current = requestKey;
+      driverH3LastFetchAtRef.current = now;
+
       try {
-        const response = await fetchH3CellsForRegion(visibleMapRegion || targetRegion, {
+        const response = await fetchH3CellsForRegion(regionForFetch, {
           surface: 'driver',
           signal: controller.signal
         });
@@ -3118,8 +3350,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         }
 
         setDriverH3Cells(Array.isArray(response?.cells) ? response.cells : []);
-      } catch (_error) {
+      } catch (error) {
         if (!controller.signal.aborted) {
+          const status = Number(error?.status || error?.response?.status || 0);
+          if (status === 401 || status === 403) {
+            driverH3DisabledUntilRef.current = Date.now() + DRIVER_H3_AUTH_COOLDOWN_MS;
+          }
           setDriverH3Cells([]);
         }
       }
@@ -3129,7 +3365,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [driverH3RefreshNonce, showDriverH3Overlay, targetRegion, visibleMapRegion]);
+  }, [buildDriverH3RequestKey, driverH3RefreshNonce, showDriverH3Overlay, targetRegion, visibleMapRegion]);
 
   useEffect(() => {
     return () => {
@@ -3614,7 +3850,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     lastNativeNavigationCameraAtRef.current = now;
     const resolvedCameraHeading = resolveSmoothedNavigationHeading(
       lastNativeNavigationHeadingRef.current,
-      leafNativeNavigationCameraHeading ?? currentHeading,
+      leafNativeNavigationCameraHeading,
     );
     lastNativeNavigationHeadingRef.current = resolvedCameraHeading;
     const navigationSpeedKmh = Number(driverTripAssistNativeNavigation?.currentSpeedKmh);
@@ -3681,7 +3917,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     });
   }, [
     activeDriverNavigationCoordinate,
-    currentHeading,
     driverTripAssistNativeNavigation?.cameraAnchorY,
     driverTripAssistNativeNavigation?.cameraAnimationDurationMs,
     driverTripAssistNativeNavigation?.cameraPitch,
@@ -4006,6 +4241,240 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setDriverDestinationMode,
   ]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const resolveDriverKycLivenessMode = async () => {
+      if (!driverKycModalVisible) {
+        setDriverKycProviderLoading(false);
+        setDriverKycLivenessMode('local');
+        return;
+      }
+
+      setDriverKycProviderLoading(true);
+      const providerResult = await kycService.getPreferredLivenessMode();
+      if (!isMounted) {
+        return;
+      }
+
+      if (!providerResult?.success) {
+        Logger.warn(
+          '⚠️ [PrototypeKYC] Provider indisponível, usando fallback local:',
+          providerResult?.error
+        );
+        setDriverKycLivenessMode('local');
+        setDriverKycProviderLoading(false);
+        return;
+      }
+
+      if (providerResult.mode === 'aws' && nativeAwsLivenessService.isAvailable()) {
+        setDriverKycLivenessMode('aws');
+        setDriverKycProviderLoading(false);
+        return;
+      }
+
+      if (providerResult.mode === 'aws') {
+        Logger.warn(
+          '⚠️ [PrototypeKYC] Provider AWS ativo, mas módulo nativo ausente nesta build; usando fallback local.'
+        );
+        setDriverKycLivenessMode('local');
+        setDriverKycProviderLoading(false);
+        return;
+      }
+
+      setDriverKycLivenessMode('local');
+      setDriverKycProviderLoading(false);
+    };
+
+    resolveDriverKycLivenessMode();
+    return () => {
+      isMounted = false;
+    };
+  }, [driverKycModalVisible]);
+
+  const openDriverKycModal = useCallback((source = {}) => {
+    const requirement =
+      source?.requirement ||
+      source?.payload?.requirement ||
+      'LIVENESS_REQUIRED';
+    const isIdentityReverification = requirement === 'IDENTITY_REVERIFICATION' ||
+      source?.type === 'kyc_reverification_required' ||
+      source?.payload?.type === 'kyc_reverification_required';
+    const reason = isIdentityReverification
+      ? DRIVER_IDENTITY_REVERIFICATION_REASON
+      : (
+        source?.reason ||
+        source?.error ||
+        source?.message ||
+        source?.payload?.reason ||
+        source?.payload?.error ||
+        'Validação facial obrigatória para ficar online.'
+      );
+
+    setDriverKycPendingReason(reason);
+    setDriverKycChallengeContext({
+      challengeId: source?.challengeId || source?.payload?.challengeId || null,
+      requirement,
+    });
+    setDriverKycProcessing(false);
+    setDriverKycModalVisible(true);
+  }, []);
+
+  const handleDriverKycModalCancel = useCallback(() => {
+    setDriverKycModalVisible(false);
+    setDriverKycPendingReason('');
+    setDriverKycLivenessMode('local');
+    setDriverKycAwsSessionId(null);
+    setDriverKycProviderLoading(false);
+    setDriverKycProcessing(false);
+    setDriverKycChallengeContext({
+      challengeId: null,
+      requirement: null,
+    });
+  }, []);
+
+  useEffect(() => {
+    const notificationType = route?.params?.notificationType;
+    const requirement = route?.params?.requirement;
+    const shouldOpenIdentityReverification =
+      notificationType === 'kyc_reverification_required' ||
+      requirement === 'IDENTITY_REVERIFICATION';
+
+    if (
+      !shouldOpenIdentityReverification ||
+      !isDriverRole ||
+      driverHasAcceptedOrActiveWork ||
+      driverKycModalVisible
+    ) {
+      return;
+    }
+
+    openDriverKycModal({
+      type: 'kyc_reverification_required',
+      reason: DRIVER_IDENTITY_REVERIFICATION_REASON,
+      challengeId: route?.params?.challengeId || null,
+      requirement: 'IDENTITY_REVERIFICATION',
+    });
+    navigation.setParams?.({
+      notificationType: null,
+      requirement: null,
+      challengeId: null,
+      reason: null,
+    });
+  }, [
+    driverHasAcceptedOrActiveWork,
+    driverKycModalVisible,
+    isDriverRole,
+    navigation,
+    openDriverKycModal,
+    route?.params?.challengeId,
+    route?.params?.notificationType,
+    route?.params?.requirement,
+  ]);
+
+  const handleDriverKycVerificationSuccess = useCallback(async () => {
+    const onlineResult = await setDriverOnline(true);
+    if (onlineResult?.success) {
+      handleDriverKycModalCancel();
+      return;
+    }
+
+    if (isDriverKycRequiredResult(onlineResult)) {
+      setDriverKycProcessing(false);
+      setDriverKycPendingReason(
+        onlineResult?.reason ||
+        onlineResult?.error ||
+        'A validação foi registrada, mas ainda não liberou o online. Tente novamente.'
+      );
+      return;
+    }
+
+    handleDriverKycModalCancel();
+    Alert.alert(
+      'Modo motorista',
+      onlineResult?.error || 'Validação concluída, mas não foi possível ficar online agora.'
+    );
+  }, [handleDriverKycModalCancel, setDriverOnline]);
+
+  const handleDriverKycCapture = useCallback(async (selfieImageUri) => {
+    const driverId = profile?.uid || profileUid;
+    if (!driverId) {
+      handleDriverKycModalCancel();
+      Alert.alert('Validação facial', 'Não foi possível identificar a conta do motorista.');
+      return;
+    }
+
+    setDriverKycProcessing(true);
+
+    try {
+      const kycOptions = {
+        challengeId: driverKycChallengeContext.challengeId || undefined,
+        requirement: driverKycChallengeContext.requirement || undefined,
+        livenessPassed: true,
+        awsSessionId: driverKycAwsSessionId || undefined,
+      };
+      const result = await kycService.verifyDriver(driverId, selfieImageUri, {
+        ...kycOptions,
+        mode: driverKycAwsSessionId ? 'mobile_arcface_w600k_r50_v1' : 'device_signature_v1',
+        allowRawSelfieFallback: true,
+        serverSideFallbackOnDeviceEmbeddingUnavailable: Boolean(driverKycAwsSessionId),
+      });
+      const isMatch = Boolean(result?.success && result?.data?.isMatch);
+
+      if (!isMatch) {
+        handleDriverKycModalCancel();
+        Alert.alert(
+          'Validação não aprovada',
+          'Não foi possível validar sua identidade. Tente novamente com boa iluminação e rosto centralizado.'
+        );
+        return;
+      }
+
+      await handleDriverKycVerificationSuccess();
+    } catch (error) {
+      Logger.error('❌ [PrototypeKYC] Erro ao validar motorista:', error);
+      handleDriverKycModalCancel();
+      Alert.alert('Validação facial', 'Falha ao validar identidade. Tente novamente.');
+    } finally {
+      setDriverKycProcessing(false);
+    }
+  }, [
+    driverKycChallengeContext.challengeId,
+    driverKycChallengeContext.requirement,
+    driverKycAwsSessionId,
+    handleDriverKycModalCancel,
+    handleDriverKycVerificationSuccess,
+    profile?.uid,
+    profileUid,
+  ]);
+
+  const handleDriverKycAwsSuccess = useCallback(async ({ sessionId }) => {
+    const driverId = profile?.uid || profileUid;
+    if (!driverId) {
+      handleDriverKycModalCancel();
+      Alert.alert('Validação facial', 'Não foi possível identificar a conta do motorista.');
+      return;
+    }
+
+    setDriverKycProcessing(true);
+
+    try {
+      setDriverKycAwsSessionId(sessionId);
+      setDriverKycLivenessMode('local_after_aws');
+      setDriverKycPendingReason('Liveness aprovado. Capture uma selfie rápida para comparar com sua CNH.');
+    } catch (error) {
+      Logger.error('❌ [PrototypeKYC] Erro ao validar motorista via AWS:', error);
+      handleDriverKycModalCancel();
+      Alert.alert('Validação facial', 'Falha ao validar identidade. Tente novamente.');
+    } finally {
+      setDriverKycProcessing(false);
+    }
+  }, [
+    handleDriverKycModalCancel,
+    profile?.uid,
+    profileUid,
+  ]);
+
   const handleDriverOnlineToggle = useCallback(async () => {
     appendPrototypeRuntimeDebugStep('driver_home_toggle_pressed', {
       driverOnline,
@@ -4016,6 +4485,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const runToggle = async (nextValue) => {
       try {
         const result = await setDriverOnline(nextValue);
+        if (nextValue && isDriverKycRequiredResult(result)) {
+          openDriverKycModal(result);
+          return;
+        }
+
         if (result?.blocked) {
           Alert.alert(
             'Ativação pendente',
@@ -4047,12 +4521,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             return;
           }
 
+          if (nextValue && isDriverKycRequiredResult(result)) {
+            openDriverKycModal(result);
+            return;
+          }
+
           Alert.alert(
             'Modo motorista',
             resultError
           );
         }
       } catch (error) {
+        if (nextValue && isDriverKycRequiredResult(error)) {
+          openDriverKycModal(error);
+          return;
+        }
         Alert.alert('Modo motorista', error?.message || 'Não foi possível atualizar o status online agora.');
       }
     };
@@ -4091,6 +4574,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverOnlinePending,
     navigation,
     normalizedBookingStatus,
+    openDriverKycModal,
     setDriverOnline
   ]);
 
@@ -4776,6 +5260,19 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     );
   }
 
+  const DriverKycCameraScreen = driverKycModalVisible &&
+    !driverKycProviderLoading &&
+    !driverKycProcessing &&
+    driverKycLivenessMode !== 'aws'
+    ? resolveKYCCameraScreen()
+    : null;
+  const DriverKycAWSNativeLivenessScreen = driverKycModalVisible &&
+    !driverKycProviderLoading &&
+    !driverKycProcessing &&
+    driverKycLivenessMode === 'aws'
+    ? resolveAWSNativeLivenessScreen()
+    : null;
+
   return (
     <PrototypeScreenTransition>
       <View style={styles.container}>
@@ -4785,7 +5282,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           mapRef={mapRef}
           region={targetRegion}
           userCoordinate={currentCoordinate || DEFAULT_USER_COORDINATE}
-          userHeading={currentHeading}
+          userHeading={isDriverRole ? null : currentHeading}
           userAvatarUri={profileImage}
           userAvatarLetter={profileInitial}
           driverCoordinate={presentedDriverCoordinate}
@@ -4803,13 +5300,19 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           destinationAddress={presentedRouteDestinationAddress}
           originLabel="Partida"
           originAddress={currentAddress || 'Sua localização atual'}
-          hideUserMarker={mapShouldHideUserMarker}
+          hideUserMarker={
+            mapShouldHideUserMarker && !shouldRenderDriverCurrentLocationCar
+          }
+          currentLocationMarkerMode={
+            shouldRenderDriverCurrentLocationCar ? 'car' : 'dot'
+          }
           animateRoute={routeAnimate}
           routeMainColor={routeMainColor}
           routeShadowColor={routeShadowColor}
           routeHighlightColor={routeHighlightColor}
           hideRouteEndpointMarkers={isLiveTripMapActive}
           driverMarkerMode={driverMarkerMode}
+          driverMarkerOccludedBottom={isDriverRole ? baselineOccludedBottom : 0}
           driverVehicleColor={presentedDriverVehicleColor}
           driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
           driverMarkerLetter={driverMarkerLetter}
@@ -5016,6 +5519,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           />
         ) : null}
 
+        {showDriverHomeSkeleton ? (
+          <DriverHomeHydrationSkeleton
+            insetsBottom={insets.bottom}
+            onCtaLayout={handleDriverCtaLayout}
+          />
+        ) : null}
+
         {runtimeVisualStateReady &&
         showHomeChrome &&
         isDriverRole &&
@@ -5101,6 +5611,51 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             onPressSettings={() => navigation.navigate('RobotaxiPrototypeSettings')}
           />
         ) : null}
+
+        <Modal
+          visible={driverKycModalVisible}
+          animationType="slide"
+          onRequestClose={handleDriverKycModalCancel}
+        >
+          {driverKycProviderLoading || driverKycProcessing ? (
+            <View style={styles.driverKycLoadingContainer}>
+              <ActivityIndicator size="large" color="#1A330E" />
+              <Text style={styles.driverKycLoadingText}>
+                {driverKycProcessing
+                  ? 'Validando sua identidade...'
+                  : 'Preparando validação facial...'}
+              </Text>
+            </View>
+          ) : DriverKycAWSNativeLivenessScreen ? (
+            <DriverKycAWSNativeLivenessScreen
+              driverId={profile?.uid || profileUid}
+              challengeId={driverKycChallengeContext.challengeId}
+              requirement={driverKycChallengeContext.requirement}
+              onSuccess={handleDriverKycAwsSuccess}
+              onCancel={handleDriverKycModalCancel}
+              onFallbackLocal={() => setDriverKycLivenessMode('local')}
+            />
+          ) : DriverKycCameraScreen ? (
+            <DriverKycCameraScreen
+              onCapture={handleDriverKycCapture}
+              onCancel={handleDriverKycModalCancel}
+              type="selfie"
+            />
+          ) : (
+            <View style={styles.driverKycLoadingContainer}>
+              <ActivityIndicator size="large" color="#1A330E" />
+              <Text style={styles.driverKycLoadingText}>Preparando validação facial...</Text>
+            </View>
+          )}
+
+          {driverKycPendingReason ? (
+            <View style={styles.driverKycReasonBanner}>
+              <Text style={styles.driverKycReasonText}>
+                {driverKycPendingReason}
+              </Text>
+            </View>
+          ) : null}
+        </Modal>
 
         {effectiveHomeSurfaceLoadingVisible ? (
           <View
@@ -5317,5 +5872,203 @@ const styles = StyleSheet.create({
   },
   homeLoadingSpinner: {
     marginTop: 18,
+  },
+  driverKycLoadingContainer: {
+    flex: 1,
+    backgroundColor: '#F8F6F1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  driverKycLoadingText: {
+    marginTop: 16,
+    color: '#171412',
+    fontFamily: fonts.SemiBold,
+    fontSize: 18,
+    lineHeight: 24,
+    textAlign: 'center',
+  },
+  driverKycReasonBanner: {
+    position: 'absolute',
+    top: 52,
+    left: 16,
+    right: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(17, 20, 18, 0.78)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  driverKycReasonText: {
+    color: '#FFFFFF',
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  driverHomeSkeletonStack: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    zIndex: 16,
+    elevation: Platform.OS === 'android' ? 0 : 12,
+  },
+  driverHomeSkeletonCard: {
+    minHeight: DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT,
+    borderRadius: 32,
+    paddingHorizontal: 28,
+    paddingTop: 21,
+    paddingBottom: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#ECE5DC',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.12,
+    shadowRadius: 17,
+  },
+  driverHomeSkeletonTopRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    minHeight: 122,
+  },
+  driverHomeSkeletonMainColumn: {
+    flex: 1,
+    minHeight: 118,
+    paddingRight: 13,
+  },
+  driverHomeSkeletonDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: '#E9E2D8',
+    marginLeft: 3,
+    marginRight: 13,
+  },
+  driverHomeSkeletonSideColumn: {
+    width: 82,
+    justifyContent: 'center',
+    gap: 7,
+    paddingVertical: 4,
+  },
+  driverHomeSkeletonLine: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(117,111,104,0.16)',
+  },
+  driverHomeSkeletonLabel: {
+    width: 86,
+    height: 12,
+  },
+  driverHomeSkeletonAmount: {
+    width: 136,
+    height: 31,
+    marginTop: 10,
+  },
+  driverHomeSkeletonProgressTrack: {
+    width: '100%',
+    height: 5,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(117,111,104,0.12)',
+    marginTop: 8,
+  },
+  driverHomeSkeletonProgressFill: {
+    width: '34%',
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: 'rgba(26,51,14,0.28)',
+  },
+  driverHomeSkeletonCaptionRow: {
+    marginTop: 5,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  driverHomeSkeletonCaption: {
+    width: 104,
+    height: 11,
+  },
+  driverHomeSkeletonPercent: {
+    width: 30,
+    height: 11,
+  },
+  driverHomeSkeletonPill: {
+    marginTop: 8,
+    width: 176,
+    height: 24,
+    borderRadius: 999,
+    backgroundColor: 'rgba(117,111,104,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(233,226,216,0.8)',
+  },
+  driverHomeSkeletonSideValue: {
+    width: 34,
+    height: 20,
+  },
+  driverHomeSkeletonSideLabel: {
+    width: 58,
+    height: 11,
+    marginBottom: 6,
+  },
+  driverHomeSkeletonHorizontalDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E9E2D8',
+    marginTop: 6,
+    marginBottom: 15,
+  },
+  driverHomeSkeletonActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  driverHomeSkeletonSlider: {
+    flex: 1,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: '#ECE5DC',
+    backgroundColor: 'rgba(248,246,241,0.72)',
+    justifyContent: 'center',
+  },
+  driverHomeSkeletonThumb: {
+    position: 'absolute',
+    left: 8,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(23,20,18,0.18)',
+  },
+  driverHomeSkeletonActionLabel: {
+    width: 108,
+    height: 16,
+    alignSelf: 'center',
+  },
+  driverHomeSkeletonGear: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: '#ECE5DC',
+    backgroundColor: 'rgba(248,246,241,0.72)',
+  },
+  driverHomeSkeletonPromoCard: {
+    height: 188,
+    marginTop: 12,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: '#ECE5DC',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    paddingHorizontal: 28,
+    paddingTop: 28,
+  },
+  driverHomeSkeletonPromoTitle: {
+    width: '54%',
+    height: 24,
+  },
+  driverHomeSkeletonPromoBody: {
+    width: '72%',
+    height: 13,
+    marginTop: 18,
+  },
+  driverHomeSkeletonPromoBodyShort: {
+    width: '44%',
+    height: 13,
+    marginTop: 9,
   }
 });

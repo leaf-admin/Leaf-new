@@ -1,6 +1,7 @@
 import {
   resolveTripGrossAmount,
   resolveTripNetAmount,
+  resolveTripNetAmountOrNull,
   resolveTripPassengerPaidAmount,
   resolveTripTollAmount,
 } from "./tripFinancialSummary";
@@ -30,5 +31,16 @@ describe("tripFinancialSummary", () => {
         },
       }),
     ).toBe(4.9);
+  });
+
+  it("nao trata bruto isolado como liquido do motorista", () => {
+    const receipt = {
+      fare: 27.5,
+      grossFare: 27.5,
+    };
+
+    expect(resolveTripNetAmountOrNull(receipt)).toBeNull();
+    expect(resolveTripNetAmount(receipt)).toBe(0);
+    expect(resolveTripGrossAmount(receipt)).toBe(27.5);
   });
 });

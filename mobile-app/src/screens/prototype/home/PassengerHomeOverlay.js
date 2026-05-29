@@ -30,7 +30,7 @@ const HOME_CARD_PADDING_TOP = 22;
 const HOME_CARD_PADDING_BOTTOM = 18;
 const HOME_STACK_GAP = 18;
 const HOME_PROMO_CARD_HEIGHT = 188;
-const HOME_CATEGORY_CARD_HEIGHT = HOME_PROMO_CARD_HEIGHT + 25;
+const HOME_CATEGORY_CARD_HEIGHT = 262;
 const HOME_SEARCH_DROPDOWN_MIN_HEIGHT = 72;
 const HOME_SEARCH_DROPDOWN_MAX_HEIGHT = 140;
 const HOME_SEARCH_DROPDOWN_ROW_HEIGHT = 44;
@@ -38,6 +38,8 @@ const HOME_SEARCH_DROPDOWN_VERTICAL_PADDING = 8;
 const HOME_SEARCH_DROPDOWN_TOP_GAP = 10;
 const HOME_STACK_HEIGHT = HOME_CARD_HEIGHT + HOME_STACK_GAP + HOME_PROMO_CARD_HEIGHT;
 const HOME_SEARCH_KEYBOARD_CLEARANCE = 52;
+const LEAF_WELCOME_RIO_BANNER_IMAGE_URL =
+  "https://storage.googleapis.com/leaf-reactnative.firebasestorage.app/campaign-center/assets/asset_mpgam7le_f7f03d20_leaf-welcome-rio-1035x564.webp?GoogleAccessId=firebase-adminsdk-fbsvc%40leaf-reactnative.iam.gserviceaccount.com&Expires=2051222400&Signature=pgIHEiHVb5lkRxw9ca%2F9PR8jeIUe2kA03Tou08WveLCBJ%2B5wTYiDFpCW9v%2FXXMCCNUuPpNXVF7ZpHD9tK43x%2B71JC6u4Khq7hSQu9Nvkl3GIuWheGcO4K901olK9OgQJDw6HN4VmsWvvod%2BiE9pu%2B2%2BodJbth3FHwW5nieThVZtdW0QovD9E1SKsjWfpDnIWTw6STwC0fca33awqvQ7eO4tMwc8KQGrQswZIR2GGHChTgFApcKs7oArhjRk6jrlfua0B%2BYVFgr%2FJXXFoMUouY%2BUYuyoSQmqGeKQqItTdYjg2Utcm81bonilMyJ8%2B%2FGSi%2FpNBetSRasPoLPc2T%2F8MxA%3D%3D";
 const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
   {
     id: "local_leaf_rio_comfort",
@@ -48,6 +50,10 @@ const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
       title: "Viaje com mais conforto",
       body: "Motoristas verificados, ar ligado e uma experiência mais calma para chegar bem.",
       backgroundColor: "#FBFCF8",
+      imageUrl: LEAF_WELCOME_RIO_BANNER_IMAGE_URL,
+      imageAlt: "Banner de boas-vindas da Leaf no Rio de Janeiro",
+      displayMode: "image_only",
+      hideTextOverlay: true,
       cta: { label: "Novidades", action: "open_campaign_details" },
     },
     rules: { autoRotateSeconds: 6 },
@@ -133,9 +139,10 @@ function PassengerHomeOverlay({
   const lowerPanelHeight = shouldShowCategoryCard
       ? HOME_CATEGORY_CARD_HEIGHT
       : HOME_PROMO_CARD_HEIGHT;
+  const activeStackGap = shouldShowCategoryCard ? 16 : HOME_STACK_GAP;
   const stackHeight = destinationSearchActive
     ? activeSearchCardHeight
-    : activeSearchCardHeight + HOME_STACK_GAP + lowerPanelHeight;
+    : activeSearchCardHeight + activeStackGap + lowerPanelHeight;
 
   React.useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -211,8 +218,9 @@ function PassengerHomeOverlay({
           style={[
             styles.searchCard,
             styles.searchCardInStack,
+            shouldShowCategoryCard && styles.searchCardReviewMode,
             {
-              bottom: destinationSearchActive ? 0 : lowerPanelHeight + HOME_STACK_GAP,
+              bottom: destinationSearchActive ? 0 : lowerPanelHeight + activeStackGap,
               height: activeSearchCardHeight,
             },
           ]}
@@ -572,6 +580,12 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: HOME_PROMO_CARD_HEIGHT + HOME_STACK_GAP,
   },
+  searchCardReviewMode: {
+    borderColor: "rgba(236,229,220,0.72)",
+    backgroundColor: "rgba(255,255,255,0.94)",
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+  },
   promoCard: {
     position: "absolute",
     left: 0,
@@ -796,8 +810,8 @@ const styles = StyleSheet.create({
     borderColor: CARD_BORDER,
     backgroundColor: CARD_SURFACE,
     paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 14,
+    paddingTop: 12,
+    paddingBottom: 18,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 18 },
     shadowOpacity: 0.08,
@@ -810,7 +824,7 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: "#D8D2CA",
-    marginBottom: 8,
+    marginBottom: 10,
   },
   categoryEyebrow: {
     color: TEXT_PRIMARY,
@@ -819,8 +833,8 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   categoryTabs: {
-    marginTop: 10,
-    minHeight: 38,
+    marginTop: 12,
+    minHeight: 40,
     flexDirection: "row",
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#E9E2D8",
@@ -838,9 +852,9 @@ const styles = StyleSheet.create({
   },
   categoryTabText: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 16,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13.5,
+    lineHeight: 17,
   },
   categoryTabTextActive: {
     color: TEXT_PRIMARY,
@@ -848,7 +862,7 @@ const styles = StyleSheet.create({
   },
   categorySummaryRow: {
     minHeight: 38,
-    marginTop: 12,
+    marginTop: 13,
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
@@ -861,8 +875,8 @@ const styles = StyleSheet.create({
   categorySummaryTitle: {
     color: TEXT_PRIMARY,
     fontFamily: fonts.SemiBold,
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 15.5,
+    lineHeight: 20,
   },
   categorySummarySubtitle: {
     marginTop: 1,
@@ -942,7 +956,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   categoryConfirmButton: {
-    marginTop: 12,
+    marginTop: 16,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
     alignItems: "center",

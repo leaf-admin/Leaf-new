@@ -46,7 +46,6 @@ function LeafCampaignCarousel({
   testID = "leaf-campaign-carousel",
 }) {
   const [campaigns, setCampaigns] = useState([]);
-  const [remoteHydrated, setRemoteHydrated] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [loadedImageIds, setLoadedImageIds] = useState(() => new Set());
   const [failedImageIds, setFailedImageIds] = useState(() => new Set());
@@ -71,16 +70,13 @@ function LeafCampaignCarousel({
     let mounted = true;
     if (!enabled || !surface) {
       setCampaigns([]);
-      setRemoteHydrated(true);
       return undefined;
     }
     if (IS_TEST_ENV && !Array.isArray(globalThis?.__LEAF_CAMPAIGN_FIXTURES__)) {
       setCampaigns([]);
-      setRemoteHydrated(true);
       return undefined;
     }
 
-    setRemoteHydrated(false);
     loadCachedEligibleCampaigns(requestContext)
       .then((cached) => {
         if (mounted && cached.campaigns?.length) {
@@ -96,10 +92,7 @@ function LeafCampaignCarousel({
         setCampaigns((fresh.campaigns || []).slice(0, limit));
         setActiveIndex(0);
       })
-      .catch(() => null)
-      .finally(() => {
-        if (mounted) setRemoteHydrated(true);
-      });
+      .catch(() => null);
 
     return () => {
       mounted = false;
@@ -108,9 +101,7 @@ function LeafCampaignCarousel({
 
   const renderCampaigns = campaigns.length > 0
     ? campaigns
-    : remoteHydrated
-      ? fallbackCampaigns
-      : [];
+    : fallbackCampaigns;
   const activeCampaign = renderCampaigns[activeIndex] || renderCampaigns[0] || null;
   const hasRemoteCampaigns = campaigns.length > 0;
   const rotateSeconds = normalizeSeconds(activeCampaign?.rules?.autoRotateSeconds);
@@ -122,9 +113,7 @@ function LeafCampaignCarousel({
   const activeImageLoaded = loadedImageIds.has(activeImageKey);
   const activeImageReady = Boolean(activeShouldRenderImage && activeImageLoaded);
   const activeImageOnly = activeContent.displayMode === "image_only" || activeContent.hideTextOverlay === true;
-  const activeCampaignVisible = Boolean(activeCampaign) && (
-    !activeImageOnly || !activeShouldRenderImage || activeImageReady
-  );
+  const activeCampaignVisible = Boolean(activeCampaign);
 
   useEffect(() => {
     if (activeIndex >= renderCampaigns.length) {
@@ -172,7 +161,23 @@ function LeafCampaignCarousel({
     }
 
     let cancelled = false;
-    Image.prefetch(activeImageUrl)
+    const prefetchResult =
+      typeof Image.prefetch === "function"
+        ? Image.prefetch(activeImageUrl)
+        : null;
+
+    if (!prefetchResult || typeof prefetchResult.then !== "function") {
+      setLoadedImageIds((current) => {
+        const next = new Set(current);
+        next.add(activeImageKey);
+        return next;
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    prefetchResult
       .then(() => {
         if (cancelled) return;
         setLoadedImageIds((current) => {
@@ -330,6 +335,12 @@ function LeafCampaignCarousel({
             style={styles.imageBackground}
           >
             {textOnImage ? <View style={[styles.imageScrim, { borderRadius }]} /> : null}
+            {imageOnly && shouldRenderImage && !imageReady ? (
+              <View style={styles.imageLoadingPlaceholder} pointerEvents="none">
+                <View style={[styles.imageLoadingLine, styles.imageLoadingLineLong]} />
+                <View style={[styles.imageLoadingLine, styles.imageLoadingLineShort]} />
+              </View>
+            ) : null}
             {hideContentOverlay ? null : cardContent}
           </ImageBackground>
         ) : (
@@ -363,6 +374,24 @@ const styles = StyleSheet.create({
   imageScrim: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.22)",
+  },
+  imageLoadingPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    backgroundColor: "#FBFCF8",
+  },
+  imageLoadingLine: {
+    height: 16,
+    borderRadius: 999,
+    backgroundColor: "rgba(117,111,104,0.14)",
+  },
+  imageLoadingLineLong: {
+    width: "54%",
+  },
+  imageLoadingLineShort: {
+    width: "34%",
+    marginTop: 12,
   },
   content: {
     flex: 1,

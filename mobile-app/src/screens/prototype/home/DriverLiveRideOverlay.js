@@ -86,8 +86,12 @@ function resolveDisplayNetAmount(activeRide, driverTripMeta) {
       activeRide?.lockedDriverNetAmount,
       activeRide?.estimatedDriverNetAmount,
       activeRide?.driverNetAmount,
-      driverTripMeta?.fare,
-      activeRide?.fare,
+      activeRide?.netAmount,
+      activeRide?.paymentBreakdown?.driverNetAmount,
+      activeRide?.paymentDistribution?.netAmountInReais,
+      driverTripMeta?.driverNetAmount,
+      driverTripMeta?.estimatedDriverNetAmount,
+      driverTripMeta?.lockedDriverNetAmount,
     ].find((value) => Number.isFinite(Number(value)) && Number(value) > 0) ?? null;
 
   if (preferredPositiveAmount !== null) {
@@ -100,11 +104,15 @@ function resolveDisplayNetAmount(activeRide, driverTripMeta) {
       activeRide?.lockedDriverNetAmount,
       activeRide?.estimatedDriverNetAmount,
       activeRide?.driverNetAmount,
-      driverTripMeta?.fare,
-      activeRide?.fare,
-    ].find((value) => Number.isFinite(Number(value))) ?? 0;
+      activeRide?.netAmount,
+      activeRide?.paymentBreakdown?.driverNetAmount,
+      activeRide?.paymentDistribution?.netAmountInReais,
+      driverTripMeta?.driverNetAmount,
+      driverTripMeta?.estimatedDriverNetAmount,
+      driverTripMeta?.lockedDriverNetAmount,
+    ].find((value) => Number.isFinite(Number(value))) ?? null;
 
-  return Number(firstKnownAmount || 0);
+  return firstKnownAmount === null ? null : Number(firstKnownAmount);
 }
 
 function formatDistanceKm(value) {
@@ -437,8 +445,11 @@ function DriverLiveRideOverlay({
         offer?.dropoffAddress ||
         "",
     ).trim() || "Destino indisponível";
+  const activeRideNetAmount = resolveDisplayNetAmount(activeRide, driverTripMeta);
   const fareLabel = hasActiveRide
-    ? formatCurrency(resolveDisplayNetAmount(activeRide, driverTripMeta))
+    ? Number.isFinite(activeRideNetAmount)
+      ? formatCurrency(activeRideNetAmount)
+      : "--"
     : getDriverOfferPayoutLabel(offer) || "--";
   const passengerLabel = String(
     offer?.passenger ||
@@ -773,45 +784,51 @@ function DriverLiveRideOverlay({
     variant = "secondary",
     testID,
     accessibilityLabel,
-  }) => (
-    <LeafAnimatedPressable
-      activeScale={variant === "primary" ? 0.984 : 0.978}
-      style={[
-        styles.compactActionButton,
-        variant === "primary" && styles.compactActionButtonPrimary,
-        variant === "danger" && styles.compactActionButtonDanger,
-        disabled && styles.compactActionButtonDisabled,
-      ]}
-      onPress={onPress}
-      disabled={disabled}
-      testID={testID}
-      accessibilityLabel={accessibilityLabel || label}
-    >
-      <Ionicons
-        name={icon}
-        size={leafButtonMetrics.iconSize}
-        color={
-          variant === "primary"
-            ? "#FFFFFF"
-            : variant === "danger"
-              ? "#8A1F2B"
-              : "#274A36"
-        }
-      />
-      <Text
+  }) => {
+    const shouldShowLabel = variant === "primary";
+
+    return (
+      <LeafAnimatedPressable
+        activeScale={variant === "primary" ? 0.984 : 0.978}
         style={[
-          styles.compactActionButtonText,
-          variant === "primary" && styles.compactActionButtonTextPrimary,
-          variant === "danger" && styles.compactActionButtonTextDanger,
+          styles.compactActionButton,
+          variant === "primary" && styles.compactActionButtonPrimary,
+          variant === "danger" && styles.compactActionButtonDanger,
+          disabled && styles.compactActionButtonDisabled,
+          !shouldShowLabel && styles.compactActionButtonIconOnly,
         ]}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={0.82}
+        onPress={onPress}
+        disabled={disabled}
+        testID={testID}
+        accessibilityLabel={accessibilityLabel || label}
       >
-        {label}
-      </Text>
-    </LeafAnimatedPressable>
-  );
+        <Ionicons
+          name={icon}
+          size={leafButtonMetrics.iconSize}
+          color={
+            variant === "primary"
+              ? "#FFFFFF"
+              : variant === "danger"
+                ? "#8A1F2B"
+                : "#274A36"
+          }
+        />
+        {shouldShowLabel ? (
+          <Text
+            style={[
+              styles.compactActionButtonText,
+              styles.compactActionButtonTextPrimary,
+            ]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+          >
+            {label}
+          </Text>
+        ) : null}
+      </LeafAnimatedPressable>
+    );
+  };
 
   const renderNavigationTripCard = () => (
     <>
@@ -2565,6 +2582,7 @@ const styles = StyleSheet.create({
   compactActionsRow: {
     flexDirection: "row",
     gap: 8,
+    alignItems: "center",
   },
   compactActionsGroup: {
     marginTop: 10,
@@ -2582,6 +2600,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: leafButtonMetrics.iconGap,
     paddingHorizontal: 8,
+  },
+  compactActionButtonIconOnly: {
+    flex: 0,
+    width: leafButtonMetrics.height,
+    minWidth: leafButtonMetrics.height,
+    maxWidth: leafButtonMetrics.height,
+    gap: 0,
+    paddingHorizontal: 0,
   },
   compactActionButtonPrimary: {
     backgroundColor: "#1A330E",

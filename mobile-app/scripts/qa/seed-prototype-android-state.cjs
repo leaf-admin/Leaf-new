@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
@@ -189,6 +191,10 @@ function run(command, args, options = {}) {
   return execFileSync(command, args, { encoding: 'utf8', ...options }).trim();
 }
 
+function logSeed(message) {
+  process.stderr.write(`[seed-android] ${message}\n`);
+}
+
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -208,6 +214,456 @@ function adbArgs(deviceId, args) {
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function boundedNumber(value, fallback, min, max) {
+  const parsed = Number(value);
+  const finite = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(Math.max(finite, min), max);
+}
+
+function parseUrl(value) {
+  try {
+    return new URL(String(value || ''));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function extractDevClientBundleUrl(launchUrl) {
+  const parsed = parseUrl(launchUrl);
+  if (!parsed) {
+    return null;
+  }
+
+  const nestedBundleUrl = parsed.searchParams.get('url');
+  if (nestedBundleUrl) {
+    return parseUrl(nestedBundleUrl);
+  }
+
+  if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    return parsed;
+  }
+
+  return null;
+}
+
+function isLoopbackHost(hostname) {
+  return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(
+    String(hostname || '').trim().toLowerCase(),
+  );
+}
+
+function resolveLocalMetroEndpoint(launchUrl) {
+  const bundleUrl = extractDevClientBundleUrl(launchUrl);
+  if (!bundleUrl || !isLoopbackHost(bundleUrl.hostname)) {
+    return null;
+  }
+
+  const port = Number(bundleUrl.port || (bundleUrl.protocol === 'https:' ? '443' : '80'));
+  if (!Number.isInteger(port) || port <= 0) {
+    return null;
+  }
+
+  const statusUrl = new URL(bundleUrl.toString());
+  statusUrl.pathname = '/status';
+  statusUrl.search = '';
+  statusUrl.hash = '';
+
+  return {
+    bundleUrl: bundleUrl.toString(),
+    port,
+    statusUrl: statusUrl.toString(),
+  };
+}
+
+function requestText(url, timeoutMs) {
+  return new Promise((resolve) => {
+    const parsed = parseUrl(url);
+    if (!parsed) {
+      resolve({ ok: false, statusCode: 0, body: '', error: 'invalid_url' });
+      return;
+    }
+
+    const client = parsed.protocol === 'https:' ? https : http;
+    const request = client.request(
+      parsed,
+      { method: 'GET', timeout: timeoutMs },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          body += chunk;
+        });
+        response.on('end', () => {
+          resolve({
+            ok: response.statusCode >= 200 && response.statusCode < 300,
+            statusCode: response.statusCode || 0,
+            body,
+            error: '',
+          });
+        });
+      },
+    );
+
+    request.on('timeout', () => {
+      request.destroy(new Error('timeout'));
+    });
+    request.on('error', (error) => {
+      resolve({ ok: false, statusCode: 0, body: '', error: error.message });
+    });
+    request.end();
+  });
+}
+
+async function waitForLocalMetroReady(launchUrl, timeoutMs) {
+  const endpoint = resolveLocalMetroEndpoint(launchUrl);
+  if (!endpoint) {
+    return null;
+  }
+
+  const startedAt = Date.now();
+  let lastProbe = null;
+  while (Date.now() - startedAt <= timeoutMs) {
+    lastProbe = await requestText(endpoint.statusUrl, 1800);
+    if (lastProbe.ok && /packager-status:running|running/i.test(lastProbe.body)) {
+      logSeed(`[launch] Metro ready at ${endpoint.statusUrl}`);
+      return endpoint;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  }
+
+  const detail = lastProbe?.error || `status=${lastProbe?.statusCode || 'unknown'}`;
+  throw new Error(
+    `Metro local nao respondeu em ${timeoutMs}ms (${endpoint.statusUrl}; ${detail}). ` +
+      'Inicie o Metro ou ajuste --dev-client-url antes de abrir o dev-client.',
+  );
+}
+
+function ensureAndroidMetroReverse(deviceId, launchUrl) {
+  const endpoint = resolveLocalMetroEndpoint(launchUrl);
+  if (!endpoint) {
+    return null;
+  }
+
+  run(ADB_BIN, adbArgs(deviceId, ['wait-for-device']));
+  const result = spawnSync(
+    ADB_BIN,
+    adbArgs(deviceId, ['reverse', `tcp:${endpoint.port}`, `tcp:${endpoint.port}`]),
+    { encoding: 'utf8', maxBuffer: 1024 * 1024 },
+  );
+
+  if (result.status !== 0) {
+    throw new Error(
+      `Falha ao configurar adb reverse tcp:${endpoint.port}. ` +
+        `${result.stderr || result.stdout || ''}`.trim(),
+    );
+  }
+
+  logSeed(`[launch] adb reverse tcp:${endpoint.port} -> tcp:${endpoint.port} ok`);
+  return endpoint;
+}
+
+function summarizeAmStartOutput(output) {
+  const summary = String(output || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^(Status|Activity|TotalTime|WaitTime|Complete|Warning|Error):/i.test(line))
+    .join('; ');
+  return summary || 'am start completed';
+}
+
+function startAndroidViewIntent(deviceId, launchUrl, label) {
+  const amStartTimeoutMs = boundedNumber(
+    arg('--am-start-timeout-ms', '45000'),
+    45000,
+    5000,
+    120000,
+  );
+  const result = spawnSync(
+    ADB_BIN,
+    adbArgs(deviceId, [
+      'shell',
+      'am',
+      'start',
+      '-W',
+      '--ez',
+      'EXDevMenuDisableAutoLaunch',
+      'true',
+      '-a',
+      'android.intent.action.VIEW',
+      '-d',
+      shellQuote(launchUrl),
+      APP_ID,
+    ]),
+    { encoding: 'utf8', maxBuffer: 1024 * 1024 * 4, timeout: amStartTimeoutMs },
+  );
+  const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+
+  if (result.error) {
+    throw new Error(`Timeout ao abrir ${label} no Android apos ${amStartTimeoutMs}ms.\n${output}`);
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`Falha ao abrir ${label} no Android.\n${output}`);
+  }
+
+  logSeed(`[launch] ${label}: ${summarizeAmStartOutput(output)}`);
+  return output;
+}
+
+function dumpAndroidUi(deviceId) {
+  const remoteDumpPath = `/data/local/tmp/leaf-qa-window-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}.xml`;
+  const dumpResult = spawnSync(
+    ADB_BIN,
+    adbArgs(deviceId, ['shell', 'uiautomator', 'dump', remoteDumpPath]),
+    { encoding: 'utf8', maxBuffer: 1024 * 1024 * 4, timeout: 6000 },
+  );
+  if (dumpResult.status !== 0) {
+    return '';
+  }
+
+  const catResult = spawnSync(
+    ADB_BIN,
+    adbArgs(deviceId, ['shell', 'cat', remoteDumpPath]),
+    { encoding: 'utf8', maxBuffer: 1024 * 1024 * 4, timeout: 6000 },
+  );
+  spawnSync(ADB_BIN, adbArgs(deviceId, ['shell', 'rm', '-f', remoteDumpPath]), {
+    encoding: 'utf8',
+    timeout: 3000,
+  });
+
+  if (catResult.status !== 0) {
+    return `${dumpResult.stdout || ''}${dumpResult.stderr || ''}`.replace(/\r/g, '');
+  }
+
+  return `${catResult.stdout || ''}${dumpResult.stdout || ''}${dumpResult.stderr || ''}`.replace(/\r/g, '');
+}
+
+function isLikelyExpoDevelopmentBuildScreen(uiDump) {
+  return /Development Build|Recently opened|Open from Clipboard|Enter URL manually|No compatible development build|No development servers/i.test(
+    String(uiDump || ''),
+  );
+}
+
+function isLikelyAndroidAnrDialog(uiDump) {
+  return /isn(?:'|&apos;|&#39;)?t responding|is not responding|Close app|Wait/i.test(
+    String(uiDump || ''),
+  );
+}
+
+function parseUiBounds(value) {
+  const match = String(value || '').match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+  if (!match) {
+    return null;
+  }
+
+  const left = Number(match[1]);
+  const top = Number(match[2]);
+  const right = Number(match[3]);
+  const bottom = Number(match[4]);
+  if (![left, top, right, bottom].every(Number.isFinite)) {
+    return null;
+  }
+
+  return { left, top, right, bottom };
+}
+
+function findUiNodeBounds(uiDump, textPattern) {
+  const nodes = String(uiDump || '').match(/<node\b[^>]*>/g) || [];
+  for (const node of nodes) {
+    if (!textPattern.test(node)) {
+      continue;
+    }
+
+    const boundsMatch = node.match(/\bbounds="([^"]+)"/);
+    const bounds = parseUiBounds(boundsMatch?.[1]);
+    if (bounds) {
+      return bounds;
+    }
+  }
+
+  return null;
+}
+
+function tapUiBounds(deviceId, bounds) {
+  if (!bounds) {
+    return false;
+  }
+
+  const x = Math.round((bounds.left + bounds.right) / 2);
+  const y = Math.round((bounds.top + bounds.bottom) / 2);
+  spawnSync(ADB_BIN, adbArgs(deviceId, ['shell', 'input', 'tap', String(x), String(y)]), {
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  return true;
+}
+
+function dismissAndroidAnrWaitDialog(deviceId, artifactDir, label = 'android-anr') {
+  const uiDump = dumpAndroidUi(deviceId);
+  if (!isLikelyAndroidAnrDialog(uiDump)) {
+    return false;
+  }
+
+  const diagnosticPath = writeLaunchUiDiagnostic(deviceId, artifactDir, label, uiDump);
+  const waitBounds = findUiNodeBounds(
+    uiDump,
+    /\b(text|content-desc)="Wait"|\btext="Aguardar"|\bcontent-desc="Aguardar"/i,
+  );
+  const tapped = tapUiBounds(deviceId, waitBounds);
+  logSeed(
+    `[launch][warn] Dialogo Android ANR detectado; ${tapped ? 'toquei em Wait' : 'nao encontrei o botao Wait'}; uiDump=${diagnosticPath}`,
+  );
+  return tapped;
+}
+
+function isLikelyAndroidTransientLoading(uiDump) {
+  return /Bundling(?:\s+\d+(?:\.\d+)?%)?|Downloading|Loading JavaScript|Connecting to Metro|Reloading/i.test(
+    String(uiDump || ''),
+  );
+}
+
+function waitForAndroidTransientLoadingToClear(deviceId, artifactDir, timeoutMs) {
+  if (!timeoutMs) {
+    return true;
+  }
+
+  const startedAt = Date.now();
+  let lastDump = '';
+  let attempts = 0;
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    attempts += 1;
+    if (dismissAndroidAnrWaitDialog(deviceId, artifactDir, `app-ready-android-anr-${attempts}`)) {
+      sleep(1500);
+    }
+
+    lastDump = dumpAndroidUi(deviceId);
+    if (!lastDump || !isLikelyAndroidTransientLoading(lastDump)) {
+      return true;
+    }
+
+    sleep(1000);
+  }
+
+  const diagnosticPath = writeLaunchUiDiagnostic(
+    deviceId,
+    artifactDir,
+    'app-ready-timeout',
+    lastDump,
+  );
+  logSeed(
+    `[launch][warn] UI ainda em estado transitorio apos ${timeoutMs}ms; uiDump=${diagnosticPath}`,
+  );
+  return false;
+}
+
+function defaultReadyTextsForScenario(scenario) {
+  if (scenario === 'passenger-home') {
+    return ['Para onde vamos?'];
+  }
+  if (scenario === 'driver-home') {
+    return ['Ficar online', 'Meus ganhos'];
+  }
+  return [];
+}
+
+function defaultGoneTextsForScenario(scenario) {
+  if (scenario === 'passenger-home' || scenario === 'driver-home') {
+    return ['Bem vindo(a),'];
+  }
+  return [];
+}
+
+function waitForAndroidUiTextToAppear(deviceId, artifactDir, texts, timeoutMs) {
+  const expectedTexts = (Array.isArray(texts) ? texts : [])
+    .map((text) => String(text || '').trim())
+    .filter(Boolean);
+  if (!expectedTexts.length || !timeoutMs) {
+    return true;
+  }
+
+  const startedAt = Date.now();
+  let lastDump = '';
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    lastDump = dumpAndroidUi(deviceId);
+    if (expectedTexts.some((text) => lastDump.includes(text))) {
+      return true;
+    }
+    sleep(1000);
+  }
+
+  const diagnosticPath = writeLaunchUiDiagnostic(
+    deviceId,
+    artifactDir,
+    'ui-ready-timeout',
+    lastDump,
+  );
+  logSeed(
+    `[launch][warn] Nenhum texto de UI esperado apareceu apos ${timeoutMs}ms (${expectedTexts.join(
+      ' | ',
+    )}); uiDump=${diagnosticPath}`,
+  );
+  return false;
+}
+
+function waitForAndroidUiTextToDisappear(deviceId, artifactDir, texts, timeoutMs) {
+  const blockedTexts = (Array.isArray(texts) ? texts : [])
+    .map((text) => String(text || '').trim())
+    .filter(Boolean);
+  if (!blockedTexts.length || !timeoutMs) {
+    return true;
+  }
+
+  const startedAt = Date.now();
+  let lastDump = '';
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    lastDump = dumpAndroidUi(deviceId);
+    if (!blockedTexts.some((text) => lastDump.includes(text))) {
+      return true;
+    }
+    sleep(1000);
+  }
+
+  const diagnosticPath = writeLaunchUiDiagnostic(
+    deviceId,
+    artifactDir,
+    'ui-gone-timeout',
+    lastDump,
+  );
+  logSeed(
+    `[launch][warn] Texto de loading ainda visivel apos ${timeoutMs}ms (${blockedTexts.join(
+      ' | ',
+    )}); uiDump=${diagnosticPath}`,
+  );
+  return false;
+}
+
+function writeLaunchUiDiagnostic(deviceId, artifactDir, label, uiDump) {
+  const diagnosticPath = path.join(artifactDir, `${label}-ui-dump.xml`);
+  fs.mkdirSync(path.dirname(diagnosticPath), { recursive: true });
+  fs.writeFileSync(diagnosticPath, uiDump || dumpAndroidUi(deviceId) || '');
+  return diagnosticPath;
+}
+
+function waitForDevLauncherToClear(deviceId, timeoutMs) {
+  const startedAt = Date.now();
+  let lastDump = '';
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    lastDump = dumpAndroidUi(deviceId);
+    if (!lastDump || !isLikelyExpoDevelopmentBuildScreen(lastDump)) {
+      return { cleared: true, elapsedMs: Date.now() - startedAt, lastDump };
+    }
+    sleep(1200);
+  }
+
+  return { cleared: false, elapsedMs: Date.now() - startedAt, lastDump };
 }
 
 function buildApprovedDriverActivation() {
@@ -978,6 +1434,7 @@ function buildStorageSql(entries, deleteKeys = []) {
     'DELETE FROM android_metadata;',
     "INSERT INTO android_metadata (locale) VALUES ('en_US');",
     'CREATE TABLE IF NOT EXISTS catalystLocalStorage (key TEXT PRIMARY KEY, value TEXT NOT NULL);',
+    'PRAGMA user_version = 1;',
   ];
 
   deleteKeys.forEach((key) => {
@@ -1021,9 +1478,57 @@ function writeAsyncStorage(deviceId, entries, deleteKeys = []) {
   }
 
   if (!result || result.status !== 0) {
+    const output = `${result?.stderr || ''}${result?.stdout || ''}`;
+    if (/permission denied|not found|inaccessible/i.test(output)) {
+      writeAsyncStorageViaRunAsCopy(deviceId, entries, deleteKeys);
+      return;
+    }
+
     throw new Error(
-      `Falha ao gravar AsyncStorage Android. Use build debug/e2e para permitir run-as.\n${result?.stderr || result?.stdout || ''}`,
+      `Falha ao gravar AsyncStorage Android. Use build debug/e2e para permitir run-as.\n${output}`,
     );
+  }
+}
+
+function writeAsyncStorageViaRunAsCopy(deviceId, entries, deleteKeys = []) {
+  const sql = buildStorageSql(entries, deleteKeys);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leaf-android-run-as-storage-'));
+  const tempDbPath = path.join(tempDir, 'RKStorage');
+  const remoteTempDbPath = `/data/local/tmp/leaf-rkstorage-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}.db`;
+
+  try {
+    const localResult = spawnSync('sqlite3', [tempDbPath], {
+      input: sql,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 4,
+    });
+
+    if (localResult.status !== 0) {
+      throw new Error(`Falha ao criar SQLite local.\n${localResult.stderr || localResult.stdout}`);
+    }
+
+    run(ADB_BIN, adbArgs(deviceId, ['push', tempDbPath, remoteTempDbPath]));
+    run(ADB_BIN, adbArgs(deviceId, ['shell', 'chmod', '644', remoteTempDbPath]));
+    run(ADB_BIN, adbArgs(deviceId, ['shell', 'run-as', APP_ID, 'mkdir', '-p', 'databases']));
+    run(ADB_BIN, adbArgs(deviceId, ['shell', 'run-as', APP_ID, 'cp', remoteTempDbPath, 'databases/RKStorage']));
+    run(
+      ADB_BIN,
+      adbArgs(deviceId, [
+        'shell',
+        'run-as',
+        APP_ID,
+        'rm',
+        '-f',
+        'databases/RKStorage-journal',
+        'databases/RKStorage-wal',
+        'databases/RKStorage-shm',
+      ]),
+    );
+    run(ADB_BIN, adbArgs(deviceId, ['shell', 'rm', '-f', remoteTempDbPath]));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
@@ -1273,55 +1778,152 @@ async function main() {
   } else {
     writeAsyncStorage(deviceId, storageEntries, AUTH_FLOW_STALE_STORAGE_KEYS);
   }
-  suppressAndroidDevMenu(deviceId);
+  try {
+    suppressAndroidDevMenu(deviceId);
+  } catch (error) {
+    console.warn(
+      `[seed-android][warn] Nao foi possivel suprimir o onboarding do Dev Client: ${error.message}`,
+    );
+  }
 
   let launchOutput = '';
   if (!hasFlag('--skip-launch')) {
     setAndroidEmulatorLocation(deviceId, snapshot.driverCoordinate || snapshot.currentCoordinate);
     const launchUrl = devClientUrl || route;
-    const quotedLaunchUrl = shellQuote(launchUrl);
     const totalCaptureDelayMs = Math.min(Math.max(freezeMs, 5000), 36000);
-    launchOutput = run(
-      ADB_BIN,
-      adbArgs(deviceId, [
-        'shell',
-        'am',
-        'start',
-        '-W',
-        '-a',
-        'android.intent.action.VIEW',
-        '-d',
-        quotedLaunchUrl,
-        APP_ID,
-      ]),
+    const launchOutputs = [];
+    const skipMetroReverse = hasFlag('--skip-metro-reverse');
+    const metroReadyTimeoutMs = boundedNumber(
+      arg('--metro-ready-timeout-ms', '15000'),
+      15000,
+      0,
+      60000,
     );
-    if (devClientUrl && route !== devClientUrl) {
-      const quotedRoute = shellQuote(route);
+    const devClientLaunchTimeoutMs = boundedNumber(
+      arg('--dev-client-launch-timeout-ms', '16000'),
+      16000,
+      3000,
+      45000,
+    );
+    const maxDevClientLaunchAttempts = devClientUrl
+      ? Math.round(boundedNumber(arg('--dev-client-launch-attempts', '2'), 2, 1, 3))
+      : 1;
+
+    if (devClientUrl && !hasFlag('--skip-metro-ready-check')) {
+      await waitForLocalMetroReady(devClientUrl, metroReadyTimeoutMs);
+    }
+
+    for (let attempt = 1; attempt <= maxDevClientLaunchAttempts; attempt += 1) {
+      if (attempt > 1) {
+        logSeed(`[launch][retry] reabrindo dev-client (${attempt}/${maxDevClientLaunchAttempts})`);
+      }
+
+      if (devClientUrl && !skipMetroReverse) {
+        ensureAndroidMetroReverse(deviceId, devClientUrl);
+      }
+
+      launchOutputs.push(
+        startAndroidViewIntent(
+          deviceId,
+          launchUrl,
+          devClientUrl ? `dev-client (${attempt}/${maxDevClientLaunchAttempts})` : 'route',
+        ),
+      );
+
+      if (!devClientUrl || route === devClientUrl) {
+        sleep(totalCaptureDelayMs);
+        break;
+      }
+
       const routeWarmupMs =
         scenario === 'driver-offer'
           ? Math.min(Math.max(freezeMs - 4000, 9000), 14000)
-          : Math.min(Math.max(Number(arg('--route-warmup-ms', '12000')), 5000), 24000);
+          : boundedNumber(arg('--route-warmup-ms', '12000'), 12000, 5000, 24000);
       sleep(routeWarmupMs);
-      launchOutput = `${launchOutput}\n${run(
-        ADB_BIN,
-        adbArgs(deviceId, [
-          'shell',
-          'am',
-          'start',
-          '-W',
-          '-a',
-          'android.intent.action.VIEW',
-          '-d',
-          quotedRoute,
-          APP_ID,
-        ]),
-      )}`;
-      sleep(Math.max(3000, totalCaptureDelayMs - routeWarmupMs));
-    } else {
-      sleep(totalCaptureDelayMs);
+
+      if (!skipMetroReverse) {
+        ensureAndroidMetroReverse(deviceId, devClientUrl);
+      }
+
+      launchOutputs.push(
+        startAndroidViewIntent(
+          deviceId,
+          route,
+          `route ${scenario} (${attempt}/${maxDevClientLaunchAttempts})`,
+        ),
+      );
+
+      const routeSettleBudgetMs = Math.max(3000, totalCaptureDelayMs - routeWarmupMs);
+      const launcherState = waitForDevLauncherToClear(
+        deviceId,
+        Math.min(devClientLaunchTimeoutMs, routeSettleBudgetMs),
+      );
+
+      if (!launcherState.cleared) {
+        const diagnosticPath = writeLaunchUiDiagnostic(
+          deviceId,
+          artifactDir,
+          `dev-client-launch-attempt-${attempt}`,
+          launcherState.lastDump,
+        );
+        logSeed(
+          `[launch][warn] Expo Development Build ainda visivel apos ${launcherState.elapsedMs}ms; uiDump=${diagnosticPath}`,
+        );
+
+        if (attempt < maxDevClientLaunchAttempts) {
+          run(ADB_BIN, adbArgs(deviceId, ['shell', 'am', 'force-stop', APP_ID]));
+          sleep(1200);
+          continue;
+        }
+
+        throw new Error(
+          `Dev-client Android nao saiu da tela Expo Development Build apos ${maxDevClientLaunchAttempts} tentativa(s). ` +
+            `Diagnostico: ${diagnosticPath}`,
+        );
+      }
+
+      sleep(Math.max(0, routeSettleBudgetMs - launcherState.elapsedMs));
+      break;
     }
+
+    launchOutput = launchOutputs.join('\n');
   }
 
+  if (dismissAndroidAnrWaitDialog(deviceId, artifactDir, 'pre-screenshot-android-anr')) {
+    sleep(3000);
+    dismissAndroidAnrWaitDialog(deviceId, artifactDir, 'pre-screenshot-android-anr-recheck');
+  }
+
+  const appReadyTimeoutMs = boundedNumber(
+    arg('--app-ready-timeout-ms', '30000'),
+    30000,
+    0,
+    90000,
+  );
+  waitForAndroidTransientLoadingToClear(deviceId, artifactDir, appReadyTimeoutMs);
+  const explicitReadyText = String(arg('--wait-for-text', '') || '').trim();
+  const readyTexts = explicitReadyText
+    ? explicitReadyText.split('|').map((text) => text.trim())
+    : defaultReadyTextsForScenario(scenario);
+  const uiReadyTimeoutMs = boundedNumber(
+    arg('--ui-ready-timeout-ms', '25000'),
+    25000,
+    0,
+    90000,
+  );
+  waitForAndroidUiTextToAppear(deviceId, artifactDir, readyTexts, uiReadyTimeoutMs);
+  const explicitGoneText = String(arg('--wait-for-text-gone', '') || '').trim();
+  const goneTexts = explicitGoneText
+    ? explicitGoneText.split('|').map((text) => text.trim())
+    : defaultGoneTextsForScenario(scenario);
+  waitForAndroidUiTextToDisappear(deviceId, artifactDir, goneTexts, uiReadyTimeoutMs);
+  const postUiReadySettleMs = boundedNumber(
+    arg('--post-ui-ready-settle-ms', '2500'),
+    2500,
+    0,
+    15000,
+  );
+  sleep(postUiReadySettleMs);
   clearAndroidNotifications(deviceId);
   const resolvedScreenshotPath = captureScreenshot(deviceId, screenshotPath);
   process.stdout.write(

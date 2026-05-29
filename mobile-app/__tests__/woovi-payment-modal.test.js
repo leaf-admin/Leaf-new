@@ -23,6 +23,10 @@ jest.mock('react-native-elements', () => ({
 
 jest.mock('react-native-qrcode-svg', () => 'QRCode');
 
+jest.mock('@react-native-firebase/auth', () => () => ({
+  currentUser: { uid: 'auth_passenger_1' },
+}));
+
 jest.mock('../src/components/design-system/robotaxiPrototypeTokens', () => ({
   color: {
     bg: { panel: '#fff', canvas: '#f6f6f6' },
@@ -157,7 +161,8 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     });
 
     await waitFor(() => {
-      expect(WooviService.getPaymentStatus).toHaveBeenCalledWith('temp_ride_123');
+      expect(WooviService.getPaymentStatus).toHaveBeenCalledTimes(2);
+      expect(WooviService.getPaymentStatus).not.toHaveBeenCalledWith('temp_ride_123');
       expect(onPaymentConfirmed).toHaveBeenCalledWith(
         expect.objectContaining({
           chargeId: 'charge_123',

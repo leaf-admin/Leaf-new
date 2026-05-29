@@ -3,6 +3,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiDriverDocumentsScreen from '../src/screens/prototype/RobotaxiDriverDocumentsScreen';
 import RobotaxiDriverWaitlistScreen from '../src/screens/prototype/RobotaxiDriverWaitlistScreen';
+import RobotaxiDriverWaitlistStatusScreen from '../src/screens/prototype/RobotaxiDriverWaitlistStatusScreen';
 import RobotaxiInvitesScreen from '../src/screens/prototype/RobotaxiInvitesScreen';
 import RobotaxiPublicTripTrackingScreen from '../src/screens/prototype/RobotaxiPublicTripTrackingScreen';
 import RobotaxiShareTripScreen from '../src/screens/prototype/RobotaxiShareTripScreen';
@@ -64,6 +65,7 @@ jest.mock('../src/services/runtime/driverWaitlistService', () => ({
     position: null,
     city: { cityLabel: 'Rio de Janeiro', pendingDrivers: 11, approvedDrivers: 42 },
   }),
+  leaveDriverWaitlist: jest.fn().mockResolvedValue({ success: true }),
 }));
 
 function buildRuntime(overrides = {}) {
@@ -252,6 +254,30 @@ describe('prototype new surfaces', () => {
         })
       );
       expect(screen.getByText('DRV-123')).toBeTruthy();
+    });
+  });
+
+  it('renders the isolated driver waitlist status surface and joins from the app', async () => {
+    const navigation = buildNavigation();
+    const screen = render(
+      <RobotaxiDriverWaitlistStatusScreen
+        navigation={navigation}
+        route={{ key: 'driver-waitlist-status', params: {} }}
+      />
+    );
+
+    expect(loadDriverWaitlistStatus).toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.getByText('Lista de espera')).toBeTruthy();
+      expect(screen.getByText('Entre na lista da sua cidade')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText('robotaxi-driver-waitlist-status-join-button'));
+
+    await waitFor(() => {
+      expect(joinDriverWaitlist).toHaveBeenCalledWith({ city: 'Rio de Janeiro' });
+      expect(screen.getByText('Sua vaga está na fila')).toBeTruthy();
     });
   });
 

@@ -145,6 +145,35 @@ jest.mock('../src/services/WebSocketManager', () => ({
   default: { getInstance: jest.fn(() => ({ on: jest.fn(), off: jest.fn() })) },
 }));
 
+jest.mock('../src/services/KYCService', () => ({
+  __esModule: true,
+  default: {
+    getPreferredLivenessMode: jest.fn(() => Promise.resolve({ success: true, mode: 'local' })),
+    verifyDriver: jest.fn(() => Promise.resolve({ success: true, data: { isMatch: true } })),
+    getAwsProviderName: jest.fn(() => 'aws_rekognition_face_liveness'),
+  },
+}));
+
+jest.mock('../src/components/KYC/KYCCameraScreen', () => {
+  const React = require('react');
+  const { Text, TouchableOpacity } = require('react-native');
+  return ({ onCapture }) => (
+    <TouchableOpacity testID="driver-kyc-camera" onPress={() => onCapture('selfie://ok')}>
+      <Text>Validar identidade</Text>
+    </TouchableOpacity>
+  );
+});
+
+jest.mock('../src/components/KYC/AWSLivenessWebViewScreen', () => {
+  const React = require('react');
+  const { Text, TouchableOpacity } = require('react-native');
+  return ({ onSuccess }) => (
+    <TouchableOpacity testID="driver-kyc-aws" onPress={() => onSuccess({ sessionId: 'aws-session-1' })}>
+      <Text>Validar identidade AWS</Text>
+    </TouchableOpacity>
+  );
+});
+
 function buildDriverRuntime(overrides = {}) {
   return {
     activeRole: 'driver',
@@ -259,6 +288,10 @@ describe('driver online toggle', () => {
     resolvePassengerAutoRoute.mockReturnValue(null);
     shouldAutoSyncPassengerRoute.mockReturnValue(false);
     mockGetForegroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+    const kycServiceMock = require('../src/services/KYCService').default;
+    kycServiceMock.getPreferredLivenessMode.mockResolvedValue({ success: true, mode: 'local' });
+    kycServiceMock.verifyDriver.mockResolvedValue({ success: true, data: { isMatch: true } });
+    kycServiceMock.getAwsProviderName.mockReturnValue('aws_rekognition_face_liveness');
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   });
 
@@ -402,6 +435,48 @@ describe('driver online toggle', () => {
     });
   });
 
+  it('opens the driver KYC modal when recent verification is required to go online', async () => {
+    const kycServiceMock = require('../src/services/KYCService').default;
+    const setDriverOnline = jest
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        code: 'kycRequired',
+        kycRequired: true,
+        reason: 'Nenhuma verificação encontrada',
+        requirement: 'LIVENESS_REQUIRED',
+      })
+      .mockResolvedValueOnce({ success: true, isOnline: true });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        setDriverOnline,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+
+    await waitFor(() => {
+      expect(kycServiceMock.getPreferredLivenessMode).toHaveBeenCalled();
+      expect(getByText(/Nenhuma verificação encontrada/)).toBeTruthy();
+      expect(getByText('Preparando validação facial...')).toBeTruthy();
+      expect(Alert.alert).not.toHaveBeenCalledWith(
+        'Modo motorista',
+        expect.stringContaining('Nenhuma verificação')
+      );
+    });
+  });
+
   it('shows location guidance and allows opening settings when location permission blocks online mode', async () => {
     const setDriverOnline = jest.fn().mockResolvedValue({
       success: false,
@@ -500,6 +575,27 @@ describe('driver online toggle', () => {
     expect(latestMapProps.routeCoordinates).toEqual([]);
     expect(latestMapProps.searchingMode).toBe(false);
     expect(latestMapProps.destinationCoordinate).toBeNull();
+  });
+
+  it('keeps the idle driver car marker stable instead of following device compass heading', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'idle',
+        currentHeading: 187,
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+    });
+
+    const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+    expect(latestMapProps.currentLocationMarkerMode).toBe('car');
+    expect(latestMapProps.driverHeading).toBe(0);
+    expect(latestMapProps.userHeading).toBeNull();
   });
 
   it('keeps the traffic layer off on the idle home map even when the setting is enabled', async () => {

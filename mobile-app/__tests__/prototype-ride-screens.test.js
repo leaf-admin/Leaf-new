@@ -163,6 +163,8 @@ function buildReceiptRuntime(overrides = {}) {
         id: 'trip_1',
         fare: 38.4,
         value: 'R$ 38,40',
+        driverNetAmount: 31.8,
+        totalFees: 6.6,
         route: 'Rua A -> Aeroporto Santos Dumont',
         pickupAddress: 'Rua A, 10, Centro, Rio de Janeiro',
         destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
@@ -177,6 +179,8 @@ function buildReceiptRuntime(overrides = {}) {
       id: 'trip_1',
       fare: 38.4,
       value: 'R$ 38,40',
+      driverNetAmount: 31.8,
+      totalFees: 6.6,
       route: 'Rua A -> Aeroporto Santos Dumont',
       pickupAddress: 'Rua A, 10, Centro, Rio de Janeiro',
       destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
@@ -191,6 +195,24 @@ function buildReceiptRuntime(overrides = {}) {
     dismissCompletedReceipt: jest.fn(),
     ...overrides,
   };
+}
+
+function expectCriticalRideCardFieldsRendered(screen, role, state, renderedFields) {
+  const result = validateRideCardRenderedFields(role, state, renderedFields, {
+    includeImportant: false,
+    requireTestIDs: true,
+    queryByTestId: screen.queryByTestId,
+  });
+
+  expect({
+    missing: result.missing.map((field) => field.id),
+    missingRenderTargets: result.missingRenderTargets.map((field) => field.id),
+    missingRendered: result.missingRendered.map((field) => field.id),
+  }).toEqual({
+    missing: [],
+    missingRenderTargets: [],
+    missingRendered: [],
+  });
 }
 
 describe('prototype ride screens', () => {
@@ -255,6 +277,99 @@ describe('prototype ride screens', () => {
         DRIVER_TRIP_RENDERED_CARD_FIELDS.started,
       ).ok
     ).toBe(true);
+  });
+
+  it('renders critical contract fields with concrete card testIDs', () => {
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'accepted' }));
+    const passengerAccepted = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    expectCriticalRideCardFieldsRendered(
+      passengerAccepted,
+      RIDE_CARD_ROLES.PASSENGER,
+      RIDE_CARD_STATES.PASSENGER_DRIVER_ACCEPTED,
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.accepted
+    );
+    passengerAccepted.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'arrived' }));
+    const passengerArrived = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    expectCriticalRideCardFieldsRendered(
+      passengerArrived,
+      RIDE_CARD_ROLES.PASSENGER,
+      RIDE_CARD_STATES.PASSENGER_DRIVER_ARRIVED,
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.arrived
+    );
+    passengerArrived.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
+    const passengerStarted = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    expectCriticalRideCardFieldsRendered(
+      passengerStarted,
+      RIDE_CARD_ROLES.PASSENGER,
+      RIDE_CARD_STATES.PASSENGER_IN_TRIP,
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.started
+    );
+    passengerStarted.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue({
+      driverOffers: [
+        {
+          bookingId: 'booking_1',
+          pickupAddress: 'Rua A, 10',
+          dropoffAddress: 'Aeroporto Santos Dumont',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          distanceKm: 0.7,
+          tripDistanceKm: 8.2,
+          pickupEtaMin: 4,
+          tripDurationMin: 14,
+          pricingSnapshotLocked: true,
+          payout: 'R$ 31,80',
+        },
+      ],
+      acceptDriverOffer: jest.fn(),
+      rejectDriverOffer: jest.fn(),
+      lastError: '',
+    });
+    const driverOffer = render(<RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />);
+    expectCriticalRideCardFieldsRendered(
+      driverOffer,
+      RIDE_CARD_ROLES.DRIVER,
+      RIDE_CARD_STATES.DRIVER_NEW_OFFER,
+      DRIVER_OFFER_RENDERED_CARD_FIELDS
+    );
+    driverOffer.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(buildDriverRuntime({ bookingStatus: 'accepted' }));
+    const driverAccepted = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+    expectCriticalRideCardFieldsRendered(
+      driverAccepted,
+      RIDE_CARD_ROLES.DRIVER,
+      RIDE_CARD_STATES.DRIVER_TO_PICKUP,
+      DRIVER_TRIP_RENDERED_CARD_FIELDS.accepted
+    );
+    driverAccepted.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(buildDriverRuntime({ bookingStatus: 'arrived' }));
+    const driverArrived = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+    expectCriticalRideCardFieldsRendered(
+      driverArrived,
+      RIDE_CARD_ROLES.DRIVER,
+      RIDE_CARD_STATES.DRIVER_AT_PICKUP,
+      DRIVER_TRIP_RENDERED_CARD_FIELDS.arrived
+    );
+    driverArrived.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(buildDriverRuntime({ bookingStatus: 'started' }));
+    const driverStarted = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+    fireEvent.press(driverStarted.getByText('Detalhes'));
+    expectCriticalRideCardFieldsRendered(
+      driverStarted,
+      RIDE_CARD_ROLES.DRIVER,
+      RIDE_CARD_STATES.DRIVER_IN_TRIP,
+      DRIVER_TRIP_RENDERED_CARD_FIELDS.started
+    );
   });
 
   it('drives the offer screen into the driver trip surface on acceptance', async () => {
@@ -396,6 +511,33 @@ describe('prototype ride screens', () => {
     });
   });
 
+  it('labels a driver trip gross fallback as bruto instead of líquido', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'started',
+        driverActiveRide: {
+          bookingId: 'booking_gross_only',
+          status: 'started',
+          pickupAddress: 'Rua A, 10',
+          dropoffAddress: 'Aeroporto Santos Dumont',
+          fare: 38.4,
+          grossFare: 38.4,
+          destinationCoordinate: { latitude: -22.9, longitude: -43.17 },
+        },
+        selectedFare: 38.4,
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(
+      <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(screen.getAllByText('R$ 38,40').length).toBeGreaterThan(0);
+    expect(screen.getByText('bruto')).toBeTruthy();
+    expect(screen.queryByText('líquido')).toBeNull();
+  });
+
   it('moves the passenger trip surface to receipt when the trip is completed', async () => {
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'completed' }));
 
@@ -426,7 +568,8 @@ describe('prototype ride screens', () => {
     expect(screen.getByLabelText('Mensagem')).toBeTruthy();
     expect(screen.getByLabelText('Ligar')).toBeTruthy();
     expect(screen.getByText('Compartilhar')).toBeTruthy();
-    expect(screen.getByText('Cancelar corrida')).toBeTruthy();
+    expect(screen.getByLabelText('Cancelar corrida')).toBeTruthy();
+    expect(screen.queryByText('Cancelar corrida')).toBeNull();
   });
 
   it('updates passenger boarding timer copy as pickup urgency changes', () => {
@@ -621,6 +764,9 @@ describe('prototype ride screens', () => {
           {
             id: 'trip_1',
             date: '02 abr 2026',
+            fare: 16.5,
+            driverNetAmount: 15.01,
+            totalFees: 1.49,
             value: 'R$ 15,01',
             pickupAddress: '1540 Mission St',
             dropoffAddress: '1 Ferry Building',

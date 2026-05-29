@@ -178,17 +178,10 @@ function buildSocketCandidateUrls() {
 
   const primaryUrl = getWebSocketURL();
   pushCandidate(primaryUrl);
-  pushCandidate(getApiURL());
 
   try {
     const parsedPrimary = new URL(primaryUrl);
-    if (/^socket(?=[.-])/i.test(parsedPrimary.hostname)) {
-      parsedPrimary.hostname = parsedPrimary.hostname.replace(
-        /^socket(?=[.-])/i,
-        "api",
-      );
-      pushCandidate(parsedPrimary.toString());
-    } else if (/^api(?=[.-])/i.test(parsedPrimary.hostname)) {
+    if (/^api(?=[.-])/i.test(parsedPrimary.hostname)) {
       parsedPrimary.hostname = parsedPrimary.hostname.replace(
         /^api(?=[.-])/i,
         "socket",
@@ -197,6 +190,19 @@ function buildSocketCandidateUrls() {
     }
   } catch (_error) {
     // ignore invalid primary candidate
+  }
+
+  try {
+    const parsedApi = new URL(getApiURL());
+    if (/^api(?=[.-])/i.test(parsedApi.hostname)) {
+      parsedApi.hostname = parsedApi.hostname.replace(/^api(?=[.-])/i, "socket");
+      parsedApi.pathname = "";
+      parsedApi.search = "";
+      parsedApi.hash = "";
+      pushCandidate(parsedApi.toString());
+    }
+  } catch (_error) {
+    // ignore invalid API-derived candidate
   }
 
   return candidates;
@@ -1029,7 +1035,7 @@ class WebSocketManager {
       return this.connectionPromise;
     }
 
-    try {
+    this.connectionPromise = (async () => {
       this.isConnecting = true;
       if (this.socket) {
         Logger.log(
@@ -1039,16 +1045,21 @@ class WebSocketManager {
       }
 
       this.connectionAttempts = 0;
-      return await this._connectFreshSocket({ forceRefreshAuth });
+      return this._connectFreshSocket({ forceRefreshAuth });
+    })();
+
+    try {
+      return await this.connectionPromise;
     } catch (error) {
       Logger.warn(
         "⚠️ [WebSocketManager] Erro ao inicializar WebSocket:",
         error.message,
       );
       Logger.warn("⚠️ [WebSocketManager] Stack:", error.stack);
+      throw error; // ✅ Re-throw para que o chamador possa tratar
+    } finally {
       this.isConnecting = false;
       this.connectionPromise = null;
-      throw error; // ✅ Re-throw para que o chamador possa tratar
     }
   }
 

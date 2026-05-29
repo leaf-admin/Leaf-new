@@ -160,4 +160,37 @@ describe("ride card contract", () => {
 
     expect(criticalOnlyResult.ok).toBe(true);
   });
+
+  it("can validate concrete render targets for critical fields", () => {
+    const result = validateRideCardRenderedFields(
+      RIDE_CARD_ROLES.PASSENGER,
+      RIDE_CARD_STATES.PASSENGER_DRIVER_ARRIVED,
+      [
+        { id: "driver_name", testID: "driver-name" },
+        { id: "driver_photo", testID: "driver-photo" },
+        { id: "vehicle_model", testID: "vehicle-model" },
+        { id: "vehicle_color" },
+        { id: "vehicle_plate", testID: "vehicle-plate" },
+        { id: "boarding_timer", testID: "boarding-timer" },
+        { id: "boarding_timer_message", testID: "boarding-message" },
+        { id: "pickup_address", testID: "pickup-address" },
+        { id: "contact_actions", testID: "contact-actions" },
+        { id: "safety_action", testID: "safety-action" },
+      ],
+      {
+        includeImportant: false,
+        requireTestIDs: true,
+        isTestIDRendered: (testID) => testID !== "boarding-message",
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.missing.map((field) => field.id)).toEqual([]);
+    expect(result.missingRenderTargets.map((field) => field.id)).toEqual([
+      "vehicle_color",
+    ]);
+    expect(result.missingRendered.map((field) => field.id)).toEqual([
+      "boarding_timer_message",
+    ]);
+  });
 });

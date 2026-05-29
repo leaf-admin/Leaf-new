@@ -108,4 +108,37 @@ describe("driver receipt screen", () => {
     expect(navigation.navigate).toHaveBeenCalledWith("RobotaxiPrototype");
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
+
+  it("does not show a gross-only receipt as received net payout", () => {
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime());
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const receipt = {
+      id: "trip_gross_only",
+      fare: 25,
+      finalFare: 25,
+      paymentMethod: "pix",
+      passengerId: "passenger_1",
+      passengerName: "Passageiro Rota",
+      pickupAddress: "Rua Origem, Centro",
+      destinationAddress: "Rua Destino, Botafogo",
+      distanceKm: 4.2,
+      durationMin: 16,
+    };
+
+    const screen = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true, receipt } }}
+      />,
+    );
+
+    expect(screen.getByText("Repasse pendente")).toBeTruthy();
+    expect(screen.getByText("Aguardando dados de repasse")).toBeTruthy();
+    expect(screen.getAllByText("R$ 25,00").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Valor recebido")).toBeNull();
+  });
 });

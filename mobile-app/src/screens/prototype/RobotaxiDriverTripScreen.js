@@ -28,46 +28,113 @@ import {
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { useLiveRouteTiming } from "./liveRouteTiming";
+import {
+  RIDE_CARD_ROLES,
+  RIDE_CARD_STATES,
+  createRideCardFieldTestIDs,
+  defineRideCardRenderedFields,
+} from "./rideCardContract";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 318;
 
+const DRIVER_TO_PICKUP_RENDERED_CARD_FIELD_IDS = Object.freeze([
+  "passenger_name",
+  "passenger_photo",
+  "pickup_address",
+  "pickup_eta",
+  "pickup_distance",
+  "destination_preview",
+  "ride_preferences",
+  "navigation_action",
+  "contact_actions",
+  "arrived_action",
+  "cancel_action",
+]);
+
+const DRIVER_AT_PICKUP_RENDERED_CARD_FIELD_IDS = Object.freeze([
+  "passenger_name",
+  "passenger_photo",
+  "boarding_pin",
+  "boarding_timer",
+  "pickup_address",
+  "contact_actions",
+  "no_show_action",
+  "start_trip_action",
+]);
+
+const DRIVER_IN_TRIP_RENDERED_CARD_FIELD_IDS = Object.freeze([
+  "destination_address",
+  "eta_final",
+  "distance_remaining",
+  "route_progress",
+  "net_payout",
+  "passenger_name",
+  "passenger_photo",
+  "navigation_action",
+  "report_problem_action",
+  "finish_trip_action",
+]);
+
+const DRIVER_TO_PICKUP_FIELD_TEST_ID_OVERRIDES = Object.freeze({
+  arrived_action: "driver-live-primary-action-arrive-button",
+  cancel_action: "driver-trip-cancel-button",
+  contact_actions: "driver-trip-chat-button",
+  navigation_action: "driver-trip-navigation-button",
+});
+
+const DRIVER_AT_PICKUP_FIELD_TEST_ID_OVERRIDES = Object.freeze({
+  contact_actions: "driver-trip-chat-button",
+  no_show_action: "driver-trip-no-show-button",
+  start_trip_action: "driver-live-primary-action-start-button",
+});
+
+const DRIVER_IN_TRIP_FIELD_TEST_ID_OVERRIDES = Object.freeze({
+  finish_trip_action: "driver-live-primary-action-complete-button",
+  navigation_action: "driver-trip-navigation-button",
+  report_problem_action: "driver-trip-report-button",
+});
+
+const DRIVER_TRIP_FIELD_TEST_IDS = Object.freeze({
+  accepted: createRideCardFieldTestIDs(
+    RIDE_CARD_ROLES.DRIVER,
+    RIDE_CARD_STATES.DRIVER_TO_PICKUP,
+    DRIVER_TO_PICKUP_RENDERED_CARD_FIELD_IDS,
+    DRIVER_TO_PICKUP_FIELD_TEST_ID_OVERRIDES,
+  ),
+  arrived: createRideCardFieldTestIDs(
+    RIDE_CARD_ROLES.DRIVER,
+    RIDE_CARD_STATES.DRIVER_AT_PICKUP,
+    DRIVER_AT_PICKUP_RENDERED_CARD_FIELD_IDS,
+    DRIVER_AT_PICKUP_FIELD_TEST_ID_OVERRIDES,
+  ),
+  started: createRideCardFieldTestIDs(
+    RIDE_CARD_ROLES.DRIVER,
+    RIDE_CARD_STATES.DRIVER_IN_TRIP,
+    DRIVER_IN_TRIP_RENDERED_CARD_FIELD_IDS,
+    DRIVER_IN_TRIP_FIELD_TEST_ID_OVERRIDES,
+  ),
+});
+
 export const DRIVER_TRIP_RENDERED_CARD_FIELDS = Object.freeze({
-  accepted: Object.freeze([
-    "passenger_name",
-    "passenger_photo",
-    "pickup_address",
-    "pickup_eta",
-    "pickup_distance",
-    "destination_preview",
-    "ride_preferences",
-    "navigation_action",
-    "contact_actions",
-    "arrived_action",
-    "cancel_action",
-  ]),
-  arrived: Object.freeze([
-    "passenger_name",
-    "passenger_photo",
-    "boarding_pin",
-    "boarding_timer",
-    "pickup_address",
-    "contact_actions",
-    "no_show_action",
-    "start_trip_action",
-  ]),
-  started: Object.freeze([
-    "destination_address",
-    "eta_final",
-    "distance_remaining",
-    "route_progress",
-    "net_payout",
-    "passenger_name",
-    "passenger_photo",
-    "navigation_action",
-    "report_problem_action",
-    "finish_trip_action",
-  ]),
+  accepted: defineRideCardRenderedFields(
+    RIDE_CARD_ROLES.DRIVER,
+    RIDE_CARD_STATES.DRIVER_TO_PICKUP,
+    DRIVER_TO_PICKUP_RENDERED_CARD_FIELD_IDS,
+    { testIDs: DRIVER_TO_PICKUP_FIELD_TEST_ID_OVERRIDES },
+  ),
+  arrived: defineRideCardRenderedFields(
+    RIDE_CARD_ROLES.DRIVER,
+    RIDE_CARD_STATES.DRIVER_AT_PICKUP,
+    DRIVER_AT_PICKUP_RENDERED_CARD_FIELD_IDS,
+    { testIDs: DRIVER_AT_PICKUP_FIELD_TEST_ID_OVERRIDES },
+  ),
+  started: defineRideCardRenderedFields(
+    RIDE_CARD_ROLES.DRIVER,
+    RIDE_CARD_STATES.DRIVER_IN_TRIP,
+    DRIVER_IN_TRIP_RENDERED_CARD_FIELD_IDS,
+    { testIDs: DRIVER_IN_TRIP_FIELD_TEST_ID_OVERRIDES },
+  ),
 });
 
 function resolveDriverTripPrimaryActionTestID(status) {
@@ -135,30 +202,128 @@ function formatBoardingTimer(seconds) {
   return `${Math.floor(normalizedSeconds / 60)}:${String(normalizedSeconds % 60).padStart(2, "0")}`;
 }
 
-function resolveDisplayNetAmount(request, driverTripMeta, selectedFare) {
-  const preferredPositiveAmount =
-    [
-      request?.estimatedDriverNetAmount,
-      request?.driverNetAmount,
-      driverTripMeta?.fare,
-      selectedFare,
-      request?.fare,
-    ].find((value) => Number.isFinite(Number(value)) && Number(value) > 0) ?? null;
+function pickDriverTripMoney(...values) {
+  const finiteValues = values
+    .filter((value) => value !== null && value !== undefined && String(value).trim() !== "")
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
 
-  if (preferredPositiveAmount !== null) {
-    return Number(preferredPositiveAmount);
+  return finiteValues.find((value) => value > 0) ?? finiteValues[0] ?? null;
+}
+
+function roundDriverTripMoney(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
   }
 
-  const firstKnownAmount =
-    [
-      request?.estimatedDriverNetAmount,
-      request?.driverNetAmount,
-      driverTripMeta?.fare,
-      selectedFare,
-      request?.fare,
-    ].find((value) => Number.isFinite(Number(value))) ?? null;
+  return Number(numeric.toFixed(2));
+}
 
-  return firstKnownAmount === null ? null : Number(firstKnownAmount);
+function resolveDriverTripFeeAmount(source = {}) {
+  const totalFees = pickDriverTripMoney(
+    source?.estimatedTotalFees,
+    source?.totalFees,
+    source?.retainedFeesInReais,
+    source?.fareBreakdown?.estimatedTotalFees,
+    source?.fareBreakdown?.totalFees,
+    source?.paymentBreakdown?.estimatedTotalFees,
+    source?.paymentBreakdown?.totalFees,
+    source?.paymentDistribution?.retainedFeesInReais,
+  );
+  if (totalFees !== null) {
+    return totalFees;
+  }
+
+  const operationalFee = pickDriverTripMoney(
+    source?.estimatedOperationalFee,
+    source?.operationalFee,
+    source?.fareBreakdown?.estimatedOperationalFee,
+    source?.fareBreakdown?.operationalFee,
+    source?.paymentBreakdown?.estimatedOperationalFee,
+    source?.paymentBreakdown?.operationalFee,
+  );
+  const paymentIntermediationFee = pickDriverTripMoney(
+    source?.estimatedPaymentIntermediationFee,
+    source?.paymentIntermediationFee,
+    source?.fareBreakdown?.estimatedPaymentIntermediationFee,
+    source?.fareBreakdown?.paymentIntermediationFee,
+    source?.paymentBreakdown?.estimatedPaymentIntermediationFee,
+    source?.paymentBreakdown?.paymentIntermediationFee,
+  );
+
+  if (operationalFee !== null || paymentIntermediationFee !== null) {
+    return Number(operationalFee || 0) + Number(paymentIntermediationFee || 0);
+  }
+
+  return null;
+}
+
+function resolveDriverTripGrossAmount(request, driverTripMeta, selectedFare) {
+  return pickDriverTripMoney(
+    request?.grossFare,
+    request?.grossAmount,
+    request?.totalAmount,
+    request?.finalFare,
+    request?.fare,
+    request?.amount,
+    driverTripMeta?.grossFare,
+    driverTripMeta?.grossAmount,
+    selectedFare,
+  );
+}
+
+function resolveDisplayPayoutAmount(request, driverTripMeta, selectedFare) {
+  const explicitNetAmount = pickDriverTripMoney(
+    request?.estimatedDriverNetAmount,
+    request?.driverNetAmount,
+    request?.driverNetAmountLocked,
+    request?.lockedDriverNetAmount,
+    request?.netAmount,
+    request?.netAmountInReais,
+    request?.driver_share,
+    request?.fareBreakdown?.estimatedDriverNetAmount,
+    request?.fareBreakdown?.driverNetAmount,
+    request?.paymentBreakdown?.estimatedDriverNetAmount,
+    request?.paymentBreakdown?.driverNetAmount,
+    request?.paymentDistribution?.netAmountInReais,
+    driverTripMeta?.estimatedDriverNetAmount,
+    driverTripMeta?.driverNetAmount,
+    driverTripMeta?.netAmount,
+  );
+  if (explicitNetAmount !== null) {
+    return {
+      value: explicitNetAmount,
+      label: "líquido",
+    };
+  }
+
+  const grossAmount = resolveDriverTripGrossAmount(
+    request,
+    driverTripMeta,
+    selectedFare,
+  );
+  const feeAmount =
+    resolveDriverTripFeeAmount(request) ??
+    resolveDriverTripFeeAmount(driverTripMeta);
+  if (grossAmount !== null && feeAmount !== null) {
+    return {
+      value: roundDriverTripMoney(Math.max(0, grossAmount - feeAmount)),
+      label: "líquido",
+    };
+  }
+
+  if (grossAmount !== null) {
+    return {
+      value: grossAmount,
+      label: "bruto",
+    };
+  }
+
+  return {
+    value: null,
+    label: "valor",
+  };
 }
 
 function getFirstName(value) {
@@ -264,6 +429,7 @@ function IconActionButton({
 }) {
   const isDanger = tone === "danger";
   const isPrimary = tone === "primary";
+  const shouldShowLabel = isPrimary;
   return (
     <LeafAnimatedPressable
       activeScale={0.978}
@@ -278,6 +444,7 @@ function IconActionButton({
         isPrimary && styles.iconActionButtonPrimary,
         disabled && styles.iconActionButtonDisabled,
         style,
+        !shouldShowLabel && styles.iconOnlyActionButton,
       ]}
     >
       <Ionicons
@@ -285,16 +452,18 @@ function IconActionButton({
         size={leafButtonMetrics.iconSize}
         color={isPrimary ? "#FFFFFF" : isDanger ? leafRideColors.dangerText : leafRideColors.leaf}
       />
-      <Text
-        style={[
-          styles.iconActionLabel,
-          isPrimary && styles.iconActionLabelPrimary,
-          isDanger && styles.iconActionLabelDanger,
-        ]}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
+      {shouldShowLabel ? (
+        <Text
+          style={[
+            styles.iconActionLabel,
+            isPrimary && styles.iconActionLabelPrimary,
+            isDanger && styles.iconActionLabelDanger,
+          ]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+      ) : null}
     </LeafAnimatedPressable>
   );
 }
@@ -364,14 +533,15 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
   const dropoffTitle =
     String(selectedDestination?.name || dropoffLabel.split(",")[0] || dropoffLabel).trim() ||
     dropoffLabel;
-  const tripFareValue = resolveDisplayNetAmount(
+  const tripFareDisplay = resolveDisplayPayoutAmount(
     request,
     driverTripMeta,
     selectedFare,
   );
-  const tripFareLabel = Number.isFinite(tripFareValue)
-    ? formatCurrency(tripFareValue)
+  const tripFareLabel = Number.isFinite(tripFareDisplay.value)
+    ? formatCurrency(tripFareDisplay.value)
     : "--";
+  const tripFareCaption = tripFareDisplay.label;
   const passengerLabel =
     String(
       request?.passengerName ||
@@ -476,6 +646,11 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
   const isBoardingTimerExpired = boardingTimerSeconds === 0;
   const primaryActionTestID =
     resolveDriverTripPrimaryActionTestID(normalizedBookingStatus);
+  const driverCardFieldTestIDs = normalizedBookingStatus === "started"
+    ? DRIVER_TRIP_FIELD_TEST_IDS.started
+    : normalizedBookingStatus === "arrived"
+      ? DRIVER_TRIP_FIELD_TEST_IDS.arrived
+      : DRIVER_TRIP_FIELD_TEST_IDS.accepted;
   const primaryLabel = busyAction
     ? "Atualizando..."
     : normalizedBookingStatus === "accepted"
@@ -773,14 +948,18 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
         {tripFareLabel}
       </Text>
       <Text style={styles.driverPayoutLabel} numberOfLines={1}>
-        líquido
+        {tripFareCaption}
       </Text>
     </View>
   );
 
-  const renderCompactMetric = (value, label, valueStyle = null) => (
+  const renderCompactMetric = (value, label, valueStyle = null, testID = undefined) => (
     <View style={styles.compactMetric}>
-      <Text style={[styles.compactMetricValue, valueStyle]} numberOfLines={1}>
+      <Text
+        style={[styles.compactMetricValue, valueStyle]}
+        numberOfLines={1}
+        testID={testID}
+      >
         {value}
       </Text>
       <Text style={styles.compactMetricLabel} numberOfLines={1}>
@@ -806,8 +985,14 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             arrivalLabel={null}
             style={styles.driverRouteProgress}
             testID="driver-trip-route-progress"
+            fieldTestIDs={{
+              progress: driverCardFieldTestIDs.route_progress,
+            }}
           />
-          <Text style={styles.driverRouteSummaryText} numberOfLines={1}>
+          <Text
+            style={styles.driverRouteSummaryText}
+            numberOfLines={1}
+          >
             {driverStartedSummary}
           </Text>
         </>
@@ -866,6 +1051,13 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       ? (
         <>
           <IconActionButton
+            icon="navigate-outline"
+            label="Navegar"
+            onPress={handleOpenNavigation}
+            style={styles.compactSecondaryButton}
+            testID="driver-trip-navigation-button"
+          />
+          <IconActionButton
             icon="warning-outline"
             label="Reportar"
             tone="danger"
@@ -916,6 +1108,13 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
         : (
           <>
             <IconActionButton
+              icon="navigate-outline"
+              label="Navegar"
+              onPress={handleOpenNavigation}
+              style={styles.compactSecondaryButton}
+              testID="driver-trip-navigation-button"
+            />
+            <IconActionButton
               icon="chatbubble-outline"
               label="Chat"
               onPress={() => navigation.navigate("RobotaxiPrototypeChat")}
@@ -947,11 +1146,23 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
         <View style={styles.sheetHandle} />
         <View style={styles.compactHeaderRow}>
           <View style={styles.compactHeaderCopy}>
-            <Text style={styles.compactTitle} numberOfLines={1}>
+            <Text
+              style={styles.compactTitle}
+              numberOfLines={1}
+              testID={
+                normalizedBookingStatus === "started"
+                  ? driverCardFieldTestIDs.destination_address
+                  : undefined
+              }
+            >
               {compactTripTitle}
             </Text>
             {shouldShowPickupLine ? (
-              <Text style={styles.compactSubtitle} numberOfLines={1}>
+              <Text
+                style={styles.compactSubtitle}
+                numberOfLines={1}
+                testID={driverCardFieldTestIDs.pickup_address}
+              >
                 {pickupLabel}
               </Text>
             ) : (
@@ -986,6 +1197,10 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           compact
           style={styles.compactPassengerIdentity}
           testID="driver-trip-passenger-identity"
+          fieldTestIDs={{
+            avatar: driverCardFieldTestIDs.passenger_photo,
+            name: driverCardFieldTestIDs.passenger_name,
+          }}
         />
 
         {normalizedBookingStatus === "arrived" ? (
@@ -1005,18 +1220,45 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
                 {boardingTimerMessage}
               </Text>
             </View>
-            <Text style={styles.pinValue} numberOfLines={1}>
+            <Text
+              style={styles.pinValue}
+              numberOfLines={1}
+              testID={driverCardFieldTestIDs.boarding_pin}
+            >
               {boardingPin}
             </Text>
           </View>
         ) : null}
 
         <View style={styles.compactMetricRow}>
-          {renderCompactMetric(compactTripEtaLabel, compactTripEtaCaption)}
+          {renderCompactMetric(
+            compactTripEtaLabel,
+            compactTripEtaCaption,
+            null,
+            normalizedBookingStatus === "started"
+              ? driverCardFieldTestIDs.eta_final
+              : normalizedBookingStatus === "arrived"
+                ? driverCardFieldTestIDs.boarding_timer
+                : driverCardFieldTestIDs.pickup_eta,
+          )}
           {normalizedBookingStatus !== "arrived"
-            ? renderCompactMetric(distanceLabel, compactTripMetaLabel)
+            ? renderCompactMetric(
+                distanceLabel,
+                compactTripMetaLabel,
+                null,
+                normalizedBookingStatus === "started"
+                  ? driverCardFieldTestIDs.distance_remaining
+                  : undefined,
+              )
             : null}
-          {renderCompactMetric(tripFareLabel, "líquido", styles.compactMetricValueLeaf)}
+          {renderCompactMetric(
+            tripFareLabel,
+            tripFareCaption,
+            styles.compactMetricValueLeaf,
+            normalizedBookingStatus === "started"
+              ? driverCardFieldTestIDs.net_payout
+              : undefined,
+          )}
         </View>
 
         {normalizedBookingStatus === "accepted" ? (
@@ -1701,14 +1943,16 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   secondaryActionButton: {
-    flex: 1,
-    minWidth: 0,
+    flex: 0,
+    width: leafButtonMetrics.height,
+    minWidth: leafButtonMetrics.height,
+    maxWidth: leafButtonMetrics.height,
   },
   primaryActionRow: {
     marginTop: 10,
   },
   iconActionButton: {
-    minWidth: 76,
+    minWidth: leafButtonMetrics.height,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
@@ -1719,6 +1963,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: leafButtonMetrics.iconGap,
     paddingHorizontal: 12,
+  },
+  iconOnlyActionButton: {
+    flex: 0,
+    width: leafButtonMetrics.height,
+    minWidth: leafButtonMetrics.height,
+    maxWidth: leafButtonMetrics.height,
+    gap: 0,
+    paddingHorizontal: 0,
   },
   iconActionButtonDanger: {
     backgroundColor: leafRideColors.danger,

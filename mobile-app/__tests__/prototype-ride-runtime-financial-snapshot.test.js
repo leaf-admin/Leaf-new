@@ -186,7 +186,7 @@ describe('prototype ride runtime financial snapshot', () => {
           pricingSnapshotLocked: true,
         },
         driverTripMeta: {
-          fare: 75.74,
+          driverNetAmount: 75.74,
           fareLabel: 'R$ 75,74',
         },
       },
@@ -195,6 +195,25 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(snapshot.finalFare).toBeCloseTo(78.73, 2);
     expect(snapshot.driverNetAmount).toBeCloseTo(75.74, 2);
     expect(snapshot.totalFees).toBeCloseTo(2.99, 2);
+  });
+
+  it('does not persist the gross fare as driver net when no net snapshot exists', () => {
+    const snapshot = resolveCompletedTripFinancialSnapshot(
+      { fare: 31.8 },
+      {
+        selectedFare: 31.8,
+        activeBooking: { estimatedFare: 31.8 },
+        driverActiveRide: {
+          fare: 31.8,
+          grossFare: 31.8,
+          pricingSnapshotLocked: true,
+        },
+      },
+    );
+
+    expect(snapshot.finalFare).toBeCloseTo(31.8, 2);
+    expect(snapshot.driverNetAmount).toBeUndefined();
+    expect(snapshot.totalFees).toBeUndefined();
   });
 
   it('recalculates net from the fee breakdown when a driver receipt repeats gross as payout', () => {

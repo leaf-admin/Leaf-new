@@ -413,6 +413,7 @@ function DriverUI(props) {
     const [isKYCProcessing, setIsKYCProcessing] = useState(false);
     const [kycPendingReason, setKycPendingReason] = useState('');
     const [kycLivenessMode, setKycLivenessMode] = useState('local');
+    const [kycAwsSessionId, setKycAwsSessionId] = useState(null);
     const [isKycProviderLoading, setIsKycProviderLoading] = useState(false);
     const [kycChallengeContext, setKycChallengeContext] = useState({
         challengeId: null,
@@ -2694,6 +2695,7 @@ function DriverUI(props) {
         setShowKYCModal(false);
         setKycPendingReason('');
         setKycLivenessMode('local');
+        setKycAwsSessionId(null);
         setIsKycProviderLoading(false);
         setKycChallengeContext({
             challengeId: null,
@@ -2709,7 +2711,9 @@ function DriverUI(props) {
             return;
         }
 
+        const currentAwsSessionId = kycAwsSessionId;
         setShowKYCModal(false);
+        setKycAwsSessionId(null);
         setIsKYCProcessing(true);
 
         try {
@@ -2717,7 +2721,9 @@ function DriverUI(props) {
                 challengeId: kycChallengeContext.challengeId || undefined,
                 requirement: kycChallengeContext.requirement || undefined,
                 livenessPassed: true,
-                mode: 'device_signature_v1'
+                awsSessionId: currentAwsSessionId || undefined,
+                mode: 'device_signature_v1',
+                allowRawSelfieFallback: true
             });
             const isMatch = !!(result?.success && result?.data?.isMatch);
 
@@ -2748,36 +2754,9 @@ function DriverUI(props) {
             return;
         }
 
-        setShowKYCModal(false);
-        setIsKYCProcessing(true);
-
-        try {
-            const result = await kycService.verifyDriver(driverId, null, {
-                challengeId: kycChallengeContext.challengeId || undefined,
-                requirement: kycChallengeContext.requirement || undefined,
-                livenessPassed: true,
-                awsSessionId: sessionId,
-                mode: kycService.getAwsProviderName()
-            });
-            const isMatch = !!(result?.success && result?.data?.isMatch);
-
-            if (!isMatch) {
-                Alert.alert(
-                    'Validação não aprovada',
-                    result?.error || 'Não foi possível validar sua identidade. Tente novamente.'
-                );
-                return;
-            }
-
-            Alert.alert('Validação concluída', 'Identidade validada. Colocando você online...');
-            await loadCanonicalDriverActivationStatus();
-            await activateOnlineStatus({ skipActivationLivenessGate: true });
-        } catch (error) {
-            Logger.error('❌ [KYC] Erro ao validar motorista via AWS:', error);
-            Alert.alert('Erro', 'Falha ao validar identidade. Tente novamente.');
-        } finally {
-            setIsKYCProcessing(false);
-        }
+        setKycAwsSessionId(sessionId);
+        setKycLivenessMode('local_after_aws');
+        setKycPendingReason('Liveness aprovado. Capture uma selfie rápida para comparar com sua CNH.');
     };
 
     const handleKycFallbackLocal = () => {

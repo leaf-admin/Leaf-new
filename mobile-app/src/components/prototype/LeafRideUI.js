@@ -363,6 +363,7 @@ export function LeafRouteProgress({
   arrivalLabel,
   style,
   testID,
+  fieldTestIDs = {},
 }) {
   const pulse = React.useRef(new Animated.Value(0)).current;
   const normalizedProgress = Math.max(0.08, Math.min(0.94, Number(progress) || 0.48));
@@ -430,19 +431,27 @@ export function LeafRouteProgress({
       <View style={styles.routeEndpointRow}>
         <View style={styles.routeEndpoint}>
           <Text style={styles.routeEndpointLabel}>PARTIDA</Text>
-          <Text style={styles.routeEndpointValue} numberOfLines={1}>
+          <Text
+            style={styles.routeEndpointValue}
+            numberOfLines={1}
+            testID={fieldTestIDs.origin}
+          >
             {originLabel}
           </Text>
         </View>
         <View style={[styles.routeEndpoint, styles.routeEndpointRight]}>
           <Text style={styles.routeEndpointLabel}>CHEGADA</Text>
-          <Text style={styles.routeEndpointValue} numberOfLines={1}>
+          <Text
+            style={styles.routeEndpointValue}
+            numberOfLines={1}
+            testID={fieldTestIDs.destination}
+          >
             {destinationLabel}
           </Text>
         </View>
       </View>
 
-      <View style={styles.routeLineWrap}>
+      <View style={styles.routeLineWrap} testID={fieldTestIDs.progress}>
         <View style={styles.routeLineRail} />
         <Animated.View style={[styles.routeLineFill, { width: progressWidth }]} />
         <View style={[styles.routeEndpointDot, styles.routeStartDot]} />
@@ -558,23 +567,40 @@ export function LeafDriverIdentity({
   plate,
   style,
   testID,
+  fieldTestIDs = {},
 }) {
   return (
     <View style={[styles.identityRow, style]} testID={testID}>
-      <LeafAvatar initial={initial} photoUri={photoUri} />
+      <LeafAvatar initial={initial} photoUri={photoUri} testID={fieldTestIDs.avatar} />
       <View style={styles.identityCopy}>
-        <Text style={styles.identityName} numberOfLines={1}>
+        <Text
+          style={styles.identityName}
+          numberOfLines={1}
+          testID={fieldTestIDs.name}
+        >
           {name}
         </Text>
-        <Text style={styles.identityMeta} numberOfLines={1}>
+        <Text
+          style={styles.identityMeta}
+          numberOfLines={1}
+          testID={fieldTestIDs.meta}
+        >
           {rating}
         </Text>
       </View>
       <View style={styles.vehicleCopy}>
-        <Text style={styles.plateText} numberOfLines={1}>
+        <Text
+          style={styles.plateText}
+          numberOfLines={1}
+          testID={fieldTestIDs.plate}
+        >
           {plate || "--"}
         </Text>
-        <Text style={styles.vehicleText} numberOfLines={1}>
+        <Text
+          style={styles.vehicleText}
+          numberOfLines={1}
+          testID={fieldTestIDs.vehicle}
+        >
           {vehicle}
         </Text>
       </View>
@@ -591,22 +617,40 @@ export function LeafPersonIdentity({
   compact = false,
   style,
   testID,
+  fieldTestIDs = {},
 }) {
   return (
     <View style={[styles.identityRow, style]} testID={testID}>
-      <LeafAvatar initial={initial} photoUri={photoUri} compact={compact} />
+      <LeafAvatar
+        initial={initial}
+        photoUri={photoUri}
+        compact={compact}
+        testID={fieldTestIDs.avatar}
+      />
       <View style={styles.identityCopy}>
-        <Text style={[styles.identityName, compact && styles.identityNameCompact]} numberOfLines={1}>
+        <Text
+          style={[styles.identityName, compact && styles.identityNameCompact]}
+          numberOfLines={1}
+          testID={fieldTestIDs.name}
+        >
           {name}
         </Text>
         {meta ? (
-          <Text style={[styles.identityMeta, compact && styles.identityMetaCompact]} numberOfLines={1}>
+          <Text
+            style={[styles.identityMeta, compact && styles.identityMetaCompact]}
+            numberOfLines={1}
+            testID={fieldTestIDs.meta}
+          >
             {meta}
           </Text>
         ) : null}
       </View>
       {right ? (
-        <Text style={styles.identityRight} numberOfLines={1}>
+        <Text
+          style={styles.identityRight}
+          numberOfLines={1}
+          testID={fieldTestIDs.right}
+        >
           {right}
         </Text>
       ) : null}
@@ -614,10 +658,13 @@ export function LeafPersonIdentity({
   );
 }
 
-function LeafAvatar({ initial, photoUri, compact = false }) {
+function LeafAvatar({ initial, photoUri, compact = false, testID }) {
   const source = resolveAvatarSource(photoUri);
   return (
-    <View style={[styles.identityAvatar, compact && styles.identityAvatarCompact]}>
+    <View
+      style={[styles.identityAvatar, compact && styles.identityAvatarCompact]}
+      testID={testID}
+    >
       {source ? (
         <Image source={source} style={styles.identityAvatarImage} />
       ) : (

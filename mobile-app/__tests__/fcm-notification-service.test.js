@@ -162,7 +162,7 @@ describe('FCMNotificationService initialization', () => {
     await flushMicrotasks();
 
     expect(mockWsManager.on).toHaveBeenCalledTimes(1);
-    expect(mockWsManager.connect).toHaveBeenCalledTimes(1);
+    expect(mockWsManager.connect).not.toHaveBeenCalled();
     expect(mockWsManager.registerFCMToken).not.toHaveBeenCalled();
   });
 
@@ -480,6 +480,75 @@ describe('FCMNotificationService initialization', () => {
     expect(navigationRef.navigate).toHaveBeenCalledWith(
       'RobotaxiPrototypeDriverDocuments',
       expect.objectContaining({ documentType: 'cnh' })
+    );
+  });
+
+  it('navigates waitlist pushes to the isolated driver waitlist status route', () => {
+    const navigationRef = {
+      isReady: jest.fn(() => true),
+      navigate: jest.fn(),
+    };
+    globalThis.navigationRef = navigationRef;
+
+    const target = FCMNotificationService.navigateToScreen({
+      data: {
+        type: 'driver_waitlist_update',
+        waitlistEvent: 'approved',
+        status: 'approved',
+        userType: 'driver',
+      },
+    });
+
+    expect(target).toEqual(
+      expect.objectContaining({
+        routeName: 'RobotaxiPrototypeDriverWaitlistStatus',
+        params: expect.objectContaining({
+          notificationType: 'driver_waitlist_update',
+          status: 'approved',
+          userType: 'driver',
+        }),
+      })
+    );
+    expect(navigationRef.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeDriverWaitlistStatus',
+      expect.objectContaining({ status: 'approved' })
+    );
+  });
+
+  it('navigates identity reverification pushes to the prototype home with challenge context', () => {
+    const navigationRef = {
+      isReady: jest.fn(() => true),
+      navigate: jest.fn(),
+    };
+    globalThis.navigationRef = navigationRef;
+
+    const target = FCMNotificationService.navigateToScreen({
+      data: {
+        type: 'kyc_reverification_required',
+        userType: 'driver',
+        requirement: 'IDENTITY_REVERIFICATION',
+        challengeId: 'idrev_abc123',
+        reason: 'Por segurança, precisamos validar sua identidade.',
+      },
+    });
+
+    expect(target).toEqual(
+      expect.objectContaining({
+        routeName: 'RobotaxiPrototype',
+        params: expect.objectContaining({
+          notificationType: 'kyc_reverification_required',
+          userType: 'driver',
+          requirement: 'IDENTITY_REVERIFICATION',
+          challengeId: 'idrev_abc123',
+        }),
+      })
+    );
+    expect(navigationRef.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({
+        requirement: 'IDENTITY_REVERIFICATION',
+        challengeId: 'idrev_abc123',
+      })
     );
   });
 

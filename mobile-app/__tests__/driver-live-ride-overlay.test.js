@@ -89,7 +89,8 @@ describe("DriverLiveRideOverlay", () => {
     );
 
     expect(screen.getByText("A caminho de 1 Ferry Building")).toBeTruthy();
-    expect(screen.getByText("Problema")).toBeTruthy();
+    expect(screen.queryByText("Problema")).toBeNull();
+    expect(screen.getByLabelText("Reportar problema")).toBeTruthy();
     expect(screen.getByText("Encerrar")).toBeTruthy();
     expect(screen.getByLabelText("Finalizar corrida")).toBeTruthy();
   });
@@ -238,7 +239,7 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Navegar")).toBeTruthy();
+    expect(screen.queryByText("Navegar")).toBeNull();
     expect(screen.getByLabelText("Abrir navegação")).toBeTruthy();
     expect(screen.getByLabelText("Iniciar corrida")).toBeTruthy();
   });

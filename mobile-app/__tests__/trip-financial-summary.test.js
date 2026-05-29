@@ -3,6 +3,7 @@ const {
   buildTripFinancialTotals,
   formatCurrencyBRL,
   resolveTripDisplayAmount,
+  resolveTripNetAmount,
 } = require('../src/screens/prototype/tripFinancialSummary');
 
 describe('trip financial summary', () => {
@@ -44,6 +45,17 @@ describe('trip financial summary', () => {
     };
 
     expect(resolveTripDisplayAmount(trip, { role: 'driver' })).toBeCloseTo(15.01, 2);
+    expect(resolveTripDisplayAmount(trip, { role: 'passenger' })).toBeCloseTo(16.5, 2);
+  });
+
+  it('does not fall back to gross fare for driver net totals without net evidence', () => {
+    const trip = {
+      fare: 16.5,
+      grossFare: 16.5,
+    };
+
+    expect(resolveTripNetAmount(trip)).toBe(0);
+    expect(resolveTripDisplayAmount(trip, { role: 'driver' })).toBe(0);
     expect(resolveTripDisplayAmount(trip, { role: 'passenger' })).toBeCloseTo(16.5, 2);
   });
 

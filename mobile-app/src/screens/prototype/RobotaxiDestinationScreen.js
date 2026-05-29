@@ -1303,6 +1303,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     : Number.isFinite(selectedQuoteFare) && selectedQuoteFare > 0
       ? selectedQuoteFare
       : selectedPlanData?.value;
+  const selectedDiscountBenefit =
+    selectedPricingQuote?.discountBenefit && typeof selectedPricingQuote.discountBenefit === "object"
+      ? selectedPricingQuote.discountBenefit
+      : null;
+  const selectedGrossQuoteFare = Number(selectedPricingQuote?.grossEstimatedFare);
+  const selectedGrossEstimatedFare =
+    Number.isFinite(selectedGrossQuoteFare) && selectedGrossQuoteFare > 0
+      ? selectedGrossQuoteFare
+      : selectedPlanFare;
   const selectedPricingPayload = selectedPricingQuote?.pricingPayload || null;
   const selectedDynamicPercentage = Number(
     selectedPricingPayload?.dynamic_percentage ?? 0,
@@ -3121,12 +3130,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 <View style={styles.categoryTabs}>
                   {categoryOptions.map((plan) => {
                     const selected = plan.id === selectedPlan;
-                    const iconName =
-                      plan.id === "elite"
-                        ? "diamond-outline"
-                        : plan.id === "moto"
-                          ? "bicycle-outline"
-                          : "leaf-outline";
                     return (
                       <TouchableOpacity
                         key={plan.id}
@@ -3141,11 +3144,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         accessibilityLabel={`Categoria ${plan.categoryLabel}, embarque em ${plan.pickupEtaLabel}, ${plan.priceLabel}`}
                         accessibilityState={{ selected, disabled: plan.unavailable }}
                       >
-                        <Ionicons
-                          name={iconName}
-                          size={15}
-                          color={selected ? leafRideColors.text : leafRideColors.secondary}
-                        />
                         <Text
                           style={[
                             styles.categoryTabText,
@@ -3164,19 +3162,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
                 <View style={styles.categorySelectedRow}>
                   <View style={styles.categorySelectedLeft}>
-                    <View style={styles.categorySelectedIcon}>
-                      <Ionicons
-                        name={
-                          selectedCategoryOption?.id === "elite"
-                            ? "diamond-outline"
-                            : selectedCategoryOption?.id === "moto"
-                              ? "bicycle-outline"
-                              : "leaf-outline"
-                        }
-                        size={17}
-                        color={leafRideColors.leaf}
-                      />
-                    </View>
                     <View style={styles.categorySelectedCopy}>
                       <Text style={styles.categorySelectedTitle} numberOfLines={1}>
                         {selectedCategoryOption?.categoryLabel || "Plus"}
@@ -3466,9 +3451,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               },
               carType: selectedPlanData.title,
               estimatedFare: selectedPlanFare,
+              grossEstimatedFare: selectedGrossEstimatedFare,
             }}
             estimates={{ estimateFare: selectedPlanFare }}
-            passengerId={profileUid || "prototype-passenger"}
+            grossEstimatedFare={selectedGrossEstimatedFare}
+            discountBenefit={selectedDiscountBenefit}
+            passengerId={profileUid || riderProfile?.uid || riderProfile?.id || ""}
             passengerName={riderProfile?.name || "Passageira Leaf"}
             passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}
             qaAutoConfirm={qaAutoConfirmPix}
@@ -4250,9 +4238,9 @@ const styles = StyleSheet.create({
   },
   categoryTabText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 10.5,
-    lineHeight: 13,
+    fontFamily: fonts.SemiBold,
+    fontSize: 12.5,
+    lineHeight: 16,
   },
   categoryTabTextActive: {
     color: leafRideColors.text,
@@ -4277,15 +4265,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 9,
-  },
-  categorySelectedIcon: {
-    width: 25,
-    height: 25,
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F1F5EE",
+    gap: 0,
   },
   categorySelectedCopy: {
     flex: 1,
@@ -4294,8 +4274,8 @@ const styles = StyleSheet.create({
   categorySelectedTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 13.5,
-    lineHeight: 18,
+    fontSize: 15.5,
+    lineHeight: 20,
   },
   categorySelectedSubtitle: {
     marginTop: 1,

@@ -26,62 +26,128 @@ import { useLiveRouteTiming } from './liveRouteTiming';
 import { formatCurrencyBRL } from './tripFinancialSummary';
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from './robotaxiPrototypeData';
 import { normalizePassengerBookingStatus } from './passengerFlowRouting';
+import { buildFallbackRouteCoordinates } from './prototypeMapRoute';
+import {
+  RIDE_CARD_ROLES,
+  RIDE_CARD_STATES,
+  createRideCardFieldTestIDs,
+  defineRideCardRenderedFields,
+} from './rideCardContract';
 import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 292;
 
+const PASSENGER_ACCEPTED_RENDERED_CARD_FIELD_IDS = Object.freeze([
+  'driver_name',
+  'driver_photo',
+  'driver_rating',
+  'vehicle_model',
+  'vehicle_color',
+  'vehicle_plate',
+  'pickup_eta',
+  'pickup_distance',
+  'pickup_address',
+  'destination_address',
+  'fare',
+  'vehicle_type',
+  'contact_actions',
+  'share_trip_action',
+  'safety_action',
+  'cancel_action',
+]);
+
+const PASSENGER_ARRIVED_RENDERED_CARD_FIELD_IDS = Object.freeze([
+  'driver_name',
+  'driver_photo',
+  'vehicle_model',
+  'vehicle_color',
+  'vehicle_plate',
+  'boarding_timer',
+  'boarding_timer_message',
+  'pickup_address',
+  'contact_actions',
+  'safety_action',
+  'cancel_action',
+]);
+
+const PASSENGER_STARTED_RENDERED_CARD_FIELD_IDS = Object.freeze([
+  'destination_address',
+  'eta_final',
+  'distance_remaining',
+  'route_progress',
+  'driver_name',
+  'driver_photo',
+  'vehicle_model',
+  'vehicle_color',
+  'vehicle_plate',
+  'fare',
+  'vehicle_type',
+  'share_trip_action',
+  'safety_action',
+  'support_action',
+  'change_destination_action',
+  'end_early_action',
+]);
+
+const PASSENGER_ACCEPTED_FIELD_TEST_ID_OVERRIDES = Object.freeze({
+  cancel_action: 'passenger-trip-cancel-button',
+  safety_action: 'passenger-trip-sos-button',
+  share_trip_action: 'passenger-trip-share-button',
+});
+
+const PASSENGER_ARRIVED_FIELD_TEST_ID_OVERRIDES = Object.freeze({
+  cancel_action: 'passenger-trip-cancel-button',
+  safety_action: 'passenger-trip-sos-button',
+});
+
+const PASSENGER_STARTED_FIELD_TEST_ID_OVERRIDES = Object.freeze({
+  safety_action: 'passenger-trip-support-button',
+  share_trip_action: 'passenger-trip-share-button',
+  support_action: 'passenger-trip-support-button',
+});
+
+const PASSENGER_TRIP_FIELD_TEST_IDS = Object.freeze({
+  accepted: createRideCardFieldTestIDs(
+    RIDE_CARD_ROLES.PASSENGER,
+    RIDE_CARD_STATES.PASSENGER_DRIVER_ACCEPTED,
+    PASSENGER_ACCEPTED_RENDERED_CARD_FIELD_IDS,
+    PASSENGER_ACCEPTED_FIELD_TEST_ID_OVERRIDES,
+  ),
+  arrived: createRideCardFieldTestIDs(
+    RIDE_CARD_ROLES.PASSENGER,
+    RIDE_CARD_STATES.PASSENGER_DRIVER_ARRIVED,
+    PASSENGER_ARRIVED_RENDERED_CARD_FIELD_IDS,
+    PASSENGER_ARRIVED_FIELD_TEST_ID_OVERRIDES,
+  ),
+  started: createRideCardFieldTestIDs(
+    RIDE_CARD_ROLES.PASSENGER,
+    RIDE_CARD_STATES.PASSENGER_IN_TRIP,
+    PASSENGER_STARTED_RENDERED_CARD_FIELD_IDS,
+    PASSENGER_STARTED_FIELD_TEST_ID_OVERRIDES,
+  ),
+});
+
 export const PASSENGER_TRIP_RENDERED_CARD_FIELDS = Object.freeze({
-  accepted: Object.freeze([
-    'driver_name',
-    'driver_photo',
-    'driver_rating',
-    'vehicle_model',
-    'vehicle_color',
-    'vehicle_plate',
-    'pickup_eta',
-    'pickup_distance',
-    'pickup_address',
-    'destination_address',
-    'fare',
-    'vehicle_type',
-    'contact_actions',
-    'share_trip_action',
-    'safety_action',
-    'cancel_action',
-  ]),
-  arrived: Object.freeze([
-    'driver_name',
-    'driver_photo',
-    'vehicle_model',
-    'vehicle_color',
-    'vehicle_plate',
-    'boarding_timer',
-    'boarding_timer_message',
-    'pickup_address',
-    'contact_actions',
-    'safety_action',
-    'cancel_action',
-  ]),
-  started: Object.freeze([
-    'destination_address',
-    'eta_final',
-    'distance_remaining',
-    'route_progress',
-    'driver_name',
-    'driver_photo',
-    'vehicle_model',
-    'vehicle_color',
-    'vehicle_plate',
-    'fare',
-    'vehicle_type',
-    'share_trip_action',
-    'safety_action',
-    'support_action',
-    'change_destination_action',
-    'end_early_action',
-  ]),
+  accepted: defineRideCardRenderedFields(
+    RIDE_CARD_ROLES.PASSENGER,
+    RIDE_CARD_STATES.PASSENGER_DRIVER_ACCEPTED,
+    PASSENGER_ACCEPTED_RENDERED_CARD_FIELD_IDS,
+    { testIDs: PASSENGER_ACCEPTED_FIELD_TEST_ID_OVERRIDES },
+  ),
+  arrived: defineRideCardRenderedFields(
+    RIDE_CARD_ROLES.PASSENGER,
+    RIDE_CARD_STATES.PASSENGER_DRIVER_ARRIVED,
+    PASSENGER_ARRIVED_RENDERED_CARD_FIELD_IDS,
+    { testIDs: PASSENGER_ARRIVED_FIELD_TEST_ID_OVERRIDES },
+  ),
+  started: defineRideCardRenderedFields(
+    RIDE_CARD_ROLES.PASSENGER,
+    RIDE_CARD_STATES.PASSENGER_IN_TRIP,
+    PASSENGER_STARTED_RENDERED_CARD_FIELD_IDS,
+    { testIDs: PASSENGER_STARTED_FIELD_TEST_ID_OVERRIDES },
+  ),
 });
 
 function formatCurrency(value) {
@@ -298,8 +364,6 @@ function buildExtensionPaymentData(rideExtension, bookingId) {
 function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style }) {
   const isWarning = tone === 'warning';
   const isDanger = tone === 'danger';
-  const displayLabel =
-    label === 'Mensagem' ? 'Chat' : label === 'Cancelar corrida' ? 'Cancelar' : label;
   return (
     <LeafAnimatedPressable
       activeScale={0.978}
@@ -311,7 +375,8 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
         styles.iconActionButton,
         isWarning && styles.iconActionButtonWarning,
         isDanger && styles.iconActionButtonDanger,
-        style
+        style,
+        styles.iconOnlyActionButton
       ]}
     >
       <Ionicons
@@ -325,17 +390,6 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
               : leafRideColors.leaf
         }
       />
-      <Text
-        style={[
-          styles.iconActionLabel,
-          isDanger && styles.iconActionLabelDanger,
-          isWarning && styles.iconActionLabelWarning,
-        ]}
-        numberOfLines={1}
-      >
-        {displayLabel}
-      </Text>
-      {displayLabel !== label ? <Text style={styles.hiddenText}>{label}</Text> : null}
     </LeafAnimatedPressable>
   );
 }
@@ -530,6 +584,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         ? tripPickupCoordinate
         : tripDestinationCoordinate;
 
+    if (routeStart && routeEnd) {
+      return buildFallbackRouteCoordinates(routeStart, routeEnd);
+    }
+
     return [routeStart, routeEnd].filter(Boolean);
   }, [
     activeBooking?.route,
@@ -643,6 +701,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     !isOperationalDecisionPending &&
     !isOperationalSearching &&
     !['driver_decision_pending', 'pending_payment', 'confirming', 'expired', 'rejected'].includes(extensionStatus);
+  const passengerCardFieldTestIDs = isStarted
+    ? PASSENGER_TRIP_FIELD_TEST_IDS.started
+    : isArrived
+      ? PASSENGER_TRIP_FIELD_TEST_IDS.arrived
+      : PASSENGER_TRIP_FIELD_TEST_IDS.accepted;
   const driverInitial = String(driverName || 'C').trim().charAt(0).toUpperCase() || 'C';
   const driverRatingLabel = driverInfo?.rating
     ? `${Number(driverInfo.rating).toFixed(1).replace('.', ',')} · parceiro Leaf`
@@ -674,7 +737,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const passengerSheetKicker = isStarted
     ? arrivalClockLabel || resolvedTripArrivalText || compactEtaValue
     : isArrived
-      ? ''
+      ? pickupPointLabel
       : `${compactEtaValue} até o embarque`;
   const boardingPinLabel =
     String(
@@ -854,7 +917,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           label="SOS"
           tone="warning"
           onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
-          testID="passenger-trip-sos-button"
+          testID={passengerCardFieldTestIDs.safety_action}
         />
       </View>
       <LeafDivider style={styles.cardStateDivider} />
@@ -880,7 +943,17 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             {passengerSheetTitle}
           </Text>
           {passengerSheetKicker ? (
-            <Text style={styles.rideKicker} numberOfLines={1}>
+            <Text
+              style={styles.rideKicker}
+              numberOfLines={1}
+              testID={
+                isStarted
+                  ? passengerCardFieldTestIDs.eta_final
+                  : isArrived
+                    ? passengerCardFieldTestIDs.pickup_address
+                    : passengerCardFieldTestIDs.pickup_eta
+              }
+            >
               {passengerSheetKicker}
             </Text>
           ) : null}
@@ -888,6 +961,16 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             <Text style={styles.hiddenText}>{`${compactEtaValue} até chegar`}</Text>
           ) : null}
         </View>
+        {!isStarted ? (
+          <IconActionButton
+            icon="shield-checkmark-outline"
+            label="SOS"
+            tone="warning"
+            onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
+            style={styles.tripHeaderIconAction}
+            testID={passengerCardFieldTestIDs.safety_action}
+          />
+        ) : null}
       </View>
 
       {isStarted ? (
@@ -900,9 +983,17 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             arrivalLabel={null}
             style={styles.tripRouteProgressCompact}
             testID="passenger-trip-route-progress"
+            fieldTestIDs={{
+              destination: passengerCardFieldTestIDs.destination_address,
+              progress: passengerCardFieldTestIDs.route_progress,
+            }}
           />
           {startedTripMeta ? (
-            <Text style={styles.tripRouteMeta} numberOfLines={1}>
+            <Text
+              style={styles.tripRouteMeta}
+              numberOfLines={1}
+              testID={passengerCardFieldTestIDs.distance_remaining}
+            >
               {startedTripMeta}
             </Text>
           ) : null}
@@ -915,8 +1006,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             plate={plateLabel}
             style={styles.startedIdentity}
             testID="passenger-trip-driver-identity"
+            fieldTestIDs={{
+              avatar: passengerCardFieldTestIDs.driver_photo,
+              name: passengerCardFieldTestIDs.driver_name,
+              meta: passengerCardFieldTestIDs.driver_rating,
+              plate: passengerCardFieldTestIDs.vehicle_plate,
+              vehicle: passengerCardFieldTestIDs.vehicle_model,
+            }}
           />
-          <Text style={styles.vehicleColorText} numberOfLines={1}>
+          <Text
+            style={styles.vehicleColorText}
+            numberOfLines={1}
+            testID={passengerCardFieldTestIDs.vehicle_color}
+          >
             {vehicleColorLabel}
           </Text>
           <View style={styles.passengerSecondaryActionsRow}>
@@ -949,7 +1051,12 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       ) : isArrived ? (
         <>
           <View style={styles.boardingTimerCompactPanel}>
-            <Text style={styles.boardingTimerValue}>{boardingCountdownLabel || '0:00'}</Text>
+            <Text
+              style={styles.boardingTimerValue}
+              testID={passengerCardFieldTestIDs.boarding_timer}
+            >
+              {boardingCountdownLabel || '0:00'}
+            </Text>
             <Text
               style={[
                 styles.boardingTimerMessage,
@@ -957,6 +1064,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 isBoardingTimerExpired && styles.boardingTimerMessageExpired,
               ]}
               numberOfLines={1}
+              testID={passengerCardFieldTestIDs.boarding_timer_message}
             >
               {boardingTimerMessage}
             </Text>
@@ -970,11 +1078,24 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             plate={plateLabel}
             style={styles.arrivedIdentity}
             testID="passenger-trip-driver-identity"
+            fieldTestIDs={{
+              avatar: passengerCardFieldTestIDs.driver_photo,
+              name: passengerCardFieldTestIDs.driver_name,
+              plate: passengerCardFieldTestIDs.vehicle_plate,
+              vehicle: passengerCardFieldTestIDs.vehicle_model,
+            }}
           />
-          <Text style={styles.vehicleColorText} numberOfLines={1}>
+          <Text
+            style={styles.vehicleColorText}
+            numberOfLines={1}
+            testID={passengerCardFieldTestIDs.vehicle_color}
+          >
             {vehicleColorLabel}
           </Text>
-          <View style={styles.passengerSecondaryActionsRow}>
+          <View
+            style={styles.passengerSecondaryActionsRow}
+            testID={passengerCardFieldTestIDs.contact_actions}
+          >
             <IconActionButton
               icon="call-outline"
               label="Ligar"
@@ -1018,8 +1139,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             plate={plateLabel}
             style={styles.acceptedIdentity}
             testID="passenger-trip-driver-identity"
+            fieldTestIDs={{
+              avatar: passengerCardFieldTestIDs.driver_photo,
+              name: passengerCardFieldTestIDs.driver_name,
+              meta: passengerCardFieldTestIDs.driver_rating,
+              plate: passengerCardFieldTestIDs.vehicle_plate,
+              vehicle: passengerCardFieldTestIDs.vehicle_model,
+            }}
           />
-          <Text style={styles.vehicleColorText} numberOfLines={1}>
+          <Text
+            style={styles.vehicleColorText}
+            numberOfLines={1}
+            testID={passengerCardFieldTestIDs.vehicle_color}
+          >
             {vehicleColorLabel}
           </Text>
           <View
@@ -1035,7 +1167,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 <Text style={styles.rideRouteMeta} numberOfLines={1}>
                   {distanceLabel} até o embarque
                 </Text>
-                <Text style={styles.rideRouteAddress} numberOfLines={1}>
+                <Text
+                  style={styles.rideRouteAddress}
+                  numberOfLines={1}
+                  testID={passengerCardFieldTestIDs.pickup_address}
+                >
                   {pickupPointLabel}
                 </Text>
               </View>
@@ -1048,13 +1184,20 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 <Text style={styles.rideRouteMeta} numberOfLines={1}>
                   {vehicle} · {fareLabel}
                 </Text>
-                <Text style={styles.rideRouteAddress} numberOfLines={1}>
+                <Text
+                  style={styles.rideRouteAddress}
+                  numberOfLines={1}
+                  testID={passengerCardFieldTestIDs.destination_address}
+                >
                   {destination}
                 </Text>
               </View>
             </View>
           </View>
-          <View style={styles.passengerSecondaryActionsRow}>
+          <View
+            style={styles.passengerSecondaryActionsRow}
+            testID={passengerCardFieldTestIDs.contact_actions}
+          >
             <IconActionButton
               icon="call-outline"
               label="Ligar"
@@ -1440,7 +1583,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             estimatedFare: Number(rideExtension?.diffFare || 0)
           }}
           estimates={{ estimateFare: Number(rideExtension?.diffFare || 0) }}
-          passengerId={profileUid || 'prototype-passenger'}
+          passengerId={profileUid || riderProfile?.uid || riderProfile?.id || ''}
           passengerName={riderProfile?.name || 'Passageira Leaf'}
           passengerEmail={riderProfile?.email || 'passageiro@leaf.app.br'}
         />
@@ -1500,7 +1643,7 @@ const styles = StyleSheet.create({
     lineHeight: 24
   },
   iconActionButton: {
-    minWidth: 76,
+    minWidth: leafButtonMetrics.height,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
@@ -1509,15 +1652,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: leafButtonMetrics.iconGap,
-    paddingHorizontal: 12
+    paddingHorizontal: 0
+  },
+  iconOnlyActionButton: {
+    flex: 0,
+    width: leafButtonMetrics.height,
+    minWidth: leafButtonMetrics.height,
+    maxWidth: leafButtonMetrics.height,
   },
   tripActionIcon: {
-    minWidth: 76,
+    minWidth: leafButtonMetrics.height,
     minHeight: leafButtonMetrics.height
   },
   tripHeaderIconAction: {
-    minWidth: 72,
+    minWidth: leafButtonMetrics.height,
     minHeight: leafButtonMetrics.height
   },
   iconActionButtonWarning: {
@@ -1527,18 +1675,6 @@ const styles = StyleSheet.create({
   iconActionButtonDanger: {
     backgroundColor: leafRideColors.danger,
     borderColor: '#F5CBD2'
-  },
-  iconActionLabel: {
-    color: leafRideColors.text,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 16
-  },
-  iconActionLabelDanger: {
-    color: leafRideColors.dangerText
-  },
-  iconActionLabelWarning: {
-    color: leafRideColors.warningText
   },
   cardStateDivider: {
     marginTop: 14,

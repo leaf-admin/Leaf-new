@@ -29,6 +29,27 @@ const DRIVER_GOAL_STORAGE_PREFIX = "@prototype_driver_daily_goal_";
 const DEFAULT_DAILY_GOAL = 200;
 const COMPETITOR_REFERENCE_TAKE_RATE = 0.3;
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
+const LEAF_WELCOME_RIO_BANNER_IMAGE_URL =
+  "https://storage.googleapis.com/leaf-reactnative.firebasestorage.app/campaign-center/assets/asset_mpgam7le_f7f03d20_leaf-welcome-rio-1035x564.webp?GoogleAccessId=firebase-adminsdk-fbsvc%40leaf-reactnative.iam.gserviceaccount.com&Expires=2051222400&Signature=pgIHEiHVb5lkRxw9ca%2F9PR8jeIUe2kA03Tou08WveLCBJ%2B5wTYiDFpCW9v%2FXXMCCNUuPpNXVF7ZpHD9tK43x%2B71JC6u4Khq7hSQu9Nvkl3GIuWheGcO4K901olK9OgQJDw6HN4VmsWvvod%2BiE9pu%2B2%2BodJbth3FHwW5nieThVZtdW0QovD9E1SKsjWfpDnIWTw6STwC0fca33awqvQ7eO4tMwc8KQGrQswZIR2GGHChTgFApcKs7oArhjRk6jrlfua0B%2BYVFgr%2FJXXFoMUouY%2BUYuyoSQmqGeKQqItTdYjg2Utcm81bonilMyJ8%2B%2FGSi%2FpNBetSRasPoLPc2T%2F8MxA%3D%3D";
+const DRIVER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
+  {
+    id: "local_driver_leaf_day",
+    name: "Leaf motorista",
+    template: "home_banner_card",
+    content: {
+      eyebrow: "Hoje na Leaf",
+      title: "Fique online quando estiver pronto",
+      body: "Acompanhe seus ganhos, aceite corridas com calma e mantenha sua rotina no controle.",
+      backgroundColor: "#FBFCF8",
+      imageUrl: LEAF_WELCOME_RIO_BANNER_IMAGE_URL,
+      imageAlt: "Banner de boas-vindas da Leaf no Rio de Janeiro",
+      displayMode: "image_only",
+      hideTextOverlay: true,
+      cta: { label: "Começar", action: "driver_go_online" },
+    },
+    rules: { autoRotateSeconds: 6 },
+  },
+]);
 const DRIVER_HOME_COLOR = {
   sheet: "#FFFFFF",
   sheetSoft: "#FFFFFF",
@@ -136,7 +157,7 @@ function resolveTripNetAmount(item = {}) {
     return Math.max(0, gross - fees);
   }
 
-  return Number.isFinite(gross) ? Math.max(0, gross) : 0;
+  return 0;
 }
 
 function resolveGoalStreakDays(history = [], dailyGoal = DEFAULT_DAILY_GOAL, todayNet = 0) {
@@ -668,7 +689,7 @@ function DriverHomeOverlay({
           limit={3}
           height={DRIVER_HOME_PROMO_CARD_HEIGHT}
           borderRadius={DRIVER_HOME_CARD_RADIUS}
-          fallbackCampaigns={[]}
+          fallbackCampaigns={DRIVER_HOME_FALLBACK_CAMPAIGNS}
           style={styles.driverPromoCard}
           testID="driver-home-promo-carousel"
         />

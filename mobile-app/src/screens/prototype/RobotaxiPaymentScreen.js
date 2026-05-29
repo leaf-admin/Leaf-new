@@ -459,7 +459,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
             estimatedFare: Number(fare),
           }}
           estimates={{ estimateFare: Number(fare) }}
-          passengerId={profileUid || "prototype-passenger"}
+          passengerId={profileUid || riderProfile?.uid || riderProfile?.id || ""}
           passengerName={riderProfile?.name || "Passageira Leaf"}
           passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}
           qaAutoConfirm={qaAutoConfirmPix}

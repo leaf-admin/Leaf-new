@@ -102,6 +102,32 @@ describe('driverOfferPricingSnapshot', () => {
     expect(selectDisplayableDriverOffer([provisionalOffer])).toBeNull();
   });
 
+  it('does not promote a locked gross-only offer into a net payout label', () => {
+    const grossOnlyLockedOffer = {
+      bookingId: 'booking_1',
+      fare: 16.5,
+      grossFare: 16.5,
+      pricingSnapshotLocked: true,
+    };
+
+    expect(hasAuthoritativeDriverOfferPricing(grossOnlyLockedOffer)).toBe(false);
+    expect(getDriverOfferPayoutLabel(grossOnlyLockedOffer)).toBeNull();
+    expect(selectDisplayableDriverOffer([grossOnlyLockedOffer])).toBeNull();
+  });
+
+  it('infers the displayable net payout only when fees are explicit', () => {
+    const feeBackedOffer = {
+      bookingId: 'booking_1',
+      fare: 16.5,
+      grossFare: 16.5,
+      estimatedTotalFees: 1.49,
+      pricingSnapshotLocked: true,
+    };
+
+    expect(hasAuthoritativeDriverOfferPricing(feeBackedOffer)).toBe(true);
+    expect(getDriverOfferPayoutLabel(feeBackedOffer)).toBe('R$ 15,01');
+  });
+
   it('selects the first displayable offer with locked net pricing', () => {
     const selected = selectDisplayableDriverOffer([
       {

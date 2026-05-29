@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Image, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import Svg, { Path, Rect } from 'react-native-svg';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
@@ -34,6 +35,16 @@ const DRIVER_MARKER_IMAGE_SOURCES = Object.freeze({
   yellow: require('../../assets/map/leaf-map-car-marker-yellow.png'),
 });
 const DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE = DRIVER_MARKER_IMAGE_SOURCES.black;
+const DRIVER_MARKER_BODY_COLORS = Object.freeze({
+  black: '#111111',
+  white: '#F4F1EA',
+  silver: '#B9C0C3',
+  gray: '#50575A',
+  red: '#7E2020',
+  blue: '#1E4D6F',
+  green: '#1A330E',
+  yellow: '#D7A623',
+});
 
 function resolveAvatarInitial(value) {
   return String(value || 'L').trim().charAt(0).toUpperCase() || 'L';
@@ -198,14 +209,30 @@ function resolveVehicleColorToken(value) {
   return null;
 }
 
-function resolveVehicleMarkerImageSource(...values) {
-  const token = values.map(resolveVehicleColorToken).find(Boolean) || 'black';
-  return DRIVER_MARKER_IMAGE_SOURCES[token] || DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE;
+function resolveVehicleMarkerBodyColor(token) {
+  return DRIVER_MARKER_BODY_COLORS[token] || DRIVER_MARKER_BODY_COLORS.black;
 }
 
 function resolveRemoteMarkerImageSource(value) {
   const uri = String(value || '').trim();
   return uri ? { uri } : null;
+}
+
+function resolveNativeMarkerImageSource(source) {
+  if (!source) {
+    return undefined;
+  }
+
+  if (Platform.OS !== 'android') {
+    return source;
+  }
+
+  if (typeof source === 'string') {
+    return source;
+  }
+
+  const resolved = Image.resolveAssetSource(source);
+  return resolved?.uri || undefined;
 }
 
 function toRadians(value) {
@@ -814,6 +841,100 @@ const MapAvatarMarker = React.memo(function MapAvatarMarker({
   );
 });
 
+const InlineVehicleMarker = React.memo(function InlineVehicleMarker({
+  colorToken = 'black',
+}) {
+  const bodyColor = resolveVehicleMarkerBodyColor(colorToken);
+  const windowColor = colorToken === 'white' ? '#60727A' : '#37474F';
+  const sideWindowColor = colorToken === 'white' ? '#4B5E66' : '#263238';
+
+  return (
+    <Svg width={38} height={38} viewBox="0 0 512 512">
+      <Rect x="130" y="40" width="252" height="432" rx="60" fill="#000000" opacity="0.15" />
+      <Rect x="115" y="90" width="30" height="70" rx="8" fill="#1C2022" />
+      <Rect x="367" y="90" width="30" height="70" rx="8" fill="#1C2022" />
+      <Rect x="115" y="350" width="30" height="70" rx="8" fill="#1C2022" />
+      <Rect x="367" y="350" width="30" height="70" rx="8" fill="#1C2022" />
+      <Path
+        d="M140 100 C140 50 160 30 256 30 C352 30 372 50 372 100 L372 410 C372 460 340 480 256 480 C172 480 140 460 140 410 Z"
+        fill={bodyColor}
+      />
+      <Rect x="105" y="140" width="36" height="16" rx="6" fill={bodyColor} />
+      <Rect x="371" y="140" width="36" height="16" rx="6" fill={bodyColor} />
+      <Path d="M160 130 L352 130 L332 185 L180 185 Z" fill={windowColor} />
+      <Path d="M155 195 L175 195 L175 330 L155 310 Z" fill={sideWindowColor} />
+      <Path d="M357 195 L337 195 L337 330 L357 310 Z" fill={sideWindowColor} />
+      <Path d="M180 340 L332 340 L352 385 L160 385 Z" fill={windowColor} />
+      <Rect x="180" y="195" width="152" height="135" rx="10" fill={bodyColor} />
+      <Path d="M180 45 L190 115" stroke="rgba(255,255,255,0.16)" strokeWidth="3" strokeLinecap="round" />
+      <Path d="M332 45 L322 115" stroke="rgba(255,255,255,0.16)" strokeWidth="3" strokeLinecap="round" />
+      <Path d="M150 35 Q170 32 190 36" stroke="#FFFFFF" strokeWidth="6" strokeLinecap="round" fill="none" opacity="0.9" />
+      <Path d="M362 35 Q342 32 322 36" stroke="#FFFFFF" strokeWidth="6" strokeLinecap="round" fill="none" opacity="0.9" />
+      <Rect x="145" y="470" width="35" height="6" rx="2" fill="#D32F2F" />
+      <Rect x="332" y="470" width="35" height="6" rx="2" fill="#D32F2F" />
+    </Svg>
+  );
+});
+
+const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
+  source,
+  colorToken = 'black',
+}) {
+  const shouldRenderRemoteImage = Boolean(
+    source &&
+      typeof source === 'object' &&
+      typeof source.uri === 'string' &&
+      source.uri.trim()
+  );
+
+  return (
+    <View collapsable={false} style={styles.vehicleMarkerWrap}>
+      {shouldRenderRemoteImage ? (
+        <Image
+          source={source}
+          style={styles.vehicleMarkerImage}
+          resizeMode="contain"
+          fadeDuration={0}
+        />
+      ) : (
+        <InlineVehicleMarker colorToken={colorToken} />
+      )}
+    </View>
+  );
+});
+
+const ProjectedVehicleOverlay = React.memo(function ProjectedVehicleOverlay({
+  pointX,
+  pointY,
+  heading = 0,
+  source,
+  colorToken = 'black',
+}) {
+  if (!Number.isFinite(pointX) || !Number.isFinite(pointY)) {
+    return null;
+  }
+
+  const effectiveSource = source || DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE;
+
+  return (
+    <View pointerEvents="none" style={styles.androidDriverVehicleOverlayLayer}>
+      <View
+        collapsable={false}
+        style={[
+          styles.androidDriverVehicleOverlay,
+          {
+            left: pointX - 21,
+            top: pointY - 21,
+            transform: [{ rotate: `${normalizeHeadingDegrees(heading) ?? 0}deg` }],
+          },
+        ]}
+      >
+        <VehicleMarkerContent source={effectiveSource} colorToken={colorToken} />
+      </View>
+    </View>
+  );
+});
+
 const NearbyVehicleRequestDots = React.memo(function NearbyVehicleRequestDots({
   sequenceIndex = 0
 }) {
@@ -1034,6 +1155,8 @@ function PrototypeMapLayer({
   routeHighlightColor = null,
   hideRouteEndpointMarkers = false,
   driverMarkerMode = 'car',
+  driverMarkerOccludedBottom = 0,
+  currentLocationMarkerMode = 'dot',
   driverVehicleColor = '',
   driverMarkerAssetUrl = '',
   driverMarkerLetter = 'D',
@@ -1202,7 +1325,10 @@ function PrototypeMapLayer({
   const resolvedAvatarSource = useMemo(() => {
     return shouldRenderAvatarImage ? { uri: normalizedAvatarUri } : null;
   }, [normalizedAvatarUri, shouldRenderAvatarImage]);
-  const shouldShowCurrentLocationMarker = Boolean(!hideUserMarker);
+  const shouldShowCurrentLocationMarker = Boolean(
+    !hideUserMarker &&
+      !(Platform.OS !== 'android' && currentLocationMarkerMode === 'car')
+  );
   const shouldShowUserAvatarMarker = Boolean(searchingMode && shouldShowCurrentLocationMarker);
   const userMarkerTracksViewChanges =
     Platform.OS === 'android' || shouldShowCurrentLocationMarker;
@@ -1236,26 +1362,44 @@ function PrototypeMapLayer({
     () => resolveRemoteMarkerImageSource(driverMarkerAssetUrl),
     [driverMarkerAssetUrl],
   );
+  const driverVehicleMarkerColorToken = useMemo(
+    () =>
+      resolveVehicleColorToken(
+        driverVehicleColor,
+        driverCoordinate?.vehicleColor,
+        driverCoordinate?.color,
+        driverCoordinate?.vehicle?.color,
+      ) || 'black',
+    [
+      driverCoordinate?.color,
+      driverCoordinate?.vehicle?.color,
+      driverCoordinate?.vehicleColor,
+      driverVehicleColor,
+    ],
+  );
   const driverVehicleMarkerImageSource = useMemo(
     () => {
       if (driverMarkerCampaignImageSource) {
         return driverMarkerCampaignImageSource;
       }
 
-      return resolveVehicleMarkerImageSource(
-        driverVehicleColor,
-        driverCoordinate?.vehicleColor,
-        driverCoordinate?.color,
-        driverCoordinate?.vehicle?.color,
-      );
+      return DRIVER_MARKER_IMAGE_SOURCES[driverVehicleMarkerColorToken] ||
+        DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE;
     },
     [
-      driverCoordinate?.color,
-      driverCoordinate?.vehicle?.color,
-      driverCoordinate?.vehicleColor,
       driverMarkerCampaignImageSource,
-      driverVehicleColor,
+      driverVehicleMarkerColorToken,
     ],
+  );
+  const driverVehicleMarkerNativeImageSource = useMemo(
+    () => resolveNativeMarkerImageSource(driverVehicleMarkerImageSource),
+    [driverVehicleMarkerImageSource],
+  );
+  const shouldRenderAndroidDriverVehicleMarker =
+    Platform.OS === 'android' && driverMarkerMode === 'car';
+  const androidDriverMarkerOccludedBottom = Math.max(
+    0,
+    Number(driverMarkerOccludedBottom) || 0,
   );
   const mapChildrenCount = useMemo(
     () => React.Children.count(mapChildren),
@@ -1693,6 +1837,61 @@ function PrototypeMapLayer({
     projectedRouteEndpointOverlayPoints.destination,
     projectedRouteEndpointOverlayPoints.origin
   ]);
+  const projectedDriverVehicleOverlayPoint = useMemo(() => {
+    if (
+      Platform.OS !== 'android' ||
+      driverMarkerMode !== 'car' ||
+      !hasDisplayedDriverCoordinate ||
+      !androidProjectionLayout.hasLayout
+    ) {
+      return null;
+    }
+
+    const projectedPoint = projectCoordinateToScreenPoint({
+      coordinate: displayedDriverCoordinate,
+      projectionRegion: androidVisibleRegion || region,
+      width: androidProjectionLayout.width,
+      height: androidProjectionLayout.height,
+    });
+
+    if (!projectedPoint) {
+      return null;
+    }
+
+    const markerMaxY = Math.max(
+      56,
+      androidProjectionLayout.height - androidDriverMarkerOccludedBottom - 28,
+    );
+
+    return {
+      x: Math.min(Math.max(projectedPoint.x, 28), androidProjectionLayout.width - 28),
+      y: Math.min(Math.max(projectedPoint.y, 28), markerMaxY),
+    };
+  }, [
+    androidProjectionLayout.hasLayout,
+    androidProjectionLayout.height,
+    androidProjectionLayout.width,
+    androidDriverMarkerOccludedBottom,
+    androidVisibleRegion,
+    displayedDriverCoordinate?.latitude,
+    displayedDriverCoordinate?.longitude,
+    driverMarkerMode,
+    hasDisplayedDriverCoordinate,
+    region,
+  ]);
+  const shouldRenderProjectedDriverVehicleOverlay = Boolean(
+    projectedDriverVehicleOverlayPoint &&
+      Platform.OS === 'android' &&
+      driverMarkerMode === 'car' &&
+      currentLocationMarkerMode !== 'car'
+  );
+  const shouldRenderCurrentLocationVehicleOverlay =
+    currentLocationMarkerMode === 'car';
+  const shouldSuppressNativeAndroidDriverVehicleMarker = Boolean(
+    shouldRenderAndroidDriverVehicleMarker &&
+      (shouldRenderProjectedDriverVehicleOverlay ||
+        shouldRenderCurrentLocationVehicleOverlay)
+  );
   const projectedUserOverlayPoint = useMemo(() => {
     const projectionRegion =
       Platform.OS === 'android' ? androidVisibleRegion || region : region;
@@ -2028,7 +2227,9 @@ function PrototypeMapLayer({
             </Marker>
           ) : null}
 
-          {hasDisplayedDriverCoordinate ? (
+          {hasDisplayedDriverCoordinate &&
+          !shouldRenderProjectedDriverVehicleOverlay &&
+          !shouldSuppressNativeAndroidDriverVehicleMarker ? (
             <Marker
               key="driver-marker"
               coordinate={{
@@ -2037,14 +2238,23 @@ function PrototypeMapLayer({
               }}
               zIndex={19}
               anchor={{ x: 0.5, y: 0.5 }}
-              image={driverMarkerMode === 'car' ? driverVehicleMarkerImageSource : undefined}
+              image={
+                driverMarkerMode === 'car' && !shouldRenderAndroidDriverVehicleMarker
+                  ? driverVehicleMarkerNativeImageSource
+                  : undefined
+              }
               flat={driverMarkerMode === 'car'}
               rotation={driverMarkerMode === 'car' ? displayedDriverHeading : 0}
-              tracksViewChanges={false}
+              tracksViewChanges={shouldRenderAndroidDriverVehicleMarker}
               pinColor={undefined}
             >
               {driverMarkerMode === 'avatar' ? (
                 <MapAvatarMarker letter={driverMarkerLetter} tone="driver" />
+              ) : shouldRenderAndroidDriverVehicleMarker ? (
+                <VehicleMarkerContent
+                  source={driverVehicleMarkerImageSource}
+                  colorToken={driverVehicleMarkerColorToken}
+                />
               ) : null}
             </Marker>
           ) : null}
@@ -2056,13 +2266,19 @@ function PrototypeMapLayer({
                 const lat = Number(vehicle.coordinate.latitude).toFixed(6);
                 const lng = Number(vehicle.coordinate.longitude).toFixed(6);
                 const isRequestingVehicle = searchingMode && index === activeNearbyRequestIndex;
-                const vehicleMarkerImageSource =
-                  driverMarkerCampaignImageSource ||
-                  resolveVehicleMarkerImageSource(
+                const vehicleMarkerColorToken =
+                  resolveVehicleColorToken(
                     vehicle.color,
                     vehicle.vehicleColor,
                     vehicle.vehicle?.color,
-                  );
+                  ) || 'black';
+                const vehicleMarkerImageSource =
+                  driverMarkerCampaignImageSource ||
+                  DRIVER_MARKER_IMAGE_SOURCES[vehicleMarkerColorToken] ||
+                  DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE;
+                const vehicleMarkerNativeImageSource =
+                  resolveNativeMarkerImageSource(vehicleMarkerImageSource);
+                const shouldRenderAndroidVehicleMarkerChild = Platform.OS === 'android';
                 return (
                   <React.Fragment key={`nearby-${id || 'vehicle'}-${index}-${lat}-${lng}`}>
                     <Marker
@@ -2072,12 +2288,23 @@ function PrototypeMapLayer({
                       }}
                       zIndex={isRequestingVehicle ? 17 : 16}
                       anchor={{ x: 0.5, y: 0.5 }}
-                      image={vehicleMarkerImageSource}
+                      image={
+                        shouldRenderAndroidVehicleMarkerChild
+                          ? undefined
+                          : vehicleMarkerNativeImageSource
+                      }
                       flat
                       rotation={Number.isFinite(Number(vehicle.heading)) ? Number(vehicle.heading) : 0}
                       opacity={isOuterVehicle ? 0.84 : 1}
-                      tracksViewChanges={false}
-                    />
+                      tracksViewChanges={shouldRenderAndroidVehicleMarkerChild}
+                    >
+                      {shouldRenderAndroidVehicleMarkerChild ? (
+                        <VehicleMarkerContent
+                          source={vehicleMarkerImageSource}
+                          colorToken={vehicleMarkerColorToken}
+                        />
+                      ) : null}
+                    </Marker>
                     {isRequestingVehicle ? (
                       <Marker
                         coordinate={{
@@ -2133,6 +2360,16 @@ function PrototypeMapLayer({
         </MapView>
       </View>
 
+      {shouldRenderProjectedDriverVehicleOverlay ? (
+        <ProjectedVehicleOverlay
+          pointX={projectedDriverVehicleOverlayPoint.x}
+          pointY={projectedDriverVehicleOverlayPoint.y}
+          heading={displayedDriverHeading}
+          source={driverVehicleMarkerImageSource}
+          colorToken={driverVehicleMarkerColorToken}
+        />
+      ) : null}
+
       {Platform.OS === 'android' && hasRoute && shouldRenderRouteEndpointMarkers ? (
         <View pointerEvents="none" style={styles.androidRouteEndpointOverlayLayer}>
           <AndroidRouteEndpointOverlay
@@ -2159,7 +2396,15 @@ function PrototypeMapLayer({
       {shouldShowCurrentLocationMarker &&
       shouldRenderProjectedUserOverlay &&
       projectedUserOverlayPoint ? (
-        shouldShowUserAvatarMarker ? (
+        shouldRenderCurrentLocationVehicleOverlay ? (
+          <ProjectedVehicleOverlay
+            pointX={projectedUserOverlayPoint.x}
+            pointY={projectedUserOverlayPoint.y}
+            heading={displayedDriverHeading}
+            source={driverVehicleMarkerImageSource}
+            colorToken={driverVehicleMarkerColorToken}
+          />
+        ) : shouldShowUserAvatarMarker ? (
           <FloatingUserOverlay
             pointX={projectedUserOverlayPoint.x}
             pointY={projectedUserOverlayPoint.y}
@@ -2546,6 +2791,34 @@ const styles = StyleSheet.create({
   },
   tripAvatarMarkerLetterPassenger: {
     color: '#314225'
+  },
+  vehicleMarkerWrap: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  vehicleMarkerImage: {
+    width: 38,
+    height: 38,
+  },
+  androidDriverVehicleOverlayLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 12,
+    elevation: 12,
+  },
+  androidDriverVehicleOverlay: {
+    position: 'absolute',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+    overflow: 'visible',
   },
   nearbyVehicleDotsMarker: {
     width: 42,

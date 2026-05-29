@@ -37,10 +37,19 @@ export default function WithdrawMoneyScreen(props) {
 
   const { t } = i18n;
   const isRTL = i18n.locale.indexOf('he') === 0 || i18n.locale.indexOf('ar') === 0;
+  const currentAmount = Number(String(state.amount || '').replace(',', '.')) || 0;
+  const currentBalance = Number(state.userdata.walletBalance ?? state.userdata.availableBalance ?? state.userdata.balance ?? initialBalance) || 0;
+  const currentWithdrawFee = DriverBalanceService.calculateWithdrawFee(currentAmount);
+  const currentTotalDebit = currentAmount + currentWithdrawFee;
+  const hasAmount = String(state.amount || '').trim().length > 0;
+  const exceedsAvailableBalance = hasAmount && currentAmount > 0 && currentTotalDebit > currentBalance;
+  const canSubmitWithdrawal = !loading && currentAmount > 0 && currentTotalDebit <= currentBalance && Boolean(String(state.pixKey || '').trim()) && Boolean(String(state.appPassword || '').trim());
 
   const withdrawNow = async () => {
-    const amount = Number(String(state.amount || '').replace(',', '.'));
-    const balance = Number(state.userdata.walletBalance ?? state.userdata.availableBalance ?? state.userdata.balance ?? initialBalance);
+    const amount = currentAmount;
+    const balance = currentBalance;
+    const withdrawFee = currentWithdrawFee;
+    const totalDebit = currentTotalDebit;
     const driverId = state.userdata.uid || state.userdata.id || auth?.profile?.uid || auth?.profile?.id;
     const pixKey = String(state.pixKey || '').trim();
     const appPassword = String(state.appPassword || '').trim();
@@ -50,7 +59,7 @@ export default function WithdrawMoneyScreen(props) {
       return;
     }
 
-    if (balance > 0 && amount > 0 && amount <= balance) {
+    if (balance > 0 && amount > 0 && totalDebit <= balance) {
       if (!pixKey) {
         Alert.alert(t('alert'), 'Informe sua chave Pix');
         return;
@@ -89,8 +98,11 @@ export default function WithdrawMoneyScreen(props) {
 
       Alert.alert(t('alert'), result?.error || 'Não foi possível solicitar o saque');
     } else {
-      if (amount > balance) {
-        Alert.alert(t('alert'),t('withdraw_more'));
+      if (totalDebit > balance) {
+        Alert.alert(
+          t('alert'),
+          `Saldo insuficiente. Este saque debita R$ ${totalDebit.toFixed(2).replace('.', ',')}${withdrawFee > 0 ? ' incluindo tarifa de R$ 1,00' : ''}.`
+        );
       }
       else if (amount <= 0) {
         Alert.alert(t('alert'),t('withdraw_below_zero'));
@@ -161,12 +173,23 @@ export default function WithdrawMoneyScreen(props) {
           <Text style={styles.dailyFeeStruck}>R$ 9,90</Text>
           <Text style={styles.dailyFeeFree}>R$ 0,00 agora</Text>
         </View>
+        {hasAmount && currentWithdrawFee > 0 && (
+          <Text style={styles.withdrawFeeText}>
+            Saques abaixo de R$ 500,00 têm tarifa de R$ 1,00.
+          </Text>
+        )}
+        {exceedsAvailableBalance && (
+          <Text style={styles.withdrawErrorText}>
+            Saldo insuficiente para saque + tarifa.
+          </Text>
+        )}
         <Button
             title={t('withdraw')}
             loading={loading}
             titleStyle={styles.buttonTitle}
             onPress={withdrawNow}
-            buttonStyle={styles.buttonWrapper2}
+            disabled={!canSubmitWithdrawal}
+            buttonStyle={[styles.buttonWrapper2, !canSubmitWithdrawal && styles.buttonDisabled]}
             containerStyle={{ height: '100%' }}
             testID="driver-withdraw-submit-button"
             accessibilityLabel="driver-withdraw-submit-button"
@@ -244,6 +267,20 @@ const styles = StyleSheet.create({
     fontFamily: fonts.Bold,
     color: MAIN_COLOR,
   },
+  withdrawFeeText: {
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: fonts.Regular,
+    color: '#6E7D72',
+  },
+  withdrawErrorText: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: fonts.Bold,
+    color: '#B42318',
+  },
   buttonWrapper2: {
     marginBottom: 10,
     marginTop: 18,
@@ -252,6 +289,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: MAIN_COLOR,
     borderRadius: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.45,
   },
   buttonTitle: {
     color: colors.WHITE,
