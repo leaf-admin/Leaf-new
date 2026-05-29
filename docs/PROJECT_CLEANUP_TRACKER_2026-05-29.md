@@ -130,3 +130,15 @@ Validação:
 - `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs`: reduziu de 38 para 32 achados; os CORS wildcard desses scripts sairam. Achados restantes sao artefatos sensiveis locais, validacao Woovi/webhook e bypasses de QA/prelaunch que exigem bloco separado.
+
+## Bloco 4 - Executado Localmente
+
+Escopo: remover artefato local ignorado e inativo.
+
+- Removido `web-app/`, que tinha apenas `web-app/.env` local e nenhum arquivo rastreado.
+- `web-app` ja constava como fora dos workspaces ativos desde o plano de migracao de 2026-05-16.
+
+Validação:
+
+- `git ls-files web-app`: nenhum arquivo rastreado.
+- `find web-app`: diretorio ausente apos limpeza.
