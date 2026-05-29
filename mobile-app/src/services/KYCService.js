@@ -392,7 +392,7 @@ class KYCService {
       const serverSideFallbackOnDeviceEmbeddingUnavailable =
         options?.serverSideFallbackOnDeviceEmbeddingUnavailable === true;
       const preferServerSideSelfieVerification =
-        options?.preferServerSideSelfieVerification !== false;
+        options?.preferServerSideSelfieVerification === true;
 
       let similarity = null;
       let threshold = null;

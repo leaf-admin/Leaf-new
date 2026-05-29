@@ -32,6 +32,7 @@ function createHarness() {
 
 describe('create-socket-server Redis adapter status', () => {
   const originalEnv = process.env;
+  let exitSpy;
 
   beforeEach(() => {
     process.env = { ...originalEnv, NODE_ENV: 'test' };
@@ -41,10 +42,12 @@ describe('create-socket-server Redis adapter status', () => {
     delete global.socketIoRedisAdapterStatus;
     delete global.socketIoRedisAdapter;
     delete global.io;
+    exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => undefined);
     jest.clearAllMocks();
   });
 
   afterEach(() => {
+    exitSpy?.mockRestore();
     process.env = originalEnv;
     delete global.socketIoRedisAdapterStatus;
     delete global.socketIoRedisAdapter;
@@ -158,5 +161,7 @@ describe('create-socket-server Redis adapter status', () => {
         runtimeRole: 'gateway'
       })
     );
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });
