@@ -584,3 +584,25 @@ Validação:
   - `services/face-compare-service/.venv`: `650M`
   - `vehicle-image-bank`: `1.2G`
 - `git status --short`: limpo antes do registro deste bloco.
+
+## Bloco 32 - Executado
+
+Escopo: criar aliases canonicos para nomes legados vivos sem quebrar compatibilidade.
+
+- Criados aliases de compose:
+  - `leaf-websocket-backend/docker-compose.contabo.yml`
+  - `leaf-websocket-backend/docker-compose.production.yml`
+- Os aliases apontam para `docker-compose.hostinger.yml`, que segue sendo o compose operacional por compatibilidade.
+- Criados wrappers de deploy:
+  - `leaf-websocket-backend/scripts/deploy-contabo-docker.sh`
+  - `scripts/deploy-contabo-completo.sh`
+- Os wrappers chamam o script legado compatível `deploy-hostinger-docker.sh`.
+- `server.vps.js` permanece preservado como rollback deprecated, sem renome nesta etapa.
+
+Validação:
+
+- `bash -n leaf-websocket-backend/scripts/deploy-contabo-docker.sh scripts/deploy-contabo-completo.sh`: PASS.
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
+- `node` confirmou que os aliases de compose sao symlinks para `docker-compose.hostinger.yml` e que o alvo existe.
+- `git diff --check`: PASS.
+- `docker compose -f docker-compose.contabo.yml config --services`: nao executado porque `docker` nao esta disponivel neste shell.
