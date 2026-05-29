@@ -255,3 +255,17 @@ Validação:
 - `rg` confirmou que as referencias remanescentes eram internas ao pacote removido.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+
+## Bloco 12 - Executado
+
+Escopo: remover manifest DigitalOcean App Platform que nao pertence ao deploy Contabo atual.
+
+- Removido `.do/app.yaml`.
+- Removida a entrada explicita de `.do/app.yaml` do scanner de secrets.
+- O arquivo estava em sandbox, apontava `run_command: node server.js` e nao refletia o deploy modular/Contabo atual.
+
+Validação:
+
+- `git ls-files .do/app.yaml`: confirmava que era versionado antes da remocao.
+- `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.

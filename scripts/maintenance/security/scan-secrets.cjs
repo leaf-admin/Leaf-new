@@ -173,8 +173,7 @@ function shouldScanContent(file) {
     relative === 'mobile-app/app.config.js' ||
     relative.startsWith('mobile-app/config/') ||
     relative.startsWith('mobile-app/plugins/') ||
-    relative === 'docker-compose.observability.yml' ||
-    relative === '.do/app.yaml'
+    relative === 'docker-compose.observability.yml'
   );
 }
 
