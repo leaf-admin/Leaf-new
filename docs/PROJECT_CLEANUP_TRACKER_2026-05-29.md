@@ -390,3 +390,18 @@ Validação:
 - `node -c` nos plugins alterados: PASS.
 - `npx expo config --json`: PASS.
 - `npm --prefix mobile-app run qa:production-guards`: PASS.
+
+## Bloco 20 - Executado
+
+Escopo: remover fallbacks antigos de runtime backend para IPs legados.
+
+- `load-ngrok-url.js` passa a usar `https://api.leaf.app.br` como fallback de producao para webhook Woovi.
+- `kyc-vps-client.js` nao tenta mais chamar a VPS antiga quando `BIOMETRIC_FACE_SERVICE_URL`/`KYC_VPS_URL` nao estiverem configurados; o erro agora e fail-closed.
+- `runtime-cors-origins.js`, `runtime-cors-config.js` e `routes/waitlist.js` deixam de liberar `sslip.io`/IP antigo por default.
+- Hosts temporarios de CORS continuam disponiveis apenas via env explicito (`CORS_RUNTIME_HOSTS`/`RUNTIME_CORS_HOSTS`).
+
+Validação:
+
+- `node -c` nos arquivos alterados: PASS.
+- Unit tests de runtime CORS: PASS (`10/10`).
+- Smoke local do cliente KYC sem env: PASS, retornando provider nao configurado sem fallback de IP.

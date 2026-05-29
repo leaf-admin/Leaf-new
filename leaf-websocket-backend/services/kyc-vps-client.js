@@ -45,8 +45,7 @@ function guessImageContentType(buffer, fallback = 'image/jpeg') {
 
 class KYCVPSClient {
   constructor() {
-    // VPS dedicada: 147.182.204.181
-    this.vpsUrl = process.env.KYC_VPS_URL || 'http://147.182.204.181:3002';
+    this.vpsUrl = process.env.KYC_VPS_URL || '';
     this.apiKey = process.env.KYC_VPS_API_KEY || '';
     // ✅ CORREÇÃO: Aumentar timeout para 60s (upload de imagens pode demorar)
     this.timeout = parseInt(process.env.KYC_VPS_TIMEOUT) || 60000; // 60 segundos (era 30s)
@@ -85,6 +84,10 @@ class KYCVPSClient {
         currentImageBuffer,
         options
       );
+    }
+
+    if (!this.vpsUrl) {
+      throw new Error('KYC provider not configured: set BIOMETRIC_FACE_SERVICE_URL or KYC_VPS_URL');
     }
 
     try {
@@ -256,6 +259,15 @@ class KYCVPSClient {
         vpsUrl: this.biometricFaceClient.baseUrl,
         response: health,
         error: healthy ? undefined : health.error || `status ${health.status || 'unknown'}`
+      };
+    }
+
+    if (!this.vpsUrl) {
+      return {
+        status: 'unhealthy',
+        vpsUrl: '',
+        configured: false,
+        error: 'KYC provider not configured'
       };
     }
 
