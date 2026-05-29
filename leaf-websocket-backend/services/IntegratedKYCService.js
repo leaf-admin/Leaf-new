@@ -440,75 +440,35 @@ class IntegratedKYCService {
    */
   async verifyWithLocalProcessing(userId, currentImageBuffer, options = {}) {
     try {
-      // ✅ Buscar foto âncora primeiro
-      logStructured('info', 'Buscando foto âncora para processamento local', { service: 'integrated-kyc-service', userId });
-      const anchorData = await this.firebaseStorage.getAnchorImage(userId);
-      
-      if (anchorData && anchorData.embedding) {
-        // ✅ Usar embedding da foto âncora (mais eficiente)
-        logStructured('info', 'Usando embedding da foto âncora para comparação local', { service: 'integrated-kyc-service', userId });
-        
-        // Usar kyc-service para gerar embedding da selfie atual
-        const kycService = require('./kyc-service');
-        await kycService.initialize();
-        
-        // Normalizar e gerar embedding da selfie atual
-        const tempPath = require('path').join(require('os').tmpdir(), `selfie_${userId}_${Date.now()}.jpg`);
-        await require('fs').promises.writeFile(tempPath, currentImageBuffer);
-        
-        try {
-          const selfieNormalized = await kycService.normalizeImage(tempPath);
-          const selfieEmbedding = await kycService.generateFaceEmbedding(selfieNormalized);
-          
-          // Comparar embeddings
-          const similarity = kycService.calculateCosineSimilarity(anchorData.embedding, selfieEmbedding);
-          
-          const isMatch = similarity >= this.similarityThreshold;
-          
-          // Limpar arquivo temporário
-          await require('fs').promises.unlink(tempPath).catch(() => {});
-          
-          return {
-            success: true,
-            result: {
-              isMatch: isMatch,
-              similarityScore: similarity,
-              confidence: similarity,
-              threshold: this.similarityThreshold,
-              processingTime: Date.now()
-            },
-            attempts: 1,
-            totalTime: Date.now(),
-            usingAnchorImage: true
-          };
-        } catch (error) {
-          // Limpar arquivo temporário em caso de erro
-          await require('fs').promises.unlink(tempPath).catch(() => {});
-          throw error;
-        }
-      } else {
-        // Fallback: usar CNH se foto âncora não estiver disponível
-        logStructured('warn', 'Foto âncora não encontrada, usando CNH como fallback no processamento local', { service: 'integrated-kyc-service', userId });
-        const cnhUrl = await this.firebaseStorage.getCNHUrl(userId);
-        
-        if (!cnhUrl) {
-          throw new Error('Foto de perfil (âncora) não encontrada. Por favor, complete o onboarding KYC primeiro.');
-        }
-        
-        // Baixar CNH e processar
-        const cnhBuffer = await this.firebaseStorage.downloadFile(cnhUrl);
-        
-        // Usar retry service com CNH (método antigo)
-        return await this.retryService.verifyWithRetry(
-          userId,
-          currentImageBuffer,
-          {
-            minConfidence: options.minConfidence || 0.75,
-            maxRetries: options.maxRetries || 3,
-            referenceImageBuffer: cnhBuffer // Passar CNH como referência
-          }
-        );
-      }
+      logStructured('info', 'Usando comparação biométrica server-side como fallback local', {
+        service: 'integrated-kyc-service',
+        userId
+      });
+
+      const serverResult = await this.verifyDriverServerSideSelfie(userId, currentImageBuffer, {
+        ...options,
+        requirement: options.requirement || 'LEGACY_LOCAL_PROCESSING_FALLBACK',
+        skipStatusSideEffects: options.skipStatusSideEffects !== false
+      });
+
+      return {
+        success: serverResult.success === true,
+        result: {
+          isMatch: serverResult.isMatch === true,
+          similarityScore: serverResult.similarityScore || 0,
+          confidence: serverResult.confidence || 0,
+          threshold: serverResult.threshold || this.similarityThreshold,
+          processingTime: serverResult.processingTime || 0
+        },
+        attempts: serverResult.attempts || 1,
+        totalTime: serverResult.totalTime || serverResult.processingTime || 0,
+        fromVPS: serverResult.fromVPS === true,
+        mode: serverResult.mode || 'server_biometric_selfie_v1',
+        provider: serverResult.provider || serverResult.comparisonProvider || 'leaf_face_compare_service',
+        usingCnhFaceEmbedding: true,
+        error: serverResult.error || null,
+        code: serverResult.code || null
+      };
     } catch (error) {
       logError(error, 'Erro no processamento local', { service: 'integrated-kyc-service', userId });
       throw error;

@@ -4,7 +4,6 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
 const os = require('os');
 const fs = require('fs').promises;
 const { logStructured, logError } = require('../utils/logger');
@@ -15,7 +14,6 @@ try {
 } catch (e) {
   logStructured('warn', '⚠️ Firebase config não encontrado', { service: 'kyc-onboarding-routes' });
 }
-const kycService = require('../services/kyc-service');
 const kycDriverStatusService = require('../services/kyc-driver-status-service');
 
 // Configurar multer para upload de imagens
@@ -128,63 +126,15 @@ router.post(
       });
     }
 
-    const cnhFile = req.files.cnh[0];
-    const selfieFile = req.files.selfie[0];
-
-    logStructured('info', `🔐 Processando KYC onboarding para motorista ${driverId}`, { service: 'kyc-onboarding-routes' });
-
-    // Inicializar serviço KYC se necessário
-    if (!kycService.initialized) {
-      await kycService.initialize();
-    }
-
-    // Processar KYC
-    const result = await kycService.processOnboarding(
-      driverId,
-      cnhFile.path,
-      selfieFile.path
-    );
-
-    // ✅ Processar bloqueio/liberação baseado no resultado
-    let statusResult = null;
-    try {
-      statusResult = await kycDriverStatusService.processOnboardingResult(driverId, result);
-      logStructured('info', 'Status do motorista atualizado após onboarding KYC', {
-        service: 'kyc-onboarding-routes',
-        driverId,
-        approved: result.approved,
-        blocked: statusResult?.blocked || false
-      });
-    } catch (statusError) {
-      logError(statusError, 'Erro ao atualizar status do motorista (não bloqueia resposta)', {
-        service: 'kyc-onboarding-routes',
-        driverId
-      });
-      // Não bloquear resposta se falhar atualização de status
-    }
-
-    // Limpar arquivos temporários
     await Promise.all([
-      fs.unlink(cnhFile.path).catch(() => {}),
-      fs.unlink(selfieFile.path).catch(() => {})
+      req.files.cnh?.[0]?.path ? fs.unlink(req.files.cnh[0].path).catch(() => {}) : Promise.resolve(),
+      req.files.selfie?.[0]?.path ? fs.unlink(req.files.selfie[0].path).catch(() => {}) : Promise.resolve()
     ]);
 
-    // Retornar resultado
-    res.json({
-      success: true,
-      data: {
-        approved: result.approved,
-        needsReview: result.needsReview,
-        similarity: result.similarity,
-        cnhData: result.cnhData,
-        anchorImageUrl: result.anchorImageUrl,
-        blocked: statusResult?.blocked || false,
-        message: result.approved 
-          ? 'KYC aprovado com sucesso! Sua conta foi liberada.' 
-          : result.needsReview 
-            ? 'KYC requer revisão manual. Sua conta foi bloqueada temporariamente.' 
-            : 'KYC rejeitado. As imagens não correspondem. Sua conta foi bloqueada.'
-      }
+    return res.status(410).json({
+      success: false,
+      error: 'KYC multipart legado desativado',
+      message: 'Use o fluxo device-first ou /api/kyc com comparação biométrica server-side.'
     });
   } catch (error) {
     logError(error, '❌ Erro ao processar KYC onboarding:', { service: 'kyc-onboarding-routes' });
@@ -224,29 +174,12 @@ router.post(
       });
     }
 
-    logStructured('info', `🔐 Re-verificando KYC para motorista ${driverId}`, { service: 'kyc-onboarding-routes' });
-
-    // Inicializar serviço KYC se necessário
-    if (!kycService.initialized) {
-      await kycService.initialize();
-    }
-
-    // Re-verificar
-    const result = await kycService.reverifyIdentity(driverId, req.file.path);
-
-    // Limpar arquivo temporário
     await fs.unlink(req.file.path).catch(() => {});
 
-    // Retornar resultado
-    res.json({
-      success: true,
-      data: {
-        approved: result.approved,
-        similarity: result.similarity,
-        message: result.approved 
-          ? 'Identidade verificada com sucesso!' 
-          : 'Identidade não verificada. As imagens não correspondem.'
-      }
+    return res.status(410).json({
+      success: false,
+      error: 'Reverificacao KYC legada desativada',
+      message: 'Use o fluxo /api/kyc com AWS Liveness e comparação biométrica server-side.'
     });
   } catch (error) {
     logError(error, '❌ Erro ao re-verificar KYC:', { service: 'kyc-onboarding-routes' });

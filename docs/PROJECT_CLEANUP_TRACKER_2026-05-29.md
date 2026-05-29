@@ -718,3 +718,21 @@ Validação:
 - `node -c leaf-websocket-backend/services/support-ticket-service.js && node -c leaf-websocket-backend/repositories/support-legacy-rtdb-repository.js`: PASS.
 - `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
 - `cd leaf-websocket-backend && npx jest --config config/jest.unit.config.js --runInBand --runTestsByPath tests/unit/repositories/support-legacy-rtdb-repository.unit.test.js tests/unit/services/support-ticket-service-rtdb-adapter.unit.test.js tests/unit/services/support-queue-service.unit.test.js tests/unit/services/support-driver-identity-reverification-service.unit.test.js tests/unit/services/rating-service-kyc.unit.test.js`: PASS (`10/10` somando as duas rodadas deste bloco).
+
+## Bloco 38 - Executado
+
+Escopo: fechar chamadas runtime ao KYC antigo sem remover arquivos de rollback.
+
+- `IntegratedKYCService.verifyWithLocalProcessing` nao chama mais `services/kyc-service.js`.
+- O fallback local agora usa `verifyDriverServerSideSelfie`, que depende do `face-compare-service` e do embedding `users/{driverId}/biometrics/cnhFace`.
+- `routes/kyc-onboarding.js` deixou de importar `services/kyc-service.js`.
+- Multipart legado de onboarding e reverificacao passa a responder `410`, orientando o uso do fluxo device-first ou `/api/kyc` server-side.
+- `/api/kyc-proxy` no runtime modular fica atras de `ENABLE_LEGACY_KYC_PROXY=true`; sem flag, nao monta o proxy legado.
+- `services/kyc-service.js` permanece no repo como legado isolado e testado, sem chamada runtime modular direta nesta etapa.
+
+Validação:
+
+- `rg` de requires para `./kyc-service` em services/routes/bootstrap: PASS sem chamada runtime modular direta.
+- `node -c leaf-websocket-backend/bootstrap/register-http-routes.js && node -c leaf-websocket-backend/routes/kyc-onboarding.js && node -c leaf-websocket-backend/services/IntegratedKYCService.js`: PASS.
+- `cd leaf-websocket-backend && npx jest --config config/jest.unit.config.js --runInBand --runTestsByPath tests/unit/services/kyc-legacy-boundary.unit.test.js tests/unit/services/kyc-biometric-production-policy.unit.test.js tests/unit/services/device-face-embedding-verification-service.unit.test.js tests/unit/routes/kyc-routes-auth.unit.test.js tests/unit/services/driver-document-analysis-queue-biometric-retry.unit.test.js tests/unit/services/kyc-service.unit.test.js`: PASS (`25/25`).
+- `cd mobile-app && npx jest --config jest.config.js --runInBand --runTestsByPath __tests__/kyc-service.liveness.test.js __tests__/document-step.kyc.test.js`: PASS (`14/14`).
