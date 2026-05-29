@@ -152,7 +152,6 @@ function shouldScanContent(file) {
     relative === 'leaf-websocket-backend/server.vps.js' ||
     relative.startsWith('services/support-agent-orchestrator/src/') ||
     relative.startsWith('services/kyc-service/src/') ||
-    relative.startsWith('services/kyc-microservice/src/') ||
     relative === 'mobile-app/eas.json' ||
     relative === 'mobile-app/app.config.js' ||
     relative.startsWith('mobile-app/config/') ||

@@ -46,7 +46,7 @@ Limpar o projeto em baby steps, sem remover legado vivo nem misturar limpeza com
 - `prototypeRideRuntime.js`: arquivo vivo, mas grande demais. Deve ser quebrado por domínio.
 - `WebSocketManager.js`: vivo; precisa extração incremental, não remoção.
 - `routes/dashboard.js`: vivo; dividir rotas por domínio antes de limpar.
-- `services/kyc-service` e `services/kyc-microservice`: confirmar supersedência pelo `face-compare-service` antes de remover.
+- `services/kyc-service`: confirmar supersedência pelo `face-compare-service` antes de remover.
 - Wallet/BaaS/subscription antigas: remover somente depois de confirmar ausência em navegação, dashboard, backend financeiro e regras de motorista.
 - Imports de `common-local`: remover apenas por migração para serviços canônicos.
 
@@ -96,3 +96,18 @@ Validação:
 - `cd mobile-app && npx expo config --json`: PASS.
 - `cd mobile-app && npx jest --config jest.config.js --runInBand --runTestsByPath __tests__/prototype-ride-screens.test.js`: PASS, 27 testes.
 - `cd services/face-compare-service && .venv/bin/python -m pytest tests -q`: PASS, 11 testes.
+
+## Bloco 2 - Executado
+
+Escopo: remover KYC Node experimental sem uso runtime.
+
+- Removido `services/kyc-microservice/src/api.js`.
+- Removida excecao correspondente do scanner de secrets.
+- Atualizado o devkit para apontar o fluxo atual para `leaf-websocket-backend/routes/kyc-routes.js` e `services/face-compare-service`.
+
+Validação:
+
+- `rg` confirmou que `services/kyc-microservice` nao tinha referencia runtime.
+- `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs`: executou, mas falhou por artefatos sensiveis locais preexistentes (`.env`, keystores, Firebase json e afins). Nao foi corrigido neste bloco para nao quebrar ambiente/build; tratar em bloco proprio de seguranca.
