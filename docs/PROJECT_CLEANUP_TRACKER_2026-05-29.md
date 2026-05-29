@@ -300,3 +300,23 @@ Validação:
 - `rg` sem referencias remanescentes para `docker-compose-vultr-8gb` e `nginx-vultr` fora do tracker.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
+
+## Bloco 15 - Executado
+
+Escopo: remover laboratorio historico de testes/manutencao fora das suites canonicas.
+
+- Removidos `scripts/maintenance/testing/` e `scripts/maintenance/tests/`.
+- Removido `scripts/maintenance/deploy/deploy-baas-system.sh`.
+- Removido `docs/architecture/mobile/BAAS_IMPLEMENTATION_GUIDE.md`, guia isolado do modelo BaaS antigo.
+- Esses arquivos eram experimentais/historicos de Woovi, BaaS, self-hosted e websocket, sem chamada por `package.json` raiz ou scripts canonicos.
+- Testes vivos permanecem em:
+  - `leaf-websocket-backend/scripts/tests/`
+  - `mobile-app/__tests__/`
+  - `scripts/prelaunch/`
+  - `scripts/validation/`
+
+Validação:
+
+- `rg` confirmou ausencia de referencias ativas fora de docs historicos/legados.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
