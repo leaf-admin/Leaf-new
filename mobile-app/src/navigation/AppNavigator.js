@@ -381,7 +381,7 @@ const PROTOTYPE_QA_DEEP_LINK_ROUTES = {
   'robotaxi/trip': 'RobotaxiPrototypeTrip',
   'robotaxi/receipt': 'RobotaxiPrototypeReceipt',
   'robotaxi/driver/offer': 'RobotaxiPrototypeDriverOffer',
-  'robotaxi/driver/trip': 'RobotaxiPrototypeDriverTrip',
+  'robotaxi/driver/trip': 'RobotaxiPrototype',
 };
 
 function parsePrototypeQaDeepLink(url) {

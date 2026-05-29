@@ -415,9 +415,10 @@ describe('prototype ride screens', () => {
     await waitFor(() => {
       expect(acceptDriverOffer).toHaveBeenCalled();
       expect(navigation.navigate).toHaveBeenCalledWith(
-        'RobotaxiPrototypeDriverTrip',
+        'RobotaxiPrototype',
         expect.objectContaining({
-          request: expect.objectContaining({ bookingId: 'booking_1' }),
+          bookingId: 'booking_1',
+          source: 'driver-offer-accepted',
         })
       );
     });

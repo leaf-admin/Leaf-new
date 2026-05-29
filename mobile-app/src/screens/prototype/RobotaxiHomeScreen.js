@@ -2720,7 +2720,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     shouldRenderRuntimeMapState && hasActiveRoute ? '#2B5B21' : null;
   const routeShadowColor =
     shouldRenderRuntimeMapState && hasActiveRoute
-      ? 'rgba(255,255,255,0.88)'
+      ? '#FFFFFF'
       : null;
   const routeHighlightColor =
     shouldRenderRuntimeMapState && isLiveTripMapActive ? null : undefined;
@@ -5272,6 +5272,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverKycLivenessMode === 'aws'
     ? resolveAWSNativeLivenessScreen()
     : null;
+  const presentedMapRegion =
+    presentedSearchingMode && searchTargetRegion
+      ? searchTargetRegion
+      : targetRegion;
 
   return (
     <PrototypeScreenTransition>
@@ -5280,7 +5284,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
         <PrototypeMapLayer
           mapRef={mapRef}
-          region={targetRegion}
+          region={presentedMapRegion}
           userCoordinate={currentCoordinate || DEFAULT_USER_COORDINATE}
           userHeading={isDriverRole ? null : currentHeading}
           userAvatarUri={profileImage}

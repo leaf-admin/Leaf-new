@@ -1129,7 +1129,6 @@ function PrototypeMapLayer({
   onRegionChangeComplete,
   mapChildren,
   children,
-  mapSafetyProfile = 'default',
   interactionEnabled = true,
   hideUserMarker = false,
   animateRoute = true,
@@ -1147,7 +1146,6 @@ function PrototypeMapLayer({
   destinationMarkerLetter = 'P',
   forceRegionUpdate = false
 }) {
-  const iosMapSafeMode = Platform.OS === 'ios' && mapSafetyProfile === 'driver';
   const mapProvider =
     Platform.OS === 'ios' || Platform.OS === 'android'
       ? PROVIDER_GOOGLE
@@ -1221,9 +1219,7 @@ function PrototypeMapLayer({
       destinationCoordinate?.longitude,
     ],
   );
-  const iosLifecycleSafeMode =
-    Platform.OS === 'ios' && (searchingMode || hasDriverCoordinate || hasRoute);
-  const useSimplifiedIosMap = iosMapSafeMode || iosLifecycleSafeMode;
+  const useSimplifiedIosMap = Platform.OS === 'ios' && searchingMode;
   const hasDestination = Boolean(normalizedDestinationCoordinate);
   const shouldRenderRouteEndpointMarkers = !hideRouteEndpointMarkers;
   const hasOriginMarker = Boolean(
@@ -1384,7 +1380,7 @@ function PrototypeMapLayer({
     [mapChildren],
   );
   const effectiveRouteShadowColor =
-    routeShadowColor || 'rgba(255,255,255,0.88)';
+    routeShadowColor || '#FFFFFF';
   const effectiveRouteMainColor =
     routeMainColor || '#1A330E';
   const effectiveRouteHighlightColor =
@@ -1453,7 +1449,7 @@ function PrototypeMapLayer({
   }, [normalizedAvatarUri]);
 
   useEffect(() => {
-    if (!searchingMode || normalizedNearbyVehicles.length === 0 || useSimplifiedIosMap) {
+    if (!searchingMode || normalizedNearbyVehicles.length === 0) {
       setNearbyVehiclesVisible(false);
       setActiveNearbyRequestIndex(0);
       return undefined;
@@ -1466,7 +1462,7 @@ function PrototypeMapLayer({
     }, NEARBY_VEHICLE_REVEAL_DELAY_MS);
 
     return () => clearTimeout(timer);
-  }, [normalizedNearbyVehicles.length, searchingMode, useSimplifiedIosMap]);
+  }, [normalizedNearbyVehicles.length, searchingMode]);
 
   useEffect(() => {
     if (!nearbyVehiclesVisible || visibleNearbyVehicles.length <= 1) {
@@ -1700,7 +1696,7 @@ function PrototypeMapLayer({
   ]);
 
   const scheduleAndroidVisibleRegionUpdate = useCallback(nextRegion => {
-    if (Platform.OS !== 'android' || !isValidMapRegion(nextRegion)) {
+    if (!isValidMapRegion(nextRegion)) {
       return;
     }
 
@@ -2008,6 +2004,124 @@ function PrototypeMapLayer({
     searchingMode,
     visibleNearbyVehicles,
   ]);
+  const projectedSearchRadiusOverlay = useMemo(() => {
+    if (
+      Platform.OS !== 'ios' ||
+      !useSimplifiedIosMap ||
+      !searchingMode ||
+      !hasSearchCenter ||
+      !androidProjectionLayout.hasLayout
+    ) {
+      return null;
+    }
+
+    const projectionRegion = androidVisibleRegion || region;
+    const centerPoint = projectCoordinateToScreenPoint({
+      coordinate: searchCenterCoordinate,
+      projectionRegion,
+      width: androidProjectionLayout.width,
+      height: androidProjectionLayout.height,
+    });
+
+    if (!centerPoint) {
+      return null;
+    }
+
+    const metersPerScreenHeight = Math.max(
+      1,
+      calculateCoordinateDistanceMeters(
+        {
+          latitude: projectionRegion.latitude - projectionRegion.latitudeDelta / 2,
+          longitude: projectionRegion.longitude,
+        },
+        {
+          latitude: projectionRegion.latitude + projectionRegion.latitudeDelta / 2,
+          longitude: projectionRegion.longitude,
+        },
+      ),
+    );
+    const pixelsPerMeter = androidProjectionLayout.height / metersPerScreenHeight;
+    const currentRadius = Number(searchRadiusMeters) * pixelsPerMeter;
+    const previewRadius = Number(searchPreviewRadiusMeters) * pixelsPerMeter;
+
+    return {
+      center: centerPoint,
+      radius: Number.isFinite(currentRadius) ? Math.max(0, currentRadius) : 0,
+      previewRadius: Number.isFinite(previewRadius) ? Math.max(0, previewRadius) : 0,
+    };
+  }, [
+    androidProjectionLayout.hasLayout,
+    androidProjectionLayout.height,
+    androidProjectionLayout.width,
+    androidVisibleRegion,
+    hasSearchCenter,
+    region,
+    searchCenterCoordinate,
+    searchPreviewRadiusMeters,
+    searchRadiusMeters,
+    searchingMode,
+    useSimplifiedIosMap,
+  ]);
+  const projectedNearbyVehicleOverlayItems = useMemo(() => {
+    if (
+      Platform.OS !== 'ios' ||
+      !useSimplifiedIosMap ||
+      !searchingMode ||
+      !androidProjectionLayout.hasLayout ||
+      collisionSafeNearbyVehicles.length === 0
+    ) {
+      return [];
+    }
+
+    return collisionSafeNearbyVehicles
+      .map((vehicle, index) => {
+        const point = projectCoordinateToScreenPoint({
+          coordinate: vehicle.coordinate,
+          projectionRegion: androidVisibleRegion || region,
+          width: androidProjectionLayout.width,
+          height: androidProjectionLayout.height,
+        });
+
+        if (!point) {
+          return null;
+        }
+
+        const id = String(vehicle.id || '');
+        const vehicleMarkerColorToken =
+          resolveVehicleColorToken(
+            vehicle.color,
+            vehicle.vehicleColor,
+            vehicle.vehicle?.color,
+          ) || 'black';
+        const vehicleMarkerImageSource =
+          driverMarkerCampaignImageSource ||
+          DRIVER_MARKER_IMAGE_SOURCES[vehicleMarkerColorToken] ||
+          DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE;
+
+        return {
+          id: id || `vehicle-${index}`,
+          index,
+          point,
+          heading: Number.isFinite(Number(vehicle.heading)) ? Number(vehicle.heading) : 0,
+          opacity: id.startsWith('outer') ? 0.84 : 1,
+          isRequesting: index === activeNearbyRequestIndex,
+          source: vehicleMarkerImageSource,
+          colorToken: vehicleMarkerColorToken,
+        };
+      })
+      .filter(Boolean);
+  }, [
+    activeNearbyRequestIndex,
+    androidProjectionLayout.hasLayout,
+    androidProjectionLayout.height,
+    androidProjectionLayout.width,
+    androidVisibleRegion,
+    collisionSafeNearbyVehicles,
+    driverMarkerCampaignImageSource,
+    region,
+    searchingMode,
+    useSimplifiedIosMap,
+  ]);
 
   useEffect(() => {
     if (!hasRoute || denseRoute.length < 2) {
@@ -2123,9 +2237,10 @@ function PrototypeMapLayer({
 
           {!useSimplifiedIosMap && hasRenderableRoute ? (
             <Polyline
-              key="route-shadow"
+              key={`route-shadow-${effectiveRouteShadowColor}`}
               coordinates={routeRenderCoordinates}
               strokeColor={effectiveRouteShadowColor}
+              strokeColors={[effectiveRouteShadowColor, effectiveRouteShadowColor]}
               strokeWidth={isSyntheticRoutePreview ? 7 : 7.5}
               lineCap="round"
               lineJoin="round"
@@ -2134,9 +2249,10 @@ function PrototypeMapLayer({
 
           {hasRenderableRoute ? (
             <Polyline
-              key="route-main"
+              key={`route-main-${effectiveRouteMainColor}`}
               coordinates={routeRenderCoordinates}
               strokeColor={effectiveRouteMainColor}
+              strokeColors={[effectiveRouteMainColor, effectiveRouteMainColor]}
               strokeWidth={useSimplifiedIosMap ? 3.8 : 4}
               lineCap="round"
               lineJoin="round"
@@ -2332,6 +2448,75 @@ function PrototypeMapLayer({
           source={driverVehicleMarkerImageSource}
           colorToken={driverVehicleMarkerColorToken}
         />
+      ) : null}
+
+      {Platform.OS === 'ios' && projectedSearchRadiusOverlay ? (
+        <View pointerEvents="none" style={styles.iosSearchOverlayLayer}>
+          {projectedSearchRadiusOverlay.previewRadius > 0 ? (
+            <View
+              style={[
+                styles.iosSearchRadiusPreview,
+                {
+                  width: projectedSearchRadiusOverlay.previewRadius * 2,
+                  height: projectedSearchRadiusOverlay.previewRadius * 2,
+                  borderRadius: projectedSearchRadiusOverlay.previewRadius,
+                  left: projectedSearchRadiusOverlay.center.x - projectedSearchRadiusOverlay.previewRadius,
+                  top: projectedSearchRadiusOverlay.center.y - projectedSearchRadiusOverlay.previewRadius,
+                },
+              ]}
+            />
+          ) : null}
+          {projectedSearchRadiusOverlay.radius > 0 ? (
+            <View
+              style={[
+                styles.iosSearchRadiusCurrent,
+                {
+                  width: projectedSearchRadiusOverlay.radius * 2,
+                  height: projectedSearchRadiusOverlay.radius * 2,
+                  borderRadius: projectedSearchRadiusOverlay.radius,
+                  left: projectedSearchRadiusOverlay.center.x - projectedSearchRadiusOverlay.radius,
+                  top: projectedSearchRadiusOverlay.center.y - projectedSearchRadiusOverlay.radius,
+                },
+              ]}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      {Platform.OS === 'ios' && projectedNearbyVehicleOverlayItems.length > 0 ? (
+        <View pointerEvents="none" style={styles.iosNearbyVehicleOverlayLayer}>
+          {projectedNearbyVehicleOverlayItems.map(item => (
+            <React.Fragment key={`ios-nearby-${item.id}-${item.index}`}>
+              <View
+                collapsable={false}
+                style={[
+                  styles.iosNearbyVehicleOverlay,
+                  {
+                    left: item.point.x - 21,
+                    top: item.point.y - 21,
+                    opacity: item.opacity,
+                    transform: [{ rotate: `${normalizeHeadingDegrees(item.heading) ?? 0}deg` }],
+                  },
+                ]}
+              >
+                <VehicleMarkerContent source={item.source} colorToken={item.colorToken} />
+              </View>
+              {item.isRequesting ? (
+                <View
+                  style={[
+                    styles.iosNearbyVehicleDotsOverlay,
+                    {
+                      left: item.point.x - 21,
+                      top: item.point.y - 47,
+                    },
+                  ]}
+                >
+                  <NearbyVehicleRequestDots sequenceIndex={item.index} />
+                </View>
+              ) : null}
+            </React.Fragment>
+          ))}
+        </View>
       ) : null}
 
       {Platform.OS === 'android' && hasRoute && shouldRenderRouteEndpointMarkers ? (
@@ -2782,6 +2967,45 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     shadowOpacity: 0,
     elevation: 0,
+    overflow: 'visible',
+  },
+  iosSearchOverlayLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9,
+  },
+  iosSearchRadiusPreview: {
+    position: 'absolute',
+    borderWidth: 1,
+    borderColor: 'rgba(13,148,136,0.20)',
+    backgroundColor: 'rgba(45,212,191,0.04)',
+  },
+  iosSearchRadiusCurrent: {
+    position: 'absolute',
+    borderWidth: 1.7,
+    borderColor: 'rgba(13,148,136,0.46)',
+    backgroundColor: 'rgba(45,212,191,0.12)',
+  },
+  iosNearbyVehicleOverlayLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 14,
+  },
+  iosNearbyVehicleOverlay: {
+    position: 'absolute',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    overflow: 'visible',
+  },
+  iosNearbyVehicleDotsOverlay: {
+    position: 'absolute',
+    width: 42,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 16,
     overflow: 'visible',
   },
   nearbyVehicleDotsMarker: {
