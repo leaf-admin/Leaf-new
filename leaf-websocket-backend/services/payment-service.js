@@ -127,7 +127,10 @@ class PaymentService {
       qrCode: null,
       paymentLink: 'leaf://payment/review-bypass',
       rideId,
-      amount: paymentData.amount
+      amount: paymentData.amount,
+      grossAmountInCents: paymentData.grossAmountInCents || paymentData.amount || null,
+      payableAmountInCents: paymentData.payableAmountInCents || paymentData.amount || null,
+      discountBenefit: paymentData.discountBenefit || null
     };
   }
 
@@ -233,6 +236,9 @@ class PaymentService {
       paymentLink: existing.paymentLink || null,
       rideId: existing.rideId || null,
       amount: existing.amountCents || existing.amount || null,
+      grossAmountInCents: existing.grossAmountInCents || existing.amountCents || existing.amount || null,
+      payableAmountInCents: existing.payableAmountInCents || existing.amountCents || existing.amount || null,
+      discountBenefit: existing.discountBenefit || null,
       paymentIntentId: existing.paymentIntentId || null,
       correlationID: existing.correlationID || null,
       splitApplied: false,
@@ -248,6 +254,14 @@ class PaymentService {
     const rideId = String(paymentData.rideId || '').trim();
     const passengerId = String(paymentData.passengerId || '').trim();
     const amountCents = this.normalizePaymentAmountCents(paymentData.amount);
+    const grossAmountInCents = paymentData.grossAmountInCents !== undefined && paymentData.grossAmountInCents !== null
+      ? this.normalizePaymentAmountCents(paymentData.grossAmountInCents)
+      : (paymentData.grossAmount !== undefined && paymentData.grossAmount !== null
+        ? this.toCents(paymentData.grossAmount)
+        : amountCents);
+    const payableAmountInCents = this.normalizePaymentAmountCents(
+      paymentData.payableAmountInCents || amountCents
+    );
     const quoteVersion = this.normalizeQuoteVersion(paymentData);
     const paymentIntentId = this.buildAdvancePaymentIntentId(rideId);
     const correlationID = this.buildAdvanceChargeCorrelationID(paymentData);
@@ -313,6 +327,9 @@ class PaymentService {
               paymentIntentId,
               correlationID: existing.correlationID || correlationID,
               amountCents,
+              grossAmountInCents: existing.grossAmountInCents || grossAmountInCents,
+              payableAmountInCents: existing.payableAmountInCents || payableAmountInCents,
+              discountBenefit: existing.discountBenefit || paymentData.discountBenefit || null,
               quoteVersion
             };
           }
@@ -338,6 +355,9 @@ class PaymentService {
           rideId,
           passengerId,
           amountCents,
+          grossAmountInCents,
+          payableAmountInCents,
+          discountBenefit: paymentData.discountBenefit || null,
           quoteVersion,
           correlationID,
           status: 'creating_charge',
@@ -362,6 +382,9 @@ class PaymentService {
           paymentIntentId,
           correlationID,
           amountCents,
+          grossAmountInCents,
+          payableAmountInCents,
+          discountBenefit: paymentData.discountBenefit || null,
           quoteVersion
         };
       });
@@ -389,6 +412,9 @@ class PaymentService {
         paymentIntentId,
         correlationID,
         amountCents,
+        grossAmountInCents,
+        payableAmountInCents,
+        discountBenefit: paymentData.discountBenefit || null,
         quoteVersion,
         intentPersistenceError: error.message
       };
@@ -829,6 +855,10 @@ class PaymentService {
         additionalInfo: [
           { key: 'passenger_id', value: paymentData.passengerId },
           { key: 'ride_id', value: paymentData.rideId },
+          { key: 'gross_amount_cents', value: String(paymentData.grossAmountInCents || paymentIntent.grossAmountInCents || '') },
+          { key: 'payable_amount_cents', value: String(paymentData.payableAmountInCents || paymentIntent.payableAmountInCents || paymentIntent.amountCents || '') },
+          { key: 'discount_benefit_id', value: String(paymentData.discountBenefit?.benefitId || '') },
+          { key: 'discount_amount_cents', value: String(paymentData.discountBenefit?.discountAmountInCents || 0) },
           { key: 'payment_intent_id', value: paymentIntent.paymentIntentId || '' },
           { key: 'quote_version', value: paymentIntent.quoteVersion || this.normalizeQuoteVersion(paymentData) },
           { key: 'payment_type', value: 'advance_payment' },
@@ -960,6 +990,9 @@ class PaymentService {
         paymentLink,
         rideId: paymentData.rideId,
         amount: paymentIntent.amountCents || paymentData.amount,
+        grossAmountInCents: paymentData.grossAmountInCents || paymentIntent.grossAmountInCents || null,
+        payableAmountInCents: paymentData.payableAmountInCents || paymentIntent.payableAmountInCents || paymentIntent.amountCents || paymentData.amount,
+        discountBenefit: paymentData.discountBenefit || paymentIntent.discountBenefit || null,
         paymentIntentId: paymentIntent.paymentIntentId || null,
         correlationID: chargeData.correlationID,
         splitApplied: false,
@@ -987,6 +1020,16 @@ class PaymentService {
    * @returns {Promise<Object>} - Resultado da confirmação
    */
   async confirmPaymentAndCreditDriver(chargeId, rideId, driverId) {
+    if (!this.isLegacyDirectDriverCreditEnabled()) {
+      return {
+        success: false,
+        error: 'Credito direto legado desativado',
+        code: 'LEGACY_DIRECT_DRIVER_CREDIT_DISABLED',
+        settlementPolicy: 'post_ride_ledger',
+        details: 'Use ride.completed + worker de billing para liquidar holding e creditar o motorista.'
+      };
+    }
+
     try {
       logStructured('info', 'Confirmando pagamento e creditando saldo', { service: 'PaymentService', chargeId, rideId, driverId });
 
@@ -1218,6 +1261,16 @@ class PaymentService {
    * @param {string} driverId
    */
   async releasePaymentToDriver(rideId, driverId) {
+    if (!this.isLegacyDirectDriverCreditEnabled()) {
+      return {
+        success: false,
+        error: 'Liberacao direta legada desativada',
+        code: 'LEGACY_DIRECT_DRIVER_CREDIT_DISABLED',
+        settlementPolicy: 'post_ride_ledger',
+        details: 'Use ride.completed + worker de billing para liquidar holding e creditar o motorista.'
+      };
+    }
+
     try {
       if (!rideId || !driverId) {
         return {
@@ -1873,49 +1926,11 @@ class PaymentService {
         });
       }
 
-      // 3. ✅ NOVO: Creditar saldo diretamente no Firestore (substitui BaaS temporariamente)
-      const creditResult = await this.creditDriverBalance(
+      const plannedBalanceCreditId = this.buildDriverBalanceCreditId(
         rideData.driverId,
-        netCalculation.netAmount,
-        rideData.rideId
+        rideData.rideId,
+        netCalculation.netAmount
       );
-
-      if (!creditResult.success) {
-        logError(new Error(creditResult.error), 'Erro ao creditar saldo do motorista', {
-          service: 'PaymentService',
-          rideId: rideData.rideId,
-          driverId: rideData.driverId
-        });
-        return {
-          success: false,
-          error: 'Falha ao creditar saldo do motorista',
-          details: creditResult.error || 'Crédito no ledger interno não confirmado',
-          retryable: true
-        };
-      }
-
-      logStructured('info', 'Saldo creditado com sucesso', { service: 'PaymentService', balance: creditResult.balance });
-
-      // 4. Atualizar status do holding para distribuído
-      const distributionData = {
-        rideId: rideData.rideId,
-        driverId: rideData.driverId,
-        status: 'distributed',
-        distributedAt: new Date().toISOString(),
-        netAmount: netCalculation.netAmount,
-        subscriptionRetainedFee: retainedFees,
-        transferId: transferId || null, // ID da transferência (se BaaS estiver disponível)
-        balanceCreditId: creditResult.balanceId || null, // ID do crédito no Firestore
-        calculation: netCalculation,
-        // Taxas retidas na conta Leaf (não transferidas)
-        retainedFees: {
-          operationalFee: netCalculation.operationalFee,
-          wooviFee: netCalculation.wooviFee,
-          subscriptionRetainedFee: retainedFees,
-          totalRetained: netCalculation.operationalFee + netCalculation.wooviFee + retainedFees
-        }
-      };
-
       const ledgerResult = await this.financialLedgerService.recordRideSettlement({
         rideId: rideData.rideId,
         driverId: rideData.driverId,
@@ -1926,7 +1941,7 @@ class PaymentService {
         retainedFeeCents: retainedFees,
         metadata: {
           transferId: transferId || null,
-          balanceCreditId: creditResult.balanceId || null,
+          balanceCreditId: plannedBalanceCreditId,
           refundAmountCents: passengerRefundAmount || 0,
           refundId: passengerRefundResult?.refundId || null
         }
@@ -1947,6 +1962,53 @@ class PaymentService {
         };
       }
 
+      // 3. ✅ Creditar saldo somente depois do ledger canônico do settlement estar postado.
+      const creditResult = await this.creditDriverBalance(
+        rideData.driverId,
+        netCalculation.netAmount,
+        rideData.rideId
+      );
+
+      if (!creditResult.success) {
+        logError(new Error(creditResult.error), 'Erro ao creditar saldo do motorista após ledger postado', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          driverId: rideData.driverId,
+          ledgerEventId: ledgerResult.eventId || null
+        });
+        return {
+          success: false,
+          error: 'Falha ao creditar saldo do motorista',
+          details: creditResult.error || 'Crédito interno não confirmado',
+          retryable: true,
+          ledgerStatus: 'posted',
+          ledgerEventId: ledgerResult.eventId || null
+        };
+      }
+
+      logStructured('info', 'Saldo creditado com sucesso', { service: 'PaymentService', balance: creditResult.balance });
+
+      // 4. Atualizar status do holding para distribuído
+      const distributionData = {
+        rideId: rideData.rideId,
+        driverId: rideData.driverId,
+        status: 'distributed',
+        distributedAt: new Date().toISOString(),
+        netAmount: netCalculation.netAmount,
+        subscriptionRetainedFee: retainedFees,
+        transferId: transferId || null, // ID da transferência (se BaaS estiver disponível)
+        balanceCreditId: creditResult.transactionId || plannedBalanceCreditId,
+        ledgerEventId: ledgerResult.eventId || null,
+        calculation: netCalculation,
+        // Taxas retidas na conta Leaf (não transferidas)
+        retainedFees: {
+          operationalFee: netCalculation.operationalFee,
+          wooviFee: netCalculation.wooviFee,
+          subscriptionRetainedFee: retainedFees,
+          totalRetained: netCalculation.operationalFee + netCalculation.wooviFee + retainedFees
+        }
+      };
+
       // ✅ Salvar distribuição no Firestore
       await this.saveDistributionToFirestore(distributionData);
 
@@ -1957,7 +2019,7 @@ class PaymentService {
         distributionData: {
           netAmount: netCalculation.netAmount,
           transferId: transferId,
-          balanceCreditId: creditResult.balanceId,
+          balanceCreditId: creditResult.transactionId || plannedBalanceCreditId,
           ledgerEventId: ledgerResult.eventId || null,
           retainedFees: distributionData.retainedFees
         }
@@ -2030,38 +2092,12 @@ class PaymentService {
       // O motorista recebe a taxa menos o custo de transação da Woovi gerado pelo estorno parcial
       const netAmount = rideData.cancellationFee - this.WOOVI_FEE_MINIMUM;
 
-      // Creditar via Firestore
-      const creditResult = await this.creditDriverBalance(
+      const cancellationCreditRideId = `cancel_${rideData.rideId}`;
+      const plannedBalanceCreditId = this.buildDriverBalanceCreditId(
         rideData.driverId,
-        netAmount,
-        `cancel_${rideData.rideId}` // prefix para rastreabilidade
+        cancellationCreditRideId,
+        netAmount
       );
-
-      if (!creditResult.success) {
-        throw new Error(creditResult.error);
-      }
-
-      // Atualizar status do holding/distribuir
-      const distributionData = {
-        rideId: rideData.rideId,
-        driverId: rideData.driverId,
-        status: 'distributed_cancellation',
-        distributedAt: new Date().toISOString(),
-        netAmount: netAmount,
-        balanceCreditId: creditResult.balanceId || null,
-        calculation: {
-          totalAmount: rideData.cancellationFee,
-          operationalFee: 0,
-          wooviFee: this.WOOVI_FEE_MINIMUM,
-          netAmount: netAmount
-        },
-        retainedFees: {
-          operationalFee: 0,
-          wooviFee: this.WOOVI_FEE_MINIMUM,
-          totalRetained: this.WOOVI_FEE_MINIMUM
-        }
-      };
-
       const ledgerResult = await this.financialLedgerService.recordCancellationSettlement({
         rideId: rideData.rideId,
         driverId: rideData.driverId,
@@ -2069,7 +2105,7 @@ class PaymentService {
         netAmountCents: netAmount,
         wooviFeeCents: this.WOOVI_FEE_MINIMUM,
         metadata: {
-          balanceCreditId: creditResult.balanceId || null
+          balanceCreditId: plannedBalanceCreditId
         }
       });
 
@@ -2087,6 +2123,39 @@ class PaymentService {
           retryable: true
         };
       }
+
+      // Creditar via Firestore somente após ledger canônico do cancelamento.
+      const creditResult = await this.creditDriverBalance(
+        rideData.driverId,
+        netAmount,
+        cancellationCreditRideId
+      );
+
+      if (!creditResult.success) {
+        throw new Error(creditResult.error);
+      }
+
+      // Atualizar status do holding/distribuir
+      const distributionData = {
+        rideId: rideData.rideId,
+        driverId: rideData.driverId,
+        status: 'distributed_cancellation',
+        distributedAt: new Date().toISOString(),
+        netAmount: netAmount,
+        balanceCreditId: creditResult.transactionId || plannedBalanceCreditId,
+        ledgerEventId: ledgerResult.eventId || null,
+        calculation: {
+          totalAmount: rideData.cancellationFee,
+          operationalFee: 0,
+          wooviFee: this.WOOVI_FEE_MINIMUM,
+          netAmount: netAmount
+        },
+        retainedFees: {
+          operationalFee: 0,
+          wooviFee: this.WOOVI_FEE_MINIMUM,
+          totalRetained: this.WOOVI_FEE_MINIMUM
+        }
+      };
 
       await this.saveDistributionToFirestore(distributionData);
 
@@ -2131,6 +2200,93 @@ class PaymentService {
       .createHash('sha256')
       .update(String(pixKey || '').trim().toLowerCase())
       .digest('hex');
+  }
+
+  isLegacyDirectDriverCreditEnabled() {
+    return String(process.env.ENABLE_LEGACY_DIRECT_DRIVER_CREDIT || 'false').toLowerCase() === 'true';
+  }
+
+  normalizeStoredCents(value) {
+    if (value === undefined || value === null || value === '') {
+      return null;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return Math.max(0, Math.round(parsed));
+  }
+
+  getCanonicalBalanceCents(balanceData = {}) {
+    const balanceCents = this.normalizeStoredCents(balanceData.balanceCents);
+    if (balanceCents !== null) {
+      return balanceCents;
+    }
+    return this.toCents(balanceData.balance || 0);
+  }
+
+  getCanonicalTotalEarningsCents(balanceData = {}) {
+    const totalEarningsCents = this.normalizeStoredCents(balanceData.totalEarningsCents);
+    if (totalEarningsCents !== null) {
+      return totalEarningsCents;
+    }
+    return this.toCents(balanceData.totalEarnings || 0);
+  }
+
+  async recordDriverWithdrawalDenial({ driverId, amountCents = 0, pixKey = '', requestId = '', reason = 'unknown', code = null, actorId = null, metadata = {} } = {}) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore || !driverId) {
+      return { success: false, error: !driverId ? 'driverId obrigatório' : 'Firestore não disponível' };
+    }
+
+    const normalizedReason = String(reason || 'unknown').trim() || 'unknown';
+    const safeAmountCents = Math.max(0, Math.round(Number(amountCents || 0)));
+    const denialRef = firestore.collection('driver_withdrawal_denials').doc();
+    const summaryRef = firestore.collection('driver_withdrawal_denial_summaries').doc(driverId);
+
+    try {
+      const payload = {
+        driverId,
+        amountCents: safeAmountCents,
+        pixKeyHash: pixKey ? this.buildWithdrawalPixKeyHash(pixKey) : null,
+        requestId: requestId || null,
+        reason: normalizedReason,
+        code: code || null,
+        actorId: actorId || null,
+        metadata,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAtIso: new Date().toISOString()
+      };
+
+      await denialRef.set(payload);
+      await summaryRef.set({
+        driverId,
+        lastReason: normalizedReason,
+        lastCode: code || null,
+        lastDeniedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastDeniedAtIso: payload.createdAtIso,
+        deniedCount: admin.firestore.FieldValue.increment(1),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      logStructured('warn', 'Tentativa de saque negada registrada', {
+        service: 'payment-service',
+        driverId,
+        reason: normalizedReason,
+        code: code || null,
+        amountCents: safeAmountCents
+      });
+
+      return { success: true, denialId: denialRef.id };
+    } catch (error) {
+      logStructured('warn', 'Falha ao registrar tentativa de saque negada', {
+        service: 'payment-service',
+        driverId,
+        reason: normalizedReason,
+        error: error.message
+      });
+      return { success: false, error: error.message };
+    }
   }
 
   /**
@@ -2189,8 +2345,11 @@ class PaymentService {
             success: true,
             duplicate: true,
             previousBalance: creditData.previousBalance ?? null,
+            previousBalanceCents: creditData.previousBalanceCents ?? null,
             newBalance: creditData.newBalance ?? null,
+            newBalanceCents: creditData.newBalanceCents ?? null,
             creditAmount: amountInReais,
+            creditAmountCents: amountInCents,
             balanceId: driverId,
             transactionId: creditTransactionId
           };
@@ -2198,26 +2357,33 @@ class PaymentService {
 
         const balanceDoc = await transaction.get(balanceRef);
 
-        let currentBalance = 0;
-        let totalEarnings = 0;
+        let currentBalanceCents = 0;
+        let totalEarningsCents = 0;
 
         if (balanceDoc.exists) {
           const data = balanceDoc.data();
-          currentBalance = data.balance || 0;
-          totalEarnings = data.totalEarnings || 0;
+          currentBalanceCents = this.getCanonicalBalanceCents(data);
+          totalEarningsCents = this.getCanonicalTotalEarningsCents(data);
         }
 
-        const newBalance = currentBalance + amountInReais;
-        const newTotalEarnings = totalEarnings + amountInReais;
+        const currentBalance = this.toReais(currentBalanceCents);
+        const totalEarnings = this.toReais(totalEarningsCents);
+        const newBalanceCents = currentBalanceCents + amountInCents;
+        const newTotalEarningsCents = totalEarningsCents + amountInCents;
+        const newBalance = this.toReais(newBalanceCents);
+        const newTotalEarnings = this.toReais(newTotalEarningsCents);
 
         // Atualizar saldo
         transaction.set(balanceRef, {
           driverId: driverId,
           balance: newBalance,
+          balanceCents: newBalanceCents,
           totalEarnings: newTotalEarnings,
+          totalEarningsCents: newTotalEarningsCents,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           lastRideId: rideId,
-          lastCreditAmount: amountInReais
+          lastCreditAmount: amountInReais,
+          lastCreditAmountCents: amountInCents
         }, { merge: true });
 
         transaction.set(creditTransactionRef, {
@@ -2226,7 +2392,9 @@ class PaymentService {
           amountInCents,
           rideId,
           previousBalance: currentBalance,
+          previousBalanceCents: currentBalanceCents,
           newBalance,
+          newBalanceCents,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           description: `Ganhos da corrida ${rideId}`,
           idempotencyKey: creditTransactionId
@@ -2235,8 +2403,11 @@ class PaymentService {
         return {
           success: true,
           previousBalance: currentBalance,
-          newBalance: newBalance,
+          previousBalanceCents: currentBalanceCents,
+          newBalance,
+          newBalanceCents,
           creditAmount: amountInReais,
+          creditAmountCents: amountInCents,
           balanceId: driverId,
           transactionId: creditTransactionId
         };
@@ -2340,6 +2511,7 @@ class PaymentService {
           balance: 0,
           balanceCents: 0,
           totalEarnings: 0,
+          totalEarningsCents: 0,
           subscriptionPendingFeeCents: effectivePendingFeeCents,
           subscriptionPendingFee: this.toReais(effectivePendingFeeCents),
           subscriptionPendingFeeRawCents: Math.max(0, rawPendingFeeCents),
@@ -2363,15 +2535,17 @@ class PaymentService {
       }
 
       const data = balanceDoc.data();
-      const balanceCents = this.toCents(data.balance || 0);
+      const balanceCents = this.getCanonicalBalanceCents(data);
+      const totalEarningsCents = this.getCanonicalTotalEarningsCents(data);
       const pendingFeeCents = effectivePendingFeeCents;
       const availableAfterSubscriptionCents = Math.max(0, balanceCents - pendingFeeCents);
 
       return {
         success: true,
-        balance: data.balance || 0,
+        balance: this.toReais(balanceCents),
         balanceCents,
-        totalEarnings: data.totalEarnings || 0,
+        totalEarnings: this.toReais(totalEarningsCents),
+        totalEarningsCents,
         lastUpdated: data.lastUpdated?.toDate?.() || null,
         lastRideId: data.lastRideId || null,
         subscriptionPendingFeeCents: pendingFeeCents,
@@ -2508,13 +2682,15 @@ class PaymentService {
             withdrawFeeCents: Number(existing.withdrawFeeCents || 0),
             subscriptionSettlementCents: Number(existing.subscriptionSettlementCents || 0),
             totalDebitCents: Number(existing.totalDebitCents || 0),
-            status: existing.status || 'pending'
+            status: existing.status || 'pending',
+            ledgerStatus: existing.ledgerStatus || null,
+            ledgerEventId: existing.ledgerEventId || null
           };
         }
 
         const balanceDoc = await transaction.get(balanceRef);
         const balanceData = balanceDoc.exists ? balanceDoc.data() : {};
-        const currentBalanceCents = this.toCents(balanceData.balance || 0);
+        const currentBalanceCents = this.getCanonicalBalanceCents(balanceData);
         const currentBalance = this.toReais(currentBalanceCents);
 
         if (currentBalanceCents < totalDebitCents) {
@@ -2540,11 +2716,15 @@ class PaymentService {
         transaction.set(balanceRef, {
           driverId,
           balance: newBalance,
+          balanceCents: newBalanceCents,
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           lastWithdrawalAt: admin.firestore.FieldValue.serverTimestamp(),
           lastWithdrawalAmount: amountInReais,
+          lastWithdrawalAmountCents: amountCents,
           lastWithdrawalFee: feeInReais,
-          lastWithdrawalSubscriptionSettlement: subscriptionSettlementInReais
+          lastWithdrawalFeeCents: withdrawFeeCents,
+          lastWithdrawalSubscriptionSettlement: subscriptionSettlementInReais,
+          lastWithdrawalSubscriptionSettlementCents: subscriptionSettlementCents
         }, { merge: true });
 
         const baseTransactionData = {
@@ -2564,7 +2744,9 @@ class PaymentService {
           amount: -amountInReais,
           amountInCents: -amountCents,
           previousBalance: currentBalance,
+          previousBalanceCents: currentBalanceCents,
           newBalance: newBalance,
+          newBalanceCents,
           description: `Saque solicitado (${pixKey})`
         });
 
@@ -2576,7 +2758,9 @@ class PaymentService {
             amount: -feeInReais,
             amountInCents: -withdrawFeeCents,
             previousBalance: this.toReais(currentBalanceCents - amountCents),
+            previousBalanceCents: currentBalanceCents - amountCents,
             newBalance: newBalance,
+            newBalanceCents,
             description: 'Taxa de saque abaixo de R$ 500,00'
           });
         }
@@ -2589,7 +2773,9 @@ class PaymentService {
             amount: -subscriptionSettlementInReais,
             amountInCents: -subscriptionSettlementCents,
             previousBalance: this.toReais(currentBalanceCents - amountCents - withdrawFeeCents),
+            previousBalanceCents: currentBalanceCents - amountCents - withdrawFeeCents,
             newBalance,
+            newBalanceCents,
             description: 'Liquidação de assinatura diária pendente no saque'
           });
         }
@@ -2608,6 +2794,7 @@ class PaymentService {
           totalDebitCents,
           totalDebitInReais,
           status: 'pending',
+          ledgerStatus: 'pending',
           source: 'mobile_app',
           subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2625,8 +2812,11 @@ class PaymentService {
           subscriptionSettlementCents,
           totalDebitCents,
           previousBalance: currentBalance,
+          previousBalanceCents: currentBalanceCents,
           newBalance,
+          newBalanceCents,
           status: 'pending',
+          ledgerStatus: 'pending',
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
@@ -2635,7 +2825,9 @@ class PaymentService {
           idempotentReplay: false,
           withdrawalId: withdrawalRef.id,
           previousBalance: currentBalance,
+          previousBalanceCents: currentBalanceCents,
           newBalance,
+          newBalanceCents,
           withdrawFeeCents,
           subscriptionSettlementCents,
           totalDebitCents
@@ -2673,6 +2865,8 @@ class PaymentService {
           previousBalance: transactionResult.previousBalance,
           newBalance: transactionResult.newBalance,
           subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+          ledgerStatus: transactionResult.ledgerStatus || 'unknown',
+          ledgerEventId: transactionResult.ledgerEventId || null,
           settlementSyncStatus: 'unchanged'
         };
       }
@@ -2690,14 +2884,50 @@ class PaymentService {
         }
       });
 
-      if (!withdrawalLedgerResult.success) {
-        logStructured('warn', 'Saque solicitado sem ledger financeiro canônico', {
+      const withdrawalDocRef = firestore.collection('driver_withdrawals').doc(transactionResult.withdrawalId || withdrawalRef.id);
+      const ledgerPosted = Boolean(withdrawalLedgerResult.success);
+      const ledgerStatusPatch = ledgerPosted
+        ? {
+            ledgerStatus: 'posted',
+            ledgerEventId: withdrawalLedgerResult.eventId || null,
+            ledgerPostedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }
+        : {
+            status: 'ledger_pending',
+            ledgerStatus: 'pending_retry',
+            ledgerError: withdrawalLedgerResult.error || withdrawalLedgerResult.code || 'Falha ao registrar ledger de saque',
+            ledgerRetryable: true,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          };
+
+      await withdrawalDocRef.set(ledgerStatusPatch, { merge: true });
+      await idempotencyRef.set({
+        status: ledgerPosted ? 'pending' : 'ledger_pending',
+        ledgerStatus: ledgerStatusPatch.ledgerStatus,
+        ledgerEventId: ledgerStatusPatch.ledgerEventId || null,
+        ledgerError: ledgerStatusPatch.ledgerError || null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      if (!ledgerPosted) {
+        logStructured('error', 'Saque solicitado sem ledger financeiro canônico; Pix Out bloqueado até conciliação', {
           service: 'payment-service',
           driverId,
           withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
           ledgerError: withdrawalLedgerResult.error || withdrawalLedgerResult.code
         });
       }
+
+      this.financialLedgerService.reconcileWithdrawalFinancials({
+        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id
+      }).catch((reconciliationError) => {
+        logStructured('warn', 'Falha ao reconciliar saque após solicitação', {
+          service: 'payment-service',
+          withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+          error: reconciliationError.message
+        });
+      });
 
       let settlementSync = {
         success: true,
@@ -2720,17 +2950,17 @@ class PaymentService {
 
         try {
           if (!settlementSync.success) {
-            await withdrawalRef.set({
-              settlementSyncStatus: 'pending_retry',
-              settlementSyncError: settlementSync.error || 'Erro ao sincronizar assinatura',
-              settlementSyncUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-          } else {
-            await withdrawalRef.set({
-              settlementSyncStatus: 'synced',
-              subscriptionPendingRemainingCents: settlementSync.remainingCents,
-              settlementSyncUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+              await withdrawalDocRef.set({
+                settlementSyncStatus: 'pending_retry',
+                settlementSyncError: settlementSync.error || 'Erro ao sincronizar assinatura',
+                settlementSyncUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+            } else {
+              await withdrawalDocRef.set({
+                settlementSyncStatus: 'synced',
+                subscriptionPendingRemainingCents: settlementSync.remainingCents,
+                settlementSyncUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
           }
         } catch (syncPersistError) {
           logStructured('warn', 'Falha ao persistir status de sincronização da assinatura no saque', {
@@ -2743,7 +2973,9 @@ class PaymentService {
       }
 
       await idempotencyRef.set({
-        status: 'pending',
+        status: ledgerPosted ? 'pending' : 'ledger_pending',
+        ledgerStatus: ledgerPosted ? 'posted' : 'pending_retry',
+        ledgerEventId: withdrawalLedgerResult.eventId || null,
         settlementSyncStatus: settlementSync.success ? 'synced' : 'pending_retry',
         subscriptionPendingRemainingCents: settlementSync.remainingCents || 0,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -2782,6 +3014,9 @@ class PaymentService {
         previousBalance: transactionResult.previousBalance,
         newBalance: transactionResult.newBalance,
         subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
+        status: ledgerPosted ? 'pending' : 'ledger_pending',
+        ledgerStatus: ledgerPosted ? 'posted' : 'pending_retry',
+        ledgerEventId: withdrawalLedgerResult.eventId || null,
         settlementSyncStatus: settlementSync.success ? 'synced' : 'pending_retry'
       };
     } catch (error) {
@@ -2821,9 +3056,13 @@ class PaymentService {
 
     const withdrawals = [];
     snapshot.forEach((doc) => {
+      const data = doc.data() || {};
+      if (data.ledgerStatus !== 'posted') {
+        return;
+      }
       withdrawals.push({
         id: doc.id,
-        ...doc.data()
+        ...data
       });
     });
     withdrawals.sort((a, b) => {
@@ -2871,6 +3110,16 @@ class PaymentService {
         };
       }
 
+      if (withdrawal.ledgerStatus !== 'posted') {
+        return {
+          success: false,
+          error: 'Ledger de solicitação de saque ainda não confirmado',
+          code: 'WITHDRAWAL_LEDGER_NOT_POSTED',
+          status: withdrawal.status,
+          ledgerStatus: withdrawal.ledgerStatus || 'missing'
+        };
+      }
+
       transaction.set(withdrawalRef, {
         status: 'processing',
         processingStartedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2906,6 +3155,11 @@ class PaymentService {
     const amountCents = Number(withdrawal.amountCents || 0);
     const driverPixKey = String(withdrawal.pixKey || '').trim();
     if (!amountCents || !driverPixKey) {
+      await withdrawalRef.set({
+        status: 'pending',
+        lastError: 'Dados do saque inválidos',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
       return { success: false, error: 'Dados do saque inválidos' };
     }
 
@@ -2943,14 +3197,6 @@ class PaymentService {
       };
     }
 
-    await withdrawalRef.set({
-      status: 'processed',
-      processedAt: admin.firestore.FieldValue.serverTimestamp(),
-      processedBy: actorId,
-      transferId: transferResult.transferId || transferResult.transactionId || null,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-
     const processedLedgerResult = await this.financialLedgerService.recordWithdrawalProcessed({
       withdrawalId,
       driverId: withdrawal.driverId,
@@ -2963,13 +3209,61 @@ class PaymentService {
     });
 
     if (!processedLedgerResult.success) {
-      logStructured('warn', 'Saque processado sem ledger financeiro canônico', {
+      await withdrawalRef.set({
+        status: 'processed_ledger_pending',
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        processedBy: actorId,
+        transferId: transferResult.transferId || transferResult.transactionId || null,
+        ledgerProcessedStatus: 'pending_retry',
+        ledgerProcessedError: processedLedgerResult.error || processedLedgerResult.code || 'Falha ao registrar ledger de Pix Out',
+        ledgerRetryable: true,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      logStructured('error', 'Saque processado na Woovi com ledger financeiro pendente', {
         service: 'payment-service',
         withdrawalId,
         driverId: withdrawal.driverId,
         ledgerError: processedLedgerResult.error || processedLedgerResult.code
       });
+
+      this.financialLedgerService.reconcileWithdrawalFinancials({ withdrawalId })
+        .catch((reconciliationError) => {
+          logStructured('warn', 'Falha ao reconciliar saque com ledger pendente', {
+            service: 'payment-service',
+            withdrawalId,
+            error: reconciliationError.message
+          });
+        });
+
+      return {
+        success: true,
+        withdrawalId,
+        transferId: transferResult.transferId || transferResult.transactionId || null,
+        status: 'processed_ledger_pending',
+        ledgerProcessedStatus: 'pending_retry',
+        ledgerError: processedLedgerResult.error || processedLedgerResult.code || null
+      };
     }
+
+    await withdrawalRef.set({
+      status: 'processed',
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      processedBy: actorId,
+      transferId: transferResult.transferId || transferResult.transactionId || null,
+      ledgerProcessedStatus: 'posted',
+      ledgerProcessedEventId: processedLedgerResult.eventId || null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    this.financialLedgerService.reconcileWithdrawalFinancials({ withdrawalId })
+      .catch((reconciliationError) => {
+        logStructured('warn', 'Falha ao reconciliar saque após processamento', {
+          service: 'payment-service',
+          withdrawalId,
+          error: reconciliationError.message
+        });
+      });
 
     logStructured('info', 'Saque processado com sucesso', {
       service: 'payment-service',
@@ -2981,7 +3275,9 @@ class PaymentService {
     return {
       success: true,
       withdrawalId,
-      transferId: transferResult.transferId || transferResult.transactionId || null
+      transferId: transferResult.transferId || transferResult.transactionId || null,
+      ledgerProcessedStatus: 'posted',
+      ledgerProcessedEventId: processedLedgerResult.eventId || null
     };
   }
 

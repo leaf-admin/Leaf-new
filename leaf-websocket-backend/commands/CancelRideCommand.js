@@ -113,6 +113,23 @@ function haversineDistanceKm(lat1, lng1, lat2, lng2) {
     return earthRadiusKm * c;
 }
 
+async function applyDeferredIdentityReverification(driverId, context = {}) {
+    try {
+        const kycPolicyService = require('../services/kyc-policy-service');
+        if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') {
+            return;
+        }
+        await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
+    } catch (error) {
+        logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos cancelamento', {
+            service: 'cancel-ride-command',
+            bookingId: context.tripId || null,
+            driverId,
+            error: error.message
+        });
+    }
+}
+
 class CancelRideCommand extends Command {
     constructor(data) {
         super(data);
@@ -388,6 +405,10 @@ class CancelRideCommand extends Command {
                 await pricingH3ReadModelService.clearBookingSnapshot(redis, this.bookingId).catch(() => null);
                 if (driverId) {
                     await clearActiveTripForDriver(redis, driverId, this.bookingId);
+                    await applyDeferredIdentityReverification(driverId, {
+                        source: 'ride_canceled',
+                        tripId: this.bookingId
+                    });
                     const refreshedDriverState = await redis.hgetall(`driver:${driverId}`);
                     const driverLat = Number(refreshedDriverState?.lat);
                     const driverLng = Number(refreshedDriverState?.lng);

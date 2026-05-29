@@ -522,6 +522,138 @@ class FinancialLedgerService {
     return events;
   }
 
+  async listLedgerEventsByWithdrawal(firestore, withdrawalId) {
+    const snapshot = await firestore
+      .collection('financial_ledger_events')
+      .where('withdrawalId', '==', withdrawalId)
+      .limit(100)
+      .get();
+    const events = [];
+    snapshot.forEach((doc) => events.push({ id: doc.id, ...doc.data() }));
+    return events;
+  }
+
+  async reconcileWithdrawalFinancials({ withdrawalId } = {}) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore || !withdrawalId) {
+      return {
+        success: false,
+        error: !withdrawalId ? 'withdrawalId é obrigatório' : 'Firestore não disponível'
+      };
+    }
+
+    try {
+      const withdrawalDoc = await firestore.collection('driver_withdrawals').doc(withdrawalId).get();
+      const ledgerEvents = await this.listLedgerEventsByWithdrawal(firestore, withdrawalId);
+      const issues = [];
+      const withdrawal = withdrawalDoc.exists ? withdrawalDoc.data() : null;
+      const requestedEvent = ledgerEvents.find((event) => event.eventType === 'withdrawal_requested');
+      const processedEvent = ledgerEvents.find((event) => event.eventType === 'withdrawal_processed');
+      const amountCents = this.toCents(withdrawal?.amountCents || 0);
+      const totalDebitCents = this.toCents(
+        withdrawal?.totalDebitCents
+        || (amountCents + this.toCents(withdrawal?.feeCents || 0) + this.toCents(withdrawal?.subscriptionSettlementCents || 0))
+      );
+
+      if (!withdrawal) {
+        issues.push({
+          code: 'WITHDRAWAL_NOT_FOUND',
+          severity: 'high',
+          message: 'Saque não encontrado para reconciliação'
+        });
+      }
+
+      if (withdrawal && amountCents > 0 && !requestedEvent) {
+        issues.push({
+          code: 'WITHDRAWAL_REQUEST_WITHOUT_LEDGER_EVENT',
+          severity: 'high',
+          message: 'Saque criado sem evento withdrawal_requested no ledger'
+        });
+      }
+
+      if (withdrawal && withdrawal.ledgerStatus !== 'posted') {
+        issues.push({
+          code: 'WITHDRAWAL_REQUEST_LEDGER_NOT_POSTED',
+          severity: 'high',
+          message: 'Saque ainda não possui ledger de solicitação postado',
+          ledgerStatus: withdrawal.ledgerStatus || null,
+          status: withdrawal.status || null
+        });
+      }
+
+      if (requestedEvent && totalDebitCents > 0 && this.toCents(requestedEvent.totalDebitCents) !== totalDebitCents) {
+        issues.push({
+          code: 'WITHDRAWAL_REQUEST_AMOUNT_MISMATCH',
+          severity: 'high',
+          message: 'Valor debitado no ledger diverge do total debitado no saque',
+          ledgerAmountCents: this.toCents(requestedEvent.totalDebitCents),
+          withdrawalTotalDebitCents: totalDebitCents
+        });
+      }
+
+      if (withdrawal?.status === 'processed' && !processedEvent) {
+        issues.push({
+          code: 'WITHDRAWAL_PROCESSED_WITHOUT_LEDGER_EVENT',
+          severity: 'critical',
+          message: 'Saque marcado como processado sem evento withdrawal_processed no ledger'
+        });
+      }
+
+      if (withdrawal?.status === 'processed_ledger_pending') {
+        issues.push({
+          code: 'WITHDRAWAL_PROCESSED_LEDGER_PENDING',
+          severity: 'critical',
+          message: 'Pix Out foi processado e o ledger de processamento segue pendente'
+        });
+      }
+
+      if (processedEvent && amountCents > 0 && this.toCents(processedEvent.totalDebitCents) !== amountCents) {
+        issues.push({
+          code: 'WITHDRAWAL_PROCESSED_AMOUNT_MISMATCH',
+          severity: 'critical',
+          message: 'Valor do Pix Out no ledger diverge do valor solicitado para saque',
+          ledgerAmountCents: this.toCents(processedEvent.totalDebitCents),
+          withdrawalAmountCents: amountCents
+        });
+      }
+
+      const report = {
+        withdrawalId,
+        driverId: withdrawal?.driverId || null,
+        ok: issues.length === 0,
+        issues,
+        totals: {
+          amountCents,
+          totalDebitCents,
+          ledgerEventCount: ledgerEvents.length,
+          hasRequestedLedger: Boolean(requestedEvent),
+          hasProcessedLedger: Boolean(processedEvent)
+        },
+        status: withdrawal?.status || null,
+        ledgerStatus: withdrawal?.ledgerStatus || null,
+        checkedAt: admin.firestore.FieldValue.serverTimestamp(),
+        checkedAtIso: new Date().toISOString()
+      };
+
+      await firestore.collection('financial_withdrawal_reconciliation_reports').doc(withdrawalId).set(report, { merge: true });
+
+      return {
+        success: true,
+        report
+      };
+    } catch (error) {
+      logError(error, 'Erro ao reconciliar fluxo financeiro de saque', {
+        service: 'financial-ledger-service',
+        withdrawalId
+      });
+      return {
+        success: false,
+        error: error.message,
+        withdrawalId
+      };
+    }
+  }
+
   async reconcileRideFinancials({ rideId } = {}) {
     const firestore = firebaseConfig.getFirestore();
     if (!firestore || !rideId) {

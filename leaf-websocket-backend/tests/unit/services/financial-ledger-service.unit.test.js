@@ -348,4 +348,85 @@ describe('FinancialLedgerService', () => {
     expect(firestore.docs.has('financial_reconciliation_reports/ride_e2e_123_smoke')).toBe(false);
     expect(firestore.docs.has('financial_reconciliation_reports/ride_normal_1777175584964')).toBe(false);
   });
+
+  it('reconciles a posted withdrawal without issues', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    firestore.docs.set('driver_withdrawals/withdrawal_ok', {
+      driverId: 'driver_1',
+      amountCents: 2500,
+      feeCents: 100,
+      totalDebitCents: 2600,
+      status: 'pending',
+      ledgerStatus: 'posted'
+    });
+    await service.recordWithdrawalRequested({
+      withdrawalId: 'withdrawal_ok',
+      driverId: 'driver_1',
+      amountCents: 2500,
+      withdrawFeeCents: 100,
+      requestId: 'request_ok'
+    });
+
+    const result = await service.reconcileWithdrawalFinancials({
+      withdrawalId: 'withdrawal_ok'
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.report).toMatchObject({
+      withdrawalId: 'withdrawal_ok',
+      ok: true,
+      issues: [],
+      totals: {
+        amountCents: 2500,
+        totalDebitCents: 2600,
+        ledgerEventCount: 1,
+        hasRequestedLedger: true,
+        hasProcessedLedger: false
+      }
+    });
+    expect(firestore.docs.get('financial_withdrawal_reconciliation_reports/withdrawal_ok')).toMatchObject({
+      ok: true
+    });
+  });
+
+  it('flags processed withdrawals whose Pix Out ledger is pending', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    firestore.docs.set('driver_withdrawals/withdrawal_bad', {
+      driverId: 'driver_1',
+      amountCents: 2500,
+      feeCents: 100,
+      totalDebitCents: 2600,
+      status: 'processed_ledger_pending',
+      ledgerStatus: 'posted'
+    });
+    await service.recordWithdrawalRequested({
+      withdrawalId: 'withdrawal_bad',
+      driverId: 'driver_1',
+      amountCents: 2500,
+      withdrawFeeCents: 100,
+      requestId: 'request_bad'
+    });
+
+    const result = await service.reconcileWithdrawalFinancials({
+      withdrawalId: 'withdrawal_bad'
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.report).toMatchObject({
+      withdrawalId: 'withdrawal_bad',
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'WITHDRAWAL_PROCESSED_LEDGER_PENDING',
+          severity: 'critical'
+        })
+      ])
+    });
+  });
 });

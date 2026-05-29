@@ -167,6 +167,15 @@ describe('PaymentService payment status cache', () => {
     expect(new PaymentService().isWooviDirectTransferOnRideCompletionEnabled()).toBe(true);
   });
 
+  it('charges the Woovi withdrawal fee only below R$ 500,00', () => {
+    const service = new PaymentService();
+
+    expect(service.calculateWithdrawFee(0)).toBe(0);
+    expect(service.calculateWithdrawFee(49999)).toBe(100);
+    expect(service.calculateWithdrawFee(50000)).toBe(0);
+    expect(service.calculateWithdrawFee(100000)).toBe(0);
+  });
+
   it('reads confirmed payment status from redis cache before falling back to external providers', async () => {
     const service = new PaymentService();
 
@@ -520,6 +529,82 @@ describe('PaymentService financial rules', () => {
     expect(subscriptionStateService.settlePendingOnWithdrawal).not.toHaveBeenCalled();
   });
 
+  it('uses balanceCents as the canonical available balance during withdrawals', async () => {
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_balances/driver_cents', {
+      driverId: 'driver_cents',
+      balance: 0,
+      balanceCents: 4200,
+      totalEarnings: 0,
+      totalEarningsCents: 10000
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+
+    const balance = await service.getDriverBalance('driver_cents');
+    const result = await service.requestDriverWithdrawal({
+      driverId: 'driver_cents',
+      amountCents: 3000,
+      pixKey: 'driver@pix.test',
+      requestId: 'withdraw_request_cents'
+    });
+
+    expect(balance).toMatchObject({
+      success: true,
+      balance: 42,
+      balanceCents: 4200,
+      totalEarnings: 100,
+      totalEarningsCents: 10000
+    });
+    expect(result).toMatchObject({
+      success: true,
+      totalDebitCents: 3100,
+      newBalance: 11,
+      ledgerStatus: 'posted'
+    });
+    expect(firestore.docs.get('driver_balances/driver_cents')).toMatchObject({
+      balance: 11,
+      balanceCents: 1100,
+      totalEarningsCents: 10000
+    });
+  });
+
+  it('keeps withdrawals ledger_pending when the canonical requested ledger fails', async () => {
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_balances/driver_ledger_pending', {
+      driverId: 'driver_ledger_pending',
+      balanceCents: 4200
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    service.financialLedgerService.recordWithdrawalRequested = jest.fn().mockResolvedValue({
+      success: false,
+      code: 'LEDGER_WRITE_FAILED',
+      error: 'ledger unavailable'
+    });
+
+    const result = await service.requestDriverWithdrawal({
+      driverId: 'driver_ledger_pending',
+      amountCents: 2500,
+      pixKey: 'driver@pix.test',
+      requestId: 'withdraw_request_ledger_pending'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      status: 'ledger_pending',
+      ledgerStatus: 'pending_retry',
+      totalDebitCents: 2600
+    });
+    const withdrawal = Array.from(firestore.docs.entries())
+      .find(([path]) => path.startsWith('driver_withdrawals/'))?.[1];
+    expect(withdrawal).toMatchObject({
+      status: 'ledger_pending',
+      ledgerStatus: 'pending_retry',
+      ledgerRetryable: true
+    });
+  });
+
   it('rejects withdrawal idempotency replay when the same requestId changes parameters', async () => {
     const firestore = createInMemoryFirestore();
     firestore.docs.set('driver_balances/driver_1', {
@@ -584,7 +669,8 @@ describe('PaymentService financial rules', () => {
       driverId: 'driver_1',
       pixKey: 'driver@pix.test',
       amountCents: 2500,
-      status: 'pending'
+      status: 'pending',
+      ledgerStatus: 'posted'
     });
     firebaseConfig.getFirestore.mockReturnValue(firestore);
     mockTransferDirectToDriver.mockResolvedValue({
@@ -614,6 +700,68 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it('blocks Pix Out when the withdrawal request ledger is not posted', async () => {
+    process.env.LEAF_PIX_KEY = 'leaf@pix.test';
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_withdrawals/wd_without_ledger', {
+      driverId: 'driver_1',
+      pixKey: 'driver@pix.test',
+      amountCents: 2500,
+      status: 'pending'
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+
+    const result = await service.processDriverWithdrawal('wd_without_ledger', 'admin_1');
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'WITHDRAWAL_LEDGER_NOT_POSTED'
+    });
+    expect(mockTransferDirectToDriver).not.toHaveBeenCalled();
+    expect(firestore.docs.get('driver_withdrawals/wd_without_ledger')).toMatchObject({
+      status: 'pending'
+    });
+  });
+
+  it('marks a processed withdrawal as ledger pending when Pix Out succeeds but processed ledger fails', async () => {
+    process.env.LEAF_PIX_KEY = 'leaf@pix.test';
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_withdrawals/wd_processed_ledger_pending', {
+      driverId: 'driver_1',
+      pixKey: 'driver@pix.test',
+      amountCents: 2500,
+      status: 'pending',
+      ledgerStatus: 'posted'
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockTransferDirectToDriver.mockResolvedValue({
+      success: true,
+      transferId: 'transfer_wd_ledger_pending'
+    });
+    const service = new PaymentService();
+    service.financialLedgerService.recordWithdrawalProcessed = jest.fn().mockResolvedValue({
+      success: false,
+      code: 'LEDGER_WRITE_FAILED',
+      error: 'ledger unavailable'
+    });
+
+    const result = await service.processDriverWithdrawal('wd_processed_ledger_pending', 'admin_1');
+
+    expect(result).toMatchObject({
+      success: true,
+      status: 'processed_ledger_pending',
+      ledgerProcessedStatus: 'pending_retry'
+    });
+    expect(mockTransferDirectToDriver).toHaveBeenCalledTimes(1);
+    expect(firestore.docs.get('driver_withdrawals/wd_processed_ledger_pending')).toMatchObject({
+      status: 'processed_ledger_pending',
+      ledgerProcessedStatus: 'pending_retry',
+      ledgerRetryable: true,
+      transferId: 'transfer_wd_ledger_pending'
+    });
+  });
+
   it('passes stable gateway correlation id when processing withdrawals', async () => {
     process.env.LEAF_PIX_KEY = 'leaf@pix.test';
     const firestore = createInMemoryFirestore();
@@ -621,7 +769,8 @@ describe('PaymentService financial rules', () => {
       driverId: 'driver_gateway',
       pixKey: 'driver@pix.test',
       amountCents: 4500,
-      status: 'pending'
+      status: 'pending',
+      ledgerStatus: 'posted'
     });
     firebaseConfig.getFirestore.mockReturnValue(firestore);
     mockTransferDirectToDriver.mockResolvedValue({

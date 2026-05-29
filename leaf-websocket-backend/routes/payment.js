@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const PaymentService = require('../services/payment-service');
 const kycPolicyService = require('../services/kyc-policy-service');
 const firebaseConfig = require('../firebase-config');
+const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
 const { logStructured, logError } = require('../utils/logger');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
@@ -223,6 +224,94 @@ function respondWithdrawalsDisabled(res) {
   );
 }
 
+function normalizePaymentAmountCents(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.round(parsed));
+}
+
+async function validatePassengerDiscountPayload({
+  passengerId,
+  amount,
+  discountBenefit,
+  grossAmountInCents,
+  grossAmount,
+}) {
+  const amountInCents = normalizePaymentAmountCents(amount);
+  const grossInCents = grossAmountInCents !== undefined && grossAmountInCents !== null
+    ? normalizePaymentAmountCents(grossAmountInCents)
+    : normalizePaymentAmountCents(Number(grossAmount || 0) * 100);
+  const benefitId = String(
+    discountBenefit?.benefitId ||
+    discountBenefit?.id ||
+    ''
+  ).trim();
+  const hasDiscountContract =
+    Boolean(discountBenefit?.applied) ||
+    Boolean(benefitId) ||
+    (grossInCents > 0 && amountInCents > 0 && amountInCents < grossInCents);
+
+  if (!hasDiscountContract) {
+    return {
+      ok: true,
+      grossAmountInCents: grossInCents || amountInCents,
+      payableAmountInCents: amountInCents,
+      discountBenefit: null,
+    };
+  }
+
+  if (!grossInCents || grossInCents < amountInCents) {
+    return {
+      ok: false,
+      statusCode: 400,
+      payload: {
+        success: false,
+        error: 'Contrato de desconto inválido',
+        code: 'PASSENGER_DISCOUNT_GROSS_AMOUNT_INVALID',
+      },
+    };
+  }
+
+  const preview = await passengerDiscountBenefitService.previewDiscount({
+    userId: passengerId,
+    grossAmountCents: grossInCents,
+    benefitId,
+  });
+
+  if (!preview.applied) {
+    return {
+      ok: false,
+      statusCode: 409,
+      payload: {
+        success: false,
+        error: 'Desconto de convite indisponível para este passageiro',
+        code: 'PASSENGER_DISCOUNT_NOT_AVAILABLE',
+      },
+    };
+  }
+
+  if (normalizePaymentAmountCents(preview.payableAmountInCents) !== amountInCents) {
+    return {
+      ok: false,
+      statusCode: 409,
+      payload: {
+        success: false,
+        error: 'Valor do pagamento diverge do desconto ativo',
+        code: 'PASSENGER_DISCOUNT_AMOUNT_MISMATCH',
+        expectedAmountInCents: preview.payableAmountInCents,
+        receivedAmountInCents: amountInCents,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    grossAmountInCents: grossInCents,
+    payableAmountInCents: amountInCents,
+    discountBenefit: preview,
+  };
+}
+
 async function resolveWithdrawalActorPhoneDigits(actor, driverId) {
   const actorPhoneDigits = normalizeDigits(actor?.phoneNumber || actor?.phone_number || actor?.phone);
   if (actorPhoneDigits) return actorPhoneDigits;
@@ -388,7 +477,10 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       wooviSubaccountPixKey,
       subaccountPixKey,
       tollFee,
-      tollFeeCents
+      tollFeeCents,
+      discountBenefit,
+      grossAmountInCents,
+      grossAmount
     } = req.body;
 
     // Validações básicas
@@ -407,6 +499,18 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       });
     }
 
+    const discountValidation = await validatePassengerDiscountPayload({
+      passengerId,
+      amount,
+      discountBenefit,
+      grossAmountInCents,
+      grossAmount,
+    });
+
+    if (!discountValidation.ok) {
+      return res.status(discountValidation.statusCode || 400).json(discountValidation.payload);
+    }
+
     const paymentData = {
       passengerId,
       amount,
@@ -420,7 +524,10 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       wooviSubaccountPixKey,
       subaccountPixKey,
       tollFee,
-      tollFeeCents
+      tollFeeCents,
+      grossAmountInCents: discountValidation.grossAmountInCents,
+      payableAmountInCents: discountValidation.payableAmountInCents,
+      discountBenefit: discountValidation.discountBenefit
     };
 
     const result = await paymentService.processAdvancePayment(paymentData);
@@ -806,6 +913,8 @@ router.post(
       });
     }
 
+    const amountCents = Math.round(Number(amount) * 100);
+
     const passwordVerification = await verifyWithdrawalAppPassword({
       actor: req.paymentActor,
       driverId,
@@ -813,12 +922,19 @@ router.post(
     });
 
     if (!passwordVerification.ok) {
+      await paymentService.recordDriverWithdrawalDenial({
+        driverId,
+        amountCents,
+        pixKey: String(pixKey).trim(),
+        requestId,
+        reason: 'password_verification_failed',
+        code: passwordVerification.payload?.code || 'WITHDRAWAL_PASSWORD_FAILED',
+        actorId: req.paymentActor?.id || req.paymentActor?.uid || null
+      });
       return res
         .status(passwordVerification.statusCode || 403)
         .json(passwordVerification.payload);
     }
-
-    const amountCents = Math.round(Number(amount) * 100);
 
     const stepUpPolicy = await kycPolicyService.evaluateWithdrawalStepUp({
       driverId,
@@ -826,6 +942,20 @@ router.post(
     });
 
     if (stepUpPolicy.requirement !== 'NONE') {
+      await paymentService.recordDriverWithdrawalDenial({
+        driverId,
+        amountCents,
+        pixKey: String(pixKey).trim(),
+        requestId,
+        reason: 'kyc_step_up_required',
+        code: 'KYC_STEP_UP_REQUIRED',
+        actorId: req.paymentActor?.id || req.paymentActor?.uid || null,
+        metadata: {
+          requirement: stepUpPolicy.requirement,
+          riskScore: stepUpPolicy.riskScore,
+          signals: stepUpPolicy.signals || []
+        }
+      });
       return res.status(403).json({
         success: false,
         error: 'Verificacao adicional obrigatoria antes do saque',
@@ -864,6 +994,19 @@ router.post(
       String(result.error || '').toLowerCase().includes('saldo insuficiente')
         ? 400
         : 500;
+    await paymentService.recordDriverWithdrawalDenial({
+      driverId,
+      amountCents,
+      pixKey: String(pixKey).trim(),
+      requestId,
+      reason: insufficientBalanceCodes.has(String(result.code || '')) ? 'insufficient_balance' : 'withdrawal_request_failed',
+      code: result.code || null,
+      actorId: req.paymentActor?.id || req.paymentActor?.uid || null,
+      metadata: {
+        statusCode,
+        details: result.details || null
+      }
+    });
     return res.status(statusCode).json({
       success: false,
       error: result.error || 'Erro ao processar saque',

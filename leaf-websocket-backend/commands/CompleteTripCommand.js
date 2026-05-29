@@ -29,6 +29,7 @@ const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator'
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
+const driverReferralRewardService = require('../services/driver-referral-reward-service');
 const {
     resolveRideLegs,
     resolveOperationalContinuation,
@@ -71,6 +72,23 @@ function safeJsonParse(value, fallback = null) {
         return JSON.parse(value);
     } catch (_error) {
         return fallback;
+    }
+}
+
+async function applyDeferredIdentityReverification(driverId, context = {}) {
+    try {
+        const kycPolicyService = require('../services/kyc-policy-service');
+        if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') {
+            return;
+        }
+        await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
+    } catch (error) {
+        logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos corrida', {
+            service: 'complete-trip-command',
+            bookingId: context.tripId || null,
+            driverId,
+            error: error.message
+        });
     }
 }
 
@@ -373,6 +391,10 @@ class CompleteTripCommand extends Command {
                 // ✅ NOVO: Remover da lista de corridas ativas
                 await redis.hdel('bookings:active', this.bookingId);
                 await clearActiveTripForDriver(redis, this.driverId, this.bookingId);
+                await applyDeferredIdentityReverification(this.driverId, {
+                    source: 'ride_completed',
+                    tripId: this.bookingId
+                });
                 await pricingH3ReadModelService.clearBookingSnapshot(redis, this.bookingId).catch(() => null);
 
                 const refreshedDriverState = await redis.hgetall(`driver:${this.driverId}`);
@@ -401,6 +423,22 @@ class CompleteTripCommand extends Command {
                             service: 'complete-trip-command',
                             bookingId: this.bookingId,
                             error: locationFinalizeError.message
+                        });
+                    }
+                });
+
+                setImmediate(async () => {
+                    try {
+                        await driverReferralRewardService.evaluateDriverRewardsForDriver(this.driverId, {
+                            source: 'ride_completed',
+                            bookingId: this.bookingId
+                        });
+                    } catch (referralRewardError) {
+                        logStructured('warn', 'Falha ao avaliar recompensa automática de indicação de motorista', {
+                            service: 'complete-trip-command',
+                            bookingId: this.bookingId,
+                            driverId: this.driverId,
+                            error: referralRewardError.message
                         });
                     }
                 });

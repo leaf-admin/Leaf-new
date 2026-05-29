@@ -12,6 +12,7 @@ const mockVerifyIdToken = jest.fn();
 const mockGetUser = jest.fn();
 const mockDocs = new Map();
 const mockRequestDriverWithdrawal = jest.fn();
+const mockRecordDriverWithdrawalDenial = jest.fn();
 const mockEvaluateWithdrawalStepUp = jest.fn();
 
 function normalizePhone(phone) {
@@ -64,7 +65,8 @@ jest.mock('../../../firebase-config', () => ({
 }));
 
 jest.mock('../../../services/payment-service', () => jest.fn().mockImplementation(() => ({
-  requestDriverWithdrawal: mockRequestDriverWithdrawal
+  requestDriverWithdrawal: mockRequestDriverWithdrawal,
+  recordDriverWithdrawalDenial: mockRecordDriverWithdrawalDenial
 })));
 
 jest.mock('../../../services/kyc-policy-service', () => ({
@@ -124,6 +126,7 @@ describe('payment withdrawal password guard', () => {
     mockVerifyIdToken.mockReset();
     mockGetUser.mockReset();
     mockRequestDriverWithdrawal.mockReset();
+    mockRecordDriverWithdrawalDenial.mockReset();
     mockEvaluateWithdrawalStepUp.mockReset();
 
     admin.auth = jest.fn(() => ({

@@ -287,7 +287,6 @@ function verifyWooviWebhookSignature(req) {
   const isProdRuntime = isProductionRuntime();
   const isSandboxRuntime = isWooviSandboxRuntime();
   const strictSignatureRuntime = isProdRuntime && !isSandboxRuntime;
-  const signatureRequired = webhookRequireSignature || strictSignatureRuntime;
   const allowUnsignedWebhook = readBooleanEnv(
     'WOOVI_WEBHOOK_ALLOW_UNSIGNED',
     !verifiersConfigured
@@ -296,6 +295,20 @@ function verifyWooviWebhookSignature(req) {
     'WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED',
     true
   );
+  const providerVerificationIdentityAccepted =
+    authDecision.configured ||
+    !isProdRuntime ||
+    isSandboxRuntime;
+  const authorizationBackedProviderVerification =
+    !verifiersConfigured &&
+    providerVerificationIdentityAccepted &&
+    authDecision.valid &&
+    allowUnsignedWebhook &&
+    providerVerificationRequired &&
+    !webhookRequireSignature;
+  const signatureRequired =
+    webhookRequireSignature ||
+    (strictSignatureRuntime && !authorizationBackedProviderVerification);
 
   if (!authDecision.valid) {
     return {
@@ -354,14 +367,12 @@ function verifyWooviWebhookSignature(req) {
     };
   }
 
-  const allowUnsignedWithoutVerifier =
-    !signaturePresent &&
+  const allowProviderVerifiedWithoutVerifier =
     !verifiersConfigured &&
-    allowUnsignedWebhook &&
-    !signatureRequired &&
-    providerVerificationRequired;
+    authorizationBackedProviderVerification &&
+    !signatureRequired;
 
-  if (allowUnsignedWithoutVerifier) {
+  if (allowProviderVerifiedWithoutVerifier) {
     return {
       valid: true,
       method: isProdRuntime || isSandboxRuntime
@@ -376,7 +387,9 @@ function verifyWooviWebhookSignature(req) {
 
   let reason = 'WEBHOOK_SIGNATURE_INVALID';
   if (!verifiersConfigured) {
-    if (signatureRequired && isProdRuntime) {
+    if (!authDecision.configured && isProdRuntime && !isSandboxRuntime) {
+      reason = 'WEBHOOK_AUTHORIZATION_NOT_CONFIGURED';
+    } else if (signatureRequired && isProdRuntime) {
       reason = 'WEBHOOK_SIGNATURE_VERIFIER_NOT_CONFIGURED';
     } else if (signatureRequired) {
       reason = 'WEBHOOK_SIGNATURE_REQUIRED';

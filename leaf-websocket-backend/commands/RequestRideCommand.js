@@ -27,6 +27,7 @@ const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator'
 const geofenceService = require('../services/geofence-service');
 const fareEstimationService = require('../services/fare-estimation-service');
 const PaymentService = require('../services/payment-service');
+const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
 const { resolveEstimatedFareSnapshot } = require('../utils/fare-snapshot-utils');
 
 const paymentService = new PaymentService();
@@ -229,6 +230,18 @@ class RequestRideCommand extends Command {
                         ? parsedPaymentAmountInCents
                         : null;
                 const paymentConfirmedAt = this.paymentData?.confirmedAt || null;
+                const paymentDiscountBenefit =
+                    this.paymentData?.discountBenefit && typeof this.paymentData.discountBenefit === 'object'
+                        ? { ...this.paymentData.discountBenefit }
+                        : null;
+                const parsedPaymentGrossAmountInCents = Number.parseInt(
+                    String(this.paymentData?.grossAmountInCents ?? ''),
+                    10
+                );
+                const paymentGrossAmountInCents =
+                    Number.isFinite(parsedPaymentGrossAmountInCents) && parsedPaymentGrossAmountInCents > 0
+                        ? parsedPaymentGrossAmountInCents
+                        : null;
                 const lockedEstimatedFareFromPayment =
                     hasConfirmedPayment && paymentAmountInCents
                         ? Number((paymentAmountInCents / 100).toFixed(2))
@@ -256,6 +269,27 @@ class RequestRideCommand extends Command {
                     estimatedFare: estimatedFareForBooking,
                     tollFee: fareEstimation.tollFee
                 });
+                const discountApplied =
+                    Boolean(paymentDiscountBenefit?.applied) &&
+                    Boolean(paymentDiscountBenefit?.benefitId);
+                const discountUsageRideId = paymentReferenceRideId || bookingId;
+                let consumedDiscount = null;
+                if (hasConfirmedPayment && discountApplied) {
+                    consumedDiscount = await passengerDiscountBenefitService.consumeDiscountForRide({
+                        userId: this.customerId,
+                        benefitId: paymentDiscountBenefit.benefitId,
+                        rideId: discountUsageRideId,
+                        grossAmountInCents:
+                            paymentGrossAmountInCents ||
+                            paymentDiscountBenefit.grossAmountInCents ||
+                            Math.round(Number(fareEstimation.estimatedFare || 0) * 100),
+                        payableAmountInCents: paymentAmountInCents,
+                        discountAmountInCents: paymentDiscountBenefit.discountAmountInCents || 0
+                    });
+                    if (!consumedDiscount?.success) {
+                        throw new Error('Desconto de convite indisponível para esta corrida.');
+                    }
+                }
 
                 // Criar dados da corrida
                 beginStage('booking_payload');
@@ -265,6 +299,17 @@ class RequestRideCommand extends Command {
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
                     estimatedFare: estimatedFareForBooking,
+                    grossEstimatedFare:
+                        paymentGrossAmountInCents
+                            ? Number((paymentGrossAmountInCents / 100).toFixed(2))
+                            : fareEstimation.estimatedFare,
+                    passengerPayableFare: estimatedFareForBooking,
+                    passengerDiscountAmount:
+                        paymentDiscountBenefit?.discountAmountInCents
+                            ? Number((paymentDiscountBenefit.discountAmountInCents / 100).toFixed(2))
+                            : 0,
+                    passengerDiscountBenefit: paymentDiscountBenefit || null,
+                    passengerDiscountUsage: consumedDiscount?.usage || null,
                     routeDistanceKm: fareEstimation.routeMetrics.distanceKm,
                     routeDurationSecs: fareEstimation.routeMetrics.durationSecs,
                     tollFee: fareEstimation.tollFee,

@@ -1,6 +1,8 @@
 const express = require('express');
+const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const fareEstimationService = require('../services/fare-estimation-service');
+const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
 const { getPublicRateCards, RATE_CARD_VERSION } = require('../services/pricing/calculateFare');
 const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured } = require('../utils/logger');
@@ -44,6 +46,18 @@ function haversineDistanceKm(lat1, lng1, lat2, lng2) {
     Math.sin(dLng / 2) * Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return earthRadiusKm * c;
+}
+
+async function resolveOptionalFirebaseUserId(req) {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) return '';
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(header.slice('Bearer '.length).trim());
+    return String(decoded?.uid || '').trim();
+  } catch (_error) {
+    return '';
+  }
 }
 
 router.get('/pricing/categories', (_req, res) => {
@@ -118,8 +132,24 @@ router.post('/pricing/quote', async (req, res) => {
       pricingContext: body.pricingContext || body.operational || null
     });
 
+    const passengerId =
+      String(body.passengerId || body.customerId || '').trim() ||
+      (await resolveOptionalFirebaseUserId(req));
+    const grossAmountInCents = Math.max(0, Math.round(Number(result.estimatedFare || 0) * 100));
+    const discountPreview = await passengerDiscountBenefitService.previewDiscount({
+      userId: passengerId,
+      grossAmountCents: grossAmountInCents,
+      benefitId: body.discountBenefitId || body.benefitId || ''
+    });
+    const estimatedFare = discountPreview.applied
+      ? discountPreview.payableFare
+      : result.estimatedFare;
+
     return res.json({
-      estimatedFare: result.estimatedFare,
+      estimatedFare,
+      grossEstimatedFare: result.estimatedFare,
+      passengerPayableFare: estimatedFare,
+      discountBenefit: discountPreview.applied ? discountPreview : null,
       carType: result.normalizedCarType,
       rateCardVersion: result.rateCardVersion,
       routeDistanceKm: result.routeMetrics?.distanceKm || 0,
