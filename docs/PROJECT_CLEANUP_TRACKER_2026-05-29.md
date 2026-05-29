@@ -187,3 +187,17 @@ Validação:
 
 - `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs`: reduziu de 27 para 19 achados, todos critical e ligados a `.env`, keystores, Firebase config/plist/json ou chave privada local.
+
+## Bloco 8 - Executado
+
+Escopo: registrar caminho seguro para segredos locais ativos.
+
+- Criado `docs/SECURITY_LOCAL_SECRETS_RUNBOOK_2026-05-29.md`.
+- Confirmado que `node scripts/maintenance/security/scan-secrets.cjs --tracked-only` passa sem achados.
+- Os 19 achados restantes do scanner completo sao locais e ignorados pelo git, mas continuam dentro do workspace porque podem ser necessarios para builds e canary.
+
+Validação:
+
+- `git ls-files` nao lista os segredos/artefatos locais sensiveis.
+- `.gitignore` cobre `.env`, `.env.*`, Firebase config, plist, keystores e chaves.
+- Nenhuma credencial real foi movida, exibida ou alterada neste bloco.
