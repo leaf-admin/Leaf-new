@@ -551,3 +551,36 @@ Validação:
 - Varredura final de documentacao ativa sem referencias antigas a IP direto, `sslip.io`, `digitaloceankey` ou provedores antigos: PASS.
 - `node scripts/prelaunch/assert-store-go-static.cjs`: PASS com warnings historicos conhecidos e `Failures: 0`.
 - `git diff --check`: PASS.
+
+## Bloco 31 - Executado Localmente
+
+Escopo: limpar artefatos ignorados e preservar evidencias operacionais.
+
+- Inventario antes da limpeza:
+  - `reports`: `1.6G`
+  - `mobile-app/.maestro/results`: `1.0G`
+  - `leaf-websocket-backend/reports`: `16M`
+  - `test-results`: `352K`
+  - `services/face-compare-service/.venv`: `650M`
+  - `vehicle-image-bank`: `1.2G`
+- Removidos somente arquivos ignorados e nao versionados:
+  - `mobile-app/.maestro/results/`
+  - `reports/build-ios-sim-release.log`
+  - zips duplicados de onboarding em `reports/`
+  - logs grandes `metro.log` de rodadas antigas `mobile-only-rider-driver-4ios_20260521_*`
+- Preservados:
+  - `test-results/` versionado
+  - `leaf-websocket-backend/reports/`
+  - `vehicle-image-bank/`
+  - `.venv` do `face-compare-service`
+
+Validação:
+
+- `git ls-files` confirmou que os artefatos removidos nao eram versionados.
+- Inventario apos limpeza:
+  - `reports`: `1.5G`
+  - `leaf-websocket-backend/reports`: `16M`
+  - `test-results`: `352K`
+  - `services/face-compare-service/.venv`: `650M`
+  - `vehicle-image-bank`: `1.2G`
+- `git status --short`: limpo antes do registro deste bloco.
