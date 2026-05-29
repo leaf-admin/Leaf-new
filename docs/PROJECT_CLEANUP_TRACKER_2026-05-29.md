@@ -142,3 +142,17 @@ Validação:
 
 - `git ls-files web-app`: nenhum arquivo rastreado.
 - `find web-app`: diretorio ausente apos limpeza.
+
+## Bloco 5 - Executado
+
+Escopo: reduzir falso positivo local do scanner de segredos sem esconder arquivos de runtime.
+
+- Atualizado `scripts/maintenance/security/scan-secrets.cjs` para ignorar caches Python e `.venv`.
+- Mantidos `node_modules`, build outputs e demais caches ja ignorados.
+- Nenhum `.env`, keystore, plist, json de Firebase ou credencial ativa foi removido neste bloco.
+
+Validação:
+
+- `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs`: reduziu de 31 para 29 achados. Os achados restantes continuam sendo artefatos sensiveis locais e bypasses/validadores que exigem bloco proprio, sem delecao cega para nao quebrar builds ou ambiente.
