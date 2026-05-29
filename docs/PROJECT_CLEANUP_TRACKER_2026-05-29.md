@@ -405,3 +405,16 @@ Validação:
 - `node -c` nos arquivos alterados: PASS.
 - Unit tests de runtime CORS: PASS (`10/10`).
 - Smoke local do cliente KYC sem env: PASS, retornando provider nao configurado sem fallback de IP.
+
+## Bloco 21 - Executado
+
+Escopo: remover scripts raiz de deploy/monitoramento da VPS antiga.
+
+- Removidos scripts raiz que apontavam diretamente para `147.182.*` e fluxos antigos de deploy/monitoramento.
+- Mantido `scripts/healthcheck-vps.sh`, pois ainda e usado pela validacao controlada, mas com default atualizado para `https://api.leaf.app.br`.
+- Atualizado o Devkit para listar apenas os scripts operacionais atuais.
+
+Validação:
+
+- Referencias diretas aos scripts removidos checadas antes da remocao; apenas docs historicos os citavam.
+- `bash -n scripts/healthcheck-vps.sh`: PASS.

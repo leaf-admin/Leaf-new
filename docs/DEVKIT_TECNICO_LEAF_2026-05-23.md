@@ -785,14 +785,10 @@ bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh
 
 Scripts de deploy/manutencao relevantes:
 
-- `scripts/deploy-to-vps.sh`
-- `scripts/deploy-to-vps-complete.sh`
-- `scripts/deploy-backend-vps.sh`
-- `scripts/deploy-notifications-vps.sh`
-- `scripts/deploy-places-cache-vps.sh`
 - `scripts/healthcheck-vps.sh`
-- `scripts/monitorar-logs*.sh`
-- `leaf-websocket-backend/scripts/deploy/*`
+- `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh`
+- `leaf-websocket-backend/scripts/deploy/deploy-secondary-realtime-host.sh`
+- `leaf-websocket-backend/scripts/deploy/validate-runtime-config.js`
 - `leaf-websocket-backend/scripts/ops/*`
 
 Dashboard:
