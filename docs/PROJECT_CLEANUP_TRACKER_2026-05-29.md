@@ -111,3 +111,22 @@ Validação:
 - `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs`: executou, mas falhou por artefatos sensiveis locais preexistentes (`.env`, keystores, Firebase json e afins). Nao foi corrigido neste bloco para nao quebrar ambiente/build; tratar em bloco proprio de seguranca.
+
+## Bloco 3 - Executado
+
+Escopo: remover scripts historicos de deploy/manutencao que nao fazem parte do fluxo Contabo atual e eram sinalizados pelo scanner por CORS aberto.
+
+- Removidos scripts antigos de Hostinger/self-hosted/147.182:
+  - `scripts/maintenance/deploy/add-trip-tracking-apis.sh`
+  - `scripts/maintenance/deploy/deploy-to-hostinger.sh`
+  - `scripts/maintenance/deploy/setup-hostinger-leaf.sh`
+  - `scripts/maintenance/deploy/setup-self-hosted.sh`
+  - `scripts/maintenance/deploy/test-simple-apis.sh`
+  - `scripts/maintenance/server.js`
+
+Validação:
+
+- `rg` confirmou que esses scripts nao eram chamados por package scripts ou runtime.
+- `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs`: reduziu de 38 para 32 achados; os CORS wildcard desses scripts sairam. Achados restantes sao artefatos sensiveis locais, validacao Woovi/webhook e bypasses de QA/prelaunch que exigem bloco separado.
