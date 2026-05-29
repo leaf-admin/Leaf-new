@@ -33,7 +33,6 @@ describe('Advanced Mobility Stress Tests', () => {
     const driverSim = new RedisDriverSimulator();
     const isRemoteEnvironment =
         driverSim.useRemoteRedis ||
-        WS_URL.includes('sslip.io') ||
         WS_URL.startsWith('https://') ||
         (WS_URL.startsWith('http://') && !WS_URL.includes('localhost') && !WS_URL.includes('127.0.0.1'));
 

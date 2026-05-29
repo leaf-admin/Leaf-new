@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io/api';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.leaf.app.br/api';
 
 const SCENARIOS = [
   {

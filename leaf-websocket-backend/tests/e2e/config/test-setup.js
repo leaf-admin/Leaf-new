@@ -9,9 +9,9 @@ jest.setTimeout(30000);
 
 // Variáveis de ambiente de teste
 process.env.NODE_ENV = 'test';
-process.env.WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
-process.env.API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
-process.env.E2E_REMOTE_SSH_HOST = process.env.E2E_REMOTE_SSH_HOST || '62.169.31.231';
+process.env.WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
+process.env.API_BASE_URL = process.env.API_BASE_URL || 'https://api.leaf.app.br';
+process.env.E2E_REMOTE_SSH_HOST = process.env.E2E_REMOTE_SSH_HOST || 'api.leaf.app.br';
 process.env.E2E_REMOTE_SSH_USER = process.env.E2E_REMOTE_SSH_USER || 'root';
 process.env.GEOFENCE_RADIUS_KM = '9999'; // Permite requisições de teste em qualquer lugar do mundo
 process.env.REDIS_DISABLE_RECONNECT = 'true';

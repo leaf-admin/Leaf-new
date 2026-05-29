@@ -9,7 +9,7 @@ const io = require('socket.io-client');
 
 class AutomatedRideTester {
     constructor(options = {}) {
-        this.baseUrl = options.baseUrl || 'http://147.182.204.181:3001';
+        this.baseUrl = options.baseUrl || 'https://socket.leaf.app.br';
         this.testResults = [];
         this.activeConnections = new Map();
         this.testConfig = {

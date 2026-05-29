@@ -12,7 +12,7 @@
 const axios = require('axios');
 
 // Configurações
-const BACKEND_URL = 'http://147.182.204.181:3001';
+const BACKEND_URL = 'https://api.leaf.app.br';
 const TEST_DRIVER_ID = 'test-driver-123';
 
 console.log('🚀 INICIANDO TESTE DO SISTEMA DE DOCUMENTOS\n');

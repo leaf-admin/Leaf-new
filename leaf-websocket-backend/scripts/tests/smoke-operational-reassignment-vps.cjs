@@ -6,9 +6,9 @@ const { execFileSync } = require('child_process');
 
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 
-const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
-const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
-const REMOTE_SSH_HOST = process.env.REMOTE_SSH_HOST || 'root@62.169.31.231';
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.leaf.app.br';
+const REMOTE_SSH_HOST = process.env.REMOTE_SSH_HOST || 'root.leaf.app.br';
 const DEFAULT_REMOTE_SSH_KEY_CANDIDATES = [
   process.env.REMOTE_SSH_KEY,
   process.env.CONTABO_SSH_KEY_PATH,

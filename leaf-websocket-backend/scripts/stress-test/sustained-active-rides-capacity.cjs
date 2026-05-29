@@ -10,7 +10,7 @@
  *
  * Example:
  *   node scripts/stress-test/sustained-active-rides-capacity.cjs \
- *     --url https://api.62.169.31.231.sslip.io \
+ *     --url https://api.leaf.app.br \
  *     --drivers 120 \
  *     --passengers 150 \
  *     --profile production

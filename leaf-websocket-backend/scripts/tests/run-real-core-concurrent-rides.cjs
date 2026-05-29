@@ -23,11 +23,11 @@ function deriveApiBaseUrl(value) {
     }
     return trimTrailingSlash(parsed.toString());
   } catch (_error) {
-    return 'https://api.62.169.31.231.sslip.io';
+    return 'https://api.leaf.app.br';
   }
 }
 
-const WS_SERVER_URL = process.env.REAL_CORE_WS_URL || process.env.WS_URL || process.env.REAL_CORE_SERVER_URL || 'https://socket.62.169.31.231.sslip.io';
+const WS_SERVER_URL = process.env.REAL_CORE_WS_URL || process.env.WS_URL || process.env.REAL_CORE_SERVER_URL || 'https://socket.leaf.app.br';
 const API_BASE_URL = deriveApiBaseUrl(process.env.REAL_CORE_SERVER_URL || WS_SERVER_URL);
 const METRICS_URL = process.env.REAL_CORE_METRICS_URL || process.env.PRELAUNCH_METRICS_URL || `${API_BASE_URL}/api/metrics/prometheus`;
 const SPEED_KMH = Number.parseFloat(process.env.REAL_CORE_SIMULATION_SPEED_KMH || process.env.NIGHT_SOAK_SPEED_KMH || '50');

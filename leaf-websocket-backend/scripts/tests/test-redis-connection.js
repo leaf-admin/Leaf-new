@@ -34,15 +34,17 @@ async function testRedisConnection() {
             }
         },
         {
-            name: '147.182.204.181:6379 (IP VPS)',
-            config: {
-                host: '147.182.204.181',
-                port: 6379,
-                password: null,
-                db: 0,
-                connectTimeout: 5000,
-                lazyConnect: false
-            }
+            name: 'REMOTE_REDIS_HOST (variável de ambiente)',
+            config: process.env.REMOTE_REDIS_HOST
+                ? {
+                    host: process.env.REMOTE_REDIS_HOST,
+                    port: Number(process.env.REMOTE_REDIS_PORT || 6379),
+                    password: process.env.REMOTE_REDIS_PASSWORD || null,
+                    db: 0,
+                    connectTimeout: 5000,
+                    lazyConnect: false
+                }
+                : null
         },
         {
             name: 'REDIS_URL (variável de ambiente)',
@@ -124,8 +126,8 @@ async function testRedisConnection() {
     console.log(`  1. Rodando na VPS (localhost:6379)`);
     console.log(`  2. Acessível pelo servidor Node.js`);
     console.log(`  3. Sem senha (ou senha configurada em REDIS_PASSWORD)`);
-    console.log(`\n${colors.yellow}Para verificar na VPS:${colors.reset}`);
-    console.log(`  ssh usuario@147.182.204.181`);
+    console.log(`\n${colors.yellow}Para verificar no host remoto:${colors.reset}`);
+    console.log(`  ssh usuario@<host-contabo>`);
     console.log(`  redis-cli ping`);
     console.log(`  systemctl status redis`);
 }

@@ -3,7 +3,7 @@ const io = require('socket.io-client');
 console.log('�� Testando WebSocket do servidor Leaf...');
 
 // Conectar ao WebSocket
-const socket = io('http://147.182.204.181:3001', {
+const socket = io('https://socket.leaf.app.br', {
     transports: ['websocket'],
     timeout: 10000
 });

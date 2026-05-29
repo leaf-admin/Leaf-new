@@ -39,7 +39,7 @@ function deriveApiBaseUrl(value) {
     }
     return trimTrailingSlash(parsed.toString());
   } catch (_error) {
-    return 'https://api.62.169.31.231.sslip.io';
+    return 'https://api.leaf.app.br';
   }
 }
 

@@ -5,13 +5,13 @@
  * Evita ruído de corrida entre "subir online" e "disparo de booking".
  *
  * Uso:
- *   WS_URL=https://socket.62.169.31.231.sslip.io API_BASE_URL=https://api.62.169.31.231.sslip.io RUNS=10 node scripts/tests/measure-new-ride-request-latency-stable-driver.js
+ *   WS_URL=https://socket.leaf.app.br API_BASE_URL=https://api.leaf.app.br RUNS=10 node scripts/tests/measure-new-ride-request-latency-stable-driver.js
  */
 
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 
-const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
-const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.leaf.app.br';
 const RUNS = Number(process.env.RUNS || 10);
 const ONLINE_MAX_ATTEMPTS = Number(process.env.ONLINE_MAX_ATTEMPTS || 5);
 const PASSENGER_UID = process.env.TEST_PASSENGER_UID || 'iDiAKrLjeDWbIOYFEqkHLS3JBGN2';

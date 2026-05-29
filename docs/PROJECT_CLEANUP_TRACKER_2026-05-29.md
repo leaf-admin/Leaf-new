@@ -480,3 +480,19 @@ Validação:
 
 - `node -c` nos scripts JS alterados: PASS.
 - `bash -n` no lembrete de alertas alterado: PASS.
+
+## Bloco 26 - Executado
+
+Escopo: alinhar scripts de teste/E2E aos dominios Leaf.
+
+- Atualizados defaults de `api.62.169.*.sslip.io` e `socket.62.169.*.sslip.io` para `api.leaf.app.br` e `socket.leaf.app.br`.
+- Atualizados testes ad hoc que ainda apontavam para `147.182.*`.
+- Removida deteccao especifica de `sslip.io` nos helpers E2E; ambiente remoto agora e inferido por URL HTTPS ou host nao-local.
+- `test-redis-connection.js` nao tenta mais abrir Redis em IP antigo; Redis remoto exige `REMOTE_REDIS_HOST` explicito.
+- Mantida a capacidade generica de `runtime-cors-origins.js` montar dominios `sslip.io` apenas quando um host e passado explicitamente para teste.
+
+Validação:
+
+- `node -c` em todos os JS/CJS alterados nesse bloco: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.

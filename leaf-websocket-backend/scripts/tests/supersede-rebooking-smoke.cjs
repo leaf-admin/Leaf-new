@@ -2,8 +2,8 @@
 
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 
-const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
-const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.leaf.app.br';
 const PASSENGER_UID = process.env.TEST_PASSENGER_UID || 'iDiAKrLjeDWbIOYFEqkHLS3JBGN2';
 const DRIVER_UID = process.env.TEST_DRIVER_UID || '5zgeX92yleYa2wH8JnMvqOU76fX2';
 const ONLINE_MAX_ATTEMPTS = Number(process.env.ONLINE_MAX_ATTEMPTS || 5);

@@ -7,8 +7,8 @@ const { GoogleAuth } = require('google-auth-library');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const REPORT_DIR = path.join(ROOT, 'reports');
-const BASE_URL = process.env.BASE_URL || 'https://api.62.169.31.231.sslip.io';
-const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
+const BASE_URL = process.env.BASE_URL || 'https://api.leaf.app.br';
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@leaf.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const FIREBASE_PROJECT = process.env.FIREBASE_PROJECT || 'leaf-reactnative';
