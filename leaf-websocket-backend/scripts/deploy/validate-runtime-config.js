@@ -9,6 +9,9 @@
 const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
+const {
+  evaluateProductionReadiness
+} = require('../../services/kyc-biometric-production-policy');
 
 const REQUIRED_BASE = [
   'NODE_ENV'
@@ -39,6 +42,13 @@ const WEBHOOK_VERIFIER_KEYS = [
   'OPENPIX_WEBHOOK_SIGNATURE_SECRET',
   'WOOVI_WEBHOOK_HMAC_SECRET',
   'OPENPIX_WEBHOOK_HMAC_SECRET'
+];
+
+const WEBHOOK_AUTHORIZATION_KEYS = [
+  'WOOVI_WEBHOOK_AUTHORIZATION',
+  'OPENPIX_WEBHOOK_AUTHORIZATION',
+  'WOOVI_WEBHOOK_AUTH_TOKEN',
+  'OPENPIX_WEBHOOK_AUTH_TOKEN'
 ];
 
 const PAYMENT_BYPASS_FLAGS = [
@@ -167,6 +177,8 @@ function main() {
   const blockers = [];
   const webhookVerifierKeysPresent = WEBHOOK_VERIFIER_KEYS.filter((key) => String(process.env[key] || '').trim());
   const hasWebhookVerifier = webhookVerifierKeysPresent.length > 0;
+  const webhookAuthorizationKeysPresent = WEBHOOK_AUTHORIZATION_KEYS.filter((key) => String(process.env[key] || '').trim());
+  const hasWebhookAuthorization = webhookAuthorizationKeysPresent.length > 0;
   const webhookRequireSignature = booleanDiagnostic(
     'WOOVI_WEBHOOK_REQUIRE_SIGNATURE',
     hasWebhookVerifier
@@ -183,6 +195,7 @@ function main() {
     acc[key] = booleanDiagnostic(key, false);
     return acc;
   }, {});
+  const biometricReadiness = evaluateProductionReadiness(process.env);
   const legacyRuntimeDiagnostics = LEGACY_RUNTIME_FLAGS.reduce((acc, key) => {
     acc[key] = booleanDiagnostic(key, false);
     return acc;
@@ -192,6 +205,12 @@ function main() {
     'REQUIRE_SOCKETIO_REDIS_ADAPTER',
     nodeEnv === 'production' && runtimeRole === 'gateway'
   );
+  const webhookProviderVerificationFallback =
+    !hasWebhookVerifier &&
+    (hasWebhookAuthorization || paymentProviderSandboxRuntime) &&
+    !webhookRequireSignature.value &&
+    webhookAllowUnsigned.value &&
+    webhookProviderVerificationRequired.value;
 
   if (paymentProviderConfigRequired && wooviEnv === 'sandbox' && /api\.woovi\.com/i.test(baseUrl) && !/sandbox/i.test(baseUrl)) {
     warnings.push('WOOVI_ENVIRONMENT=sandbox com base URL de produção detectada');
@@ -218,8 +237,13 @@ function main() {
     if (Number.isFinite(geofenceRadiusKm) && geofenceRadiusKm >= 100) {
       blockers.push(`GEOFENCE_RADIUS_KM=${geofenceRadiusKm} abre demais a operação em produção`);
     }
-    if (paymentProviderConfigRequired && !hasWebhookVerifier && !paymentProviderSandboxRuntime) {
-      blockers.push('Webhook Woovi/OpenPix em produção exige ao menos um verificador de assinatura: WOOVI_WEBHOOK_PUBLIC_KEY, OPENPIX_WEBHOOK_PUBLIC_KEY, WOOVI_WEBHOOK_SIGNATURE_SECRET, OPENPIX_WEBHOOK_SIGNATURE_SECRET, WOOVI_WEBHOOK_HMAC_SECRET ou OPENPIX_WEBHOOK_HMAC_SECRET');
+    if (
+      paymentProviderConfigRequired &&
+      !hasWebhookVerifier &&
+      !hasWebhookAuthorization &&
+      !paymentProviderSandboxRuntime
+    ) {
+      blockers.push('Webhook Woovi/OpenPix em produção exige Authorization configurado no webhook (WOOVI_WEBHOOK_AUTHORIZATION/WOOVI_WEBHOOK_AUTH_TOKEN) ou verificação por assinatura pública quando disponível');
     }
     if (
       paymentProviderSandboxRuntime &&
@@ -242,11 +266,30 @@ function main() {
     ) {
       blockers.push('WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=true obrigatório no sandbox sem verificador');
     }
-    if (paymentProviderConfigRequired && !paymentProviderSandboxRuntime && !webhookRequireSignature.value) {
+    if (
+      paymentProviderConfigRequired &&
+      !paymentProviderSandboxRuntime &&
+      hasWebhookVerifier &&
+      !webhookRequireSignature.value
+    ) {
       blockers.push('WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true obrigatório em produção');
     }
-    if (paymentProviderConfigRequired && !paymentProviderSandboxRuntime && webhookAllowUnsigned.value) {
+    if (
+      paymentProviderConfigRequired &&
+      !paymentProviderSandboxRuntime &&
+      hasWebhookVerifier &&
+      webhookAllowUnsigned.value
+    ) {
       blockers.push('WOOVI_WEBHOOK_ALLOW_UNSIGNED=false obrigatório em produção');
+    }
+    if (
+      paymentProviderConfigRequired &&
+      !paymentProviderSandboxRuntime &&
+      !hasWebhookVerifier &&
+      hasWebhookAuthorization &&
+      !webhookProviderVerificationFallback
+    ) {
+      blockers.push('Webhook Woovi sem assinatura local em produção exige WOOVI_WEBHOOK_REQUIRE_SIGNATURE=false, WOOVI_WEBHOOK_ALLOW_UNSIGNED=true e WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=true');
     }
     if (paymentProviderConfigRequired && !webhookProviderVerificationRequired.value) {
       warnings.push('WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED=false remove conferência complementar no provedor');
@@ -295,6 +338,9 @@ function main() {
       blockers.push(`CORS_ORIGIN inseguro para produção: ${corsOrigin || '(vazio)'}`);
     }
 
+    blockers.push(...biometricReadiness.blockers);
+    warnings.push(...biometricReadiness.warnings);
+
     if (boolEnv('PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR')) {
       warnings.push('PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR=true mantém dual-write legado em produção');
     }
@@ -323,19 +369,29 @@ function main() {
       WOOVI_WEBHOOK_PUBLIC_KEY: presence(process.env.WOOVI_WEBHOOK_PUBLIC_KEY || process.env.OPENPIX_WEBHOOK_PUBLIC_KEY),
       WOOVI_WEBHOOK_SIGNATURE_SECRET: presence(process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET || process.env.OPENPIX_WEBHOOK_SIGNATURE_SECRET),
       WOOVI_WEBHOOK_HMAC_SECRET: presence(process.env.WOOVI_WEBHOOK_HMAC_SECRET || process.env.OPENPIX_WEBHOOK_HMAC_SECRET),
+      WOOVI_WEBHOOK_AUTHORIZATION: presence(
+        process.env.WOOVI_WEBHOOK_AUTHORIZATION ||
+        process.env.OPENPIX_WEBHOOK_AUTHORIZATION ||
+        process.env.WOOVI_WEBHOOK_AUTH_TOKEN ||
+        process.env.OPENPIX_WEBHOOK_AUTH_TOKEN
+      ),
       LEAF_PIX_KEY: presence(process.env.LEAF_PIX_KEY)
     },
     diagnostics: {
+      biometricReadiness,
       webhookSignature: {
         verifierKeysPresent: webhookVerifierKeysPresent,
         hasVerifier: hasWebhookVerifier,
+        authorizationKeysPresent: webhookAuthorizationKeysPresent,
+        hasAuthorization: hasWebhookAuthorization,
+        providerVerificationFallback: webhookProviderVerificationFallback,
         requireSignature: {
           ...webhookRequireSignature,
-          expected: true
+          expected: hasWebhookVerifier && !paymentProviderSandboxRuntime
         },
         allowUnsigned: {
           ...webhookAllowUnsigned,
-          expected: false
+          expected: !hasWebhookVerifier
         },
         providerVerificationRequired: {
           ...webhookProviderVerificationRequired,

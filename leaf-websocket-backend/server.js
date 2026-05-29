@@ -130,6 +130,7 @@ const metricsCollector = require('./services/metrics-collector');
 const queueMonitoringRoutes = require('./routes/queue-monitoring');
 const IntegratedKYCService = require('./services/IntegratedKYCService');
 const kycPolicyService = require('./services/kyc-policy-service');
+const { resolveBiometricPolicy } = require('./services/kyc-biometric-production-policy');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
 // ============================================================================================
 
@@ -636,15 +637,49 @@ async function enforceDailyKYCForOnline(driverId) {
         return {
             allowed: false,
             reason: verification?.reason || 'Verificação facial diária necessária',
-            code: 'kycRequired'
+            code: 'kycRequired',
+            requirement: 'LIVENESS_REQUIRED',
+            challenge: await kycPolicyService.createStepUpChallenge({
+                driverId,
+                requirement: 'LIVENESS_REQUIRED',
+                score: 100,
+                source: 'driver_online',
+                signals: [
+                    {
+                        code: 'KYC_STALE_OR_MISSING',
+                        weight: 100,
+                        message: verification?.reason || 'Verificação facial diária necessária',
+                        details: {
+                            maxAgeHours: safeMaxAgeHours
+                        }
+                    }
+                ]
+            }).catch((challengeError) => {
+                logStructured('warn', 'Falha ao criar challenge KYC para online', {
+                    service: 'server',
+                    operation: 'enforceDailyKYCForOnline',
+                    driverId,
+                    error: challengeError.message
+                });
+                return null;
+            })
         };
     } catch (error) {
-        logStructured('warn', 'Falha no gate KYC diário (fail-open)', {
+        const biometricPolicy = resolveBiometricPolicy(process.env);
+        const failClosed = biometricPolicy.productionBiometricsEnabled;
+        logStructured('warn', `Falha no gate KYC diário (${failClosed ? 'fail-closed' : 'fail-open'})`, {
             service: 'server',
             operation: 'enforceDailyKYCForOnline',
             driverId,
             error: error.message
         });
+        if (failClosed) {
+            return {
+                allowed: false,
+                reason: 'Nao foi possivel validar KYC diario agora.',
+                code: 'KYC_DAILY_CHECK_FAILED'
+            };
+        }
         return {
             allowed: true,
             reason: 'Falha ao validar KYC diário (fail-open)',

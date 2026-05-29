@@ -147,15 +147,15 @@ check_json_endpoint "/health/liveness" "200"
 check_json_endpoint "/api/health" "200"
 
 # APIs usadas por app/dashboard
-check_json_endpoint "/api/rides/stats?period=today" "200"
+check_auth_endpoint "/api/rides/stats?period=today"
 check_json_endpoint "/api/metrics/overview" "200"
 check_auth_endpoint "/api/metrics/rides/daily"
 check_auth_endpoint "/api/metrics/financial/rides?period=today"
 check_auth_endpoint "/api/metrics/financial/operational-fee?period=today"
 check_auth_endpoint "/api/metrics/observability"
-check_json_endpoint "/api/map/locations?type=all" "200"
+check_auth_endpoint "/api/map/locations?type=all"
 check_auth_endpoint "/api/drivers/applications?page=1&limit=5"
-check_json_endpoint "/api/activity/recent" "200"
+check_auth_endpoint "/api/activity/recent"
 
 # KYC
 check_json_endpoint "/api/kyc/health" "200"

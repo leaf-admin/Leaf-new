@@ -379,7 +379,9 @@ function registerSocketDriverControlHandlers({
                             code: kycGate?.code || 'kycRequired',
                             kycRequired: true,
                             activationState,
-                            requirement: activationState?.requiresLiveness ? 'FIRST_ONLINE_LIVENESS' : 'RISK_OR_RECURRENCE_LIVENESS'
+                            requirement: kycGate?.requirement || 'LIVENESS_REQUIRED',
+                            challengeId: kycGate?.challenge?.challengeId || null,
+                            challenge: kycGate?.challenge || null
                         });
                         return;
                     }

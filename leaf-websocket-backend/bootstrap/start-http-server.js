@@ -69,6 +69,15 @@ function isDailySubscriptionBillingEnabled() {
     return String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
 }
 
+function boolEnv(name, fallback = false) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    const normalized = String(raw).trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    return fallback;
+}
+
 function startHttpServer({
     app,
     server,
@@ -125,9 +134,16 @@ function startHttpServer({
                 logStructured('info', 'Support Chat Service conectado ao Socket.IO', { service: 'support-chat' });
 
                 // ✅ Iniciar serviço de limpeza automática de conexões
-                const connectionCleanupService = new ConnectionCleanupService(io);
-                connectionCleanupService.start();
-                logStructured('info', 'Serviço de limpeza de conexões iniciado', { service: 'connection-cleanup' });
+                if (boolEnv('ENABLE_CONNECTION_CLEANUP_SERVICE', true)) {
+                    const connectionCleanupService = new ConnectionCleanupService(io);
+                    connectionCleanupService.start();
+                    logStructured('info', 'Serviço de limpeza de conexões iniciado', { service: 'connection-cleanup' });
+                } else {
+                    logStructured('info', 'Serviço de limpeza de conexões desabilitado neste processo', {
+                        service: 'connection-cleanup',
+                        reason: 'ENABLE_CONNECTION_CLEANUP_SERVICE=false'
+                    });
+                }
 
                 // ✅ Iniciar serviço de cobrança diária de assinatura somente após estabilização regional
                 if (isDailySubscriptionBillingEnabled()) {
@@ -141,35 +157,49 @@ function startHttpServer({
                 }
 
                 // Relatorio diario de earnings/custo por corrida para canal operacional.
-                try {
-                    const dailyEarningsReportService = require('../services/daily-earnings-report-service');
-                    dailyEarningsReportService.startScheduler();
-                } catch (dailyEarningsError) {
-                    logStructured('warn', 'Falha ao iniciar scheduler de earnings diario', {
+                if (boolEnv('DAILY_EARNINGS_REPORT_ENABLED', true)) {
+                    try {
+                        const dailyEarningsReportService = require('../services/daily-earnings-report-service');
+                        dailyEarningsReportService.startScheduler();
+                    } catch (dailyEarningsError) {
+                        logStructured('warn', 'Falha ao iniciar scheduler de earnings diario', {
+                            service: 'daily-earnings-report',
+                            error: dailyEarningsError.message
+                        });
+                    }
+                } else {
+                    logStructured('info', 'Scheduler de earnings diario desabilitado neste processo', {
                         service: 'daily-earnings-report',
-                        error: dailyEarningsError.message
+                        reason: 'DAILY_EARNINGS_REPORT_ENABLED=false'
                     });
                 }
 
                 // Reprocessa finalizacoes pendentes (outbox) para garantir persistencia no Firestore.
-                try {
-                    const ridePersistenceService = require('../services/ride-persistence-service');
-                    const outboxIntervalMs = Number.parseInt(process.env.RIDE_FINALIZATION_OUTBOX_INTERVAL_MS || '10000', 10);
-                    setInterval(async () => {
-                        const stats = await ridePersistenceService.processFinalizationOutboxBatch(30);
-                        if ((stats.processed || 0) > 0 || (stats.retried || 0) > 0 || (stats.failed || 0) > 0) {
-                            logStructured('info', 'Outbox de finalizacao processado', {
-                                service: 'ride-persistence',
-                                processed: stats.processed || 0,
-                                retried: stats.retried || 0,
-                                failed: stats.failed || 0
-                            });
-                        }
-                    }, outboxIntervalMs);
-                } catch (outboxInitError) {
-                    logStructured('error', 'Falha ao iniciar processador de outbox de finalizacao', {
+                if (boolEnv('RIDE_FINALIZATION_OUTBOX_ENABLED', true)) {
+                    try {
+                        const ridePersistenceService = require('../services/ride-persistence-service');
+                        const outboxIntervalMs = Number.parseInt(process.env.RIDE_FINALIZATION_OUTBOX_INTERVAL_MS || '10000', 10);
+                        setInterval(async () => {
+                            const stats = await ridePersistenceService.processFinalizationOutboxBatch(30);
+                            if ((stats.processed || 0) > 0 || (stats.retried || 0) > 0 || (stats.failed || 0) > 0) {
+                                logStructured('info', 'Outbox de finalizacao processado', {
+                                    service: 'ride-persistence',
+                                    processed: stats.processed || 0,
+                                    retried: stats.retried || 0,
+                                    failed: stats.failed || 0
+                                });
+                            }
+                        }, outboxIntervalMs);
+                    } catch (outboxInitError) {
+                        logStructured('error', 'Falha ao iniciar processador de outbox de finalizacao', {
+                            service: 'ride-persistence',
+                            error: outboxInitError.message
+                        });
+                    }
+                } else {
+                    logStructured('info', 'Processador de outbox de finalizacao desabilitado neste processo', {
                         service: 'ride-persistence',
-                        error: outboxInitError.message
+                        reason: 'RIDE_FINALIZATION_OUTBOX_ENABLED=false'
                     });
                 }
 

@@ -33,36 +33,62 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     CORS_ORIGIN: 'https://api.leaf.example'
   };
 
-  it('blocks production deploy without webhook signature verifier and strict flags', () => {
+  it('blocks production deploy without webhook authorization or signature verifier', () => {
     const result = runValidator(baseProdEnv);
 
     expect(result.status).toBe(1);
     expect(result.report.ok).toBe(false);
     expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
-      'Webhook Woovi/OpenPix em produção exige ao menos um verificador de assinatura: WOOVI_WEBHOOK_PUBLIC_KEY, OPENPIX_WEBHOOK_PUBLIC_KEY, WOOVI_WEBHOOK_SIGNATURE_SECRET, OPENPIX_WEBHOOK_SIGNATURE_SECRET, WOOVI_WEBHOOK_HMAC_SECRET ou OPENPIX_WEBHOOK_HMAC_SECRET',
-      'WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true obrigatório em produção',
-      'WOOVI_WEBHOOK_ALLOW_UNSIGNED=false obrigatório em produção'
+      'Webhook Woovi/OpenPix em produção exige Authorization configurado no webhook (WOOVI_WEBHOOK_AUTHORIZATION/WOOVI_WEBHOOK_AUTH_TOKEN) ou verificação por assinatura pública quando disponível'
     ]));
     expect(result.report.diagnostics.webhookSignature).toMatchObject({
       verifierKeysPresent: [],
       hasVerifier: false,
+      authorizationKeysPresent: [],
+      hasAuthorization: false,
+      providerVerificationFallback: false,
       requireSignature: {
         value: false,
         source: 'default',
-        expected: true
+        expected: false
       },
       allowUnsigned: {
         value: true,
         source: 'default',
-        expected: false
+        expected: true
       }
     });
   });
 
-  it('allows production deploy with a configured verifier and strict flags', () => {
+  it('allows production deploy with webhook authorization and provider verification fallback', () => {
     const result = runValidator({
       ...baseProdEnv,
-      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_AUTHORIZATION: 'Bearer webhook-token',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'false',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'true',
+      WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: 'true'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.ok).toBe(true);
+    expect(result.report.summary.blockers).toEqual([]);
+    expect(result.report.sensitivePresence).toMatchObject({
+      WOOVI_API_TOKEN: 'present',
+      WOOVI_WEBHOOK_AUTHORIZATION: 'present',
+      LEAF_PIX_KEY: 'present'
+    });
+    expect(result.report.diagnostics.webhookSignature).toMatchObject({
+      hasVerifier: false,
+      hasAuthorization: true,
+      providerVerificationFallback: true
+    });
+    expect(result.stdout).not.toContain('webhook-token');
+  });
+
+  it('allows production deploy with a configured public-key verifier and strict flags', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_PUBLIC_KEY: 'public-key-placeholder',
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
       WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: 'true'
@@ -73,10 +99,10 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     expect(result.report.summary.blockers).toEqual([]);
     expect(result.report.sensitivePresence).toMatchObject({
       WOOVI_API_TOKEN: 'present',
-      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'present',
+      WOOVI_WEBHOOK_PUBLIC_KEY: 'present',
       LEAF_PIX_KEY: 'present'
     });
-    expect(result.stdout).not.toContain('woovi-secret');
+    expect(result.stdout).not.toContain('public-key-placeholder');
   });
 
   it('allows real sandbox canary without webhook verifier only with provider verification fallback', () => {
@@ -104,12 +130,12 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       requireSignature: {
         value: false,
         source: 'env',
-        expected: true
+        expected: false
       },
       allowUnsigned: {
         value: true,
         source: 'env',
-        expected: false
+        expected: true
       },
       providerVerificationRequired: {
         value: true,
@@ -292,5 +318,54 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       'ENABLE_LEGACY_SOCKET_BRIDGE=true bloqueado em produção'
     ]));
     expect(result.report.diagnostics.runtime.paymentProviderConfigRequired).toBe(false);
+  });
+
+  it('blocks strict biometric production without AWS, face service and no-fallback config', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'KYC_AWS_LIVENESS_ENABLED=true obrigatório para produção biométrica.',
+      'KYC_AWS_LIVENESS_ASSUME_ROLE_ARN obrigatório para emitir credenciais temporárias AWS.',
+      'BIOMETRIC_FACE_SERVICE_URL obrigatório para comparação biométrica.',
+      'BIOMETRIC_FACE_SERVICE_API_KEY obrigatório para comparação biométrica.',
+      'ENABLE_CNH_FACE_BIOMETRICS=true obrigatório para gerar embedding da CNH.'
+    ]));
+    expect(result.report.diagnostics.biometricReadiness).toMatchObject({
+      ok: false,
+      enabled: true
+    });
+  });
+
+  it('allows strict biometric production when all required controls are configured', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true',
+      KYC_AWS_LIVENESS_ENABLED: 'true',
+      KYC_AWS_LIVENESS_ASSUME_ROLE_ARN: 'arn:aws:iam::123456789012:role/leaf-liveness',
+      BIOMETRIC_FACE_SERVICE_URL: 'https://face.leaf.internal',
+      BIOMETRIC_FACE_SERVICE_API_KEY: 'face-key',
+      ENABLE_CNH_FACE_BIOMETRICS: 'true',
+      KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
+      KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false',
+      KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.ok).toBe(true);
+    expect(result.report.diagnostics.biometricReadiness).toMatchObject({
+      ok: true,
+      enabled: true
+    });
+    expect(result.stdout).not.toContain('face-key');
   });
 });

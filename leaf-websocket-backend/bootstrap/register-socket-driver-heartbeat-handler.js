@@ -88,7 +88,10 @@ function registerSocketDriverHeartbeatHandler({
                             error: 'Verificação facial diária necessária para ficar online.',
                             reason: dailyKYC.reason,
                             code: dailyKYC.code,
-                            kycRequired: true
+                            kycRequired: true,
+                            requirement: dailyKYC.requirement || 'LIVENESS_REQUIRED',
+                            challengeId: dailyKYC.challenge?.challengeId || null,
+                            challenge: dailyKYC.challenge || null
                         });
                         return;
                     }

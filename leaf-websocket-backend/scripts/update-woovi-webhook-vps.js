@@ -18,6 +18,24 @@ const WOOVI_CONFIG = require(configPath);
 const WOOVI_API_BASE_URL = process.env.WOOVI_BASE_URL || 'https://api.woovi-sandbox.com/api/v1';
 
 const VPS_WEBHOOK_URL = process.env.WOOVI_WEBHOOK_URL || 'http://147.182.204.181/api/woovi/webhook';
+const WEBHOOK_AUTHORIZATION =
+  process.env.WOOVI_WEBHOOK_AUTHORIZATION ||
+  process.env.OPENPIX_WEBHOOK_AUTHORIZATION ||
+  process.env.WOOVI_WEBHOOK_AUTH_TOKEN ||
+  process.env.OPENPIX_WEBHOOK_AUTH_TOKEN ||
+  '';
+
+function buildWebhookPayload(basePayload = {}) {
+  const webhook = {
+    ...basePayload
+  };
+
+  if (WEBHOOK_AUTHORIZATION) {
+    webhook.authorization = WEBHOOK_AUTHORIZATION;
+  }
+
+  return { webhook };
+}
 
 async function updateWooviWebhook(webhookUrl) {
   try {
@@ -82,13 +100,11 @@ async function updateWooviWebhook(webhookUrl) {
         console.log(`      URL antiga: ${existingWebhook.url}`);
         console.log(`      URL nova: ${webhookUrl}`);
         
-        const updateResponse = await api.put(`/webhook/${existingWebhook.id}`, {
-          webhook: {
+        const updateResponse = await api.put(`/webhook/${existingWebhook.id}`, buildWebhookPayload({
             url: webhookUrl,
             isActive: true,
             name: existingWebhook.name || 'Leaf App Webhook - VPS'
-          }
-        });
+        }));
         
         if (updateResponse.data) {
           console.log('   ✅ Webhook atualizado na Woovi com sucesso!');
@@ -116,14 +132,12 @@ async function updateWooviWebhook(webhookUrl) {
         
         // Criar novo webhook
         console.log('   📝 Criando novo webhook na Woovi...');
-        const payload = {
-          webhook: {
+        const payload = buildWebhookPayload({
             name: 'Leaf App Webhook - VPS',
             url: webhookUrl,
             isActive: true,
             event: 'OPENPIX:CHARGE_COMPLETED'
-          }
-        };
+        });
         console.log('   📤 Payload:', JSON.stringify(payload, null, 2));
         
         const createResponse = await api.post('/webhook', payload);
@@ -143,14 +157,12 @@ async function updateWooviWebhook(webhookUrl) {
     } else {
       // Nenhum webhook encontrado, criar novo
       console.log('   📝 Nenhum webhook existente encontrado, criando novo...');
-      const createResponse = await api.post('/webhook', {
-        webhook: {
+      const createResponse = await api.post('/webhook', buildWebhookPayload({
           name: 'Leaf App Webhook - VPS',
           url: webhookUrl,
           isActive: true,
           event: 'OPENPIX:CHARGE_COMPLETED'
-        }
-      });
+      }));
       
       if (createResponse.data) {
         console.log('   ✅ Webhook criado na Woovi com sucesso!');

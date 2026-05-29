@@ -100,6 +100,11 @@ function createSocketServer({ server, socketIo, corsOptions, app, logStructured 
                 runtimeRole: redisAdapterConfig.runtimeRole,
                 error: error.message
             });
+            if (redisAdapterConfig.required) {
+                setImmediate(() => {
+                    process.exit(1);
+                });
+            }
         });
     } else {
         logStructured('info', 'Socket.IO Redis Adapter desabilitado por configuração', {

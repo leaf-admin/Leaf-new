@@ -7,6 +7,10 @@ RUN apk add --no-cache \
     bash \
     postgresql-client
 
+# Criar usuário não-root antes de copiar o código.
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S leaf -u 1001
+
 # Criar diretório da aplicação
 WORKDIR /app
 
@@ -16,15 +20,11 @@ COPY package*.json ./
 # Instalar dependências de produção
 RUN npm install --omit=dev && npm cache clean --force
 
-# Copiar código da aplicação
-COPY . .
+# Copiar código da aplicação já com owner correto, sem chown recursivo em node_modules.
+COPY --chown=leaf:nodejs . .
 
-# Criar usuário não-root
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S leaf -u 1001
-
-# Mudar propriedade dos arquivos
-RUN chown -R leaf:nodejs /app
+# Garantir escrita no diretório de logs sem percorrer a árvore inteira do app.
+RUN mkdir -p /app/logs && chown leaf:nodejs /app/logs
 
 # Mudar para usuário não-root
 USER leaf

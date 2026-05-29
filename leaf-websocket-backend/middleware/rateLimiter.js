@@ -154,12 +154,27 @@ const driverStatusLimiter = rateLimit({
   }
 });
 
+const getRequestPath = (req) => String(req.path || req.originalUrl || req.url || '').split('?')[0];
+
+const shouldBypassRateLimit = (req) => {
+  const requestPath = getRequestPath(req);
+
+  return (
+    requestPath === '/health' ||
+    requestPath.startsWith('/health/') ||
+    requestPath === '/api/health' ||
+    requestPath.startsWith('/api/health/') ||
+    requestPath === '/otel/health' ||
+    requestPath === '/otel/v1/traces'
+  );
+};
+
 // Função para aplicar rate limiting baseado na rota
 const applyRateLimit = (req, res, next) => {
   const url = req.url;
 
-  // OTLP ingest interno não deve sofrer rate limiting para evitar queda de telemetria.
-  if (url.includes('/otel/v1/traces') || url.includes('/otel/health')) {
+  // Health/telemetria interna não devem sofrer rate limiting para evitar flapping operacional.
+  if (shouldBypassRateLimit(req)) {
     return next();
   }
   
@@ -203,5 +218,6 @@ module.exports = {
   locationLimiter,
   websocketLimiter,
   paymentLimiter,
-  driverStatusLimiter
+  driverStatusLimiter,
+  shouldBypassRateLimit
 };

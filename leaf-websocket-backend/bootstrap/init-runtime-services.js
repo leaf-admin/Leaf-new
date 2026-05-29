@@ -8,17 +8,43 @@ function initializeRuntimeServices({
     redisPool,
     logStructured
 }) {
+    const boolEnv = (name, fallback = false) => {
+        const raw = process.env[name];
+        if (raw === undefined || raw === null || raw === '') return fallback;
+        const normalized = String(raw).trim().toLowerCase();
+        if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+        if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+        return fallback;
+    };
+
     const runQueueWorkerInProcess =
-        String(process.env.RUNTIME_ENABLE_QUEUE_WORKER || (process.env.ENABLE_DEDICATED_QUEUE_WORKER === 'true' ? 'false' : 'true')).toLowerCase() !== 'false';
+        boolEnv('RUNTIME_ENABLE_QUEUE_WORKER', !boolEnv('ENABLE_DEDICATED_QUEUE_WORKER', false));
+    const runRadiusExpansionManager = boolEnv('ENABLE_RUNTIME_RADIUS_EXPANSION_MANAGER', true);
+    const runDriverPoolMonitor = boolEnv('ENABLE_DRIVER_POOL_MONITOR', true);
+    const runAcceptedRideRecoveryMonitor = boolEnv('ENABLE_ACCEPTED_RIDE_RECOVERY_MONITOR', true);
+    const runDemandNotificationService = boolEnv('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', true);
+    const runDashboardWebSocketService = boolEnv('ENABLE_RUNTIME_DASHBOARD_WEBSOCKET', true);
+    const runCleanupJob = boolEnv('ENABLE_RUNTIME_CLEANUP_JOB', true);
+
     // ==================== INICIALIZAÇÃO FASE 7: SISTEMA DE FILAS E MATCHING ====================
     // Inicializar instâncias dos serviços
     const responseHandler = new ResponseHandler(io);
     const gradualExpander = new GradualRadiusExpander(io);
-    const radiusExpansionManager = new RadiusExpansionManager(io);
+    const radiusExpansionManager = runRadiusExpansionManager
+        ? new RadiusExpansionManager(io)
+        : null;
 
     // Iniciar monitoramento de expansão para 5km
-    radiusExpansionManager.start();
-    logStructured('info', 'RadiusExpansionManager iniciado', { service: 'server', phase: 'fase7' });
+    if (radiusExpansionManager) {
+        radiusExpansionManager.start();
+        logStructured('info', 'RadiusExpansionManager iniciado', { service: 'server', phase: 'fase7' });
+    } else {
+        logStructured('info', 'RadiusExpansionManager desabilitado neste processo', {
+            service: 'server',
+            phase: 'fase7',
+            reason: 'ENABLE_RUNTIME_RADIUS_EXPANSION_MANAGER=false'
+        });
+    }
 
     // Variável para armazenar activeBookings (compatibilidade)
     if (!io.activeBookings) {
@@ -47,162 +73,205 @@ function initializeRuntimeServices({
 
     // ==================== INICIALIZAÇÃO FASE 9: DRIVER POOL MONITOR ====================
     // Inicializar monitor de motoristas disponíveis
-    const DriverPoolMonitor = require('../services/driver-pool-monitor');
-    const driverPoolMonitor = new DriverPoolMonitor(io);
+    let driverPoolMonitor = null;
 
     // Iniciar monitor (verifica motoristas livres a cada 5 segundos)
-    driverPoolMonitor.start();
-    logStructured('info', 'DriverPoolMonitor iniciado (monitoramento contínuo de motoristas livres)', { service: 'server', phase: 'fase9' });
+    if (runDriverPoolMonitor) {
+        const DriverPoolMonitor = require('../services/driver-pool-monitor');
+        driverPoolMonitor = new DriverPoolMonitor(io);
+        driverPoolMonitor.start();
+        logStructured('info', 'DriverPoolMonitor iniciado (monitoramento contínuo de motoristas livres)', { service: 'server', phase: 'fase9' });
+    } else {
+        logStructured('info', 'DriverPoolMonitor desabilitado neste processo', {
+            service: 'server',
+            phase: 'fase9',
+            reason: 'ENABLE_DRIVER_POOL_MONITOR=false'
+        });
+    }
     // ============================================================================
 
     // ==================== MONITOR DE RECUPERAÇÃO DE ACCEPTED ÓRFÃO ====================
-    const AcceptedRideRecoveryMonitor = require('../services/accepted-ride-recovery-monitor');
-    const acceptedRideRecoveryMonitor = new AcceptedRideRecoveryMonitor(io);
-    acceptedRideRecoveryMonitor.start();
-    logStructured('info', 'AcceptedRideRecoveryMonitor iniciado (reconciliação de ACCEPTED órfão)', {
-        service: 'server'
-    });
+    let acceptedRideRecoveryMonitor = null;
+    if (runAcceptedRideRecoveryMonitor) {
+        const AcceptedRideRecoveryMonitor = require('../services/accepted-ride-recovery-monitor');
+        acceptedRideRecoveryMonitor = new AcceptedRideRecoveryMonitor(io);
+        acceptedRideRecoveryMonitor.start();
+        logStructured('info', 'AcceptedRideRecoveryMonitor iniciado (reconciliação de ACCEPTED órfão)', {
+            service: 'server'
+        });
+    } else {
+        logStructured('info', 'AcceptedRideRecoveryMonitor desabilitado neste processo', {
+            service: 'server',
+            reason: 'ENABLE_ACCEPTED_RIDE_RECOVERY_MONITOR=false'
+        });
+    }
     // ============================================================================
 
     // ==================== SERVIÇO DE NOTIFICAÇÃO DE DEMANDA ====================
-    const DemandNotificationService = require('../services/demand-notification-service');
-    const demandNotificationService = new DemandNotificationService(io);
-    logStructured('info', 'Serviço de Notificação de Demanda inicializado', { service: 'server' });
+    let demandNotificationService = null;
+    if (runDemandNotificationService) {
+        const DemandNotificationService = require('../services/demand-notification-service');
+        demandNotificationService = new DemandNotificationService(io);
+        logStructured('info', 'Serviço de Notificação de Demanda inicializado', { service: 'server' });
+    } else {
+        logStructured('info', 'Serviço de Notificação de Demanda desabilitado neste processo', {
+            service: 'server',
+            reason: 'ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE=false'
+        });
+    }
     // ============================================================================
 
     // ==================== DASHBOARD WEBSOCKET SERVICE ====================
-    const DashboardWebSocketService = require('../services/dashboard-websocket');
-    const dashboardWebSocketService = new DashboardWebSocketService(io, redisPool.getConnection());
-    logStructured('info', 'Dashboard WebSocket Service inicializado', { service: 'server' });
+    let dashboardWebSocketService = null;
+    if (runDashboardWebSocketService) {
+        const DashboardWebSocketService = require('../services/dashboard-websocket');
+        dashboardWebSocketService = new DashboardWebSocketService(io, redisPool.getConnection());
+        logStructured('info', 'Dashboard WebSocket Service inicializado', { service: 'server' });
+    } else {
+        logStructured('info', 'Dashboard WebSocket Service desabilitado neste processo', {
+            service: 'server',
+            reason: 'ENABLE_RUNTIME_DASHBOARD_WEBSOCKET=false'
+        });
+    }
     // ======================================================================
 
     // ==================== JOB DE LIMPEZA PERIÓDICA ====================
     // Limpar motoristas "fantasma" do GEO (online e offline)
-    setInterval(async () => {
-        try {
-            const redis = redisPool.getConnection();
-            const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+    if (runCleanupJob) {
+        setInterval(async () => {
+            try {
+                const redis = redisPool.getConnection();
+                const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
-            // Garantir conexão Redis
-            if (redis.status !== 'ready' && redis.status !== 'connect') {
-                try {
-                    await redis.connect();
-                } catch (connectError) {
-                    if (!connectError.message.includes('already connecting') &&
-                        !connectError.message.includes('already connected')) {
-                        logStructured('error', 'Erro ao conectar Redis no job de limpeza', {
-                            service: 'server',
-                            operation: 'cleanupJob',
-                            error: connectError.message
-                        });
-                        return;
+                // Garantir conexão Redis
+                if (redis.status !== 'ready' && redis.status !== 'connect') {
+                    try {
+                        await redis.connect();
+                    } catch (connectError) {
+                        if (!connectError.message.includes('already connecting') &&
+                            !connectError.message.includes('already connected')) {
+                            logStructured('error', 'Erro ao conectar Redis no job de limpeza', {
+                                service: 'server',
+                                operation: 'cleanupJob',
+                                error: connectError.message
+                            });
+                            return;
+                        }
                     }
                 }
-            }
 
-            // ✅ CORREÇÃO: NÃO remover motoristas do GEO ativo se estão conectados
-            // A lógica anterior removia motoristas que não tinham `driver:${driverId}` no Redis,
-            // mas isso pode expirar por TTL mesmo com motorista online e parado.
-            // Agora só removemos se o motorista realmente desconectou do WebSocket.
-            const activeDrivers = await redis.zrange('driver_locations', 0, -1);
-            let cleanedActive = 0;
-            let renewedActive = 0;
-            for (const driverId of activeDrivers) {
-                // Verificar se motorista está conectado via WebSocket
-                let isConnected = false;
-                if (io.connectedUsers) {
-                    const connectedSocket = io.connectedUsers.get(driverId);
-                    isConnected = !!connectedSocket;
-                }
+                // ✅ CORREÇÃO: NÃO remover motoristas do GEO ativo se estão conectados
+                // A lógica anterior removia motoristas que não tinham `driver:${driverId}` no Redis,
+                // mas isso pode expirar por TTL mesmo com motorista online e parado.
+                // Agora só removemos se o motorista realmente desconectou do WebSocket.
+                const activeDrivers = await redis.zrange('driver_locations', 0, -1);
+                let cleanedActive = 0;
+                let renewedActive = 0;
+                for (const driverId of activeDrivers) {
+                    // Verificar se motorista está conectado via WebSocket
+                    let isConnected = false;
+                    if (io.connectedUsers) {
+                        const connectedSocket = io.connectedUsers.get(driverId);
+                        isConnected = !!connectedSocket;
+                    }
 
-                const exists = await redis.exists(`driver:${driverId}`);
-                const driverSnapshot = exists ? await redis.hgetall(`driver:${driverId}`) : null;
-                const snapshotOnline = driverSnapshot?.isOnline === 'true' || driverSnapshot?.isOnline === true;
+                    const exists = await redis.exists(`driver:${driverId}`);
+                    const driverSnapshot = exists ? await redis.hgetall(`driver:${driverId}`) : null;
+                    const snapshotOnline = driverSnapshot?.isOnline === 'true' || driverSnapshot?.isOnline === true;
 
-                if (isConnected) {
-                    // Motorista está conectado - NUNCA remover, apenas renovar se necessário
-                    if (!exists) {
-                        // TTL expirou mas motorista está conectado - renovar entrada
-                        const driverLocation = await redis.geopos('driver_locations', driverId);
-                        if (driverLocation && driverLocation.length > 0) {
-                            const [lng, lat] = driverLocation[0];
-                            await redis.hset(`driver:${driverId}`, {
-                                id: driverId,
-                                isOnline: 'true',
-                                status: 'AVAILABLE',
-                                lat: lat.toString(),
-                                lng: lng.toString(),
-                                lastUpdate: Date.now().toString(),
-                                timestamp: Date.now().toString(),
-                                lastSeen: new Date().toISOString()
-                            });
+                    if (isConnected) {
+                        // Motorista está conectado - NUNCA remover, apenas renovar se necessário
+                        if (!exists) {
+                            // TTL expirou mas motorista está conectado - renovar entrada
+                            const driverLocation = await redis.geopos('driver_locations', driverId);
+                            if (driverLocation && driverLocation.length > 0) {
+                                const [lng, lat] = driverLocation[0];
+                                await redis.hset(`driver:${driverId}`, {
+                                    id: driverId,
+                                    isOnline: 'true',
+                                    status: 'AVAILABLE',
+                                    lat: lat.toString(),
+                                    lng: lng.toString(),
+                                    lastUpdate: Date.now().toString(),
+                                    timestamp: Date.now().toString(),
+                                    lastSeen: new Date().toISOString()
+                                });
+                                // ✅ Usar configuração centralizada de TTL
+                                const { getTTL } = require('../config/redis-ttl-config');
+                                await redis.expire(`driver:${driverId}`, getTTL('DRIVER_LOCATION', 'ONLINE'));
+                                renewedActive++;
+                            }
+                        } else {
+                            // Existe e está conectado - apenas renovar TTL para manter histórico
                             // ✅ Usar configuração centralizada de TTL
                             const { getTTL } = require('../config/redis-ttl-config');
                             await redis.expire(`driver:${driverId}`, getTTL('DRIVER_LOCATION', 'ONLINE'));
-                            renewedActive++;
                         }
                     } else {
-                        // Existe e está conectado - apenas renovar TTL para manter histórico
-                        const { getTTL } = require('../config/redis-ttl-config');
-                        await redis.expire(`driver:${driverId}`, getTTL('DRIVER_LOCATION', 'ONLINE'));
-                    }
-                } else {
-                    if (exists && !snapshotOnline) {
-                        // Sanitize: não manter motorista OFFLINE no GEO ativo.
-                        await redis.zrem('driver_locations', driverId);
-                        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                        cleanedActive++;
-                        continue;
-                    }
-
-                    // Motorista NÃO está conectado - pode remover se não existe
-                    // Mas manter por um tempo para análise de comportamento (não remover imediatamente)
-                    // Só remover se realmente não existe E não está conectado há muito tempo
-                    if (!exists) {
-                        // Verificar última atualização (se houver)
-                        const lastSeen = await redis.hget(`driver:${driverId}`, 'lastSeen');
-                        if (!lastSeen) {
-                            // Não tem histórico - pode remover (motorista nunca foi salvo corretamente)
+                        if (exists && !snapshotOnline) {
+                            // Sanitize: não manter motorista OFFLINE no GEO ativo.
                             await redis.zrem('driver_locations', driverId);
+                            await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
                             cleanedActive++;
+                            continue;
                         }
-                        // Se tem lastSeen, manter para análise de comportamento (não remover)
+
+                        // Motorista NÃO está conectado - pode remover se não existe
+                        // Mas manter por um tempo para análise de comportamento (não remover imediatamente)
+                        // Só remover se realmente não existe E não está conectado há muito tempo
+                        if (!exists) {
+                            // Verificar última atualização (se houver)
+                            const lastSeen = await redis.hget(`driver:${driverId}`, 'lastSeen');
+                            if (!lastSeen) {
+                                // Não tem histórico - pode remover (motorista nunca foi salvo corretamente)
+                                await redis.zrem('driver_locations', driverId);
+                                cleanedActive++;
+                            }
+                            // Se tem lastSeen, manter para análise de comportamento (não remover)
+                        }
                     }
                 }
-            }
 
-            // Limpar GEO offline (motoristas que expiraram)
-            const offlineDrivers = await redis.zrange('driver_offline_locations', 0, -1);
-            let cleanedOffline = 0;
-            for (const driverId of offlineDrivers) {
-                const exists = await redis.exists(`driver:${driverId}`);
-                if (!exists) {
-                    await redis.zrem('driver_offline_locations', driverId);
-                    cleanedOffline++;
+                // Limpar GEO offline (motoristas que expiraram)
+                const offlineDrivers = await redis.zrange('driver_offline_locations', 0, -1);
+                let cleanedOffline = 0;
+                for (const driverId of offlineDrivers) {
+                    const exists = await redis.exists(`driver:${driverId}`);
+                    if (!exists) {
+                        await redis.zrem('driver_offline_locations', driverId);
+                        cleanedOffline++;
+                    }
                 }
-            }
 
-            if (cleanedActive > 0 || cleanedOffline > 0 || renewedActive > 0) {
-                logStructured('info', 'Limpeza periódica de motoristas concluída', {
+                if (cleanedActive > 0 || cleanedOffline > 0 || renewedActive > 0) {
+                    logStructured('info', 'Limpeza periódica de motoristas concluída', {
+                        service: 'server',
+                        cleanedActive,
+                        cleanedOffline,
+                        renewedActive
+                    });
+                }
+
+                // Limpar cooldowns antigos
+                if (demandNotificationService) {
+                    demandNotificationService.cleanupCooldowns();
+                }
+
+            } catch (error) {
+                logStructured('error', 'Erro no job de limpeza', {
                     service: 'server',
-                    cleanedActive,
-                    cleanedOffline,
-                    renewedActive
+                    error: error.message,
+                    stack: error.stack
                 });
             }
-
-            // Limpar cooldowns antigos
-            demandNotificationService.cleanupCooldowns();
-
-        } catch (error) {
-            logStructured('error', 'Erro no job de limpeza', {
-                service: 'server',
-                error: error.message,
-                stack: error.stack
-            });
-        }
-    }, 60000); // A cada 1 minuto
-    logStructured('info', 'Job de limpeza periódica iniciado (a cada 1 minuto)', { service: 'server' });
+        }, 60000); // A cada 1 minuto
+        logStructured('info', 'Job de limpeza periódica iniciado (a cada 1 minuto)', { service: 'server' });
+    } else {
+        logStructured('info', 'Job de limpeza periódica desabilitado neste processo', {
+            service: 'server',
+            reason: 'ENABLE_RUNTIME_CLEANUP_JOB=false'
+        });
+    }
     // ============================================================================
 
     return {
