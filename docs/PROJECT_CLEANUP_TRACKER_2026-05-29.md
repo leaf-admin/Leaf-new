@@ -235,3 +235,23 @@ Validação:
 - `rg` sem chamadas ativas para os scripts removidos fora de docs historicos/tracker.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+
+## Bloco 11 - Executado
+
+Escopo: remover pacote de deploy Vultr que se referenciava apenas internamente.
+
+- Removidos:
+  - `leaf-websocket-backend/docs/README-VULTR-DEPLOY.md`
+  - `leaf-websocket-backend/scripts/deploy/deploy-rapido-vultr.sh`
+  - `leaf-websocket-backend/scripts/deploy/deploy-to-vultr.sh`
+  - `leaf-websocket-backend/scripts/deploy/fix-dpkg-and-deploy.sh`
+  - `leaf-websocket-backend/scripts/deploy/migrate-ips-to-vultr.sh`
+  - `leaf-websocket-backend/scripts/deploy/setup-vultr.sh`
+  - `leaf-websocket-backend/scripts/deploy/test-ip-migration.sh`
+  - `leaf-websocket-backend/scripts/deploy/test-vultr-performance.sh`
+
+Validação:
+
+- `rg` confirmou que as referencias remanescentes eram internas ao pacote removido.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
