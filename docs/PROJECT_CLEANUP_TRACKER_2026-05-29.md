@@ -171,3 +171,19 @@ Validação:
 - `git ls-files` confirmou que os backups removidos nao eram versionados.
 - `git check-ignore -v` confirmou que eram arquivos locais ignorados por `.env.*`.
 - `node scripts/maintenance/security/scan-secrets.cjs`: reduziu de 29 para 27 achados. Os achados restantes sao sensiveis ativos ou itens que precisam de migracao/isolamento antes de remover.
+
+## Bloco 7 - Executado
+
+Escopo: remover ruidos falsos do scanner sem enfraquecer achados reais.
+
+- Adicionada allowlist por arquivo+regra para strings diagnosticas em:
+  - `leaf-websocket-backend/scripts/deploy/validate-runtime-config.js`
+  - `leaf-websocket-backend/routes/health.js`
+  - scripts QA/prelaunch que rodam fluxos isolados.
+- A allowlist nao libera padroes de forma global; vale somente para o arquivo e regra especificos.
+- O scanner agora fica focado nos artefatos sensiveis locais restantes.
+
+Validação:
+
+- `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs`: reduziu de 27 para 19 achados, todos critical e ligados a `.env`, keystores, Firebase config/plist/json ou chave privada local.
