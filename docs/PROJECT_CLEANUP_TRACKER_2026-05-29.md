@@ -606,3 +606,22 @@ Validação:
 - `node` confirmou que os aliases de compose sao symlinks para `docker-compose.hostinger.yml` e que o alvo existe.
 - `git diff --check`: PASS.
 - `docker compose -f docker-compose.contabo.yml config --services`: nao executado porque `docker` nao esta disponivel neste shell.
+
+## Bloco 33 - Executado
+
+Escopo: reforcar guardrail de bypass de pagamento no mobile.
+
+- `allowForcedPaymentBypass` agora exige:
+  - flag explicita de ferramentas de teste (`allowTestUserTools()`)
+  - flag explicita de bypass de pagamento (`hasExplicitPaymentBypassFlag()`)
+- A mudanca mantem ferramentas QA disponiveis quando as duas flags estao ligadas em ambiente permitido.
+- Adicionado teste unitario da politica de runtime.
+- Atualizado production guard para travar regressao nesta regra.
+
+Validação:
+
+- `npm --prefix mobile-app run qa:production-guards`: PASS.
+- `cd mobile-app && npx jest --config jest.config.js --runInBand --runTestsByPath __tests__/runtime-access-policy.test.js __tests__/woovi-payment-modal.test.js`: PASS (`3/3`).
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+- `git diff --check`: PASS.

@@ -54,9 +54,7 @@ export const hasExplicitPaymentBypassFlag = () =>
 
 export const allowPaymentBypass = () => allowTestUserTools() && hasExplicitPaymentBypassFlag();
 
-export const allowForcedPaymentBypass = () =>
-    hasExplicitPaymentBypassFlag() &&
-    (isE2ETestBuild() || isSimulatorBuild() || isDevelopmentBuild());
+export const allowForcedPaymentBypass = () => allowTestUserTools() && hasExplicitPaymentBypassFlag();
 
 export const allowClientDirectGoogleFallback = () =>
     isDevelopmentBuild() ||
