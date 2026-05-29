@@ -22,6 +22,7 @@ jest.mock('../../../utils/logger', () => ({
     warn: mockLoggerWarn,
     error: jest.fn()
   },
+  logRedis: jest.fn(),
   logStructured: jest.fn()
 }));
 

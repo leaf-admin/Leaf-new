@@ -36,7 +36,6 @@ import Notifications from '../screens/Notifications';
 import SupportScreen from '../screens/SupportScreen';
 import SupportTicketScreen from '../screens/SupportTicketScreen';
 import SupportChatScreen from '../screens/SupportChatScreen';
-import WaitListScreen from '../screens/WaitListScreen';
 import HelpScreen from '../screens/HelpScreen';
 import AboutScreen from '../screens/AboutScreen';
 import LegalScreen from '../screens/LegalScreen';
@@ -88,7 +87,6 @@ import WelcomeScreen from '../screens/WelcomeScreen';
 import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 import FreeTrialScreen from '../screens/FreeTrialScreen';
 import PlanSelectionScreen from '../screens/PlanSelectionScreen';
-import ReferralScreen from '../screens/ReferralScreen';
 
 import RobotaxiPrototypeScreen from '../screens/RobotaxiPrototypeScreen';
 import RobotaxiDestinationScreen from '../screens/prototype/RobotaxiDestinationScreen';
@@ -119,6 +117,7 @@ import RobotaxiDriverOfferScreen from '../screens/prototype/RobotaxiDriverOfferS
 import RobotaxiDriverTripScreen from '../screens/prototype/RobotaxiDriverTripScreen';
 import RobotaxiDriverActivationScreen from '../screens/prototype/RobotaxiDriverActivationScreen';
 import RobotaxiDriverWaitlistScreen from '../screens/prototype/RobotaxiDriverWaitlistScreen';
+import RobotaxiDriverWaitlistStatusScreen from '../screens/prototype/RobotaxiDriverWaitlistStatusScreen';
 
 // Componentes
 // LoadingScreen removido - não é mais necessário
@@ -279,8 +278,9 @@ const prototypeInteractiveOverlayScreenOptions = {
 };
 
 const pilotLaunchFeatures = getPilotLaunchFeatureSnapshot();
-const referralEntryComponent = pilotLaunchFeatures.referralProgramsEnabled ? ReferralScreen : PilotFeatureUnavailableScreen;
 const prototypeInvitesEntryComponent = pilotLaunchFeatures.referralProgramsEnabled ? RobotaxiInvitesScreen : PilotFeatureUnavailableScreen;
+const referralEntryComponent = prototypeInvitesEntryComponent;
+const driverInviteEntryComponent = RobotaxiDriverWaitlistScreen;
 const withdrawalEntryComponent = pilotLaunchFeatures.driverWithdrawalsEnabled ? WithdrawMoney : PilotFeatureUnavailableScreen;
 const driverPayoutEntryComponent = PilotFeatureUnavailableScreen;
 
@@ -308,7 +308,7 @@ const driverPayoutScreenParams = {
 };
 
 const appLinking = {
-  prefixes: ['leafapp://', 'br.com.leaf.ride://'],
+  prefixes: ['leafapp://', 'br.com.leaf.ride://', 'https://leaf.app.br', 'https://www.leaf.app.br'],
   config: {
     screens: {
       RobotaxiPrototype: {
@@ -345,6 +345,18 @@ const appLinking = {
       RobotaxiPrototypeShareTrip: 'robotaxi/trip/share',
       RobotaxiPrototypePublicTracking: 'robotaxi/trip/public/:tripId',
       RobotaxiPrototypeInvites: 'robotaxi/invites',
+      Referral: {
+        path: 'convite/:inviteCode',
+        parse: { inviteCode: String },
+      },
+      ReferralScreen: {
+        path: 'referral/:inviteCode',
+        parse: { inviteCode: String },
+      },
+      DriverInvite: {
+        path: 'motorista/convite/:inviteCode',
+        parse: { inviteCode: String },
+      },
       RobotaxiPrototypeDriverPanel: 'robotaxi/driver/panel',
       RobotaxiPrototypeDriverActivation: 'robotaxi/driver/activation',
       RobotaxiPrototypeDriverDocuments: 'robotaxi/driver/documents',
@@ -522,6 +534,7 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
         />
       ) : null}
       <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="AuthLoadingScreen" component={AuthLoadingScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LoginScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Registration" component={Registration} options={{ headerShown: false }} />
       <Stack.Screen name="WelcomeScreen" component={WelcomeScreen} options={{ headerShown: false }} />
@@ -533,6 +546,7 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
       <Stack.Screen name="CNHUpload" component={CNHUploadScreen} options={{ headerShown: false }} />
       <Stack.Screen name="CRLVUpload" component={CRLVUploadScreen} options={{ headerShown: false }} />
       <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="AuthLoadingScreen" component={AuthLoadingScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PhoneInputScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PhoneScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Login" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
@@ -550,6 +564,11 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
         name="ReferralScreen"
         component={referralEntryComponent}
         initialParams={referralScreenParams}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="DriverInvite"
+        component={driverInviteEntryComponent}
         options={{ headerShown: false }}
       />
       <Stack.Screen
@@ -598,7 +617,8 @@ function renderSharedPrivateScreens() {
       <Stack.Screen name="Support" component={SupportScreen} />
       <Stack.Screen name="SupportTicket" component={SupportTicketScreen} />
       <Stack.Screen name="SupportChat" component={SupportChatScreen} />
-      <Stack.Screen name="WaitList" component={WaitListScreen} />
+      <Stack.Screen name="WaitList" component={RobotaxiDriverWaitlistStatusScreen} />
+      <Stack.Screen name="DriverInvite" component={driverInviteEntryComponent} />
       <Stack.Screen name="EditProfile" component={EditProfile} />
       <Stack.Screen name="EditProfileScreen" component={EditProfileScreen} />
       <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
@@ -817,6 +837,18 @@ function renderSharedPrototypeScreens() {
         initialParams={prototypeReferralScreenParams}
       />
       <Stack.Screen
+        name="Referral"
+        component={referralEntryComponent}
+        options={prototypeTransparentOverlayScreenOptions}
+        initialParams={prototypeReferralScreenParams}
+      />
+      <Stack.Screen
+        name="ReferralScreen"
+        component={referralEntryComponent}
+        options={prototypeTransparentOverlayScreenOptions}
+        initialParams={prototypeReferralScreenParams}
+      />
+      <Stack.Screen
         name="RobotaxiMenuEditProfile"
         component={RobotaxiProfileScreen}
         options={prototypeOverlayScreenOptions}
@@ -928,6 +960,16 @@ function renderDriverPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiPrototypeDriverWaitlist"
         component={RobotaxiDriverWaitlistScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeDriverWaitlistStatus"
+        component={RobotaxiDriverWaitlistStatusScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="DriverInvite"
+        component={driverInviteEntryComponent}
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen

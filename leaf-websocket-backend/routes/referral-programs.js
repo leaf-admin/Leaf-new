@@ -1,5 +1,7 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logError, logStructured } = require('../utils/logger');
 const referralProgramStateService = require('../services/referral-program-state-service');
@@ -27,6 +29,19 @@ const DEFAULT_DRIVER_QUALIFICATION_DAYS = Number.parseInt(process.env.REFERRAL_D
 const DEFAULT_PASSENGER_DISCOUNT_PERCENT = Number.parseFloat(process.env.REFERRAL_PASSENGER_DISCOUNT_PERCENT || '10');
 const DEFAULT_PASSENGER_MAX_RIDES = Number.parseInt(process.env.REFERRAL_PASSENGER_MAX_RIDES || '3', 10);
 const DEFAULT_FOUNDER_MONTHS = Number.parseInt(process.env.FOUNDER_DEFAULT_FREE_MONTHS || '6', 10);
+const DEFAULT_INVITE_EXPIRES_DAYS = Number.parseInt(process.env.REFERRAL_INVITE_EXPIRES_DAYS || '30', 10);
+const MAX_INVITE_CODE_ATTEMPTS = Number.parseInt(process.env.REFERRAL_INVITE_CODE_ATTEMPTS || '8', 10);
+
+const publicInviteLookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number.parseInt(process.env.REFERRAL_PUBLIC_LOOKUP_RATE_LIMIT || '80', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Muitas tentativas. Tente novamente em alguns minutos.',
+    retryAfter: 900
+  }
+});
 
 function buildAuditOperator(user = {}) {
   return {
@@ -111,6 +126,14 @@ function normalizeIdentifier(value) {
   return String(value || '').trim();
 }
 
+function normalizeEmail(value) {
+  return normalizeIdentifier(value).toLowerCase();
+}
+
+function normalizePhoneDigits(value) {
+  return normalizeIdentifier(value).replace(/\D/g, '');
+}
+
 function parseTimestamp(value) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -129,8 +152,113 @@ function parseTimestamp(value) {
 function generateInviteCode(type) {
   const prefix = type === 'driver_referral' ? 'DRV' : 'PSG';
   const stamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).slice(2, 7).toUpperCase();
+  const random = crypto.randomBytes(5).toString('hex').toUpperCase();
   return `${prefix}-${stamp}-${random}`;
+}
+
+function inviteIsExpired(invite, nowTs = Date.now()) {
+  const expiresTs = parseTimestamp(invite?.expiresAt);
+  return Boolean(expiresTs && expiresTs <= nowTs);
+}
+
+function resolveInviteStatus(invite) {
+  const status = String(invite?.status || 'pending').trim().toLowerCase();
+  if (status === 'pending' && inviteIsExpired(invite)) return 'expired';
+  return status;
+}
+
+function buildPublicInvitePayload(invite = {}) {
+  const type = normalizeCampaignType(invite.type);
+  const status = resolveInviteStatus(invite);
+  const canAccept = status === 'pending';
+
+  const payload = {
+    code: String(invite.code || '').trim().toUpperCase(),
+    kind: type === 'driver_referral' ? 'driver' : 'passenger',
+    status,
+    canAccept,
+    message: canAccept
+      ? 'Convite ativo'
+      : 'Convite ja utilizado ou indisponivel'
+  };
+
+  if (type === 'driver_referral') {
+    payload.driverReward = {
+      requiredCompletedTrips: toPositiveInt(invite.requiredCompletedTrips, DEFAULT_DRIVER_REQUIRED_TRIPS),
+      rewardMonths: toPositiveInt(invite.rewardMonths, DEFAULT_DRIVER_REWARD_MONTHS),
+      qualificationWindowDays: toPositiveInt(invite.qualificationWindowDays, DEFAULT_DRIVER_QUALIFICATION_DAYS)
+    };
+    return payload;
+  }
+
+  payload.passengerBenefit = {
+    discountPercent: toPercent(invite.discountPercent, DEFAULT_PASSENGER_DISCOUNT_PERCENT),
+    maxDiscountRides: toPositiveInt(invite.maxDiscountRides, DEFAULT_PASSENGER_MAX_RIDES),
+    nonCumulative: invite.nonCumulative !== false
+  };
+  return payload;
+}
+
+function resolveInviteExpiresAt(campaign = null, createdAtTs = Date.now()) {
+  const campaignDays = toPositiveInt(campaign?.params?.inviteExpiresInDays, DEFAULT_INVITE_EXPIRES_DAYS);
+  const expiresInDays = campaignDays > 0 ? campaignDays : DEFAULT_INVITE_EXPIRES_DAYS;
+  const candidateTs = createdAtTs + expiresInDays * 24 * 60 * 60 * 1000;
+  const campaignEndTs = parseTimestamp(campaign?.endAt);
+  const finalTs = campaignEndTs && campaignEndTs < candidateTs ? campaignEndTs : candidateTs;
+  return new Date(finalTs).toISOString();
+}
+
+function countCampaignInvites(invites = [], campaignId = '') {
+  const safeCampaignId = normalizeIdentifier(campaignId);
+  if (!safeCampaignId) return 0;
+  return invites.filter((invite) => normalizeIdentifier(invite.campaignId) === safeCampaignId).length;
+}
+
+function enforceCampaignInviteQuota(activeCampaign, allInvites) {
+  const maxInvitesTotal = toPositiveInt(activeCampaign?.params?.maxInvitesTotal, 0);
+  if (!activeCampaign?.id || maxInvitesTotal <= 0) return null;
+
+  const used = countCampaignInvites(allInvites, activeCampaign.id);
+  if (used >= maxInvitesTotal) {
+    return {
+      error: 'Limite total de convites da campanha atingido',
+      campaignId: activeCampaign.id,
+      limit: maxInvitesTotal
+    };
+  }
+  return null;
+}
+
+async function createInviteWithUniqueCode(type, buildPayload) {
+  let lastError = null;
+  const attempts = Math.max(1, MAX_INVITE_CODE_ATTEMPTS);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const code = generateInviteCode(type);
+    const inviteId = `invite_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const payload = buildPayload({ inviteId, code });
+    try {
+      if (typeof referralProgramStateService.createInviteWithUniqueCode === 'function') {
+        return await referralProgramStateService.createInviteWithUniqueCode(payload);
+      }
+      const existing = await referralProgramStateService.findInviteByCode(code);
+      if (existing) {
+        lastError = new Error('Código de convite já existe');
+        continue;
+      }
+      return await saveInvite(inviteId, payload);
+    } catch (error) {
+      lastError = error;
+      if (!['INVITE_CODE_ALREADY_EXISTS', 'INVITE_ID_ALREADY_EXISTS'].includes(error?.code)) {
+        throw error;
+      }
+    }
+  }
+
+  const error = new Error('Não foi possível gerar um código único de convite');
+  error.cause = lastError;
+  error.code = 'INVITE_CODE_GENERATION_FAILED';
+  error.statusCode = 500;
+  throw error;
 }
 
 function monthsFromNow(startDate, months) {
@@ -351,12 +479,95 @@ function resolveInviteeIdentity(body) {
   };
 }
 
+async function resolveAuthenticatedInviteeIdentity(req, inviteeId) {
+  const profile = inviteeId
+    ? await referralProgramStateService.getUserProfile(inviteeId).catch(() => null)
+    : null;
+  const firebaseUser = req.firebaseUser || {};
+
+  return {
+    uid: inviteeId,
+    email: normalizeEmail(
+      firebaseUser.email ||
+      firebaseUser.emailAddress ||
+      profile?.email ||
+      profile?.useremail
+    ),
+    phoneDigits: normalizePhoneDigits(
+      firebaseUser.phone_number ||
+      firebaseUser.phoneNumber ||
+      firebaseUser.phone ||
+      profile?.phone ||
+      profile?.phoneNumber ||
+      profile?.mobile ||
+      profile?.usermobile
+    )
+  };
+}
+
+function validateInviteTarget(invite, identity) {
+  const expectedInviteeId = normalizeIdentifier(invite.inviteeId);
+  const expectedEmail = normalizeEmail(invite.inviteeEmail);
+  const expectedPhoneDigits = normalizePhoneDigits(invite.inviteePhone);
+
+  if (expectedInviteeId && expectedInviteeId !== normalizeIdentifier(identity.uid)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Este convite pertence a outra conta'
+    };
+  }
+
+  if (expectedEmail && expectedEmail !== identity.email) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Este convite pertence a outro email'
+    };
+  }
+
+  if (expectedPhoneDigits && expectedPhoneDigits !== identity.phoneDigits) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Este convite pertence a outro telefone'
+    };
+  }
+
+  return { ok: true };
+}
+
 router.use((req, res, next) => {
   if (isLaunchFeatureEnabled('referralProgramsEnabled', true)) {
     return next();
   }
 
   return respondReferralProgramsDisabled(res);
+});
+
+router.get('/invites/public/:code', publicInviteLookupLimiter, async (req, res) => {
+  try {
+    const code = normalizeIdentifier(req.params.code).toUpperCase();
+    if (!code) {
+      return res.status(400).json({ error: 'Codigo do convite e obrigatorio' });
+    }
+
+    const invite = await referralProgramStateService.findInviteByCode(code);
+    if (!invite) {
+      return res.status(404).json({
+        success: false,
+        error: 'Convite nao encontrado'
+      });
+    }
+
+    return res.json({
+      success: true,
+      invite: buildPublicInvitePayload(invite)
+    });
+  } catch (error) {
+    logError(error, 'Erro ao consultar convite publico', { service: 'referral-programs' });
+    return res.status(500).json({ error: 'Erro ao consultar convite' });
+  }
 });
 
 router.get('/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
@@ -439,7 +650,7 @@ router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), requireAdmi
       return res.status(400).json({ error: 'Nome da campanha é obrigatório' });
     }
 
-    const id = `campaign_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const id = `campaign_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const campaignPayload = {
       id,
       name: String(name).trim(),
@@ -449,6 +660,8 @@ router.post('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), requireAdmi
       endAt: endAt || null,
       params: {
         maxInvitesPerDriver: toPositiveInt(params.maxInvitesPerDriver, DEFAULT_DRIVER_MAX_INVITES),
+        maxInvitesTotal: toPositiveInt(params.maxInvitesTotal, 0),
+        inviteExpiresInDays: toPositiveInt(params.inviteExpiresInDays, DEFAULT_INVITE_EXPIRES_DAYS),
         requiredCompletedTrips: toPositiveInt(params.requiredCompletedTrips, DEFAULT_DRIVER_REQUIRED_TRIPS),
         rewardMonths: toPositiveInt(params.rewardMonths, DEFAULT_DRIVER_REWARD_MONTHS),
         qualificationWindowDays: toPositiveInt(params.qualificationWindowDays, DEFAULT_DRIVER_QUALIFICATION_DAYS),
@@ -504,6 +717,8 @@ router.patch('/campaigns/:campaignId', authenticateJWT, requireRole(ADMIN_ROLES)
     };
 
     merged.params.maxInvitesPerDriver = toPositiveInt(merged.params.maxInvitesPerDriver, DEFAULT_DRIVER_MAX_INVITES);
+    merged.params.maxInvitesTotal = toPositiveInt(merged.params.maxInvitesTotal, 0);
+    merged.params.inviteExpiresInDays = toPositiveInt(merged.params.inviteExpiresInDays, DEFAULT_INVITE_EXPIRES_DAYS);
     merged.params.requiredCompletedTrips = toPositiveInt(merged.params.requiredCompletedTrips, DEFAULT_DRIVER_REQUIRED_TRIPS);
     merged.params.rewardMonths = toPositiveInt(merged.params.rewardMonths, DEFAULT_DRIVER_REWARD_MONTHS);
     merged.params.qualificationWindowDays = toPositiveInt(merged.params.qualificationWindowDays, DEFAULT_DRIVER_QUALIFICATION_DAYS);
@@ -549,6 +764,11 @@ router.post('/invites/driver', ensureUserFromFirebaseToken, async (req, res) => 
     );
 
     const allInvites = await loadInvites();
+    const campaignQuotaError = enforceCampaignInviteQuota(activeCampaign, allInvites);
+    if (campaignQuotaError) {
+      return res.status(400).json(campaignQuotaError);
+    }
+
     const driverInvites = allInvites.filter((invite) =>
       normalizeIdentifier(invite.inviterId) === inviterId &&
       normalizeCampaignType(invite.type) === 'driver_referral' &&
@@ -587,11 +807,10 @@ router.post('/invites/driver', ensureUserFromFirebaseToken, async (req, res) => 
       DEFAULT_DRIVER_QUALIFICATION_DAYS
     );
 
-    const inviteId = `invite_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    const inviteCode = generateInviteCode('driver_referral');
-    const invitePayload = {
+    const createdAt = nowIso();
+    const invitePayload = await createInviteWithUniqueCode('driver_referral', ({ inviteId, code }) => ({
       id: inviteId,
-      code: inviteCode,
+      code,
       type: 'driver_referral',
       status: 'pending',
       inviterId,
@@ -602,11 +821,10 @@ router.post('/invites/driver', ensureUserFromFirebaseToken, async (req, res) => 
       requiredCompletedTrips,
       rewardMonths,
       qualificationWindowDays,
-      createdAt: nowIso(),
-      updatedAt: nowIso()
-    };
-
-    await saveInvite(inviteId, invitePayload);
+      expiresAt: resolveInviteExpiresAt(activeCampaign, Date.now()),
+      createdAt,
+      updatedAt: createdAt
+    }));
 
     res.json({
       success: true,
@@ -619,7 +837,10 @@ router.post('/invites/driver', ensureUserFromFirebaseToken, async (req, res) => 
     });
   } catch (error) {
     logError(error, 'Erro ao criar convite de motorista', { service: 'referral-programs' });
-    res.status(500).json({ error: 'Erro ao criar convite de motorista' });
+    res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : 'Erro ao criar convite de motorista',
+      code: error.code || undefined
+    });
   }
 });
 
@@ -641,6 +862,12 @@ router.post('/invites/passenger', ensureUserFromFirebaseToken, async (req, res) 
     }
 
     const activeCampaign = await resolveCampaignForType('passenger_referral');
+    const allInvites = await loadInvites();
+    const campaignQuotaError = enforceCampaignInviteQuota(activeCampaign, allInvites);
+    if (campaignQuotaError) {
+      return res.status(400).json(campaignQuotaError);
+    }
+
     const discountPercent = toPercent(
       activeCampaign?.params?.discountPercent ?? config.passenger.discountPercent,
       DEFAULT_PASSENGER_DISCOUNT_PERCENT
@@ -651,11 +878,10 @@ router.post('/invites/passenger', ensureUserFromFirebaseToken, async (req, res) 
     );
     const nonCumulative = activeCampaign?.params?.nonCumulative !== false && config.passenger.nonCumulative !== false;
 
-    const inviteId = `invite_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    const inviteCode = generateInviteCode('passenger_referral');
-    const invitePayload = {
+    const createdAt = nowIso();
+    const invitePayload = await createInviteWithUniqueCode('passenger_referral', ({ inviteId, code }) => ({
       id: inviteId,
-      code: inviteCode,
+      code,
       type: 'passenger_referral',
       status: 'pending',
       inviterId,
@@ -666,16 +892,18 @@ router.post('/invites/passenger', ensureUserFromFirebaseToken, async (req, res) 
       discountPercent,
       maxDiscountRides,
       nonCumulative,
-      createdAt: nowIso(),
-      updatedAt: nowIso()
-    };
-
-    await saveInvite(inviteId, invitePayload);
+      expiresAt: resolveInviteExpiresAt(activeCampaign, Date.now()),
+      createdAt,
+      updatedAt: createdAt
+    }));
 
     res.json({ success: true, invite: invitePayload });
   } catch (error) {
     logError(error, 'Erro ao criar convite de passageiro', { service: 'referral-programs' });
-    res.status(500).json({ error: 'Erro ao criar convite de passageiro' });
+    res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : 'Erro ao criar convite de passageiro',
+      code: error.code || undefined
+    });
   }
 });
 
@@ -699,9 +927,18 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
       return res.status(400).json({ error: 'Não é permitido aceitar convite próprio' });
     }
 
-    const currentStatus = String(invite.status || '').toLowerCase();
+    const currentStatus = resolveInviteStatus(invite);
     if (currentStatus !== 'pending') {
-      return res.status(400).json({ error: `Convite já está ${currentStatus}` });
+      const statusCode = currentStatus === 'expired' ? 410 : 409;
+      return res.status(statusCode).json({ error: `Convite já está ${currentStatus}` });
+    }
+
+    const targetValidation = validateInviteTarget(
+      invite,
+      await resolveAuthenticatedInviteeIdentity(req, inviteeId)
+    );
+    if (!targetValidation.ok) {
+      return res.status(targetValidation.status).json({ error: targetValidation.error });
     }
 
     const acceptedAt = nowIso();
@@ -724,7 +961,9 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
       };
     }
 
-    const updatedInvite = await updateInvite(invite.id, acceptancePatch);
+    const updatedInvite = typeof referralProgramStateService.acceptInvite === 'function'
+      ? await referralProgramStateService.acceptInvite(invite.id, acceptancePatch, { expectedCode: code })
+      : await updateInvite(invite.id, acceptancePatch);
 
     let passengerBenefit = null;
     if (normalizeCampaignType(invite.type) === 'passenger_referral') {
@@ -748,7 +987,10 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
     });
   } catch (error) {
     logError(error, 'Erro ao aceitar convite', { service: 'referral-programs' });
-    res.status(500).json({ error: 'Erro ao aceitar convite' });
+    res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : 'Erro ao aceitar convite',
+      code: error.code || undefined
+    });
   }
 });
 
@@ -918,11 +1160,24 @@ router.get('/invites/me', ensureUserFromFirebaseToken, async (req, res) => {
 
 router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, res) => {
   try {
-    const [config, campaigns, invites] = await Promise.all([
+    const [config, campaigns, invites, passengerBenefits] = await Promise.all([
       loadProgramConfig(),
       loadCampaigns(),
-      loadInvites()
+      loadInvites(),
+      referralProgramStateService.listPassengerBenefits().catch(() => [])
     ]);
+    const passengerBenefitsActive = passengerBenefits.filter((benefit) =>
+      String(benefit.status || '').toLowerCase() === 'active' &&
+      Number(benefit.remainingRides || 0) > 0
+    ).length;
+    const passengerBenefitsConsumed = passengerBenefits.filter((benefit) =>
+      String(benefit.status || '').toLowerCase() === 'consumed' ||
+      Number(benefit.remainingRides || 0) <= 0
+    ).length;
+    const driverTracking = invites.filter((invite) =>
+      normalizeCampaignType(invite.type) === 'driver_referral' &&
+      String(invite?.qualification?.status || '').toLowerCase() === 'tracking'
+    ).length;
 
     const summary = {
       campaigns: {
@@ -942,7 +1197,27 @@ router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, r
         qualified: invites.filter((invite) => String(invite.status || '').toLowerCase() === 'qualified').length,
         rewarded: invites.filter((invite) => String(invite.rewardStatus || '').toLowerCase() === 'granted').length,
         driverReferral: invites.filter((invite) => normalizeCampaignType(invite.type) === 'driver_referral').length,
-        passengerReferral: invites.filter((invite) => normalizeCampaignType(invite.type) === 'passenger_referral').length
+        passengerReferral: invites.filter((invite) => normalizeCampaignType(invite.type) === 'passenger_referral').length,
+        driverTracking,
+        passengerBenefitsActive,
+        passengerBenefitsConsumed,
+        acceptanceRate: invites.length > 0
+          ? Number((invites.filter((invite) => ['accepted', 'qualified'].includes(String(invite.status || '').toLowerCase())).length / invites.length).toFixed(4))
+          : 0,
+        rewardRate: invites.length > 0
+          ? Number((invites.filter((invite) => String(invite.rewardStatus || '').toLowerCase() === 'granted').length / invites.length).toFixed(4))
+          : 0,
+        recent: invites.slice(0, 8).map((invite) => ({
+          id: invite.id,
+          code: invite.code,
+          type: invite.type,
+          status: invite.status,
+          rewardStatus: invite.rewardStatus || null,
+          inviterId: invite.inviterId || null,
+          acceptedBy: invite.acceptedBy || null,
+          createdAt: invite.createdAt || null,
+          acceptedAt: invite.acceptedAt || null,
+        }))
       },
       config
     };

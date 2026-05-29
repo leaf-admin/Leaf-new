@@ -25,7 +25,11 @@ import {
 import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { isPilotFeatureEnabled } from '../../config/pilotLaunchProfile';
-import { createReferralInvite, loadMyReferralInvites } from '../../services/runtime/referralProgramService';
+import {
+  acceptReferralInvite,
+  createReferralInvite,
+  loadMyReferralInvites,
+} from '../../services/runtime/referralProgramService';
 import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../../services/runtime/driverWaitlistService';
 
 const SURFACE_TOP_PADDING = 16;
@@ -64,6 +68,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
   const [waitlistStatus, setWaitlistStatus] = useState(null);
   const [sentInvites, setSentInvites] = useState([]);
   const [inviteTarget, setInviteTarget] = useState('');
+  const [acceptCode, setAcceptCode] = useState('');
   const [city, setCity] = useState('Rio de Janeiro');
   const [createdInvite, setCreatedInvite] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -127,6 +132,13 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    const routeCode = String(route?.params?.inviteCode || route?.params?.code || '').trim();
+    if (routeCode) {
+      setAcceptCode(routeCode.toUpperCase());
+    }
+  }, [route?.params?.code, route?.params?.inviteCode]);
+
   const handlePanelLayout = useCallback((event) => {
     const nextHeight = event?.nativeEvent?.layout?.height;
     if (Number.isFinite(nextHeight) && nextHeight > 0) {
@@ -180,6 +192,31 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
       setBusy(false);
     }
   }, [inviteTarget, referralProgramsEnabled]);
+
+  const handleAcceptDriverInvite = useCallback(async () => {
+    const code = String(acceptCode || '').trim();
+    if (!referralProgramsEnabled) {
+      Alert.alert('Convites', 'Convites de motoristas ficam desativados durante o piloto controlado.');
+      return;
+    }
+    if (!code) {
+      Alert.alert('Convites', 'Digite o código recebido.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const result = await acceptReferralInvite(code);
+      if (result.invite?.id || result.invite?.code) {
+        setAcceptCode('');
+        await loadData();
+      }
+    } catch (error) {
+      Alert.alert('Convites', error?.message || 'Não foi possível aceitar esse convite.');
+    } finally {
+      setBusy(false);
+    }
+  }, [acceptCode, loadData, referralProgramsEnabled]);
 
   const handleCopy = useCallback(async () => {
     await Clipboard.setStringAsync(latestLink);
@@ -302,6 +339,30 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                   testID="robotaxi-driver-invites-disabled-state"
                 />
               )}
+
+              {referralProgramsEnabled ? (
+                <View style={styles.inputBlock}>
+                  <Text style={styles.inputLabel}>Recebeu um convite?</Text>
+                  <TextInput
+                    value={acceptCode}
+                    onChangeText={setAcceptCode}
+                    placeholder="DRV-..."
+                    placeholderTextColor="rgba(93,106,99,0.55)"
+                    style={styles.input}
+                    autoCapitalize="characters"
+                    testID="robotaxi-driver-invite-accept-input"
+                    accessibilityLabel="robotaxi-driver-invite-accept-input"
+                  />
+                  <LeafButton
+                    label="Aceitar convite"
+                    icon="checkmark-circle-outline"
+                    tone="ghost"
+                    onPress={handleAcceptDriverInvite}
+                    disabled={busy}
+                    style={styles.fullButton}
+                  />
+                </View>
+              ) : null}
 
               {referralProgramsEnabled && latestInvite ? (
                 <PrototypeMenuSection title="Último convite">

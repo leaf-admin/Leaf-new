@@ -1,0 +1,26 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": [
+          "DTA8W5KA5D.br.com.leaf.ride"
+        ],
+        "components": [
+          {
+            "/": "/convite/*",
+            "comment": "Convites de passageiros Leaf"
+          },
+          {
+            "/": "/motorista/convite/*",
+            "comment": "Convites e waitlist de motoristas Leaf"
+          }
+        ],
+        "paths": [
+          "/convite/*",
+          "/motorista/convite/*"
+        ]
+      }
+    ]
+  }
+}

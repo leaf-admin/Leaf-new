@@ -23,6 +23,8 @@ const defaultCampaignForm = {
   type: "driver_referral",
   status: "active",
   maxInvitesPerDriver: 3,
+  maxInvitesTotal: 0,
+  inviteExpiresInDays: 30,
   requiredCompletedTrips: 20,
   rewardMonths: 1,
   qualificationWindowDays: 30,
@@ -30,6 +32,8 @@ const defaultCampaignForm = {
   maxDiscountRides: 3,
   founderFreeMonths: 6,
   nonCumulative: true,
+  startAt: "",
+  endAt: "",
 };
 
 function toNumber(value, fallback = 0) {
@@ -37,10 +41,24 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function summarizeCampaignParams(params) {
   if (!params || typeof params !== "object") return "-";
   const lines = [];
   if (params.maxInvitesPerDriver !== undefined) lines.push(`Convites: ${params.maxInvitesPerDriver}`);
+  if (params.maxInvitesTotal !== undefined && Number(params.maxInvitesTotal) > 0) lines.push(`Total campanha: ${params.maxInvitesTotal}`);
+  if (params.inviteExpiresInDays !== undefined) lines.push(`Expira: ${params.inviteExpiresInDays} dias`);
   if (params.requiredCompletedTrips !== undefined) lines.push(`Corridas: ${params.requiredCompletedTrips}`);
   if (params.rewardMonths !== undefined) lines.push(`Meses bonus: ${params.rewardMonths}`);
   if (params.discountPercent !== undefined) lines.push(`Desconto: ${params.discountPercent}%`);
@@ -205,6 +223,8 @@ export default function ProgramsPage() {
         status: campaignForm.status,
         params: {
           maxInvitesPerDriver: toNumber(campaignForm.maxInvitesPerDriver, 3),
+          maxInvitesTotal: toNumber(campaignForm.maxInvitesTotal, 0),
+          inviteExpiresInDays: toNumber(campaignForm.inviteExpiresInDays, 30),
           requiredCompletedTrips: toNumber(campaignForm.requiredCompletedTrips, 20),
           rewardMonths: toNumber(campaignForm.rewardMonths, 1),
           qualificationWindowDays: toNumber(campaignForm.qualificationWindowDays, 30),
@@ -213,6 +233,8 @@ export default function ProgramsPage() {
           founderFreeMonths: toNumber(campaignForm.founderFreeMonths, 6),
           nonCumulative: campaignForm.nonCumulative !== false,
         },
+        startAt: campaignForm.startAt ? new Date(campaignForm.startAt).toISOString() : undefined,
+        endAt: campaignForm.endAt ? new Date(campaignForm.endAt).toISOString() : undefined,
       });
 
       setCampaignForm(defaultCampaignForm);
@@ -250,11 +272,18 @@ export default function ProgramsPage() {
   };
 
   const summaryCards = useMemo(() => {
+    const acceptanceRate = Number(summary?.invites?.acceptanceRate || 0);
+    const rewardRate = Number(summary?.invites?.rewardRate || 0);
     return {
       activeCampaigns: summary?.campaigns?.active || 0,
       totalInvites: summary?.invites?.total || 0,
       acceptedInvites: summary?.invites?.accepted || 0,
       rewardedInvites: summary?.invites?.rewarded || 0,
+      driverTracking: summary?.invites?.driverTracking || 0,
+      passengerBenefitsActive: summary?.invites?.passengerBenefitsActive || 0,
+      passengerBenefitsConsumed: summary?.invites?.passengerBenefitsConsumed || 0,
+      acceptanceRateLabel: `${Math.round(acceptanceRate * 100)}%`,
+      rewardRateLabel: `${Math.round(rewardRate * 100)}%`,
     };
   }, [summary]);
   const filteredCampaigns = useMemo(() => {
@@ -294,6 +323,13 @@ export default function ProgramsPage() {
           <KpiCard title="Convites totais" value={summaryCards.totalInvites} />
           <KpiCard title="Convites aceitos" value={summaryCards.acceptedInvites} tone="positive" />
           <KpiCard title="Recompensas entregues" value={summaryCards.rewardedInvites} tone="positive" />
+        </section>
+
+        <section className="grid grid-kpi">
+          <KpiCard title="Em qualificação" value={summaryCards.driverTracking} />
+          <KpiCard title="Benefícios ativos" value={summaryCards.passengerBenefitsActive} tone="positive" />
+          <KpiCard title="Benefícios usados" value={summaryCards.passengerBenefitsConsumed} />
+          <KpiCard title="Aceite / recompensa" value={`${summaryCards.acceptanceRateLabel} / ${summaryCards.rewardRateLabel}`} />
         </section>
 
         <section className="grid">
@@ -473,6 +509,25 @@ export default function ProgramsPage() {
                 />
               </label>
               <label className="form-field">
+                Limite total da campanha
+                <input
+                  type="number"
+                  min="0"
+                  value={campaignForm.maxInvitesTotal}
+                  onChange={(e) => setCampaignForm((prev) => ({ ...prev, maxInvitesTotal: e.target.value }))}
+                />
+                <span className="text-muted">Use 0 para deixar sem limite total.</span>
+              </label>
+              <label className="form-field">
+                Expiração do convite (dias)
+                <input
+                  type="number"
+                  min="1"
+                  value={campaignForm.inviteExpiresInDays}
+                  onChange={(e) => setCampaignForm((prev) => ({ ...prev, inviteExpiresInDays: e.target.value }))}
+                />
+              </label>
+              <label className="form-field">
                 Corridas qualificação
                 <input
                   type="number"
@@ -497,6 +552,22 @@ export default function ProgramsPage() {
                   min="0"
                   value={campaignForm.discountPercent}
                   onChange={(e) => setCampaignForm((prev) => ({ ...prev, discountPercent: e.target.value }))}
+                />
+              </label>
+              <label className="form-field">
+                Início
+                <input
+                  type="datetime-local"
+                  value={campaignForm.startAt}
+                  onChange={(e) => setCampaignForm((prev) => ({ ...prev, startAt: e.target.value }))}
+                />
+              </label>
+              <label className="form-field">
+                Fim
+                <input
+                  type="datetime-local"
+                  value={campaignForm.endAt}
+                  onChange={(e) => setCampaignForm((prev) => ({ ...prev, endAt: e.target.value }))}
                 />
               </label>
               {!selectedScopeEnabled && campaignForm.status === "active" ? (
@@ -534,13 +605,14 @@ export default function ProgramsPage() {
                     <th>Tipo</th>
                     <th>Status</th>
                     <th>Parâmetros</th>
+                    <th>Janela</th>
                     <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredCampaigns.length === 0 ? (
                     <tr>
-                      <td colSpan={5}>Nenhuma campanha cadastrada até o momento.</td>
+                      <td colSpan={6}>Nenhuma campanha cadastrada até o momento.</td>
                     </tr>
                   ) : (
                     filteredCampaigns.map((campaign) => {
@@ -573,6 +645,10 @@ export default function ProgramsPage() {
                           <span>{summarizeCampaignParams(campaign.params)}</span>
                         </td>
                         <td>
+                          <span>{formatDate(campaign.startAt)}</span>
+                          <span className="table-muted">{formatDate(campaign.endAt)}</span>
+                        </td>
+                        <td>
                           <div className="actions-cell">
                             <button
                               onClick={() => updateCampaignStatus(campaign.id, "active")}
@@ -592,6 +668,48 @@ export default function ProgramsPage() {
               </table>
             </div>
             <TechnicalDetails title="Ver payload técnico dos programas" data={{ summary, campaigns }} />
+          </Panel>
+
+          <Panel
+            className="panel-span-full"
+            title="Ciclo de vida dos convites"
+            subtitle="Últimos convites criados, aceitos e qualificados pelo novo fluxo Leaf."
+          >
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Tipo</th>
+                    <th>Status</th>
+                    <th>Recompensa</th>
+                    <th>Convidador</th>
+                    <th>Aceito por</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(summary?.invites?.recent || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>Ainda não há convites recentes no novo fluxo.</td>
+                    </tr>
+                  ) : (
+                    (summary?.invites?.recent || []).map((invite) => (
+                      <tr key={invite.id || invite.code}>
+                        <td>
+                          <strong>{invite.code || "-"}</strong>
+                          <span className="table-muted">{invite.id || "-"}</span>
+                        </td>
+                        <td>{invite.type || "-"}</td>
+                        <td>{invite.status || "-"}</td>
+                        <td>{invite.rewardStatus || "-"}</td>
+                        <td>{invite.inviterId || "-"}</td>
+                        <td>{invite.acceptedBy || "-"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </Panel>
         </section>
 

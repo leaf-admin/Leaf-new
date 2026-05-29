@@ -4,6 +4,8 @@ const admin = require('firebase-admin');
 const { logger, logStructured } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
 const cityActivationStateService = require('../services/city-activation-state-service');
+const waitlistNotificationService = require('../services/waitlist-notification-service');
+const { WAITLIST_EVENTS } = require('../services/waitlist-notification-service');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
 const {
   isLaunchFeatureEnabled,
@@ -72,6 +74,59 @@ function logWaitlistAdminAudit(req, action, entity, metadata = {}) {
     operator: buildAuditOperator(req.user || {}),
     ...metadata
   });
+}
+
+function scheduleWaitlistNotification(driverId, event, context = {}) {
+  setImmediate(async () => {
+    try {
+      const result = await waitlistNotificationService.dispatch(driverId, event, context);
+      await admin.firestore().collection('users').doc(driverId).set({
+        lastWaitlistNotificationAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastWaitlistNotificationEvent: event,
+        lastWaitlistNotificationStatus: context.status || event,
+        lastWaitlistNotificationDelivered: result?.push?.success === true,
+        lastWaitlistNotificationId: result?.notification?.id || null,
+      }, { merge: true });
+    } catch (error) {
+      logger.warn('Falha ao enviar notificação de waitlist', {
+        driverId,
+        event,
+        error: error.message,
+      });
+    }
+  });
+}
+
+const WAITLIST_POSITION_NOTIFICATION_LIMIT = Number.parseInt(
+  process.env.WAITLIST_POSITION_NOTIFICATION_LIMIT || '50',
+  10
+);
+
+function collectPositionAdvancementNotifications(docs = [], removedPosition = 0, cityKey = null) {
+  return docs
+    .map((doc) => {
+      const data = doc.data ? doc.data() : {};
+      const currentPosition = Number(data?.position || 0);
+      if (!data?.driverId || !Number.isFinite(currentPosition) || currentPosition <= Number(removedPosition || 0)) {
+        return null;
+      }
+      return {
+        driverId: data.driverId,
+        previousPosition: currentPosition,
+        position: currentPosition - 1,
+        cityKey: data.cityKey || cityKey || null,
+        cityLabel: data.cityLabel || null,
+        status: 'pending',
+      };
+    })
+    .filter(Boolean)
+    .slice(0, Number.isFinite(WAITLIST_POSITION_NOTIFICATION_LIMIT) ? WAITLIST_POSITION_NOTIFICATION_LIMIT : 50);
+}
+
+function scheduleWaitlistPositionNotifications(items = []) {
+  for (const item of items) {
+    scheduleWaitlistNotification(item.driverId, WAITLIST_EVENTS.POSITION_UPDATED, item);
+  }
 }
 
 function requireAdminMutationsEnabled(req, res, next) {
@@ -746,6 +801,13 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
       cityKey: resolvedCity.cityKey
     });
 
+    scheduleWaitlistNotification(driverId, WAITLIST_EVENTS.JOINED, {
+      status: 'pending',
+      position: nextPosition,
+      cityKey: resolvedCity.cityKey,
+      cityLabel: resolvedCity.cityLabel || requestedCity || userData.city || resolvedCity.cityKey,
+    });
+
     res.json({
       success: true,
       message: 'Adicionado à wait list com sucesso',
@@ -781,8 +843,9 @@ router.delete('/api/waitlist/leave', requireFirebase, async (req, res) => {
     }
 
     const waitListDoc = waitListSnapshot.docs[0];
-    const position = waitListDoc.data().position;
-    const cityKey = waitListDoc.data().cityKey || null;
+    const waitListData = waitListDoc.data();
+    const position = waitListData.position;
+    const cityKey = waitListData.cityKey || null;
 
     // Remover da wait list
     await waitListDoc.ref.delete();
@@ -803,6 +866,12 @@ router.delete('/api/waitlist/leave', requireFirebase, async (req, res) => {
         .get();
     }
 
+    const positionNotifications = collectPositionAdvancementNotifications(
+      otherWaitListSnapshot.docs,
+      position,
+      cityKey
+    );
+
     const batch = admin.firestore().batch();
     otherWaitListSnapshot.docs
       .filter((doc) => Number(doc.data()?.position || 0) > Number(position || 0))
@@ -812,6 +881,7 @@ router.delete('/api/waitlist/leave', requireFirebase, async (req, res) => {
       });
       });
     await batch.commit();
+    scheduleWaitlistPositionNotifications(positionNotifications);
 
     // Atualizar status do usuário
     await admin.firestore().collection('users').doc(driverId).update({
@@ -1018,6 +1088,14 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
       waitListStateCode: resolvedCity.stateCode
     });
 
+    scheduleWaitlistNotification(driverId, WAITLIST_EVENTS.APPROVED, {
+      status: 'approved',
+      reason: notes,
+      previousPosition: position,
+      cityKey: resolvedCity.cityKey,
+      cityLabel: waitListData.cityLabel || resolvedCity.cityLabel,
+    });
+
     // Atualizar contador de motoristas ativos
     await admin.firestore().collection('systemConfig').doc('waitList').set({
       ...config,
@@ -1040,6 +1118,12 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
         .get();
     }
 
+    const positionNotifications = collectPositionAdvancementNotifications(
+      otherWaitListSnapshot.docs,
+      position,
+      cityKey
+    );
+
     const batch = admin.firestore().batch();
     otherWaitListSnapshot.docs
       .filter((doc) => Number(doc.data()?.position || 0) > Number(position || 0))
@@ -1049,6 +1133,7 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
       });
       });
     await batch.commit();
+    scheduleWaitlistPositionNotifications(positionNotifications);
 
     logger.info(`Motorista ${driverId} aprovado da wait list por admin ${adminId}`, {
       cityKey: resolvedCity.cityKey
@@ -1115,6 +1200,14 @@ router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAI
       waitListPosition: null
     });
 
+    scheduleWaitlistNotification(driverId, WAITLIST_EVENTS.REJECTED, {
+      status: 'rejected',
+      reason,
+      previousPosition: position,
+      cityKey,
+      cityLabel: waitListData.cityLabel || null,
+    });
+
     // Ajustar posições dos outros motoristas (mesma cidade)
     let otherWaitListSnapshot = null;
     if (cityKey) {
@@ -1131,6 +1224,12 @@ router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAI
         .get();
     }
 
+    const positionNotifications = collectPositionAdvancementNotifications(
+      otherWaitListSnapshot.docs,
+      position,
+      cityKey
+    );
+
     const batch = admin.firestore().batch();
     otherWaitListSnapshot.docs
       .filter((doc) => Number(doc.data()?.position || 0) > Number(position || 0))
@@ -1140,6 +1239,7 @@ router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAI
       });
       });
     await batch.commit();
+    scheduleWaitlistPositionNotifications(positionNotifications);
 
     logger.info(`Motorista ${driverId} rejeitado da wait list por admin ${adminId}`, {
       cityKey
@@ -1181,8 +1281,9 @@ router.put('/api/waitlist/position', authenticateSupport, requireSupportRoles(WA
     }
 
     const waitListDoc = waitListSnapshot.docs[0];
-    const currentPosition = waitListDoc.data().position;
-    const cityKey = waitListDoc.data().cityKey || null;
+    const waitListData = waitListDoc.data();
+    const currentPosition = waitListData.position;
+    const cityKey = waitListData.cityKey || null;
 
     // Buscar total de motoristas na wait list (mesma cidade)
     let totalQuery = admin.firestore()
@@ -1262,6 +1363,13 @@ router.put('/api/waitlist/position', authenticateSupport, requireSupportRoles(WA
     });
 
     await batch.commit();
+    scheduleWaitlistNotification(driverId, WAITLIST_EVENTS.POSITION_UPDATED, {
+      status: 'pending',
+      previousPosition: currentPosition,
+      position: newPosition,
+      cityKey,
+      cityLabel: waitListData.cityLabel || null,
+    });
 
     logger.info(`Posição do motorista ${driverId} ajustada para ${newPosition} por admin ${adminId}`);
     logWaitlistAdminAudit(req, 'waitlist.driver.position.update', {

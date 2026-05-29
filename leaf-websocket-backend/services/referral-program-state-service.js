@@ -5,6 +5,7 @@ const CONFIG_COLLECTION = 'referral_program_configs';
 const CONFIG_DOC_ID = 'current';
 const CAMPAIGNS_COLLECTION = 'referral_campaigns';
 const INVITES_COLLECTION = 'referral_invites';
+const INVITE_CODES_COLLECTION = 'referral_invite_codes';
 const PASSENGER_BENEFITS_COLLECTION = 'passenger_discount_benefits';
 
 const LEGACY_CONFIG_PATH = 'operations/programs/referrals/config';
@@ -12,7 +13,7 @@ const LEGACY_CAMPAIGNS_PATH = 'operations/programs/referrals/campaigns';
 const LEGACY_INVITES_PATH = 'operations/programs/referrals/invites';
 
 const LEGACY_IMPORT_ENABLED = String(
-  process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_IMPORT ?? 'true'
+  process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_IMPORT ?? 'false'
 ).toLowerCase() !== 'false';
 const LEGACY_MIRROR_ENABLED = String(
   process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR ?? 'false'
@@ -86,6 +87,7 @@ function normalizeInvite(raw = {}, fallbackId = '') {
     inviteePhone: String(raw.inviteePhone || '').trim(),
     acceptedBy: normalizeId(raw.acceptedBy),
     acceptedAt: toIso(raw.acceptedAt, null),
+    expiresAt: toIso(raw.expiresAt, null),
     campaignId: normalizeId(raw.campaignId),
     requiredCompletedTrips: raw.requiredCompletedTrips ?? null,
     rewardMonths: raw.rewardMonths ?? null,
@@ -100,6 +102,37 @@ function normalizeInvite(raw = {}, fallbackId = '') {
     updatedAt: toIso(raw.updatedAt, toIso(raw.createdAt, nowIso())),
     source: String(raw.source || '').trim() || 'firestore'
   };
+}
+
+function serviceError(message, code, statusCode = 400) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function parseTimestamp(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 10_000_000_000 ? value : value * 1000;
+  }
+  if (typeof value === 'string') {
+    const ts = new Date(value).getTime();
+    return Number.isFinite(ts) ? ts : null;
+  }
+  if (typeof value?.toDate === 'function') {
+    const ts = value.toDate().getTime();
+    return Number.isFinite(ts) ? ts : null;
+  }
+  if (typeof value?._seconds === 'number') {
+    return (value._seconds * 1000) + Math.round((value._nanoseconds || 0) / 1e6);
+  }
+  return null;
+}
+
+function inviteIsExpired(invite, nowTs = Date.now()) {
+  const expiresTs = parseTimestamp(invite?.expiresAt);
+  return Boolean(expiresTs && expiresTs <= nowTs);
 }
 
 class ReferralProgramStateService {
@@ -138,6 +171,12 @@ class ReferralProgramStateService {
     const firestore = this.getFirestore();
     if (!firestore) throw new Error('Firestore indisponível para referral programs');
     return firestore.collection(INVITES_COLLECTION);
+  }
+
+  inviteCodesCollection() {
+    const firestore = this.getFirestore();
+    if (!firestore) throw new Error('Firestore indisponível para referral programs');
+    return firestore.collection(INVITE_CODES_COLLECTION);
   }
 
   passengerBenefitsCollection() {
@@ -245,6 +284,14 @@ class ReferralProgramStateService {
     }
 
     return normalized;
+  }
+
+  async listPassengerBenefits() {
+    const snapshot = await this.passengerBenefitsCollection().get();
+    return snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...(doc.data() || {})
+    }));
   }
 
   async extendFreeMonthsForUser(userId, months, metadata = {}) {
@@ -479,6 +526,58 @@ class ReferralProgramStateService {
     return normalized;
   }
 
+  async createInviteWithUniqueCode(payload) {
+    const normalized = normalizeInvite({
+      ...(payload || {}),
+      code: String(payload?.code || '').trim().toUpperCase(),
+      source: 'firestore',
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    }, payload?.id);
+
+    if (!normalized.id) {
+      throw serviceError('invite id inválido', 'INVITE_ID_REQUIRED', 400);
+    }
+    if (!normalized.code) {
+      throw serviceError('codigo de convite inválido', 'INVITE_CODE_REQUIRED', 400);
+    }
+
+    const firestore = this.getFirestore();
+    const inviteRef = this.invitesCollection().doc(normalized.id);
+    const codeRef = this.inviteCodesCollection().doc(normalized.code);
+
+    await firestore.runTransaction(async (transaction) => {
+      const [inviteDoc, codeDoc] = await Promise.all([
+        transaction.get(inviteRef),
+        transaction.get(codeRef)
+      ]);
+
+      if (inviteDoc.exists) {
+        throw serviceError('Convite já existe', 'INVITE_ID_ALREADY_EXISTS', 409);
+      }
+      if (codeDoc.exists) {
+        throw serviceError('Código de convite já existe', 'INVITE_CODE_ALREADY_EXISTS', 409);
+      }
+
+      transaction.set(inviteRef, normalized, { merge: true });
+      transaction.set(codeRef, {
+        code: normalized.code,
+        inviteId: normalized.id,
+        type: normalized.type,
+        campaignId: normalized.campaignId || null,
+        inviterId: normalized.inviterId || null,
+        status: normalized.status,
+        createdAt: normalized.createdAt,
+        updatedAt: normalized.updatedAt,
+        expiresAt: normalized.expiresAt || null,
+        source: 'firestore'
+      }, { merge: false });
+    });
+
+    await this.mirrorInviteToLegacy(normalized);
+    return normalized;
+  }
+
   async updateInvite(inviteId, patch = {}) {
     const current = await this.getInvite(inviteId);
     if (!current) return null;
@@ -493,8 +592,85 @@ class ReferralProgramStateService {
       source: 'firestore'
     }, current.id);
     await this.invitesCollection().doc(normalized.id).set(normalized, { merge: true });
+    if (normalized.code) {
+      await this.inviteCodesCollection().doc(String(normalized.code).toUpperCase()).set({
+        inviteId: normalized.id,
+        code: String(normalized.code).toUpperCase(),
+        type: normalized.type,
+        campaignId: normalized.campaignId || null,
+        inviterId: normalized.inviterId || null,
+        status: normalized.status,
+        acceptedBy: normalized.acceptedBy || null,
+        acceptedAt: normalized.acceptedAt || null,
+        expiresAt: normalized.expiresAt || null,
+        updatedAt: normalized.updatedAt,
+        source: 'firestore'
+      }, { merge: true });
+    }
     await this.mirrorInviteToLegacy(normalized);
     return normalized;
+  }
+
+  async acceptInvite(inviteId, patch = {}, options = {}) {
+    const safeInviteId = normalizeId(inviteId);
+    if (!safeInviteId) {
+      throw serviceError('inviteId inválido', 'INVITE_ID_REQUIRED', 400);
+    }
+
+    const expectedCode = String(options.expectedCode || '').trim().toUpperCase();
+    const firestore = this.getFirestore();
+    const inviteRef = this.invitesCollection().doc(safeInviteId);
+    let acceptedInvite = null;
+
+    await firestore.runTransaction(async (transaction) => {
+      const inviteDoc = await transaction.get(inviteRef);
+      if (!inviteDoc.exists) {
+        throw serviceError('Convite não encontrado', 'INVITE_NOT_FOUND', 404);
+      }
+
+      const current = normalizeInvite(inviteDoc.data(), inviteDoc.id);
+      const currentCode = String(current.code || '').trim().toUpperCase();
+      if (expectedCode && currentCode !== expectedCode) {
+        throw serviceError('Código de convite não confere', 'INVITE_CODE_MISMATCH', 409);
+      }
+
+      const currentStatus = String(current.status || '').toLowerCase();
+      if (currentStatus !== 'pending') {
+        throw serviceError(`Convite já está ${currentStatus}`, 'INVITE_NOT_PENDING', 409);
+      }
+
+      if (inviteIsExpired(current)) {
+        throw serviceError('Convite expirado', 'INVITE_EXPIRED', 410);
+      }
+
+      acceptedInvite = normalizeInvite({
+        ...current,
+        ...(patch || {}),
+        status: 'accepted',
+        updatedAt: nowIso(),
+        source: 'firestore'
+      }, current.id);
+
+      transaction.set(inviteRef, acceptedInvite, { merge: true });
+      if (currentCode) {
+        transaction.set(this.inviteCodesCollection().doc(currentCode), {
+          inviteId: acceptedInvite.id,
+          code: currentCode,
+          type: acceptedInvite.type,
+          campaignId: acceptedInvite.campaignId || null,
+          inviterId: acceptedInvite.inviterId || null,
+          status: acceptedInvite.status,
+          acceptedBy: acceptedInvite.acceptedBy || null,
+          acceptedAt: acceptedInvite.acceptedAt || null,
+          expiresAt: acceptedInvite.expiresAt || null,
+          updatedAt: acceptedInvite.updatedAt,
+          source: 'firestore'
+        }, { merge: true });
+      }
+    });
+
+    await this.mirrorInviteToLegacy(acceptedInvite);
+    return acceptedInvite;
   }
 }
 

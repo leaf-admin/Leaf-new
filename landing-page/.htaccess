@@ -11,10 +11,11 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^excluir-conta$ excluir-conta.html [L]
 RewriteRule ^privacy-policy$ privacy-policy.html [L]
 RewriteRule ^em-breve$ em-breve.html [L]
+RewriteRule ^convite/([^/]+)/?$ convite/index.html [L]
+RewriteRule ^motorista/convite/([^/]+)/?$ motorista/convite/index.html [L]
 
 # NÃO redirecionar se já for .html (evitar loop)
 RewriteCond %{REQUEST_URI} !\.html$
-
 
 
 

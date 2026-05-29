@@ -113,6 +113,13 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
     loadInvites();
   }, [loadInvites]);
 
+  useEffect(() => {
+    const routeCode = String(route?.params?.inviteCode || route?.params?.code || '').trim();
+    if (routeCode) {
+      setAcceptCode(routeCode.toUpperCase());
+    }
+  }, [route?.params?.code, route?.params?.inviteCode]);
+
   const handlePanelLayout = useCallback((event) => {
     const nextHeight = event?.nativeEvent?.layout?.height;
     if (Number.isFinite(nextHeight) && nextHeight > 0) {

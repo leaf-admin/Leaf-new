@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "br.com.leaf.ride",
+      "sha256_cert_fingerprints": [
+        "B8:A2:ED:46:34:36:06:A6:2C:C1:26:92:BE:62:32:3E:29:69:CD:F4:C8:3F:B5:41:80:D9:24:73:8A:7C:9B:F4"
+      ]
+    }
+  }
+]
