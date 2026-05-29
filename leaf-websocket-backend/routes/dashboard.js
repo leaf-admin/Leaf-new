@@ -28,6 +28,7 @@ const {
   recomputeDriverActivationStatus
 } = require('../services/driver-document-analysis-queue');
 const { buildRecentRideActivities } = require('../services/dashboard-ride-monitoring-service');
+const { getPeakHours: getReportPeakHours } = require('../services/dashboard/reportMetrics');
 const os = require('os');
 
 // ✅ Importar middlewares de autenticação
@@ -3705,17 +3706,6 @@ function calculateAverageTripTime(bookings) {
   return tripMinutes.reduce((sum, value) => sum + value, 0) / tripMinutes.length;
 }
 
-function getPeakHours(bookings, topN = 3) {
-  if (!Array.isArray(bookings) || bookings.length === 0) {
-    return [];
-  }
-
-  return getHourlyTripDistribution(bookings)
-    .filter(({ trips }) => trips > 0)
-    .sort((a, b) => b.trips - a.trips)
-    .slice(0, topN);
-}
-
 function normalizeTimestamp(rawValue) {
   if (rawValue === null || rawValue === undefined || rawValue === '') {
     return null;
@@ -3974,19 +3964,7 @@ function getAverageRating(bookings) {
 }
 
 function getPeakHours(bookings) {
-  const hourly = new Array(24).fill(0);
-
-  bookings.forEach(booking => {
-    const hour = new Date(booking.tripdate).getHours();
-    hourly[hour] += 1;
-  });
-
-  const maxTrips = Math.max(...hourly);
-  const peakHours = hourly.map((trips, hour) => ({ hour, trips }))
-    .filter(h => h.trips === maxTrips)
-    .map(h => `${h.hour}:00`);
-
-  return peakHours;
+  return getReportPeakHours(bookings);
 }
 
 function convertToCSV(data, reportType) {

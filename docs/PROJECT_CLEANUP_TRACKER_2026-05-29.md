@@ -653,3 +653,20 @@ Evidencia:
 - `npm --prefix mobile-app run qa:production-guards`: PASS.
 - `cd mobile-app && npx jest --config jest.config.js --runInBand --runTestsByPath __tests__/prototype-ride-screens.test.js __tests__/auth-provider-startup.test.js`: PASS (`30/30`; warnings conhecidos de `Animated act(...)` no teste visual).
 - `cd mobile-app && npx expo config --json`: PASS (`Leaf`).
+
+## Bloco 35 - Executado
+
+Escopo: extrair uma duplicidade pequena do backend grande sem alterar API publica do dashboard.
+
+- Extraido o contrato efetivo de `getPeakHours` para `services/dashboard/reportMetrics.js`.
+- Mantida fachada `getPeakHours` em `routes/dashboard.js`, preservando chamadas e formato atual das respostas.
+- Removida a declaracao duplicada anterior que era sobrescrita pela segunda declaracao em tempo de execucao.
+- Adicionado teste unitario fixando o contrato legado, inclusive o comportamento historico de lista vazia retornar todas as horas empatadas.
+
+Validação:
+
+- `rg "function getPeakHours|const getPeakHours|getPeakHours\\(" leaf-websocket-backend/routes/dashboard.js leaf-websocket-backend/services/dashboard/reportMetrics.js`: PASS, sem duplicidade concorrente no router.
+- `node -c leaf-websocket-backend/routes/dashboard.js && node -c leaf-websocket-backend/services/dashboard/reportMetrics.js`: PASS.
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
+- `cd leaf-websocket-backend && npx jest --config config/jest.unit.config.js --runInBand --runTestsByPath tests/unit/services/dashboard-report-metrics.unit.test.js tests/unit/services/dashboard-user-management-service.unit.test.js tests/unit/services/dashboard-ride-monitoring-service.unit.test.js`: PASS (`10/10`).
+- `npm --prefix leaf-websocket-backend run config:validate`: BLOCKED por ambiente atual (`WOOVI_WEBHOOK_AUTHORIZATION/WOOVI_WEBHOOK_AUTH_TOKEN` ausente na `.env` carregada para producao); nao foi causado pelo bloco.
