@@ -320,3 +320,26 @@ Validação:
 - `rg` confirmou ausencia de referencias ativas fora de docs historicos/legados.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+
+## Bloco 16 - Executado
+
+Escopo: remover pacote Docker/HA/autoscale antigo do backend.
+
+- Removidos scripts antigos em `leaf-websocket-backend/scripts/deploy/` que gerenciavam Docker manual, autoscale, cluster local, KYC solto, FCM manual e deploys one-off.
+- Removidos configs antigos:
+  - `leaf-websocket-backend/config/docker/docker-compose-autoscaling.yml`
+  - `leaf-websocket-backend/config/docker/docker-compose-ha.yml`
+  - `leaf-websocket-backend/config/docker/docker-compose-simple-scaling.yml`
+  - `leaf-websocket-backend/config/nginx/nginx-ha.conf`
+- Removidos docs/runbooks correspondentes de Docker HA/autoscale.
+- Removido `leaf-websocket-backend/scripts/utils/auto-scaler.js` e o teste local HA correspondente.
+- Mantidos os scripts vivos/canonicos:
+  - `leaf-websocket-backend/scripts/deploy/validate-runtime-config.js`
+  - `leaf-websocket-backend/scripts/deploy/deploy-secondary-realtime-host.sh`
+  - `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh` por compatibilidade operacional atual.
+
+Validação:
+
+- `rg` usado para confirmar ausencia de chamada por `package.json`, workflows e scripts canonicos.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
