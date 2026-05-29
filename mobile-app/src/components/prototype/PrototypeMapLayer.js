@@ -218,23 +218,6 @@ function resolveRemoteMarkerImageSource(value) {
   return uri ? { uri } : null;
 }
 
-function resolveNativeMarkerImageSource(source) {
-  if (!source) {
-    return undefined;
-  }
-
-  if (Platform.OS !== 'android') {
-    return source;
-  }
-
-  if (typeof source === 'string') {
-    return source;
-  }
-
-  const resolved = Image.resolveAssetSource(source);
-  return resolved?.uri || undefined;
-}
-
 function toRadians(value) {
   return (Number(value) * Math.PI) / 180;
 }
@@ -1391,12 +1374,7 @@ function PrototypeMapLayer({
       driverVehicleMarkerColorToken,
     ],
   );
-  const driverVehicleMarkerNativeImageSource = useMemo(
-    () => resolveNativeMarkerImageSource(driverVehicleMarkerImageSource),
-    [driverVehicleMarkerImageSource],
-  );
-  const shouldRenderAndroidDriverVehicleMarker =
-    Platform.OS === 'android' && driverMarkerMode === 'car';
+  const shouldRenderDriverVehicleMarkerChild = driverMarkerMode === 'car';
   const androidDriverMarkerOccludedBottom = Math.max(
     0,
     Number(driverMarkerOccludedBottom) || 0,
@@ -1888,7 +1866,8 @@ function PrototypeMapLayer({
   const shouldRenderCurrentLocationVehicleOverlay =
     currentLocationMarkerMode === 'car';
   const shouldSuppressNativeAndroidDriverVehicleMarker = Boolean(
-    shouldRenderAndroidDriverVehicleMarker &&
+    Platform.OS === 'android' &&
+      shouldRenderDriverVehicleMarkerChild &&
       (shouldRenderProjectedDriverVehicleOverlay ||
         shouldRenderCurrentLocationVehicleOverlay)
   );
@@ -2238,19 +2217,14 @@ function PrototypeMapLayer({
               }}
               zIndex={19}
               anchor={{ x: 0.5, y: 0.5 }}
-              image={
-                driverMarkerMode === 'car' && !shouldRenderAndroidDriverVehicleMarker
-                  ? driverVehicleMarkerNativeImageSource
-                  : undefined
-              }
               flat={driverMarkerMode === 'car'}
               rotation={driverMarkerMode === 'car' ? displayedDriverHeading : 0}
-              tracksViewChanges={shouldRenderAndroidDriverVehicleMarker}
+              tracksViewChanges={shouldRenderDriverVehicleMarkerChild}
               pinColor={undefined}
             >
               {driverMarkerMode === 'avatar' ? (
                 <MapAvatarMarker letter={driverMarkerLetter} tone="driver" />
-              ) : shouldRenderAndroidDriverVehicleMarker ? (
+              ) : shouldRenderDriverVehicleMarkerChild ? (
                 <VehicleMarkerContent
                   source={driverVehicleMarkerImageSource}
                   colorToken={driverVehicleMarkerColorToken}
@@ -2276,9 +2250,6 @@ function PrototypeMapLayer({
                   driverMarkerCampaignImageSource ||
                   DRIVER_MARKER_IMAGE_SOURCES[vehicleMarkerColorToken] ||
                   DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE;
-                const vehicleMarkerNativeImageSource =
-                  resolveNativeMarkerImageSource(vehicleMarkerImageSource);
-                const shouldRenderAndroidVehicleMarkerChild = Platform.OS === 'android';
                 return (
                   <React.Fragment key={`nearby-${id || 'vehicle'}-${index}-${lat}-${lng}`}>
                     <Marker
@@ -2288,22 +2259,15 @@ function PrototypeMapLayer({
                       }}
                       zIndex={isRequestingVehicle ? 17 : 16}
                       anchor={{ x: 0.5, y: 0.5 }}
-                      image={
-                        shouldRenderAndroidVehicleMarkerChild
-                          ? undefined
-                          : vehicleMarkerNativeImageSource
-                      }
                       flat
                       rotation={Number.isFinite(Number(vehicle.heading)) ? Number(vehicle.heading) : 0}
                       opacity={isOuterVehicle ? 0.84 : 1}
-                      tracksViewChanges={shouldRenderAndroidVehicleMarkerChild}
+                      tracksViewChanges
                     >
-                      {shouldRenderAndroidVehicleMarkerChild ? (
-                        <VehicleMarkerContent
-                          source={vehicleMarkerImageSource}
-                          colorToken={vehicleMarkerColorToken}
-                        />
-                      ) : null}
+                      <VehicleMarkerContent
+                        source={vehicleMarkerImageSource}
+                        colorToken={vehicleMarkerColorToken}
+                      />
                     </Marker>
                     {isRequestingVehicle ? (
                       <Marker
