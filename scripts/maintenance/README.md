@@ -12,8 +12,9 @@ scripts/
 ├── start-all-services.sh             # Sobe backend, dashboard novo e mobile
 ├── start-all-services.bat            # Variante Windows dos workspaces ativos
 ├── stop-all-services.sh              # Para processos locais comuns
-├── services/                         # Scripts legados de operacao
-├── deployment/                       # Scripts legados de deploy
+├── security/                         # Guardrails e scanner de secrets
+├── cache/                            # Smokes locais de cache
+├── toggle/                           # Smokes locais de flags/toggles
 └── README.md                         # Este arquivo
 ```
 
@@ -70,9 +71,9 @@ npm run test:all
 
 ## 🚀 **PRÓXIMOS PASSOS**
 
-1. Consolidar scripts de deploy em torno de `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh`.
-2. Arquivar ou remover scripts antigos que ainda mencionem stacks removidas.
-3. Migrar qualquer automacao util para scripts raiz ou workspaces ativos.
+1. Manter deploy/ops em `leaf-websocket-backend/scripts/`.
+2. Manter automacoes de produto dentro dos workspaces ativos.
+3. Remover novos scripts temporarios assim que virarem obsoletos ou forem substituidos por package scripts.
 
 ---
 

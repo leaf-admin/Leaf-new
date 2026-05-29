@@ -451,3 +451,17 @@ Validação:
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
 - `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
+
+## Bloco 24 - Executado
+
+Escopo: remover scripts de manutencao mortos da stack Vultr/white-label.
+
+- Removidos `scripts/maintenance/deploy/` e `scripts/maintenance/deployment/`, substituidos pelos scripts canonicos em `leaf-websocket-backend/scripts/`.
+- Removidos scripts antigos de disaster recovery/load balancer baseados em IP fixo.
+- Removidos monolitos auxiliares `server-complete*.js` e checks/metricas que apontavam para VPS antiga.
+- Removido setup antigo de backup VPS; scripts locais de Redis backup foram preservados.
+- Atualizado `scripts/maintenance/README.md` para refletir apenas os grupos ainda mantidos.
+
+Validação:
+
+- `rg` previo confirmou que as referencias vivas eram apenas docs historicos/guardrails.
