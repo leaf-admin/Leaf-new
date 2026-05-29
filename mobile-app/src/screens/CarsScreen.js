@@ -7,7 +7,7 @@ import { Entypo, MaterialCommunityIcons, MaterialIcons} from '@expo/vector-icons
 import { MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { fonts } from '../common/font';
-import { getLangKey } from '../common-local/other/getLangKey';
+import { getLangKey } from '../services/runtime/localizationBridge';
 const { height, width } = Dimensions.get("window");
 
 export default function CarsScreen(props) {

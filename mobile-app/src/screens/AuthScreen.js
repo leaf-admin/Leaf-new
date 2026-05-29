@@ -16,7 +16,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { firebase } from '../common-local/config/configureFirebase';
+import { firebase } from '../services/runtime/firebaseConfigBridge';
 import { useTranslation } from '../components/i18n/LanguageProvider';
 
 

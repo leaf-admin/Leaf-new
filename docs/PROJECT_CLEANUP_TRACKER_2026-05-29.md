@@ -625,3 +625,31 @@ Validação:
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
 - `git diff --check`: PASS.
+
+## Bloco 34 - Executado
+
+Escopo: reduzir acoplamento direto do mobile ao legado vivo `common-local`, sem remover fallback ou rotas compatíveis.
+
+- Criados bridges runtime canonicos para consumidores ainda acoplados diretamente:
+  - `services/runtime/localizationBridge.js`
+  - `services/runtime/typographyBridge.js`
+  - `services/runtime/authTypesBridge.js`
+  - `services/runtime/firebaseConfigBridge.js`
+  - `services/runtime/locationActionsBridge.js`
+- Migrados imports diretos de telas, hooks, navegacao, componentes e utils para os bridges acima.
+- Removido import morto de Firebase em `AuthService`, que ja usa `@react-native-firebase/auth` diretamente.
+- Corrigido caminho quebrado `common-local/src/actions/locationactions` em hooks de tracking/historico, apontando para bridge runtime.
+- Mantidos vivos e intocados:
+  - `common-local`
+  - `state/appStore.js`
+  - `theme/runtimeTokens.js`
+  - bridges runtime existentes
+  - `PassengerUI`, `DriverUI`, `NewMapScreen`
+  - aliases `MapScreen` e `TabRoot`
+
+Evidencia:
+
+- `rg` dos imports diretos sensiveis agora retorna apenas os novos bridges runtime.
+- `npm --prefix mobile-app run qa:production-guards`: PASS.
+- `cd mobile-app && npx jest --config jest.config.js --runInBand --runTestsByPath __tests__/prototype-ride-screens.test.js __tests__/auth-provider-startup.test.js`: PASS (`30/30`; warnings conhecidos de `Animated act(...)` no teste visual).
+- `cd mobile-app && npx expo config --json`: PASS (`Leaf`).

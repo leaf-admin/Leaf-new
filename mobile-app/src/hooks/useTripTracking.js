@@ -1,13 +1,12 @@
 import Logger from '../utils/Logger';
 import { useState, useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { 
-
-    saveTracking, 
-    startTripTracking, 
-    endTripTracking, 
-    getTripData 
-} from '../common-local/src/actions/locationactions';
+import {
+    saveTracking,
+    startTripTracking,
+    endTripTracking,
+    getTripData
+} from '../services/runtime/locationActionsBridge';
 
 export const useTripTracking = (tripId) => {
     const dispatch = useDispatch();
@@ -203,4 +202,4 @@ export const useTripTracking = (tripId) => {
         updateTripStatus,
         loadTripData
     };
-}; 
+};

@@ -34,7 +34,7 @@ import { appConsts, MAIN_COLOR, SECONDORY_COLOR, FareCalculator } from '../commo
 import { getDirectionsApi } from '../services/runtime/locationRouteBridge';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../common/font';
-import { getLangKey } from '../common-local/other/getLangKey';
+import { getLangKey } from '../services/runtime/localizationBridge';
 import DeviceInfo from 'react-native-device-info';
 
 

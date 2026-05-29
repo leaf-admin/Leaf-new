@@ -14,7 +14,7 @@ import WebSocketManager from '../services/WebSocketManager';
 import realtimeConnectionOrchestrator from '../services/RealtimeConnectionOrchestrator';
 import { isE2ETestBuild, isSimulatorBuild } from '../config/runtimeAccessPolicy';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
-import { USER_SIGN_OUT } from '../common-local/types';
+import { USER_SIGN_OUT } from '../services/runtime/authTypesBridge';
 
 // Telas de Autenticação
 import OTPScreen from '../screens/OTPScreen';

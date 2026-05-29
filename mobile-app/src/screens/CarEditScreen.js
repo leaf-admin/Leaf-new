@@ -28,7 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Footer from '../components/Footer';
 import { FormIcon, MAIN_COLOR } from '../common/sharedFunctions';
 import {fonts}from "../common/font"
-import { getLangKey } from '../common-local/other/getLangKey';
+import { getLangKey } from '../services/runtime/localizationBridge';
 var { height, width } = Dimensions.get('window');
 
 export default function CarEditScreen(props) {

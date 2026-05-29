@@ -33,7 +33,7 @@ var { width, height } = Dimensions.get('window');
 import Button from '../components/Button';
 import { fonts } from '../common/font';
 import DownloadReceipt from '../components/DownloadReceipt';
-import { getLangKey } from '../common-local/other/getLangKey';
+import { getLangKey } from '../services/runtime/localizationBridge';
 import { Icon } from 'react-native-elements';
 import { api } from '../../common';
 

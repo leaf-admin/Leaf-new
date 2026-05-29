@@ -28,7 +28,7 @@ import Button from './Button';
 import RNPickerSelect from './RNPickerSelect';
 import Emptylist from './Emptylist';
 import { fonts } from '../common/font';
-import { getLangKey } from '../common-local/other/getLangKey';
+import { getLangKey } from '../services/runtime/localizationBridge';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 export default function RideList(props) {
