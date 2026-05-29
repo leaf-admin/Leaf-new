@@ -67,6 +67,12 @@ ngrok.pid
 *.so
 *.log
 venv/
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+**/.pytest_cache/
 android-sdk/
 mobile-app/test-results/
 mobile-app/reports/
@@ -136,6 +142,10 @@ ideal-*.png
 live-*.png
 /ios-*.png
 /android-*.png
+
+# Versioned Expo native module templates. The generated platform projects remain ignored.
+!mobile-app/native/
+!mobile-app/native/**
 /*-screenshot*.png
 /*-evidence*.png
 01-*.png
