@@ -13,7 +13,7 @@ const httpsAgent = new https.Agent({
     rejectUnauthorized: false
 });
 
-const API_URL = process.env.API_URL || 'http://147.182.204.181:3001';
+const API_URL = process.env.API_URL || 'https://api.leaf.app.br';
 const NOTIFICATION_ENDPOINT = `${API_URL}/api/notifications/send`;
 
 async function testNotification() {

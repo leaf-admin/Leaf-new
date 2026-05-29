@@ -12,7 +12,7 @@ async function sendTestNotification() {
     try {
         console.log('🔔 Enviando notificação de teste via WebSocket...\n');
         
-        const WEBSOCKET_URL = process.env.WEBSOCKET_URL || 'http://147.182.204.181:3001';
+        const WEBSOCKET_URL = process.env.WEBSOCKET_URL || 'https://socket.leaf.app.br';
         
         console.log(`🔌 Conectando ao WebSocket: ${WEBSOCKET_URL}`);
         
@@ -75,4 +75,3 @@ async function sendTestNotification() {
 
 // Executar
 sendTestNotification();
-

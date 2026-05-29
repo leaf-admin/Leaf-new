@@ -465,3 +465,18 @@ Escopo: remover scripts de manutencao mortos da stack Vultr/white-label.
 Validação:
 
 - `rg` previo confirmou que as referencias vivas eram apenas docs historicos/guardrails.
+
+## Bloco 25 - Executado
+
+Escopo: remover utilitarios legados soltos e atualizar defaults operacionais mantidos.
+
+- Removidos scripts antigos de KYC VPS mockado, junto dos quick starts que chamavam esses scripts.
+- Removidos utilitarios mobile soltos que instalavam APK/testavam FCM contra VPS antiga.
+- Removido `update-woovi-webhook-vps.js`, mantendo `fix-woovi-webhook.js` como script unico para webhook Woovi.
+- Removido `utils/vps-metrics.js`, nao referenciado pelo runtime atual.
+- Atualizados defaults mantidos de alerta, notificacao, load test e Woovi para `api.leaf.app.br`/`socket.leaf.app.br`.
+
+Validação:
+
+- `node -c` nos scripts JS alterados: PASS.
+- `bash -n` no lembrete de alertas alterado: PASS.

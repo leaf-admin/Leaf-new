@@ -15,7 +15,7 @@ async function sendNotificationToConnectedUser() {
         
         console.log(`🔔 Enviando notificação para usuário conectado: ${userId} (${userType})\n`);
         
-        const WEBSOCKET_URL = process.env.WEBSOCKET_URL || 'http://147.182.204.181:3001';
+        const WEBSOCKET_URL = process.env.WEBSOCKET_URL || 'https://socket.leaf.app.br';
         
         console.log(`🔌 Conectando ao WebSocket: ${WEBSOCKET_URL}`);
         
@@ -82,4 +82,3 @@ async function sendNotificationToConnectedUser() {
 
 // Executar
 sendNotificationToConnectedUser();
-

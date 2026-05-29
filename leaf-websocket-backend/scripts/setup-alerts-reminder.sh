@@ -18,11 +18,10 @@ echo "3. Ver logs:"
 echo "   tail -f /var/log/leaf-server-alerts.log"
 echo ""
 echo "4. Ver alertas via API:"
-echo "   curl http://147.182.204.181:3001/api/alerts"
+echo "   curl https://api.leaf.app.br/api/alerts"
 echo ""
 echo "📚 Documentação: monitoring/README-ALERTS.md"
 echo ""
 echo "💡 Para ver este lembrete novamente:"
 echo "   cat leaf-websocket-backend/LEMBRETE-ALERTAS-22h.md"
-
 
