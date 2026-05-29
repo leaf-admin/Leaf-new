@@ -496,3 +496,28 @@ Validação:
 - `node -c` em todos os JS/CJS alterados nesse bloco: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+
+## Bloco 27 - Executado
+
+Escopo: remover artefatos de teste gerados e ultimo status mobile legado.
+
+- Removidos relatórios JSON antigos `stress-test-e2e-rides-*.json` que estavam rastreados no backend.
+- Removido `mobile-app/test-status-atual.cjs`, que ainda apontava para a VPS Vultr antiga e duplicava checks ja cobertos pelos scripts atuais.
+- Atualizado teste unitário mobile de WebSocket para usar `socket.leaf.app.br` no cenário de Origin nativo.
+
+Validação:
+
+- `node -c mobile-app/__tests__/websocket-manager-auth.test.js`: PASS.
+- `npx jest --config jest.config.js __tests__/websocket-manager-auth.test.js --runInBand`: PASS (`13/13`; Jest manteve o aviso conhecido de open handle apos finalizar).
+
+## Bloco 28 - Executado
+
+Escopo: eliminar ultimas referencias executaveis antigas fora dos docs historicos.
+
+- Removido `leaf-websocket-backend/ssl-config.js`, sem referencias no runtime atual e ainda contendo SAN de IP antigo.
+- Removidas deteccoes especificas de `sslip.io` em scripts de prelaunch/perfil de teste; URL HTTPS ja cobre ambiente remoto.
+
+Validação:
+
+- Varredura sem docs historicos passou a apontar apenas para suporte generico `sslip.io` de CORS e testes unitarios dessa funcao.
+- `node -c` nos scripts alterados: PASS.

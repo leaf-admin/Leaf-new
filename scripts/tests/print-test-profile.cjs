@@ -41,7 +41,6 @@ function resolveExistingPath(candidates) {
 function looksRemoteWsUrl(wsUrl) {
   const normalized = String(wsUrl || '').trim().toLowerCase();
   if (!normalized) return true;
-  if (normalized.includes('sslip.io')) return true;
   if (normalized.startsWith('https://')) return true;
   if (normalized.startsWith('http://') && !normalized.includes('localhost') && !normalized.includes('127.0.0.1')) {
     return true;

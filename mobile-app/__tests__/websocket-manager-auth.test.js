@@ -272,13 +272,13 @@ describe('WebSocketManager auth QA bypass', () => {
 
     const manager = WebSocketManager.getInstance();
     manager._createSocketClient(
-      'wss://socket.62.169.31.231.sslip.io/socket.io?ignored=1',
+      'wss://socket.leaf.app.br/socket.io?ignored=1',
       { token: 'firebase-token' },
       {},
     );
 
     expect(io).toHaveBeenCalledWith(
-      'wss://socket.62.169.31.231.sslip.io/socket.io?ignored=1',
+      'wss://socket.leaf.app.br/socket.io?ignored=1',
       expect.objectContaining({
         extraHeaders: {
           Origin: 'file://',

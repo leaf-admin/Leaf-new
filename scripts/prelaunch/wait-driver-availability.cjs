@@ -42,7 +42,7 @@ function configureRemoteRuntimeFromApiBaseUrl(apiBaseUrl) {
   const normalizedWsUrl = String(process.env.WS_URL || '').trim().toLowerCase();
   if (
     !process.env.E2E_DRIVER_SIM_MODE &&
-    (normalizedWsUrl.includes('sslip.io') || normalizedWsUrl.startsWith('https://'))
+    normalizedWsUrl.startsWith('https://')
   ) {
     process.env.E2E_DRIVER_SIM_MODE = 'remote_ssh';
   }
