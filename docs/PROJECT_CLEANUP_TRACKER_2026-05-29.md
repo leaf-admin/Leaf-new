@@ -418,3 +418,17 @@ Validação:
 
 - Referencias diretas aos scripts removidos checadas antes da remocao; apenas docs historicos os citavam.
 - `bash -n scripts/healthcheck-vps.sh`: PASS.
+
+## Bloco 22 - Executado
+
+Escopo: remover pacote antigo de configs Docker/Nginx fora do runtime atual.
+
+- Removidos `leaf-websocket-backend/config/docker/` e `leaf-websocket-backend/config/nginx/`.
+- Removidos `config/nginx/nginx-complete-config.conf` e `config/nginx/nginx-fixed-config.conf`, que nao eram chamados pelos scripts atuais de waitlist.
+- Mantidos `config/nginx/nginx-leaf-app-br.conf`, `config/nginx/nginx-waitlist-secure.conf` e o README de waitlist.
+- Removidos docs antigos de organizacao que descreviam essa estrutura removida.
+
+Validação:
+
+- `rg` confirmou que os arquivos removidos eram chamados apenas por configs/docs antigas do mesmo pacote.
+- Configs de waitlist e compose ativo preservados.
