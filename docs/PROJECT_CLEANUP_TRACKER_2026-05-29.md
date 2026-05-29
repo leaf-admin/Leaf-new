@@ -269,3 +269,19 @@ Validação:
 - `git ls-files .do/app.yaml`: confirmava que era versionado antes da remocao.
 - `node -c scripts/maintenance/security/scan-secrets.cjs`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+
+## Bloco 13 - Executado
+
+Escopo: alinhar documentacao tecnica principal com runtime modular e dominios canonicos.
+
+- Atualizado `docs/DEVKIT_TECNICO_LEAF_2026-05-23.md`:
+  - E2E remoto agora aponta para `api.leaf.app.br` e `socket.leaf.app.br` por padrao.
+  - SSH remoto deve ser definido via env dos scripts operacionais.
+  - Runtime atual documentado como `server.js` modular.
+  - `server.vps.js` documentado apenas como rollback legado temporario.
+  - `docker-compose.hostinger.yml` mantido como compose atual com nome legado.
+
+Validação:
+
+- `rg` confirmou `LEAF_SERVER_RUNTIME=modular` no compose ativo.
+- `git diff --check`: PASS.

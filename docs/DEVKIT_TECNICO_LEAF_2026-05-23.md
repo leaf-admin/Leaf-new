@@ -687,10 +687,9 @@ Perfil canonico:
 
 - `docs/TEST_EXECUTION_CANONICAL_PROFILE.md`
 - Os scripts npm imprimem perfil antes de executar testes.
-- E2E default usa ambiente remoto compartilhado:
-  - Socket: `https://socket.62.169.31.231.sslip.io`
-  - API: `https://api.62.169.31.231.sslip.io`
-  - SSH host: `62.169.31.231`
+- E2E default deve apontar para os dominios canonicos atuais, salvo override explicito por variavel de ambiente:
+  - Socket: `https://socket.leaf.app.br`
+  - API: `https://api.leaf.app.br`
 
 Comandos oficiais:
 
@@ -769,14 +768,15 @@ Dominios canonicos:
 
 Ambiente remoto compartilhado de teste:
 
-- API: `https://api.62.169.31.231.sslip.io`
-- Socket: `https://socket.62.169.31.231.sslip.io`
-- SSH host: `62.169.31.231`
+- API: `https://api.leaf.app.br`
+- Socket: `https://socket.leaf.app.br`
+- SSH host: configurar via `VPS_HOST`/`SSH_KEY_PATH` nos scripts operacionais.
 
 Backend VPS:
 
-- Runtime atual: `server.vps.js`
-- Compose principal: `leaf-websocket-backend/docker-compose.hostinger.yml`
+- Runtime atual: modular em `server.js` (`LEAF_SERVER_RUNTIME=modular`).
+- Rollback legado preservado temporariamente: `server.vps.js`.
+- Compose principal: `leaf-websocket-backend/docker-compose.hostinger.yml` (nome legado, uso atual).
 - Deploy operacional atual documentado em workers como:
 
 ```bash
