@@ -102,8 +102,8 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
       
       # Woovi
-      - WOOVI_WEBHOOK_URL=${WOOVI_WEBHOOK_URL:-https://api.62.169.31.231.sslip.io/api/woovi/webhook}
-      - SERVER_URL=${SERVER_URL:-https://api.62.169.31.231.sslip.io}
+      - WOOVI_WEBHOOK_URL=${WOOVI_WEBHOOK_URL:-https://api.leaf.app.br/api/woovi/webhook}
+      - SERVER_URL=${SERVER_URL:-https://api.leaf.app.br}
       - WOOVI_ENVIRONMENT=${WOOVI_ENVIRONMENT:-production}
       - WOOVI_API_TOKEN=${WOOVI_API_TOKEN}
       - WOOVI_APP_ID=${WOOVI_APP_ID}

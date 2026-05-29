@@ -361,3 +361,18 @@ Validação:
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
 - `npm --prefix mobile-app run qa:production-guards`: PASS.
+
+## Bloco 18 - Executado
+
+Escopo: alinhar borda backend ativa aos dominios Leaf.
+
+- Atualizado `docker-compose.hostinger.yml` para usar `https://api.leaf.app.br` e `https://api.leaf.app.br/api/woovi/webhook` como defaults.
+- Atualizado `docker-compose.realtime-secondary.yml` com os mesmos defaults canonicos.
+- Atualizado `nginx.conf`, montado pelo compose ativo, para servir HTTP/HTTPS em `api.leaf.app.br`, `socket.leaf.app.br` e `dashboard.leaf.app.br`.
+- Removidos nomes/certificados `sslip.io` da configuracao `nginx.multi-gateway.conf` usada pelo compose de gateway escalado.
+
+Validação:
+
+- Parser YAML local nos composes alterados: PASS.
+- Checagem de balanceamento de blocos Nginx nos arquivos alterados: PASS.
+- `git diff --check`: PASS.

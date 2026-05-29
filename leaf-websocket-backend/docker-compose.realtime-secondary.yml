@@ -58,8 +58,8 @@ services:
       - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
       - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-https://leaf-reactnative-default-rtdb.firebaseio.com}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
-      - SERVER_URL=${SERVER_URL:-https://api.62.169.31.231.sslip.io}
-      - WOOVI_WEBHOOK_URL=${WOOVI_WEBHOOK_URL:-https://api.62.169.31.231.sslip.io/api/woovi/webhook}
+      - SERVER_URL=${SERVER_URL:-https://api.leaf.app.br}
+      - WOOVI_WEBHOOK_URL=${WOOVI_WEBHOOK_URL:-https://api.leaf.app.br/api/woovi/webhook}
       - WOOVI_ENVIRONMENT=${WOOVI_ENVIRONMENT:-production}
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
       - LOG_LEVEL=${LOG_LEVEL:-info}
