@@ -222,8 +222,8 @@ class KYCService {
       logStructured('info', `Similaridade CNH ↔ Selfie: ${similarity.toFixed(3)}`, { service: 'kyc-service', driverId, similarity });
 
       // 5. Decisão baseada em threshold
-      const APPROVE_THRESHOLD = 0.65;
-      const REVIEW_THRESHOLD = 0.55;
+      const APPROVE_THRESHOLD = Number(process.env.BIOMETRIC_FACE_APPROVE_THRESHOLD || 0.61);
+      const REVIEW_THRESHOLD = Number(process.env.BIOMETRIC_FACE_REVIEW_THRESHOLD || 0.40);
       const approved = similarity >= APPROVE_THRESHOLD;
       const needsReview = similarity >= REVIEW_THRESHOLD && similarity < APPROVE_THRESHOLD;
 
@@ -322,7 +322,7 @@ class KYCService {
       const similarity = this.calculateCosineSimilarity(anchorEmbedding, selfieEmbedding);
       logStructured('info', `Similaridade Re-verificação: ${similarity.toFixed(3)}`, { service: 'kyc-service', driverId, similarity });
 
-      const APPROVE_THRESHOLD = 0.65;
+      const APPROVE_THRESHOLD = Number(process.env.BIOMETRIC_FACE_APPROVE_THRESHOLD || 0.61);
       const approved = similarity >= APPROVE_THRESHOLD;
 
       // Salvar evidência da re-verificação
@@ -359,4 +359,3 @@ class KYCService {
 const kycService = new KYCService();
 
 module.exports = kycService;
-

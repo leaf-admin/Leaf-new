@@ -9,7 +9,39 @@
 
 const axios = require('axios');
 const FormData = require('form-data');
+const BiometricFaceClient = require('./biometric-face-client');
+const CnhFaceBiometricService = require('./cnh-face-biometric-service');
 const { logStructured, logError } = require('../utils/logger');
+
+function parseNumber(value, fallback) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function isPdfBuffer(buffer) {
+  return Buffer.isBuffer(buffer) && buffer.slice(0, 4).toString('ascii') === '%PDF';
+}
+
+function guessImageContentType(buffer, fallback = 'image/jpeg') {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) {
+    return fallback;
+  }
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+  ) {
+    return 'image/png';
+  }
+  if (buffer.slice(0, 4).toString('ascii') === 'RIFF' && buffer.slice(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp';
+  }
+  return fallback;
+}
 
 class KYCVPSClient {
   constructor() {
@@ -19,6 +51,22 @@ class KYCVPSClient {
     // ✅ CORREÇÃO: Aumentar timeout para 60s (upload de imagens pode demorar)
     this.timeout = parseInt(process.env.KYC_VPS_TIMEOUT) || 60000; // 60 segundos (era 30s)
     this.maxRetries = 2;
+    this.biometricFaceClient = new BiometricFaceClient();
+    this.cnhFaceBiometricService = new CnhFaceBiometricService({
+      client: this.biometricFaceClient
+    });
+    this.provider = String(process.env.KYC_VPS_PROVIDER || 'auto').trim().toLowerCase();
+    this.useBiometricFaceService =
+      this.provider === 'biometric-face-service'
+      || (this.provider === 'auto' && this.biometricFaceClient.isConfigured());
+    this.biometricApproveThreshold = parseNumber(
+      process.env.BIOMETRIC_FACE_APPROVE_THRESHOLD,
+      parseNumber(process.env.FACE_APPROVE_THRESHOLD, 0.61)
+    );
+    this.biometricReviewThreshold = parseNumber(
+      process.env.BIOMETRIC_FACE_REVIEW_THRESHOLD,
+      parseNumber(process.env.FACE_REVIEW_THRESHOLD, 0.40)
+    );
   }
 
   /**
@@ -30,6 +78,15 @@ class KYCVPSClient {
    * @returns {Promise<Object>} Resultado da verificação
    */
   async processKYC(userId, cnhBuffer, currentImageBuffer, options = {}) {
+    if (this.useBiometricFaceService) {
+      return this.processKYCWithBiometricFaceService(
+        userId,
+        cnhBuffer,
+        currentImageBuffer,
+        options
+      );
+    }
+
     try {
       logStructured('info', `🚀 Enviando requisição KYC para VPS: ${this.vpsUrl}`);
       logStructured('info', `   UserId: ${userId}`);
@@ -92,11 +149,116 @@ class KYCVPSClient {
     }
   }
 
+  async processKYCWithBiometricFaceService(userId, referenceImageBuffer, currentImageBuffer, options = {}) {
+    const startedAt = Date.now();
+    try {
+      logStructured('info', 'Enviando verificação KYC para microservico biometrico', {
+        service: 'kyc-vps-client',
+        provider: 'biometric-face-service',
+        userId,
+        referenceBytes: Buffer.isBuffer(referenceImageBuffer) ? referenceImageBuffer.length : 0,
+        currentBytes: Buffer.isBuffer(currentImageBuffer) ? currentImageBuffer.length : 0
+      });
+
+      const referenceEmbedding = await this.generateReferenceEmbedding(referenceImageBuffer, {
+        userId,
+        filename: options.referenceFilename || 'reference.jpg'
+      });
+      const currentEmbedding = await this.biometricFaceClient.generateEmbedding(currentImageBuffer, {
+        filename: options.currentFilename || 'current.jpg',
+        contentType: guessImageContentType(currentImageBuffer)
+      });
+
+      const comparison = await this.biometricFaceClient.compareEmbeddings(
+        referenceEmbedding.embedding,
+        currentEmbedding.embedding,
+        {
+          approveThreshold: this.biometricApproveThreshold,
+          reviewThreshold: this.biometricReviewThreshold
+        }
+      );
+
+      const confidence = Number(comparison?.cosine_similarity || 0);
+      const decision = comparison?.decision || 'reject';
+      const match = decision === 'approve';
+
+      logStructured('info', 'Verificação KYC biometrica concluida', {
+        service: 'kyc-vps-client',
+        provider: 'biometric-face-service',
+        userId,
+        decision,
+        confidence,
+        durationMs: Date.now() - startedAt
+      });
+
+      return {
+        success: true,
+        match,
+        needsReview: decision === 'review',
+        confidence,
+        similarity: confidence,
+        decision,
+        provider: 'biometric-face-service',
+        processingTime: Date.now() - startedAt,
+        reference: {
+          source: referenceEmbedding.source || 'reference_image',
+          faceCount: referenceEmbedding.face_count || null,
+          detectionScore: referenceEmbedding.selected_face?.detection_score || null,
+          model: referenceEmbedding.model || null
+        },
+        current: {
+          faceCount: currentEmbedding.face_count || null,
+          detectionScore: currentEmbedding.selected_face?.detection_score || null,
+          model: currentEmbedding.model || null
+        },
+        thresholds: comparison?.thresholds || {
+          approve: this.biometricApproveThreshold,
+          review: this.biometricReviewThreshold
+        }
+      };
+    } catch (error) {
+      logError(error, 'Erro ao processar KYC no microservico biometrico', {
+        service: 'kyc-vps-client',
+        provider: 'biometric-face-service',
+        userId,
+        durationMs: Date.now() - startedAt
+      });
+      throw error;
+    }
+  }
+
+  async generateReferenceEmbedding(referenceImageBuffer, options = {}) {
+    if (isPdfBuffer(referenceImageBuffer)) {
+      return this.cnhFaceBiometricService.generateCnhFaceEmbeddingFromPdf(referenceImageBuffer, {
+        filename: options.filename || 'cnh.pdf'
+      });
+    }
+
+    return this.biometricFaceClient.generateEmbedding(referenceImageBuffer, {
+      filename: options.filename || 'reference.jpg',
+      contentType: guessImageContentType(referenceImageBuffer)
+    });
+  }
+
   /**
    * Health check da VPS KYC
    * @returns {Promise<Object>} Status da VPS
    */
   async healthCheck() {
+    if (this.useBiometricFaceService) {
+      const health = await this.biometricFaceClient.healthCheck();
+      const rawStatus = String(health.status || '').toLowerCase();
+      const healthy = health.configured === true && ['ok', 'ready', 'healthy'].includes(rawStatus);
+
+      return {
+        status: healthy ? 'healthy' : 'unhealthy',
+        provider: 'biometric-face-service',
+        vpsUrl: this.biometricFaceClient.baseUrl,
+        response: health,
+        error: healthy ? undefined : health.error || `status ${health.status || 'unknown'}`
+      };
+    }
+
     try {
       const response = await axios.get(`${this.vpsUrl}/health`, {
         timeout: 5000,
@@ -177,4 +339,3 @@ class KYCVPSClient {
 }
 
 module.exports = KYCVPSClient;
-

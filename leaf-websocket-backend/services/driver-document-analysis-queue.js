@@ -1,6 +1,8 @@
 const firebaseConfig = require('../firebase-config');
 const ocrService = require('./ocr-service');
 const documentAIExtractionService = require('./document-ai-extraction-service');
+const CnhFaceBiometricService = require('./cnh-face-biometric-service');
+const { validateCnhDocumentIdentity } = require('./cnh-document-identity-validator');
 const { logStructured, logError } = require('../utils/logger');
 const { metrics: runtimeMetrics } = require('../utils/prometheus-metrics');
 const driverActivationStateService = require('./driver-activation-state-service');
@@ -13,6 +15,24 @@ const ALLOWED_DRIVER_DOCUMENT_TYPES = Object.freeze([
   ...(MEI_DOCUMENTS_ENABLED ? ['mei'] : [])
 ]);
 const REVIEWABLE_INDEX_STATUSES = Object.freeze(['pending', 'approved', 'rejected']);
+const CNH_FACE_BIOMETRICS_ENABLED =
+  String(process.env.ENABLE_CNH_FACE_BIOMETRICS || 'false').toLowerCase() === 'true';
+const CNH_FACE_BIOMETRICS_BLOCKING =
+  String(process.env.CNH_FACE_BIOMETRICS_BLOCKING || 'false').toLowerCase() === 'true';
+const CNH_FACE_BIOMETRICS_MAX_ATTEMPTS = Math.max(
+  1,
+  Number.parseInt(process.env.CNH_FACE_BIOMETRICS_MAX_ATTEMPTS || '3', 10) || 3
+);
+const CNH_FACE_BIOMETRICS_RETRY_BASE_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(process.env.CNH_FACE_BIOMETRICS_RETRY_BASE_DELAY_MS || '750', 10) || 750
+);
+const CNH_FACE_BIOMETRICS_RETRY_MAX_DELAY_MS = Math.max(
+  CNH_FACE_BIOMETRICS_RETRY_BASE_DELAY_MS,
+  Number.parseInt(process.env.CNH_FACE_BIOMETRICS_RETRY_MAX_DELAY_MS || '4000', 10) || 4000
+);
+
+let cnhFaceBiometricService = null;
 
 function sanitizeDocumentType(value) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -62,6 +82,247 @@ function getDbOrThrow() {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function getCnhFaceBiometricService() {
+  if (!cnhFaceBiometricService) {
+    cnhFaceBiometricService = new CnhFaceBiometricService();
+  }
+  return cnhFaceBiometricService;
+}
+
+function withoutEmbedding(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+  const { embedding, ...rest } = payload;
+  return rest;
+}
+
+function sleep(ms) {
+  if (!ms) return Promise.resolve();
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getErrorStatus(error) {
+  return Number(error?.status || error?.response?.status || error?.statusCode || 0);
+}
+
+function isRetryableCnhFaceBiometricError(error) {
+  const status = getErrorStatus(error);
+  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) {
+    return true;
+  }
+  if (status >= 400 && status < 500) {
+    return false;
+  }
+
+  const code = String(error?.code || error?.cause?.code || '').toUpperCase();
+  if (
+    code.includes('PERMISSION')
+    || code.includes('AUTH')
+    || code.includes('UNAUTHENTICATED')
+  ) {
+    return false;
+  }
+  if ([
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'EAI_AGAIN',
+    'ENOTFOUND',
+    'ESOCKETTIMEDOUT',
+    'ERR_NETWORK',
+    'ERR_BAD_RESPONSE',
+    'UNAVAILABLE',
+    'DEADLINE_EXCEEDED',
+    'RESOURCE_EXHAUSTED',
+    'INTERNAL'
+  ].includes(code)) {
+    return true;
+  }
+
+  const message = String(error?.message || '').toLowerCase();
+  if (
+    message.includes('timeout')
+    || message.includes('temporarily')
+    || message.includes('connection')
+    || message.includes('socket')
+    || message.includes('model load')
+    || message.includes('model not loaded')
+    || message.includes('service unavailable')
+    || message.includes('database unavailable')
+    || message.includes('rtdb unavailable')
+    || message.includes('deadline exceeded')
+  ) {
+    return true;
+  }
+
+  if (
+    message.includes('no face')
+    || message.includes('nenhuma face')
+    || message.includes('upload must be an image')
+    || message.includes('image is empty')
+    || message.includes('image is too large')
+    || message.includes('pdf')
+  ) {
+    return false;
+  }
+
+  return false;
+}
+
+function getCnhFaceBiometricRetryDelayMs(attempt) {
+  const exponentialDelay = CNH_FACE_BIOMETRICS_RETRY_BASE_DELAY_MS * (2 ** Math.max(0, attempt - 1));
+  const jitter = Math.floor(Math.random() * 150);
+  return Math.min(CNH_FACE_BIOMETRICS_RETRY_MAX_DELAY_MS, exponentialDelay + jitter);
+}
+
+async function generateCnhFaceBiometricShadow({ driverId, submissionId, fileBuffer }) {
+  if (!CNH_FACE_BIOMETRICS_ENABLED) {
+    return null;
+  }
+
+  const safeDriverId = String(driverId || '').trim();
+  const safeSubmissionId = String(submissionId || '').trim();
+  const startedAt = Date.now();
+  const service = getCnhFaceBiometricService();
+
+  if (!service.isConfigured()) {
+    logStructured('warn', 'Biometria facial da CNH habilitada, mas microservico nao configurado', {
+      service: 'driver-activation-queue',
+      driverId: safeDriverId,
+      submissionId: safeSubmissionId
+    });
+    return {
+      status: 'skipped',
+      provider: 'leaf_face_compare_service',
+      reason: 'not_configured',
+      createdAt: nowIso()
+    };
+  }
+
+  let lastError = null;
+  let attempts = 0;
+
+  try {
+    let result = null;
+    let biometricPayload = null;
+
+    for (attempts = 1; attempts <= CNH_FACE_BIOMETRICS_MAX_ATTEMPTS; attempts += 1) {
+      try {
+        if (!result) {
+          result = await service.generateCnhFaceEmbeddingFromPdf(fileBuffer, {
+            filename: `cnh-${safeSubmissionId || Date.now()}.pdf`
+          });
+        }
+
+        const createdAt = nowIso();
+        biometricPayload = {
+          provider: 'leaf_face_compare_service',
+          status: 'generated',
+          source: result.source || 'cnh_pdf',
+          embedding: result.embedding,
+          dimension: result.dimension || null,
+          embeddingNorm: result.embedding_norm || null,
+          faceCount: result.face_count || null,
+          selectedFace: result.selected_face || null,
+          model: result.model || null,
+          crop: result.crop || null,
+          documentType: 'cnh',
+          submissionId: safeSubmissionId || null,
+          createdAt,
+          durationMs: Date.now() - startedAt,
+          attempts
+        };
+
+        const db = getDbOrThrow();
+        await db.ref().update({
+          [`users/${safeDriverId}/biometrics/cnhFace`]: biometricPayload,
+          [`driver_activation/${safeDriverId}/biometrics/cnhFace`]: withoutEmbedding(biometricPayload)
+        });
+
+        break;
+      } catch (error) {
+        lastError = error;
+        const retryable = isRetryableCnhFaceBiometricError(error);
+        const hasAnotherAttempt = attempts < CNH_FACE_BIOMETRICS_MAX_ATTEMPTS;
+
+        if (!retryable || !hasAnotherAttempt) {
+          throw error;
+        }
+
+        const retryDelayMs = getCnhFaceBiometricRetryDelayMs(attempts);
+        runtimeMetrics.recordRealtimeUpdate('cnh_face_biometric', 'retry');
+        logStructured('warn', 'Falha transitória ao gerar ou armazenar embedding facial da CNH; retry agendado', {
+          service: 'driver-activation-queue',
+          driverId: safeDriverId,
+          submissionId: safeSubmissionId,
+          attempt: attempts,
+          maxAttempts: CNH_FACE_BIOMETRICS_MAX_ATTEMPTS,
+          retryDelayMs,
+          error: error.message,
+          status: getErrorStatus(error) || null,
+          code: error?.code || error?.cause?.code || null
+        });
+        await sleep(retryDelayMs);
+      }
+    }
+
+    logStructured('info', 'Embedding facial da CNH armazenado em shadow mode', {
+      service: 'driver-activation-queue',
+      driverId: safeDriverId,
+      submissionId: safeSubmissionId,
+      durationMs: biometricPayload.durationMs,
+      attempts,
+      source: biometricPayload.source,
+      detScore: biometricPayload.selectedFace?.detection_score || null
+    });
+
+    return withoutEmbedding(biometricPayload);
+  } catch (error) {
+    const retryable = isRetryableCnhFaceBiometricError(error);
+    const failurePayload = {
+      status: 'failed',
+      provider: 'leaf_face_compare_service',
+      error: error.message,
+      errorCode: error?.code || error?.cause?.code || null,
+      statusCode: getErrorStatus(error) || null,
+      retryable,
+      attempts,
+      maxAttempts: CNH_FACE_BIOMETRICS_MAX_ATTEMPTS,
+      createdAt: nowIso(),
+      durationMs: Date.now() - startedAt
+    };
+
+    logError(error, 'Falha ao gerar embedding facial da CNH em shadow mode', {
+      service: 'driver-activation-queue',
+      driverId: safeDriverId,
+      submissionId: safeSubmissionId,
+      durationMs: failurePayload.durationMs,
+      retryable,
+      attempts,
+      status: failurePayload.statusCode,
+      lastError: lastError?.message || null
+    });
+
+    if (CNH_FACE_BIOMETRICS_BLOCKING) {
+      throw error;
+    }
+
+    try {
+      const db = getDbOrThrow();
+      await db.ref(`driver_activation/${safeDriverId}/biometrics/cnhFace`).set(failurePayload);
+    } catch (statusError) {
+      logError(statusError, 'Falha ao registrar status de erro da biometria CNH', {
+        service: 'driver-activation-queue',
+        driverId: safeDriverId,
+        submissionId: safeSubmissionId
+      });
+    }
+
+    return failurePayload;
+  }
 }
 
 function toReviewQueueStatus(documentStatus) {
@@ -358,6 +619,23 @@ async function analyzeCnhDocument(fileBuffer) {
     extractionSource = 'pdf_image';
   }
 
+  const documentIdentity = validateCnhDocumentIdentity({
+    text: extractedText,
+    data
+  });
+
+  if (!documentIdentity.valid) {
+    return {
+      success: false,
+      reason: 'O documento enviado não parece ser uma CNH válida. Envie sua CNH Digital em PDF.',
+      data: {
+        ...(data || {}),
+        documentIdentity
+      },
+      extractionSource
+    };
+  }
+
   const hasRequiredIdentity = Boolean(String(data?.nome || '').trim()) && Boolean(String(data?.cpf || '').trim());
   if (!hasRequiredIdentity) {
     return {
@@ -549,6 +827,14 @@ class DriverDocumentAnalysisQueue {
           continue;
         }
 
+        const cnhFaceBiometric = safeDocumentType === 'cnh'
+          ? await generateCnhFaceBiometricShadow({
+            driverId: safeDriverId,
+            submissionId: currentJob.submissionId,
+            fileBuffer: currentJob.fileBuffer
+          })
+          : null;
+
         await updateDocumentState({
           driverId: safeDriverId,
           documentType: safeDocumentType,
@@ -565,7 +851,8 @@ class DriverDocumentAnalysisQueue {
             fileUrl: currentJob.fileUrl || null,
             filePath: currentJob.filePath || null,
             createdAt: currentJob.createdAt || nowIso(),
-            uploadedAt: currentJob.uploadedAt || nowIso()
+            uploadedAt: currentJob.uploadedAt || nowIso(),
+            biometricFace: cnhFaceBiometric
           },
           io: currentJob.io
         });
@@ -820,5 +1107,7 @@ module.exports = {
   ALLOWED_DRIVER_DOCUMENT_TYPES,
   sanitizeDocumentType,
   recomputeDriverActivationStatus,
-  updateDocumentState
+  updateDocumentState,
+  isRetryableCnhFaceBiometricError,
+  getCnhFaceBiometricRetryDelayMs
 };

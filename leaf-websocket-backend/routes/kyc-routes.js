@@ -3,6 +3,7 @@ const multer = require('multer');
 const IntegratedKYCService = require('../services/IntegratedKYCService');
 const AwsFaceLivenessService = require('../services/aws-face-liveness-service');
 const kycPolicyService = require('../services/kyc-policy-service');
+const { evaluateProductionReadiness } = require('../services/kyc-biometric-production-policy');
 const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
 const { logStructured, logError } = require('../utils/logger');
 let firebaseConfig = null;
@@ -15,6 +16,77 @@ try {
 const bodyUserId = (req) => req.body?.userId;
 const paramUserId = (req) => req.params?.userId;
 const queryUserId = (req) => req.query?.userId;
+
+function withoutSensitiveBiometricPayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+  const {
+    embedding,
+    embeddingA,
+    embeddingB,
+    ...safePayload
+  } = payload;
+  return safePayload;
+}
+
+function normalizeLivenessAttemptScope(value) {
+  const normalized = String(value || 'general')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
+    .replace(/_{2,}/g, '_')
+    .slice(0, 64);
+  return normalized || 'general';
+}
+
+function isIdentityReverificationRequest({ challengeId = null, requirement = null } = {}) {
+  return requirement === 'IDENTITY_REVERIFICATION'
+    || String(challengeId || '').startsWith('idrev_');
+}
+
+function resolveLivenessAttemptScope({ challenge = null, challengeId = null, requirement = null } = {}) {
+  const source = normalizeLivenessAttemptScope(challenge?.source || '');
+  if (source === 'withdrawal' || source === 'driver_online') {
+    return source;
+  }
+
+  if (isIdentityReverificationRequest({ challengeId, requirement })) {
+    return 'identity_reverification';
+  }
+
+  if (!challengeId && requirement === 'LIVENESS_REQUIRED') {
+    return 'first_access';
+  }
+
+  return source !== 'general'
+    ? source
+    : normalizeLivenessAttemptScope(requirement || 'general');
+}
+
+async function softBlockLivenessAttemptsExhausted({ userId, challengeId = null, attemptState = null, source = 'kyc_route', attemptScope = null } = {}) {
+  if (!userId) return null;
+
+  try {
+    return await kycPolicyService.markDriverForLivenessAttemptsExhausted({
+      driverId: userId,
+      challengeId,
+      attemptState: attemptState || {},
+      metadata: {
+        source,
+        attemptScope: attemptScope || attemptState?.attemptScope || null
+      }
+    });
+  } catch (error) {
+    logError(error, 'Falha ao aplicar soft block por limite de liveness', {
+      service: 'kyc-routes-routes',
+      userId,
+      challengeId,
+      source
+    });
+    return null;
+  }
+}
 
 class KYCRoutes {
   constructor() {
@@ -74,6 +146,31 @@ class KYCRoutes {
       }
     });
 
+    this.router.get('/biometrics/readiness', requireFirebaseUser, async (_req, res) => {
+      try {
+        const readiness = evaluateProductionReadiness(process.env);
+        return res.status(readiness.ok ? 200 : 503).json({
+          success: readiness.ok,
+          ...readiness,
+          awsLiveness: this.awsLivenessService.getConfigSummary(),
+          biometricFaceService: {
+            configured: Boolean(
+              String(process.env.BIOMETRIC_FACE_SERVICE_URL || '').trim()
+              && String(process.env.BIOMETRIC_FACE_SERVICE_API_KEY || '').trim()
+            ),
+            urlConfigured: Boolean(String(process.env.BIOMETRIC_FACE_SERVICE_URL || '').trim())
+          }
+        });
+      } catch (error) {
+        logError(error, 'Erro ao consultar prontidão biométrica', { service: 'kyc-routes-routes' });
+        return res.status(500).json({
+          success: false,
+          error: 'Erro interno do servidor',
+          details: error.message
+        });
+      }
+    });
+
     this.router.post(
       '/liveness/aws/session',
       requireFirebaseUser,
@@ -89,11 +186,63 @@ class KYCRoutes {
           });
         }
 
+        const effectiveChallengeId = typeof challengeId === 'string' && challengeId.trim()
+          ? challengeId.trim()
+          : null;
+        let challenge = null;
+        let effectiveRequirement = typeof requirement === 'string' && requirement.trim()
+          ? requirement.trim()
+          : null;
+        const isIdentityReverification = isIdentityReverificationRequest({
+          challengeId: effectiveChallengeId,
+          requirement: effectiveRequirement
+        });
+
+        if (effectiveChallengeId && !isIdentityReverification) {
+          challenge = await kycPolicyService.getStepUpChallenge(effectiveChallengeId, userId);
+          if (!challenge) {
+            return res.status(404).json({
+              success: false,
+              error: 'Challenge KYC não encontrado ou expirado',
+              code: 'KYC_CHALLENGE_NOT_FOUND'
+            });
+          }
+          effectiveRequirement = challenge.requirement || effectiveRequirement || 'VERIFY_REQUIRED';
+        } else if (isIdentityReverification) {
+          effectiveRequirement = 'IDENTITY_REVERIFICATION';
+        } else if (!effectiveRequirement) {
+          const firstAccessPolicy = await kycPolicyService.requiresFirstAccessLiveness(userId)
+            .catch(() => ({ required: false }));
+          if (firstAccessPolicy?.required === true) {
+            effectiveRequirement = 'LIVENESS_REQUIRED';
+          }
+        }
+
+        const attemptScope = resolveLivenessAttemptScope({
+          challenge,
+          challengeId: effectiveChallengeId,
+          requirement: effectiveRequirement
+        });
+
         const session = await this.awsLivenessService.createSession({
           userId,
-          challengeId: typeof challengeId === 'string' ? challengeId : null,
-          requirement: typeof requirement === 'string' ? requirement : null
+          challengeId: effectiveChallengeId,
+          requirement: effectiveRequirement,
+          attemptScope
         });
+
+        if (isIdentityReverification) {
+          await kycPolicyService.recordIdentityReverificationStarted(userId, {
+            challengeId: effectiveChallengeId,
+            requirement: 'IDENTITY_REVERIFICATION'
+          }).catch((error) => {
+            logError(error, 'Falha ao registrar inicio de revalidacao de identidade', {
+              service: 'kyc-routes-routes',
+              userId,
+              challengeId: effectiveChallengeId
+            });
+          });
+        }
 
         return res.status(201).json({
           success: true,
@@ -101,12 +250,26 @@ class KYCRoutes {
         });
       } catch (error) {
         const isDisabled = error?.code === 'AWS_LIVENESS_DISABLED';
-        const statusCode = isDisabled ? 503 : 500;
+        const attemptsExhausted = error?.code === 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED';
+        const statusCode = attemptsExhausted ? 423 : (isDisabled ? 503 : 500);
+        let softBlock = null;
+        if (attemptsExhausted && error.attemptState?.softBlocked === true) {
+          softBlock = await softBlockLivenessAttemptsExhausted({
+            userId: req.body?.userId,
+            challengeId: req.body?.challengeId || null,
+            attemptState: error.attemptState || null,
+            source: 'create_liveness_session_guard',
+            attemptScope: error.attemptState?.attemptScope || null
+          });
+        }
         logError(error, 'Erro ao criar sessão AWS liveness', { service: 'kyc-routes-routes' });
         return res.status(statusCode).json({
           success: false,
           error: error.message,
-          code: error.code || 'KYC_AWS_LIVENESS_SESSION_ERROR'
+          code: error.code || 'KYC_AWS_LIVENESS_SESSION_ERROR',
+          softBlocked: Boolean(softBlock?.softBlocked),
+          supportTicketId: softBlock?.supportTicketId || null,
+          attemptState: error.attemptState || null
         });
       }
       }
@@ -124,10 +287,26 @@ class KYCRoutes {
           sessionId,
           userId
         });
+        let softBlock = null;
+        if (
+          result?.completed === true
+          && result?.livenessPassed !== true
+          && result?.attemptState?.softBlocked === true
+          && result?.attemptState?.justExhausted === true
+        ) {
+          softBlock = await softBlockLivenessAttemptsExhausted({
+            userId,
+            challengeId: result?.challengeId || null,
+            attemptState: result.attemptState,
+            source: 'get_liveness_result',
+            attemptScope: result?.attemptScope || result?.attemptState?.attemptScope || null
+          });
+        }
 
         return res.json({
           success: true,
-          ...result
+          ...result,
+          softBlocked: Boolean(softBlock?.softBlocked)
         });
       } catch (error) {
         const code = error?.code || error?.name || 'KYC_AWS_LIVENESS_RESULT_ERROR';
@@ -307,6 +486,20 @@ class KYCRoutes {
               });
             }
             verificationPayload = this.awsLivenessService.toDevicePayload(awsResult, verificationPayload);
+            if (
+              awsResult?.completed === true
+              && awsResult?.livenessPassed !== true
+              && awsResult?.attemptState?.softBlocked === true
+              && awsResult?.attemptState?.justExhausted === true
+            ) {
+              await softBlockLivenessAttemptsExhausted({
+                userId,
+                challengeId,
+                attemptState: awsResult.attemptState,
+                source: 'device_verify_liveness_result',
+                attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null
+              });
+            }
           } catch (awsError) {
             const awsCode = awsError?.code || awsError?.name || 'KYC_AWS_LIVENESS_FAILED';
             const awsStatus = awsCode === 'AWS_LIVENESS_DISABLED'
@@ -355,7 +548,7 @@ class KYCRoutes {
             driverId: userId,
             requirement: effectiveRequirement,
             verificationPayload: {
-              ...verificationPayload,
+              ...withoutSensitiveBiometricPayload(verificationPayload),
               ...deviceResult
             }
           });
@@ -382,11 +575,230 @@ class KYCRoutes {
           threshold: deviceResult.threshold,
           processingTime: deviceResult.processingTime,
           mode: deviceResult.mode,
+          decision: deviceResult.decision || null,
+          embeddingDimension: deviceResult.embeddingDimension || null,
+          comparisonProvider: deviceResult.comparisonProvider || null,
           requirement: effectiveRequirement || 'VERIFY_REQUIRED',
           challengeId: challengeId || null
         });
       } catch (error) {
         logError(error, 'Erro na verificação device-first:', { service: 'kyc-routes-routes' });
+        return res.status(500).json({
+          success: false,
+          error: 'Erro interno do servidor',
+          details: error.message
+        });
+      }
+      }
+    );
+
+    this.router.post(
+      '/verify-driver/server-side-selfie',
+      requireFirebaseUser,
+      this.upload.single('currentImage'),
+      requireFirebaseSelf(bodyUserId),
+      async (req, res) => {
+      try {
+        const { userId, awsSessionId, challengeId, requirement, forceRecheck } = req.body || {};
+
+        if (!userId) {
+          return res.status(400).json({
+            success: false,
+            error: 'userId é obrigatório'
+          });
+        }
+
+        if (!req.file) {
+          return res.status(400).json({
+            success: false,
+            error: 'Selfie atual é obrigatória',
+            code: 'KYC_SELFIE_IMAGE_REQUIRED'
+          });
+        }
+
+        if (!awsSessionId) {
+          return res.status(400).json({
+            success: false,
+            error: 'Sessão AWS de liveness é obrigatória para esta verificação',
+            code: 'KYC_AWS_LIVENESS_SESSION_REQUIRED'
+          });
+        }
+
+        const isIdentityReverificationRequest =
+          requirement === 'IDENTITY_REVERIFICATION' ||
+          String(challengeId || '').startsWith('idrev_');
+        let effectiveRequirement = requirement || null;
+        if (isIdentityReverificationRequest) {
+          effectiveRequirement = 'IDENTITY_REVERIFICATION';
+        } else if (challengeId) {
+          const challenge = await kycPolicyService.getStepUpChallenge(challengeId, userId);
+          if (!challenge) {
+            return res.status(404).json({
+              success: false,
+              error: 'Challenge KYC não encontrado ou expirado',
+              code: 'KYC_CHALLENGE_NOT_FOUND'
+            });
+          }
+          effectiveRequirement = effectiveRequirement || challenge.requirement || 'VERIFY_REQUIRED';
+        }
+
+        const firstAccessPolicy = await kycPolicyService.requiresFirstAccessLiveness(userId);
+        const firstAccessLivenessRequired = !challengeId && firstAccessPolicy.required === true;
+        if (!effectiveRequirement && firstAccessLivenessRequired) {
+          effectiveRequirement = 'LIVENESS_REQUIRED';
+        }
+
+        let livenessPayload = {
+          mode: 'server_biometric_selfie_v1',
+          provider: 'leaf_face_compare_service',
+          awsSessionId,
+          aws: {
+            sessionId: awsSessionId,
+            provider: this.awsLivenessService.getProviderName()
+          }
+        };
+
+        try {
+          const awsResult = await this.awsLivenessService.getSessionResult({ sessionId: awsSessionId, userId });
+          if (!awsResult.completed) {
+            return res.status(202).json({
+              success: false,
+              code: 'KYC_AWS_LIVENESS_PENDING',
+              error: 'Sessão AWS de liveness ainda está em processamento',
+              provider: awsResult.provider,
+              sessionId: awsResult.sessionId,
+              status: awsResult.status
+            });
+          }
+          livenessPayload = this.awsLivenessService.toDevicePayload(awsResult, livenessPayload);
+          if (
+            awsResult?.completed === true
+            && awsResult?.livenessPassed !== true
+            && awsResult?.attemptState?.softBlocked === true
+            && awsResult?.attemptState?.justExhausted === true
+          ) {
+            await softBlockLivenessAttemptsExhausted({
+              userId,
+              challengeId,
+              attemptState: awsResult.attemptState,
+              source: 'server_side_selfie_liveness_result',
+              attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null
+            });
+          }
+        } catch (awsError) {
+          const awsCode = awsError?.code || awsError?.name || 'KYC_AWS_LIVENESS_FAILED';
+          const awsStatus = awsCode === 'AWS_LIVENESS_DISABLED'
+            ? 503
+            : (awsCode === 'ResourceNotFoundException' ? 404 : 400);
+          return res.status(awsStatus).json({
+            success: false,
+            error: awsError.message,
+            code: awsCode
+          });
+        }
+
+        if (!kycPolicyService.isLivenessSatisfied(livenessPayload)) {
+          return res.status(412).json({
+            success: false,
+            error: 'Liveness obrigatório para concluir esta verificação',
+            code: 'KYC_LIVENESS_REQUIRED',
+            requirement: effectiveRequirement || 'LIVENESS_REQUIRED'
+          });
+        }
+
+        const verificationResult = await this.kycService.verifyDriverServerSideSelfie(
+          userId,
+          req.file.buffer,
+          {
+            recoverBlocked: true,
+            forceRecheck: forceRecheck === 'true' || forceRecheck === true,
+            requirement: effectiveRequirement,
+            challengeId: challengeId || null,
+            filename: req.file.originalname || 'driver-selfie.jpg',
+            contentType: req.file.mimetype || 'image/jpeg'
+          }
+        );
+
+        if (!verificationResult.success) {
+          const status = verificationResult.code === 'BIOMETRIC_FACE_SERVICE_NOT_CONFIGURED'
+            ? 503
+            : (verificationResult.code === 'CNH_FACE_EMBEDDING_NOT_FOUND' ? 409 : 400);
+          return res.status(status).json(verificationResult);
+        }
+
+        if (isIdentityReverificationRequest) {
+          await kycPolicyService.recordIdentityReverificationResult(userId, {
+            ...verificationResult,
+            requirement: effectiveRequirement,
+            challengeId: challengeId || null
+          }).catch((error) => {
+            logError(error, 'Falha ao registrar resultado de revalidacao de identidade', {
+              service: 'kyc-routes-routes',
+              userId,
+              challengeId
+            });
+          });
+        }
+
+        if ((challengeId || firstAccessLivenessRequired || isIdentityReverificationRequest) && !verificationResult.isMatch) {
+          return res.status(403).json({
+            success: false,
+            error: isIdentityReverificationRequest
+              ? 'Não foi possível concluir a validação agora'
+              : 'Verificação facial não aprovada para este desafio',
+            code: 'KYC_CHALLENGE_NOT_PASSED',
+            userId,
+            isMatch: false,
+            similarityScore: verificationResult.similarityScore,
+            confidence: verificationResult.confidence,
+            decision: verificationResult.decision || null
+          });
+        }
+
+        if (challengeId && verificationResult.isMatch && !isIdentityReverificationRequest) {
+          const challengeResolution = await kycPolicyService.resolveStepUpChallenge({
+            challengeId,
+            driverId: userId,
+            requirement: effectiveRequirement,
+            verificationPayload: {
+              ...withoutSensitiveBiometricPayload(livenessPayload),
+              ...verificationResult
+            }
+          });
+
+          if (!challengeResolution.success) {
+            return res.status(400).json(challengeResolution);
+          }
+        }
+
+        if (verificationResult.isMatch) {
+          await kycPolicyService.recordVerificationSuccess(userId, {
+            source: challengeId ? 'stepup_challenge' : 'server_side_selfie_verify',
+            markFirstAccess: firstAccessLivenessRequired,
+            clearReverify: true
+          });
+        }
+
+        return res.json({
+          success: true,
+          userId,
+          isMatch: verificationResult.isMatch,
+          needsReview: verificationResult.needsReview || false,
+          similarityScore: verificationResult.similarityScore,
+          confidence: verificationResult.confidence,
+          threshold: verificationResult.threshold,
+          reviewThreshold: verificationResult.reviewThreshold,
+          processingTime: verificationResult.processingTime,
+          mode: verificationResult.mode,
+          decision: verificationResult.decision || null,
+          embeddingDimension: verificationResult.embeddingDimension || null,
+          comparisonProvider: verificationResult.comparisonProvider || null,
+          provider: verificationResult.provider || null,
+          requirement: effectiveRequirement || 'LIVENESS_REQUIRED',
+          challengeId: challengeId || null
+        });
+      } catch (error) {
+        logError(error, 'Erro na verificação server-side pós-liveness:', { service: 'kyc-routes-routes' });
         return res.status(500).json({
           success: false,
           error: 'Erro interno do servidor',
@@ -499,7 +911,7 @@ class KYCRoutes {
               driverId: userId,
               requirement: effectiveRequirement,
               verificationPayload: {
-                ...verificationPayload,
+                ...withoutSensitiveBiometricPayload(verificationPayload),
                 ...deviceResult
               }
             });
@@ -525,6 +937,9 @@ class KYCRoutes {
             threshold: deviceResult.threshold,
             processingTime: deviceResult.processingTime,
             mode: deviceResult.mode,
+            decision: deviceResult.decision || null,
+            embeddingDimension: deviceResult.embeddingDimension || null,
+            comparisonProvider: deviceResult.comparisonProvider || null,
             requirement: effectiveRequirement || 'VERIFY_REQUIRED',
             challengeId
           });
@@ -738,7 +1153,7 @@ class KYCRoutes {
     );
 
     // Estatísticas do serviço
-    this.router.get('/stats', async (req, res) => {
+    this.router.get('/stats', requireFirebaseUser, async (req, res) => {
       try {
         const stats = await this.kycService.getStats();
         res.json(stats);
@@ -754,7 +1169,7 @@ class KYCRoutes {
     });
 
     // Health check
-    this.router.get('/health', async (req, res) => {
+    this.router.get('/health', requireFirebaseUser, async (req, res) => {
       try {
         const health = await this.kycService.healthCheck();
         res.json(health);

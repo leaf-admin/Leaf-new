@@ -31,6 +31,7 @@ try {
 
 const supportTicketService = require('../services/support-ticket-service');
 const supportQueueService = require('../services/support-queue-service');
+const supportDriverIdentityReverificationService = require('../services/support-driver-identity-reverification-service');
 
 const AGENT_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
 
@@ -182,6 +183,13 @@ router.post(
       });
 
       await notifyAvailableAgents(ticket);
+      await supportDriverIdentityReverificationService.handleTicket(ticket).catch((identityError) => {
+        logError(identityError, {
+          service: 'support-routes',
+          operation: 'driverIdentityReverification',
+          ticketId: ticket.id
+        });
+      });
 
       // Garantir que o chat do usuário volte para ativo ao abrir novo ticket.
       if (supportChatService && supportChatService.reopenChat) {

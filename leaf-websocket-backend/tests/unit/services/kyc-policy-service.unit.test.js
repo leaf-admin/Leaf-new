@@ -48,6 +48,20 @@ jest.mock('../../../services/kyc-driver-status-service', () => ({
   blockDriver: jest.fn().mockResolvedValue({ success: true })
 }));
 
+jest.mock('../../../services/KYCNotificationService', () => {
+  return jest.fn().mockImplementation(() => ({
+    sendCustomNotification: jest.fn().mockResolvedValue({ success: true })
+  }));
+});
+
+jest.mock('../../../services/support-ticket-service', () => ({
+  createTicket: jest.fn().mockResolvedValue({
+    ticket: {
+      id: 'TICKET-LIVENESS-1'
+    }
+  })
+}));
+
 const approvedKycState = () => ({
   usersDoc: { kycStatus: 'approved' },
   driversDoc: {},
@@ -231,9 +245,8 @@ describe('kyc-policy-service', () => {
     expect(mockHasValidVerification).not.toHaveBeenCalled();
   });
 
-  test('markDriverForPhotoMismatch blocks dispatch eligibility and removes the driver from eligible GEO', async () => {
+  test('markDriverForPhotoMismatch soft-blocks dispatch eligibility and asks for subtle reverify', async () => {
     const firebaseConfig = require('../../../firebase-config');
-    const kycDriverStatusService = require('../../../services/kyc-driver-status-service');
 
     const result = await service.markDriverForPhotoMismatch({
       driverId: 'driver-kyc-blocked',
@@ -249,26 +262,22 @@ describe('kyc-policy-service', () => {
         success: true,
         driverId: 'driver-kyc-blocked',
         reverifyRequired: true,
+        softBlocked: true,
+        reason: 'Por segurança, precisamos validar sua identidade.',
       }),
     );
     expect(firebaseConfig.updateRealtimeDB).toHaveBeenCalledWith(
       'users/driver-kyc-blocked',
       expect.objectContaining({
         kycReverifyRequired: true,
-        kycBlocked: true,
+        kycBlocked: false,
         kycStatus: 'pending_reverify',
-      }),
-    );
-    expect(kycDriverStatusService.blockDriver).toHaveBeenCalledWith(
-      'driver-kyc-blocked',
-      expect.stringContaining('Denuncia de divergencia facial'),
-      expect.objectContaining({
-        verificationAttempts: 1,
       }),
     );
     expect(mockRedis.hset).toHaveBeenCalledWith(
       'driver:driver-kyc-blocked',
       expect.objectContaining({
+        kyc_blocked: 'false',
         dispatchEligible: 'false',
         dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
       }),
@@ -276,6 +285,45 @@ describe('kyc-policy-service', () => {
     expect(mockRedis.zrem).toHaveBeenCalledWith(
       'driver_locations_eligible',
       'driver-kyc-blocked',
+    );
+  });
+
+  test('markDriverForLivenessAttemptsExhausted opens support ticket and soft-blocks dispatch', async () => {
+    const supportTicketService = require('../../../services/support-ticket-service');
+    const firebaseConfig = require('../../../firebase-config');
+
+    const result = await service.markDriverForLivenessAttemptsExhausted({
+      driverId: 'driver-liveness-exhausted',
+      challengeId: 'kyc_ch_1',
+      attemptState: {
+        failed: 2,
+        maxAttempts: 2
+      }
+    });
+
+    expect(supportTicketService.createTicket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterId: 'driver-liveness-exhausted',
+        userType: 'driver',
+        category: 'kyc',
+        priority: 'N2'
+      })
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        softBlocked: true,
+        supportTicketId: 'TICKET-LIVENESS-1',
+        reasonCode: 'aws_liveness_attempts_exhausted'
+      })
+    );
+    expect(firebaseConfig.updateRealtimeDB).toHaveBeenCalledWith(
+      'users/driver-liveness-exhausted',
+      expect.objectContaining({
+        kycReverifyRequired: true,
+        kycReverifySource: 'aws_liveness_attempts_exhausted',
+        kycStatus: 'pending_reverify'
+      })
     );
   });
 });

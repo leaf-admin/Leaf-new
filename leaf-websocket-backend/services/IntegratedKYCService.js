@@ -5,7 +5,39 @@ const KYCAnalyticsService = require('./KYCAnalyticsService');
 const KYCNotificationService = require('./KYCNotificationService');
 const KYCVPSClient = require('./kyc-vps-client');
 const FirebaseStorageService = require('./firebase-storage-service');
+const DeviceFaceEmbeddingVerificationService = require('./device-face-embedding-verification-service');
+const { evaluateDeviceVerificationTrust } = require('./kyc-biometric-production-policy');
+const biometricJobLimiter = require('./biometric-job-limiter');
 const { logStructured, logError } = require('../utils/logger');
+
+function parseNumber(value, fallback) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeEmbeddingVector(value, expectedDimension = 512) {
+  if (!Array.isArray(value)) {
+    const error = new Error('embedding deve ser um array numerico');
+    error.code = 'FACE_EMBEDDING_INVALID_TYPE';
+    throw error;
+  }
+
+  if (value.length !== expectedDimension) {
+    const error = new Error(`embedding deve ter dimensao ${expectedDimension}`);
+    error.code = 'FACE_EMBEDDING_INVALID_DIMENSION';
+    throw error;
+  }
+
+  return value.map((item, index) => {
+    const numeric = Number(item);
+    if (!Number.isFinite(numeric)) {
+      const error = new Error(`embedding contem valor invalido no indice ${index}`);
+      error.code = 'FACE_EMBEDDING_INVALID_VALUE';
+      throw error;
+    }
+    return numeric;
+  });
+}
 
 class IntegratedKYCService {
   constructor() {
@@ -24,6 +56,9 @@ class IntegratedKYCService {
     // VPS e Firebase Storage Services
     this.vpsClient = new KYCVPSClient();
     this.firebaseStorage = new FirebaseStorageService();
+    this.deviceFaceEmbeddingVerificationService = new DeviceFaceEmbeddingVerificationService({
+      faceClient: this.vpsClient.biometricFaceClient
+    });
     this.useVPS = process.env.KYC_USE_VPS !== 'false'; // Por padrão, usar VPS se configurada
     
     // Threshold simples para KYC diário (MVP): 50%
@@ -650,15 +685,48 @@ class IntegratedKYCService {
    */
   async acceptDeviceVerification(userId, devicePayload = {}) {
     try {
-      const similarityScore = Number(devicePayload.similarityScore || 0);
-      const threshold = Number(devicePayload.threshold || this.similarityThreshold);
-      const isMatch = Boolean(devicePayload.isMatch === true || similarityScore >= threshold);
-      const confidence = Number(devicePayload.confidence || similarityScore || 0);
+      let resolvedPayload = { ...devicePayload };
+      let embeddingVerification = null;
+
+      if (this.deviceFaceEmbeddingVerificationService.isDeviceEmbeddingPayload(devicePayload)) {
+        embeddingVerification = await this.deviceFaceEmbeddingVerificationService.verify(userId, devicePayload);
+        resolvedPayload = {
+          ...devicePayload,
+          mode: embeddingVerification.mode,
+          provider: embeddingVerification.provider,
+          isMatch: embeddingVerification.isMatch,
+          similarityScore: embeddingVerification.similarityScore,
+          confidence: embeddingVerification.confidence,
+          threshold: embeddingVerification.threshold,
+          reviewThreshold: embeddingVerification.reviewThreshold,
+          decision: embeddingVerification.decision,
+          processingTime: embeddingVerification.processingTime,
+          embeddingFormat: embeddingVerification.embeddingFormat,
+          embeddingDimension: embeddingVerification.embeddingDimension,
+          reference: embeddingVerification.reference,
+          comparisonProvider: embeddingVerification.comparisonProvider
+        };
+      }
+
+      const trustGate = evaluateDeviceVerificationTrust(resolvedPayload, {
+        embeddingVerification
+      });
+      if (!trustGate.allowed) {
+        const error = new Error(trustGate.message);
+        error.code = trustGate.code;
+        error.policy = trustGate.policy;
+        throw error;
+      }
+
+      const similarityScore = Number(resolvedPayload.similarityScore || 0);
+      const threshold = Number(resolvedPayload.threshold || this.similarityThreshold);
+      const isMatch = Boolean(resolvedPayload.isMatch === true || similarityScore >= threshold);
+      const confidence = Number(resolvedPayload.confidence || similarityScore || 0);
       const timestamp = Date.now();
-      const shouldRecoverBlocked = devicePayload.recoverBlocked === true;
+      const shouldRecoverBlocked = resolvedPayload.recoverBlocked === true;
       const verificationMode = String(
-        devicePayload.mode
-        || devicePayload.provider
+        resolvedPayload.mode
+        || resolvedPayload.provider
         || 'device_signature_v1'
       );
 
@@ -669,13 +737,17 @@ class IntegratedKYCService {
         similarityScore,
         confidence,
         threshold,
-        processingTime: Number(devicePayload.processingTime || 0),
+        processingTime: Number(resolvedPayload.processingTime || 0),
         attempts: 1,
-        totalTime: Number(devicePayload.processingTime || 0),
+        totalTime: Number(resolvedPayload.processingTime || 0),
         timestamp: new Date(timestamp).toISOString(),
         fromCache: false,
         fromVPS: false,
-        mode: verificationMode
+        mode: verificationMode,
+        decision: resolvedPayload.decision || (isMatch ? 'approve' : 'reject'),
+        embeddingDimension: resolvedPayload.embeddingDimension || null,
+        reference: resolvedPayload.reference || null,
+        comparisonProvider: resolvedPayload.comparisonProvider || null
       };
 
       // Fast-path: para match positivo, evitar rotina pesada de status a cada request.
@@ -732,7 +804,11 @@ class IntegratedKYCService {
           confidence,
           threshold,
           timestamp,
-          mode: verificationMode
+          mode: verificationMode,
+          decision: verificationResult.decision,
+          embeddingDimension: verificationResult.embeddingDimension,
+          reference: verificationResult.reference,
+          comparisonProvider: verificationResult.comparisonProvider
         });
         redisOps.set(verificationKey, verificationPayload, 'EX', 24 * 60 * 60);
       }
@@ -747,6 +823,199 @@ class IntegratedKYCService {
       return {
         success: false,
         error: error.message,
+        code: error.code || 'KYC_DEVICE_VERIFICATION_FAILED',
+        userId
+      };
+    }
+  }
+
+  /**
+   * Compara selfie atual contra o embedding facial extraído da CNH.
+   * Caminho de produção para pós-AWS Liveness: o app envia a selfie bruta,
+   * backend gera o embedding no microserviço e decide sem confiar no cliente.
+   */
+  async verifyDriverServerSideSelfie(userId, currentImageBuffer, options = {}) {
+    const startedAt = Date.now();
+
+    try {
+      if (!this.initialized) {
+        throw new Error('KYC Service não inicializado');
+      }
+
+      if (!Buffer.isBuffer(currentImageBuffer) || currentImageBuffer.length === 0) {
+        const error = new Error('Selfie atual é obrigatória');
+        error.code = 'KYC_SELFIE_IMAGE_REQUIRED';
+        throw error;
+      }
+
+      const faceClient = this.vpsClient?.biometricFaceClient;
+      if (!faceClient?.isConfigured?.()) {
+        const error = new Error('Microserviço biométrico não configurado');
+        error.code = 'BIOMETRIC_FACE_SERVICE_NOT_CONFIGURED';
+        throw error;
+      }
+
+      const expectedDimension = Number.parseInt(
+        options.expectedDimension || process.env.MOBILE_FACE_EMBEDDING_DIMENSION || '512',
+        10
+      );
+      const approveThreshold = parseNumber(
+        options.approveThreshold || process.env.BIOMETRIC_FACE_APPROVE_THRESHOLD,
+        0.61
+      );
+      const reviewThreshold = parseNumber(
+        options.reviewThreshold || process.env.BIOMETRIC_FACE_REVIEW_THRESHOLD,
+        0.40
+      );
+
+      const reference = await this.deviceFaceEmbeddingVerificationService.getCnhFaceEmbedding(userId);
+      if (!reference?.embedding) {
+        const error = new Error('Embedding facial da CNH não encontrado para este motorista');
+        error.code = 'CNH_FACE_EMBEDDING_NOT_FOUND';
+        throw error;
+      }
+
+      const referenceEmbedding = normalizeEmbeddingVector(reference.embedding, expectedDimension);
+      const limitedVerification = await biometricJobLimiter.run('server_side_selfie_embedding', async () => {
+        const currentEmbeddingPayload = await faceClient.generateEmbedding(currentImageBuffer, {
+          filename: options.filename || 'driver-selfie.jpg',
+          contentType: options.contentType || 'image/jpeg'
+        });
+        const currentEmbedding = normalizeEmbeddingVector(
+          currentEmbeddingPayload?.embedding,
+          expectedDimension
+        );
+        const comparison = await faceClient.compareEmbeddings(referenceEmbedding, currentEmbedding, {
+          approveThreshold,
+          reviewThreshold
+        });
+        return {
+          currentEmbeddingPayload,
+          comparison
+        };
+      });
+      const { currentEmbeddingPayload, comparison } = limitedVerification.result;
+      const queueWaitMs = limitedVerification.waitMs;
+
+      const score = Number(comparison?.cosine_similarity || 0);
+      const decision = comparison?.decision || (
+        score >= approveThreshold ? 'approve' : (score >= reviewThreshold ? 'review' : 'reject')
+      );
+      const isMatch = decision === 'approve';
+      const confidence = score;
+      const timestamp = Date.now();
+      const verificationMode = 'server_biometric_selfie_v1';
+
+      const skipStatusSideEffects = options.skipStatusSideEffects === true
+        || options.requirement === 'IDENTITY_REVERIFICATION';
+
+      try {
+        const kycDriverStatusService = require('./kyc-driver-status-service');
+        if (!isMatch && !skipStatusSideEffects) {
+          await kycDriverStatusService.processVerificationResult(userId, {
+            success: false,
+            isMatch: false,
+            similarityScore: score,
+            confidence,
+            attempts: 1,
+            source: verificationMode
+          });
+        } else if (isMatch && options.recoverBlocked === true) {
+          await kycDriverStatusService.processVerificationResult(userId, {
+            success: true,
+            isMatch: true,
+            similarityScore: score,
+            confidence,
+            attempts: 1,
+            source: verificationMode
+          });
+        }
+      } catch (statusError) {
+        logError(statusError, 'Erro ao atualizar status com verificação server-side', {
+          service: 'integrated-kyc-service',
+          userId
+        });
+      }
+
+      const verificationResult = {
+        success: true,
+        userId,
+        isMatch,
+        needsReview: decision === 'review',
+        similarityScore: score,
+        confidence,
+        threshold: approveThreshold,
+        reviewThreshold,
+        decision,
+        processingTime: Date.now() - startedAt,
+        queueWaitMs,
+        attempts: 1,
+        totalTime: Date.now() - startedAt,
+        timestamp: new Date(timestamp).toISOString(),
+        fromCache: false,
+        fromVPS: true,
+        mode: verificationMode,
+        provider: 'leaf_face_compare_service',
+        comparisonProvider: comparison?.provider || 'leaf_face_compare_service',
+        embeddingDimension: expectedDimension,
+        reference: {
+          source: reference.source || 'cnh_face_embedding',
+          model: reference.model || null,
+          createdAt: reference.createdAt || null,
+          submissionId: reference.submissionId || null
+        },
+        current: {
+          model: currentEmbeddingPayload?.model || null,
+          faceCount: currentEmbeddingPayload?.face_count || null,
+          selectedFace: currentEmbeddingPayload?.selected_face || null
+        }
+      };
+
+      if (isMatch) {
+        const cacheKey = `kyc_verification:${userId}`;
+        const cachePayload = JSON.stringify({
+          success: true,
+          isMatch,
+          similarityScore: score,
+          confidence,
+          threshold: approveThreshold,
+          timestamp,
+          mode: verificationMode
+        });
+        const writeAuditKey = String(process.env.KYC_WRITE_AUDIT_KEY || 'false').toLowerCase() === 'true';
+        const redisOps = this.redisClient.multi();
+        redisOps.set(cacheKey, cachePayload, 'EX', 24 * 60 * 60);
+        if (writeAuditKey) {
+          redisOps.set(`verification_result:${userId}`, JSON.stringify({
+            ...verificationResult,
+            current: {
+              model: verificationResult.current.model,
+              faceCount: verificationResult.current.faceCount
+            }
+          }), 'EX', 24 * 60 * 60);
+        }
+        await redisOps.exec();
+      }
+
+      logStructured('info', 'Selfie server-side comparada contra CNH', {
+        service: 'integrated-kyc-service',
+        userId,
+        decision,
+        score,
+        queueWaitMs,
+        durationMs: Date.now() - startedAt
+      });
+
+      return verificationResult;
+    } catch (error) {
+      logError(error, 'Erro ao verificar selfie server-side', {
+        service: 'integrated-kyc-service',
+        userId
+      });
+      return {
+        success: false,
+        error: error.message,
+        code: error.code || 'KYC_SERVER_SIDE_SELFIE_FAILED',
         userId
       };
     }

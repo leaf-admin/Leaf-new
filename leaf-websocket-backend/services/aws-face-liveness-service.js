@@ -94,14 +94,52 @@ class AwsFaceLivenessService {
     this.estimatedUnitCostUsd = this.parseNumber(
       process.env.KYC_AWS_LIVENESS_ESTIMATED_UNIT_COST_USD
       || process.env.AWS_LIVENESS_ESTIMATED_UNIT_COST_USD
-      || '0',
+      || '0.015',
       0,
       0,
       100
     );
+    this.maxAttemptsPerWindow = this.parseIntValue(
+      process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW
+      || process.env.AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW
+      || '2',
+      2,
+      1,
+      10
+    );
+    this.withdrawalMaxAttemptsPerWindow = this.parseIntValue(
+      process.env.KYC_AWS_LIVENESS_WITHDRAWAL_MAX_ATTEMPTS_PER_WINDOW
+      || process.env.AWS_LIVENESS_WITHDRAWAL_MAX_ATTEMPTS_PER_WINDOW
+      || '2',
+      2,
+      1,
+      10
+    );
+    this.attemptWindowSeconds = this.parseIntValue(
+      process.env.KYC_AWS_LIVENESS_ATTEMPT_WINDOW_SECONDS
+      || process.env.AWS_LIVENESS_ATTEMPT_WINDOW_SECONDS
+      || '86400',
+      86400,
+      300,
+      604800
+    );
+    this.softBlockOnAttemptsExhausted = String(
+      process.env.KYC_AWS_LIVENESS_SOFT_BLOCK_ON_EXHAUSTED
+      || process.env.AWS_LIVENESS_SOFT_BLOCK_ON_EXHAUSTED
+      || 'true'
+    ).toLowerCase() === 'true';
+    this.sdkMaxAttempts = this.parseIntValue(
+      process.env.KYC_AWS_LIVENESS_SDK_MAX_ATTEMPTS
+      || process.env.AWS_LIVENESS_SDK_MAX_ATTEMPTS
+      || '2',
+      2,
+      1,
+      5
+    );
 
     this.redisPrefix = 'kyc:aws:liveness:session:';
     this.redisCredentialsPrefix = 'kyc:aws:liveness:credentials:';
+    this.redisAttemptPrefix = 'kyc:aws:liveness:attempts:';
     this.rekognitionClient = this.createClient();
     this.stsClient = this.createStsClient();
   }
@@ -122,7 +160,8 @@ class AwsFaceLivenessService {
     if (!this.enabled) return null;
 
     const clientConfig = {
-      region: this.region
+      region: this.region,
+      maxAttempts: this.sdkMaxAttempts
     };
 
     if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
@@ -140,7 +179,8 @@ class AwsFaceLivenessService {
     if (!this.enabled || !this.credentialsEnabled) return null;
 
     const clientConfig = {
-      region: this.region
+      region: this.region,
+      maxAttempts: this.sdkMaxAttempts
     };
 
     if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
@@ -173,7 +213,12 @@ class AwsFaceLivenessService {
       hasOutputBucket: Boolean(this.outputBucket),
       credentialsEnabled: this.credentialsEnabled,
       hasAssumeRoleArn: Boolean(this.assumeRoleArn),
-      estimatedUnitCostUsd: this.estimatedUnitCostUsd
+      estimatedUnitCostUsd: this.estimatedUnitCostUsd,
+      maxAttemptsPerWindow: this.maxAttemptsPerWindow,
+      withdrawalMaxAttemptsPerWindow: this.withdrawalMaxAttemptsPerWindow,
+      attemptWindowSeconds: this.attemptWindowSeconds,
+      softBlockOnAttemptsExhausted: this.softBlockOnAttemptsExhausted,
+      sdkMaxAttempts: this.sdkMaxAttempts
     };
   }
 
@@ -219,6 +264,208 @@ class AwsFaceLivenessService {
 
   buildCredentialsRedisKey(userId) {
     return `${this.redisCredentialsPrefix}${String(userId || 'anonymous')}`;
+  }
+
+  normalizeAttemptScope(value) {
+    const normalized = String(value || 'general')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '_')
+      .replace(/_{2,}/g, '_')
+      .slice(0, 64);
+    return normalized || 'general';
+  }
+
+  resolveAttemptScope({ requirement = null, attemptScope = null } = {}) {
+    if (attemptScope) {
+      return this.normalizeAttemptScope(attemptScope);
+    }
+    if (requirement === 'IDENTITY_REVERIFICATION') {
+      return 'identity_reverification';
+    }
+    return this.normalizeAttemptScope(requirement || 'general');
+  }
+
+  getMaxAttemptsForScope(attemptScope) {
+    const scope = this.normalizeAttemptScope(attemptScope);
+    if (scope === 'withdrawal') {
+      return this.withdrawalMaxAttemptsPerWindow;
+    }
+    return this.maxAttemptsPerWindow;
+  }
+
+  buildAttemptRedisKey({ userId, requirement = null, attemptScope = null } = {}) {
+    const safeUserId = String(userId || '').trim();
+    const safeScope = this.resolveAttemptScope({ requirement, attemptScope });
+    if (!safeUserId) return null;
+    return `${this.redisAttemptPrefix}${safeUserId}:${safeScope}`;
+  }
+
+  async getAttemptState({ userId, requirement = null, attemptScope = null } = {}) {
+    const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    const maxAttempts = this.getMaxAttemptsForScope(scope);
+    const key = this.buildAttemptRedisKey({ userId, requirement, attemptScope: scope });
+    if (!key) return null;
+
+    try {
+      const redis = redisPool.getConnection();
+      const raw = await redis.get(key);
+      if (!raw) {
+        return {
+          userId,
+          requirement: requirement || 'LIVENESS_REQUIRED',
+          attemptScope: scope,
+          started: 0,
+          failed: 0,
+          passed: 0,
+          maxAttempts,
+          estimatedUnitCostUsd: this.estimatedUnitCostUsd,
+          windowSeconds: this.attemptWindowSeconds,
+          attemptsExhausted: false,
+          softBlocked: false
+        };
+      }
+      const parsed = JSON.parse(raw);
+      return {
+        userId,
+        requirement: parsed.requirement || requirement || 'LIVENESS_REQUIRED',
+        attemptScope: parsed.attemptScope || scope,
+        started: Number(parsed.started || 0),
+        failed: Number(parsed.failed || 0),
+        passed: Number(parsed.passed || 0),
+        maxAttempts: Number(parsed.maxAttempts || maxAttempts),
+        estimatedUnitCostUsd: Number(parsed.estimatedUnitCostUsd || this.estimatedUnitCostUsd),
+        windowSeconds: Number(parsed.windowSeconds || this.attemptWindowSeconds),
+        attemptsExhausted: parsed.attemptsExhausted === true,
+        softBlocked: parsed.softBlocked === true,
+        exhaustedAt: parsed.exhaustedAt || null,
+        lastSessionId: parsed.lastSessionId || null,
+        lastStatus: parsed.lastStatus || null,
+        lastStartedAt: parsed.lastStartedAt || null,
+        lastCompletedAt: parsed.lastCompletedAt || null
+      };
+    } catch (error) {
+      logError(error, 'Falha ao ler contador de tentativas AWS liveness', {
+        service: 'aws-face-liveness-service',
+        userId
+      });
+      return null;
+    }
+  }
+
+  async saveAttemptState({ userId, requirement = null, attemptScope = null, state }) {
+    const key = this.buildAttemptRedisKey({ userId, requirement, attemptScope });
+    if (!key || !state) return null;
+
+    try {
+      const redis = redisPool.getConnection();
+      await redis.set(
+        key,
+        JSON.stringify(state),
+        'EX',
+        this.attemptWindowSeconds
+      );
+    } catch (error) {
+      logError(error, 'Falha ao salvar contador de tentativas AWS liveness', {
+        service: 'aws-face-liveness-service',
+        userId
+      });
+    }
+    return state;
+  }
+
+  async assertCanCreateSession({ userId, requirement = null, attemptScope = null } = {}) {
+    const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    const maxAttempts = this.getMaxAttemptsForScope(scope);
+    const state = await this.getAttemptState({ userId, requirement, attemptScope: scope });
+    if (!state) return null;
+
+    if (state.softBlocked || state.started >= maxAttempts || state.failed >= maxAttempts) {
+      const error = new Error('Limite de tentativas de liveness atingido');
+      error.code = 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED';
+      error.attemptState = {
+        ...state,
+        attemptsExhausted: true,
+        softBlocked: this.softBlockOnAttemptsExhausted,
+        softBlockEnabled: this.softBlockOnAttemptsExhausted,
+        maxAttempts,
+        estimatedCostUsd: Number((maxAttempts * this.estimatedUnitCostUsd).toFixed(6))
+      };
+      throw error;
+    }
+
+    return state;
+  }
+
+  async recordAttemptStarted({ userId, requirement = null, attemptScope = null, sessionId = null } = {}) {
+    const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    const maxAttempts = this.getMaxAttemptsForScope(scope);
+    const state = await this.getAttemptState({ userId, requirement, attemptScope: scope });
+    if (!state) return null;
+
+    const nextState = {
+      ...state,
+      userId,
+      requirement: requirement || state.requirement || 'LIVENESS_REQUIRED',
+      attemptScope: scope,
+      started: Number(state.started || 0) + 1,
+      maxAttempts,
+      estimatedUnitCostUsd: this.estimatedUnitCostUsd,
+      windowSeconds: this.attemptWindowSeconds,
+      lastSessionId: sessionId || state.lastSessionId || null,
+      lastStartedAt: new Date().toISOString()
+    };
+
+    await this.saveAttemptState({ userId, requirement, attemptScope: scope, state: nextState });
+    return nextState;
+  }
+
+  async recordAttemptResult({ userId, requirement = null, attemptScope = null, sessionId = null, status = null, livenessPassed = false } = {}) {
+    const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    const maxAttempts = this.getMaxAttemptsForScope(scope);
+    const state = await this.getAttemptState({ userId, requirement, attemptScope: scope });
+    if (!state) return null;
+
+    const passed = livenessPassed === true;
+    const failed = !passed;
+    const now = new Date().toISOString();
+    const nextState = {
+      ...state,
+      userId,
+      requirement: requirement || state.requirement || 'LIVENESS_REQUIRED',
+      attemptScope: scope,
+      passed: passed ? Number(state.passed || 0) + 1 : Number(state.passed || 0),
+      failed: failed ? Number(state.failed || 0) + 1 : Number(state.failed || 0),
+      lastSessionId: sessionId || state.lastSessionId || null,
+      lastStatus: status || state.lastStatus || null,
+      lastCompletedAt: now,
+      maxAttempts,
+      estimatedUnitCostUsd: this.estimatedUnitCostUsd,
+      windowSeconds: this.attemptWindowSeconds
+    };
+
+    if (passed) {
+      nextState.started = 0;
+      nextState.failed = 0;
+      nextState.attemptsExhausted = false;
+      nextState.softBlocked = false;
+      nextState.exhaustedAt = null;
+      nextState.justExhausted = false;
+    } else if (!state.softBlocked && nextState.failed >= maxAttempts) {
+      nextState.attemptsExhausted = true;
+      nextState.softBlocked = this.softBlockOnAttemptsExhausted;
+      nextState.exhaustedAt = now;
+      nextState.justExhausted = true;
+    } else if (state.softBlocked) {
+      nextState.attemptsExhausted = true;
+      nextState.softBlocked = true;
+      nextState.justExhausted = false;
+    } else {
+      nextState.justExhausted = false;
+    }
+
+    await this.saveAttemptState({ userId, requirement, attemptScope: scope, state: nextState });
+    return nextState;
   }
 
   async saveSessionMetadata(sessionId, metadata = {}) {
@@ -387,8 +634,10 @@ class AwsFaceLivenessService {
     };
   }
 
-  async createSession({ userId = null, challengeId = null, requirement = null } = {}) {
+  async createSession({ userId = null, challengeId = null, requirement = null, attemptScope = null } = {}) {
     this.assertEnabled();
+    const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    await this.assertCanCreateSession({ userId, requirement, attemptScope: scope });
 
     const input = {
       ClientRequestToken: crypto.randomUUID(),
@@ -419,16 +668,27 @@ class AwsFaceLivenessService {
       userId: userId || null,
       challengeId: challengeId || null,
       requirement: requirement || null,
+      attemptScope: scope,
       createdAt: new Date().toISOString(),
       expiresAt: new Date(startedAt + (this.sessionTtlSeconds * 1000)).toISOString()
     };
 
     await this.saveSessionMetadata(sessionId, metadata);
+    const attemptState = await this.recordAttemptStarted({
+      userId,
+      requirement,
+      attemptScope: scope,
+      sessionId
+    });
 
     logStructured('info', 'Sessão AWS Face Liveness criada', {
       service: 'aws-face-liveness-service',
       userId: userId || undefined,
-      sessionId
+      sessionId,
+      attemptScope: scope,
+      attempt: attemptState?.started || null,
+      maxAttempts: attemptState?.maxAttempts || this.getMaxAttemptsForScope(scope),
+      estimatedUnitCostUsd: this.estimatedUnitCostUsd
     });
 
     return {
@@ -436,8 +696,12 @@ class AwsFaceLivenessService {
       provider: PROVIDER_NAME,
       region: this.region,
       sessionId,
+      attemptScope: scope,
       expiresAt: metadata.expiresAt,
       confidenceThreshold: this.confidenceThreshold,
+      attempt: attemptState?.started || null,
+      maxAttempts: attemptState?.maxAttempts || this.getMaxAttemptsForScope(scope),
+      estimatedUnitCostUsd: this.estimatedUnitCostUsd,
       status: 'CREATED'
     };
   }
@@ -477,6 +741,10 @@ class AwsFaceLivenessService {
       success: true,
       provider: PROVIDER_NAME,
       sessionId,
+      userId: metadata?.userId || userId || null,
+      challengeId: metadata?.challengeId || null,
+      requirement: metadata?.requirement || null,
+      attemptScope: metadata?.attemptScope || null,
       status,
       completed,
       confidence,
@@ -494,6 +762,15 @@ class AwsFaceLivenessService {
     };
 
     if (completed) {
+      const attemptState = await this.recordAttemptResult({
+        userId: metadata?.userId || userId,
+        requirement: metadata?.requirement || null,
+        attemptScope: metadata?.attemptScope || null,
+        sessionId,
+        status,
+        livenessPassed
+      });
+
       await this.saveSessionMetadata(sessionId, {
         ...(metadata || {}),
         userId: metadata?.userId || userId || null,
@@ -502,6 +779,21 @@ class AwsFaceLivenessService {
         confidence,
         livenessPassed
       });
+
+      result.attemptState = attemptState
+        ? {
+          started: attemptState.started,
+          failed: attemptState.failed,
+          passed: attemptState.passed,
+          attemptScope: attemptState.attemptScope || metadata?.attemptScope || null,
+          maxAttempts: attemptState.maxAttempts,
+          attemptsExhausted: attemptState.attemptsExhausted === true,
+          softBlocked: attemptState.softBlocked === true,
+          exhaustedAt: attemptState.exhaustedAt || null,
+          justExhausted: attemptState.justExhausted === true,
+          estimatedCostUsd: Number((Number(attemptState.started || 0) * this.estimatedUnitCostUsd).toFixed(6))
+        }
+        : null;
     }
 
     return result;

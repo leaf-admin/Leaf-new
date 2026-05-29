@@ -181,6 +181,8 @@ class DocumentAIExtractionService {
         'Extraia os campos da CNH abaixo.',
         'Retorne JSON exatamente com estas chaves:',
         '{',
+        '  "documentType": "cnh"|"rg"|"cpf"|"crlv"|"unknown",',
+        '  "documentTypeConfidence": number,',
         '  "nome": string|null,',
         '  "cpf": string|null,',
         '  "rg": string|null,',
@@ -196,6 +198,7 @@ class DocumentAIExtractionService {
         '  "confidence": number,',
         '  "warnings": string[]',
         '}',
+        'Se o documento enviado nao for uma CNH, preencha documentType com o tipo mais provavel e deixe campos exclusivos de CNH como null.',
         '',
         'Texto OCR:',
         text
@@ -203,6 +206,8 @@ class DocumentAIExtractionService {
     });
 
     return {
+      documentType: normalizeUpper(data?.documentType || data?.tipoDocumento || data?.tipo_documento)?.toLowerCase() || null,
+      documentTypeConfidence: clamp01(data?.documentTypeConfidence || data?.tipoDocumentoConfidence || data?.document_type_confidence),
       nome: String(data?.nome || '').trim() || null,
       cpf: normalizeCPF(data?.cpf),
       rg: String(data?.rg || '').trim() || null,
@@ -243,6 +248,8 @@ class DocumentAIExtractionService {
         'Extraia os campos da CNH na imagem enviada.',
         'Retorne JSON exatamente com estas chaves:',
         '{',
+        '  "documentType": "cnh"|"rg"|"cpf"|"crlv"|"unknown",',
+        '  "documentTypeConfidence": number,',
         '  "nome": string|null,',
         '  "cpf": string|null,',
         '  "rg": string|null,',
@@ -257,12 +264,15 @@ class DocumentAIExtractionService {
         '  "ear": boolean|null,',
         '  "confidence": number,',
         '  "warnings": string[]',
-        '}'
+        '}',
+        'Se a imagem nao for uma CNH, preencha documentType com o tipo mais provavel e deixe campos exclusivos de CNH como null.'
       ].join('\n'),
       imageBuffer
     });
 
     return {
+      documentType: normalizeUpper(data?.documentType || data?.tipoDocumento || data?.tipo_documento)?.toLowerCase() || null,
+      documentTypeConfidence: clamp01(data?.documentTypeConfidence || data?.tipoDocumentoConfidence || data?.document_type_confidence),
       nome: String(data?.nome || '').trim() || null,
       cpf: normalizeCPF(data?.cpf),
       rg: String(data?.rg || '').trim() || null,

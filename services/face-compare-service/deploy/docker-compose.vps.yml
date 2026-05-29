@@ -1,0 +1,45 @@
+services:
+  face-compare-service:
+    build:
+      context: ..
+    env_file:
+      - ../.env
+    expose:
+      - "8008"
+    environment:
+      OMP_NUM_THREADS: "${FACE_OMP_NUM_THREADS:-1}"
+      OPENBLAS_NUM_THREADS: "${FACE_OPENBLAS_NUM_THREADS:-1}"
+      MKL_NUM_THREADS: "${FACE_MKL_NUM_THREADS:-1}"
+      NUMEXPR_NUM_THREADS: "${FACE_NUMEXPR_NUM_THREADS:-1}"
+    cpus: "${FACE_CONTAINER_CPUS:-1.25}"
+    mem_limit: "${FACE_CONTAINER_MEMORY:-3g}"
+    volumes:
+      - insightface-cache:/root/.insightface
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+  caddy:
+    image: caddy:2.8-alpine
+    depends_on:
+      face-compare-service:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  insightface-cache:
+  caddy-data:
+  caddy-config:

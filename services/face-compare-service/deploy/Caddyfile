@@ -1,0 +1,21 @@
+{$FACE_PUBLIC_DOMAIN} {
+  encode gzip zstd
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    -Server
+  }
+
+  request_body {
+    max_size {$FACE_MAX_REQUEST_BODY_SIZE:10MB}
+  }
+
+  reverse_proxy face-compare-service:8008 {
+    health_uri /health
+    health_interval 30s
+    health_timeout 5s
+  }
+}

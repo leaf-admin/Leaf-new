@@ -7,6 +7,7 @@ const express = require('express');
 const multer = require('multer');
 const ocrService = require('../services/ocr-service');
 const documentAIExtractionService = require('../services/document-ai-extraction-service');
+const { validateCnhDocumentIdentity } = require('../services/cnh-document-identity-validator');
 const { logger } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
 
@@ -124,11 +125,26 @@ router.post('/cnh', ocrLimiter, upload.single('image'), async (req, res) => {
 
     // Extrair dados da CNH
     const extractedData = await ocrService.extractCNHData(req.file.buffer);
+    const documentIdentity = validateCnhDocumentIdentity({
+      text: extractedData?.textoCompleto || '',
+      data: extractedData
+    });
+
+    if (!documentIdentity.valid) {
+      return res.status(422).json({
+        success: false,
+        error: 'O documento enviado não parece ser uma CNH válida. Envie uma imagem legível da sua CNH.',
+        source: 'document_identity_mismatch',
+        documentIdentity,
+        data: extractedData
+      });
+    }
 
     // Retornar dados extraídos
     res.json({
       success: true,
       data: extractedData,
+      documentIdentity,
       message: 'Dados da CNH extraídos com sucesso'
     });
 
@@ -236,12 +252,28 @@ router.post('/cnh/pdf', ocrLimiter, upload.single('pdf'), async (req, res) => {
       });
     }
 
+    const documentIdentity = validateCnhDocumentIdentity({
+      text: extractedText,
+      data
+    });
+
+    if (!documentIdentity.valid) {
+      return res.status(422).json({
+        success: false,
+        error: 'O documento enviado não parece ser uma CNH válida. Envie sua CNH Digital em PDF.',
+        source: 'document_identity_mismatch',
+        documentIdentity,
+        data
+      });
+    }
+
     return res.json({
       success: true,
       source: 'openai',
       model,
       textLength: extractedText.length,
       extractionSource,
+      documentIdentity,
       data,
       message: 'Dados da CNH extraídos com IA com sucesso'
     });
@@ -559,8 +591,6 @@ router.use((req, res) => {
 });
 
 module.exports = router;
-
-
 
 
 

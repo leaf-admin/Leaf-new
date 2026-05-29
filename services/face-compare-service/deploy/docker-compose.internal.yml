@@ -1,0 +1,37 @@
+services:
+  face-compare-service:
+    build:
+      context: ..
+    env_file:
+      - ../.env
+    ports:
+      - "127.0.0.1:${FACE_HOST_PORT:-8008}:8008"
+    environment:
+      OMP_NUM_THREADS: "${FACE_OMP_NUM_THREADS:-1}"
+      OPENBLAS_NUM_THREADS: "${FACE_OPENBLAS_NUM_THREADS:-1}"
+      MKL_NUM_THREADS: "${FACE_MKL_NUM_THREADS:-1}"
+      NUMEXPR_NUM_THREADS: "${FACE_NUMEXPR_NUM_THREADS:-1}"
+    cpus: "${FACE_CONTAINER_CPUS:-1.25}"
+    mem_limit: "${FACE_CONTAINER_MEMORY:-3g}"
+    volumes:
+      - insightface-cache:/root/.insightface
+    restart: unless-stopped
+    networks:
+      default:
+      leaf_internal:
+        aliases:
+          - "${FACE_LEAF_DOCKER_ALIAS:-leaf-face-compare-service}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+volumes:
+  insightface-cache:
+
+networks:
+  leaf_internal:
+    external: true
+    name: "${FACE_LEAF_DOCKER_NETWORK:-leaf-app_leaf-network}"
