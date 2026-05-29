@@ -214,3 +214,24 @@ Validação:
 
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `git diff --check`: PASS.
+
+## Bloco 10 - Executado
+
+Escopo: remover scripts historicos de infra fora do caminho Contabo/modular atual.
+
+- Removidos scripts antigos de Hostinger/Vultr/migracao:
+  - `scripts/maintenance/hostinger/setup-hostinger-fallback.sh`
+  - `scripts/maintenance/migration/migrate-to-vultr.sh`
+  - `scripts/maintenance/vultr/install-vultr.sh`
+  - `scripts/maintenance/vultr/nginx-leaf-app.conf`
+  - `scripts/maintenance/vultr/setup-vultr-completo.sh`
+  - `scripts/maintenance/vultr/setup-vultr-economico.sh`
+  - `scripts/maintenance/vultr/setup-vultr-primary.sh`
+  - `scripts/maintenance/tests/test-vps-differences.cjs`
+- Mantido `leaf-websocket-backend/docker-compose.hostinger.yml` porque ainda e o compose operacional/canonico apesar do nome legado.
+
+Validação:
+
+- `rg` sem chamadas ativas para os scripts removidos fora de docs historicos/tracker.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
