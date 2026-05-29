@@ -699,3 +699,22 @@ Validação:
 - `rg` de imports/componentes legados no `AppNavigator`: PASS sem resultados.
 - `npm --prefix mobile-app run qa:production-guards`: PASS.
 - `cd mobile-app && npx jest --config jest.config.js --runInBand --runTestsByPath __tests__/legacy-financial-routes.test.js __tests__/driver-balance-service-pilot.test.js __tests__/trip-financial-summary.test.js`: PASS (`11/11`).
+
+## Bloco 37 - Executado
+
+Escopo: iniciar encapsulamento RTDB por domínio, sem remover RTDB direto global.
+
+- Criado `repositories/support-legacy-rtdb-repository.js` para concentrar acesso legado de suporte a:
+  - `support_tickets`
+  - `support_messages`
+- `support-ticket-service.js` deixou de chamar `db.ref(...)` diretamente.
+- Importacao sob demanda e mirror legado continuam com o mesmo contrato, agora via repository.
+- Adicionado teste de boundary para impedir reintroducao de `.ref(...)` direto no service de suporte.
+- Mantidos outros usos RTDB vivos e intocados nesta etapa.
+
+Validação:
+
+- `rg "getLegacyDb\\(|db\\.ref|support_tickets|support_messages" leaf-websocket-backend/services/support-ticket-service.js leaf-websocket-backend/repositories/support-legacy-rtdb-repository.js`: PASS, `.ref(...)` concentrado no repository.
+- `node -c leaf-websocket-backend/services/support-ticket-service.js && node -c leaf-websocket-backend/repositories/support-legacy-rtdb-repository.js`: PASS.
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
+- `cd leaf-websocket-backend && npx jest --config config/jest.unit.config.js --runInBand --runTestsByPath tests/unit/repositories/support-legacy-rtdb-repository.unit.test.js tests/unit/services/support-ticket-service-rtdb-adapter.unit.test.js tests/unit/services/support-queue-service.unit.test.js tests/unit/services/support-driver-identity-reverification-service.unit.test.js tests/unit/services/rating-service-kyc.unit.test.js`: PASS (`10/10` somando as duas rodadas deste bloco).
