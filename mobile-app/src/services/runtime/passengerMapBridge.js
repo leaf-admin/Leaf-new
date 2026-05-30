@@ -4,23 +4,23 @@ export {
   getDirectionsApi,
   detectInputType,
   fetchGeocodeAddress
-} from '../../common-local/GoogleAPIFunctions';
+} from '../canonical/locationService';
 
-export { fetchNearbyDrivers } from '../../common-local/usersactions';
+export { fetchNearbyDrivers } from '../canonical/driverService';
 
 export {
   tollData,
   getEstimate,
   clearEstimate,
   setEstimate
-} from '../../common-local/actions/estimateactions';
+} from '../canonical/rideService';
 
-export { addBooking } from '../../common-local/actions/bookingactions';
+export { addBooking } from '../canonical/rideService';
 
 export {
   updateTripPickup,
   updateTripDrop,
   updateTripCar
-} from '../../common-local/actions/tripactions';
+} from '../canonical/rideService';
 
-export { saveAddresses } from '../../common-local/actions/authactions';
+export { saveAddresses } from '../canonical/profileService';

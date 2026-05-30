@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { colors } from '../theme/runtimeTokens';
 import { fonts } from '../theme/runtimeTokens';
-import { cardTypography } from '../common-local/typography';
+import { cardTypography } from '../services/runtime/typographyBridge';
 import { MAIN_COLOR } from '../common/sharedFunctions';
 import * as ImagePicker from 'expo-image-picker';
 import { useTranslation } from '../components/i18n/LanguageProvider';

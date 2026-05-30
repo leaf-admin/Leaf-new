@@ -15,9 +15,9 @@ DRIVER_PHONE="${DRIVER_PHONE:-21123456789}"
 PASSENGER_UID="${PASSENGER_UID:-OjML1wSzdNRaynjqMRlSW1Y0LVy2}"
 DRIVER_UID="${DRIVER_UID:-8vg2kxxqi3TYKlpD6eBlWgYseIq2}"
 
-DO_HOST="${DO_HOST:-147.182.204.181}"
-DO_KEY="${DO_KEY:-${ROOT_DIR}/../digitaloceankey}"
-DO_REMOTE_ENV_PATH="${DO_REMOTE_ENV_PATH:-/opt/leaf-app/.env}"
+REMOTE_HOST="${REMOTE_HOST:-${VPS_HOST:-}}"
+REMOTE_KEY="${REMOTE_SSH_KEY:-${VPS_KEY:-${SSH_KEY_PATH:-${REMOTE_KEY:-}}}}"
+REMOTE_ENV_PATH="${REMOTE_ENV_PATH:-/opt/leaf-app/.env}"
 
 PASSENGER_UDID="${PASSENGER_UDID:-195D2C57-87DC-4953-ABF1-4FD351ADBBEF}"
 DRIVER_UDID="${DRIVER_UDID:-2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C}"
@@ -179,10 +179,14 @@ else
   fail "Socket endpoint not reachable (${socket_code})"
 fi
 
-if [[ ! -f "${DO_KEY}" ]]; then
-  fail "missing digitalocean key: ${DO_KEY}"
+if [[ -z "${REMOTE_HOST}" ]]; then
+  fail "missing remote host. Set REMOTE_HOST or VPS_HOST."
+fi
+
+if [[ -z "${REMOTE_KEY}" ]] || [[ ! -f "${REMOTE_KEY}" ]]; then
+  fail "missing remote SSH key. Set REMOTE_SSH_KEY, VPS_KEY, SSH_KEY_PATH or REMOTE_KEY."
 else
-  pass "digitalocean key found"
+  pass "remote SSH key found"
 fi
 
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
@@ -207,7 +211,7 @@ fi
 
 log "resetting canonical runtime state on vps"
 runtime_cleanup_json="${REPORT_DIR}/runtime-cleanup.json"
-if ssh -i "${DO_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${DO_HOST}" \
+if ssh -i "${REMOTE_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${REMOTE_HOST}" \
   "docker exec -i -e TEST_PASSENGER_UID='${PASSENGER_UID}' -e TEST_DRIVER_UID='${DRIVER_UID}' leaf-websocket node -" > "${runtime_cleanup_json}" 2>&1 <<'NODE'
 const Redis = require('ioredis');
 
@@ -336,13 +340,13 @@ fi
 
 log "reading runtime admin token from vps"
 runtime_token="$(
-  ssh -i "${DO_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${DO_HOST}" \
-    "grep -E '^(RUNTIME_ADMIN_TOKEN)=' '${DO_REMOTE_ENV_PATH}' | head -n 1 | cut -d= -f2-" 2>/dev/null || true
+  ssh -i "${REMOTE_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${REMOTE_HOST}" \
+    "grep -E '^(RUNTIME_ADMIN_TOKEN)=' '${REMOTE_ENV_PATH}' | head -n 1 | cut -d= -f2-" 2>/dev/null || true
 )"
 if [[ -n "${runtime_token}" ]]; then
   pass "runtime admin token loaded from vps"
 else
-  warn "runtime admin token not found in ${DO_REMOTE_ENV_PATH}; driver-ready polling will use sleep fallback"
+  warn "runtime admin token not found in ${REMOTE_ENV_PATH}; driver-ready polling will use sleep fallback"
 fi
 
 driver_status_json="${REPORT_DIR}/driver-status.json"

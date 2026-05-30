@@ -1,7 +1,7 @@
 import Logger from '../utils/Logger';
 import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
-import { getUserTripHistory, getTripStatistics } from '../common-local/src/actions/locationactions';
+import { getUserTripHistory, getTripStatistics } from '../services/runtime/locationActionsBridge';
 
 
 export const useTripHistory = (userType = 'passenger') => {
@@ -128,4 +128,4 @@ export const useTripHistory = (userType = 'passenger') => {
             loadStatistics();
         }
     };
-}; 
+};

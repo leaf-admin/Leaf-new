@@ -1,11 +1,8 @@
-import { api } from '../../common-local';
-
-export const {
+export {
   acceptTask,
   cancelTask,
   updateProfile,
   updateBooking,
   fetchTasks,
   RequestPushMsg
-} = api;
-
+} from '../canonical/driverService';

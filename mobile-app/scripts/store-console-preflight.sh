@@ -132,7 +132,7 @@ RUNTIME_FILES=(
 )
 
 if rg -n "147\\.182\\.204\\.181|api\\.147\\.182\\.204\\.181|socket\\.147\\.182\\.204\\.181" "${RUNTIME_FILES[@]}" >/dev/null 2>&1; then
-  bad "Host antigo da DigitalOcean ainda encontrado em arquivos de runtime/release"
+  bad "Host antigo de VPS ainda encontrado em arquivos de runtime/release"
 else
   ok "Sem referência ao host antigo nos arquivos de runtime/release"
 fi
@@ -149,10 +149,81 @@ else
   bad "Política central de review/OTP não encontrada"
 fi
 
+STORE_REVIEW_FILES=(
+  "docs/STORE_PRIVACY_LOCATION_PACKAGE_2026-05-30.md"
+  "docs/PLAY_CONSOLE_READY_RESPONSES_2026-03-23.md"
+  "docs/APP_STORE_CONNECT_READY_RESPONSES_2026-03-23.md"
+  "app.config.js"
+  "eas.json"
+)
+
+if rg -n "sslip" "${STORE_REVIEW_FILES[@]}" >/dev/null 2>&1; then
+  bad "Referência sslip encontrada em arquivos ativos de loja/release"
+else
+  ok "Sem sslip nos arquivos ativos de loja/release"
+fi
+
+if node <<'NODE' >/tmp/leaf-store-review-otp.log 2>&1
+const fs = require('fs');
+const files = [
+  'docs/STORE_PRIVACY_LOCATION_PACKAGE_2026-05-30.md',
+  'docs/PLAY_CONSOLE_READY_RESPONSES_2026-03-23.md',
+  'docs/APP_STORE_CONNECT_READY_RESPONSES_2026-03-23.md'
+];
+const text = files.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+const auth = require('../leaf-websocket-backend/utils/test-auth-bypass');
+
+const badZeroOtpLines = text
+  .split(/\r?\n/)
+  .filter((line) => /000000/.test(line))
+  .filter((line) => !/(do not|never|not valid|placeholder|nunca|n[aã]o|nao|inv[aá]lido)/i.test(line));
+
+if (badZeroOtpLines.length) {
+  throw new Error(`Review docs still contain unsafe 000000 OTP lines: ${badZeroOtpLines.join(' | ')}`);
+}
+
+const requiredDocs = [
+  ['passenger review OTP', /\+55 21 10293-8475[\s\S]{0,80}992111/],
+  ['driver review OTP', /\+55 21 12345-6789[\s\S]{0,80}992000/]
+];
+for (const [label, pattern] of requiredDocs) {
+  if (!pattern.test(text)) {
+    throw new Error(`Missing ${label} in active store review docs`);
+  }
+}
+
+const requiredBackendCodes = {
+  '5521102938475': '992111',
+  '5521123456789': '992000'
+};
+for (const [phone, code] of Object.entries(requiredBackendCodes)) {
+  if (auth.DEFAULT_BYPASS_PHONE_CODES[phone] !== code) {
+    throw new Error(`Backend review OTP mismatch for ${phone}`);
+  }
+}
+NODE
+then
+  ok "Credenciais/OTP de review conferidos: passageiro 992111, motorista 992000"
+else
+  bad "Credenciais/OTP de review divergentes ou com 000000 inseguro"
+fi
+
 if rg -n "signInWithPhoneNumber" src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1; then
   ok "Fluxo OTP real via Firebase Phone Auth encontrado"
 else
   bad "Fluxo OTP real via Firebase Phone Auth não encontrado"
+fi
+
+if rg -n "BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY|driverBackgroundDisclosureVisible|locationType=\"background\"" src/screens/prototype/RobotaxiHomeScreen.js src/services/BackgroundLocationService.js src/components/PermissionExplanationModal.js >/dev/null 2>&1; then
+  ok "Disclosure de localização em segundo plano conectado ao fluxo atual do motorista"
+else
+  bad "Disclosure de localização em segundo plano não encontrado no fluxo atual do motorista"
+fi
+
+if rg -n "requestBackgroundPermissionsAsync" src/services/BackgroundLocationService.js >/dev/null 2>&1; then
+  ok "Solicitação de background location centralizada em BackgroundLocationService"
+else
+  bad "Solicitação de background location não encontrada no serviço central"
 fi
 
 section "Checks automatizados"

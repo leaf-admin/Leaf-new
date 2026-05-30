@@ -6,9 +6,9 @@ set -euo pipefail
 #   bash leaf-websocket-backend/scripts/ops/rollout-daily-subscription-withdraw-vps.sh
 #
 # Variáveis opcionais:
-#   VPS_HOST=147.182.204.181
+#   VPS_HOST=<host-contabo>
 #   VPS_USER=root
-#   VPS_KEY=/caminho/para/digitaloceankey
+#   VPS_KEY=/caminho/para/contabokey
 #   REMOTE_BACKEND_DIR=/opt/leaf
 #   APPLY_ENV=true|false   (default: true)
 #   RESTART_APP=true|false (default: true)
@@ -18,9 +18,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 BACKEND_DIR="$PROJECT_ROOT/leaf-websocket-backend"
 
-VPS_HOST="${VPS_HOST:-147.182.204.181}"
+VPS_HOST="${VPS_HOST:-${CONTABO_HOST:-}}"
 VPS_USER="${VPS_USER:-root}"
-VPS_KEY="${VPS_KEY:-$PROJECT_ROOT/digitaloceankey}"
+VPS_KEY="${VPS_KEY:-${CONTABO_KEY:-$HOME/.ssh/leaf_contabo_20260412_ed25519}}"
 REMOTE_BACKEND_DIR="${REMOTE_BACKEND_DIR:-}"
 
 APPLY_ENV="${APPLY_ENV:-true}"
@@ -32,8 +32,13 @@ if [[ ! -d "$BACKEND_DIR" ]]; then
   exit 2
 fi
 
-if [[ ! -f "$VPS_KEY" ]]; then
-  echo "[rollout][error] Chave SSH não encontrada: $VPS_KEY"
+if [[ -z "$VPS_HOST" ]]; then
+  echo "[rollout][error] Configure VPS_HOST ou CONTABO_HOST para o host Contabo"
+  exit 2
+fi
+
+if [[ -z "$VPS_KEY" || ! -f "$VPS_KEY" ]]; then
+  echo "[rollout][error] Configure VPS_KEY ou CONTABO_KEY com uma chave SSH válida"
   exit 2
 fi
 

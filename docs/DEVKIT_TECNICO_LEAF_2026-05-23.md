@@ -133,8 +133,8 @@ Raiz:
 - `leaf-dashboard-js/`: dashboard admin atual.
 - `landing-page/`: site estatico, politicas legais, exclusao de conta e paginas de marketing.
 - `services/support-agent-orchestrator/`: copiloto/orquestrador de suporte.
-- `services/kyc-service/`: KYC facial Python.
-- `services/kyc-microservice/`: KYC Node experimental/legado.
+- `services/kyc-service/`: KYC facial Python legado, mantido temporariamente para decisao de migracao.
+- `services/face-compare-service/`: comparacao facial atual usada pelo backend.
 - `observability/`: Tempo, Prometheus, Grafana, Alertmanager.
 - `scripts/`: workflow, deploy, validacao, prelaunch, manutencao.
 - `tests/`: harness antigo de testes WebSocket.
@@ -634,12 +634,10 @@ pip install -r requirements.txt
 python src/main.py
 ```
 
-KYC Node:
+KYC Node experimental:
 
-- Caminho: `services/kyc-microservice/src/api.js`
-- Usa Express, multer, OpenCV, face-api.js, canvas e Redis.
-- Parece experimental/legado e nao esta em workspaces ativos.
-- Endpoints incluem `/health`, `/stats`, `/upload-profile`, `/verify-driver`, `/encoding/:userId`.
+- Removido no bloco de limpeza de 2026-05-29.
+- O fluxo atual deve usar `leaf-websocket-backend/routes/kyc-routes.js` e `services/face-compare-service`.
 
 ## 14. Observabilidade
 
@@ -689,10 +687,9 @@ Perfil canonico:
 
 - `docs/TEST_EXECUTION_CANONICAL_PROFILE.md`
 - Os scripts npm imprimem perfil antes de executar testes.
-- E2E default usa ambiente remoto compartilhado:
-  - Socket: `https://socket.62.169.31.231.sslip.io`
-  - API: `https://api.62.169.31.231.sslip.io`
-  - SSH host: `62.169.31.231`
+- E2E default deve apontar para os dominios canonicos atuais, salvo override explicito por variavel de ambiente:
+  - Socket: `https://socket.leaf.app.br`
+  - API: `https://api.leaf.app.br`
 
 Comandos oficiais:
 
@@ -771,14 +768,15 @@ Dominios canonicos:
 
 Ambiente remoto compartilhado de teste:
 
-- API: `https://api.62.169.31.231.sslip.io`
-- Socket: `https://socket.62.169.31.231.sslip.io`
-- SSH host: `62.169.31.231`
+- API: `https://api.leaf.app.br`
+- Socket: `https://socket.leaf.app.br`
+- SSH host: configurar via `VPS_HOST`/`SSH_KEY_PATH` nos scripts operacionais.
 
 Backend VPS:
 
-- Runtime atual: `server.vps.js`
-- Compose principal: `leaf-websocket-backend/docker-compose.hostinger.yml`
+- Runtime atual: modular em `server.js` (`LEAF_SERVER_RUNTIME=modular`).
+- Rollback legado preservado temporariamente: `server.vps.js`.
+- Compose principal: `leaf-websocket-backend/docker-compose.hostinger.yml` (nome legado, uso atual).
 - Deploy operacional atual documentado em workers como:
 
 ```bash
@@ -787,14 +785,10 @@ bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh
 
 Scripts de deploy/manutencao relevantes:
 
-- `scripts/deploy-to-vps.sh`
-- `scripts/deploy-to-vps-complete.sh`
-- `scripts/deploy-backend-vps.sh`
-- `scripts/deploy-notifications-vps.sh`
-- `scripts/deploy-places-cache-vps.sh`
 - `scripts/healthcheck-vps.sh`
-- `scripts/monitorar-logs*.sh`
-- `leaf-websocket-backend/scripts/deploy/*`
+- `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh`
+- `leaf-websocket-backend/scripts/deploy/deploy-secondary-realtime-host.sh`
+- `leaf-websocket-backend/scripts/deploy/validate-runtime-config.js`
 - `leaf-websocket-backend/scripts/ops/*`
 
 Dashboard:

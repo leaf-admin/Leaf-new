@@ -3,7 +3,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOKEN_HELPER="${SCRIPT_DIR}/validation/lib/get-admin-bearer-token.sh"
-BASE_URL="${1:-https://api.147.182.204.181.sslip.io}"
+BASE_URL="${1:-https://api.leaf.app.br}"
 TIMEOUT="${TIMEOUT:-12}"
 AUTH_TOKEN="${AUTH_TOKEN:-${LEAF_ADMIN_BEARER_TOKEN:-}}"
 AUTH_MODE="provided"

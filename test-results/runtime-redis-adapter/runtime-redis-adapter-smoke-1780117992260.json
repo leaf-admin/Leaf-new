@@ -1,0 +1,110 @@
+{
+  "startedAt": "2026-05-30T05:13:09.665Z",
+  "completedAt": "2026-05-30T05:13:12.260Z",
+  "redis": {
+    "port": 51027
+  },
+  "adapterBroadcast": {
+    "status": "passed",
+    "ports": [
+      51033,
+      51034
+    ],
+    "payload": {
+      "ok": true,
+      "emittedBy": "instance-b",
+      "at": "2026-05-30T05:13:10.214Z"
+    }
+  },
+  "runtimes": [
+    {
+      "runtime": "vps",
+      "port": 51028,
+      "pid": 18392,
+      "logPath": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-redis-adapter/runtime-vps.log",
+      "readiness": {
+        "status": "healthy",
+        "timestamp": "2026-05-30T05:13:11.758Z",
+        "checks": {
+          "redis": {
+            "status": "healthy",
+            "source": "dedicated",
+            "responseTime": "0ms",
+            "latency": 0,
+            "minLatency": 0,
+            "maxLatency": 1,
+            "samples": [
+              1,
+              0,
+              0
+            ],
+            "thresholds": {
+              "warningMs": 1200,
+              "unhealthyMs": 4000
+            },
+            "message": "Redis está saudável"
+          },
+          "socketRedisAdapter": {
+            "status": "healthy",
+            "state": "ready",
+            "enabled": true,
+            "required": true,
+            "runtimeRole": "gateway",
+            "updatedAt": "2026-05-30T05:13:11.579Z",
+            "error": null,
+            "message": "Socket.IO Redis Adapter pronto"
+          }
+        }
+      },
+      "socketConnect": {
+        "status": "connected",
+        "socketId": "t4Lu1v41rpG5ITOlAAAB"
+      }
+    },
+    {
+      "runtime": "modular",
+      "port": 51029,
+      "pid": 18408,
+      "logPath": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-redis-adapter/runtime-modular.log",
+      "readiness": {
+        "status": "healthy",
+        "timestamp": "2026-05-30T05:13:12.255Z",
+        "checks": {
+          "redis": {
+            "status": "healthy",
+            "source": "dedicated",
+            "responseTime": "0ms",
+            "latency": 0,
+            "minLatency": 0,
+            "maxLatency": 0,
+            "samples": [
+              0,
+              0,
+              0
+            ],
+            "thresholds": {
+              "warningMs": 1200,
+              "unhealthyMs": 4000
+            },
+            "message": "Redis está saudável"
+          },
+          "socketRedisAdapter": {
+            "status": "healthy",
+            "state": "ready",
+            "enabled": true,
+            "required": true,
+            "runtimeRole": "gateway",
+            "updatedAt": "2026-05-30T05:13:11.820Z",
+            "error": null,
+            "message": "Socket.IO Redis Adapter pronto"
+          }
+        }
+      },
+      "socketConnect": {
+        "status": "connected",
+        "socketId": "EHxmTXFSO7G9cN7PAAAB"
+      }
+    }
+  ],
+  "artifactsDir": "/Users/izaakdias/Documents/Leaf-new/test-results/runtime-redis-adapter"
+}

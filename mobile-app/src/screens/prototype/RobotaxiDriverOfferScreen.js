@@ -562,10 +562,16 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       setBusyAction("accept");
       await acceptDriverOffer(request);
       if (typeof navigation.replace === "function") {
-        navigation.replace("RobotaxiPrototypeDriverTrip", { request });
+        navigation.replace("RobotaxiPrototype", {
+          source: "driver-offer-accepted",
+          bookingId: request?.bookingId || request?.id || null,
+        });
         return;
       }
-      navigation.navigate("RobotaxiPrototypeDriverTrip", { request });
+      navigation.navigate("RobotaxiPrototype", {
+        source: "driver-offer-accepted",
+        bookingId: request?.bookingId || request?.id || null,
+      });
     } catch (error) {
       if (isCompetitiveAcceptLossMessage(error?.message || error)) {
         navigation.goBack();

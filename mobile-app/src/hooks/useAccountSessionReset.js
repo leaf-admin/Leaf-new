@@ -4,7 +4,7 @@ import firebaseAuth from '@react-native-firebase/auth';
 import { CommonActions } from '@react-navigation/native';
 import { useDispatch } from 'react-redux';
 
-import { USER_SIGN_OUT } from '../common-local/types';
+import { USER_SIGN_OUT } from '../services/runtime/authTypesBridge';
 import WebSocketManager from '../services/WebSocketManager';
 import Logger from '../utils/Logger';
 

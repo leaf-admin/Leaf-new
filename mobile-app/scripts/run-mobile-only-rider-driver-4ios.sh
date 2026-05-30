@@ -16,11 +16,11 @@ APP_LAUNCH_MODE="${APP_LAUNCH_MODE:-dev-client}"
 METRO_HOST="${METRO_HOST:-127.0.0.1}"
 METRO_PORT="${METRO_PORT:-8081}"
 
-API_BASE_URL="${API_BASE_URL:-https://api.62.169.31.231.sslip.io}"
-WS_URL="${WS_URL:-https://socket.62.169.31.231.sslip.io}"
-DO_HOST="${DO_HOST:-62.169.31.231}"
-DO_KEY="${DO_KEY:-${ROOT_DIR}/digitaloceankey}"
-DO_REMOTE_ENV_PATH="${DO_REMOTE_ENV_PATH:-/opt/leaf-app/.env}"
+API_BASE_URL="${API_BASE_URL:-https://api.leaf.app.br}"
+WS_URL="${WS_URL:-https://socket.leaf.app.br}"
+REMOTE_HOST="${REMOTE_HOST:-${VPS_HOST:-}}"
+REMOTE_KEY="${REMOTE_SSH_KEY:-${VPS_KEY:-${SSH_KEY_PATH:-${REMOTE_KEY:-}}}}"
+REMOTE_ENV_PATH="${REMOTE_ENV_PATH:-/opt/leaf-app/.env}"
 PLAYBACK_SPEED_MPS="${PLAYBACK_SPEED_MPS:-16.667}"
 PLAYBACK_QA_MULTIPLIER="${PLAYBACK_QA_MULTIPLIER:-1}"
 APPROACH_EVIDENCE_WAIT_SECONDS="${APPROACH_EVIDENCE_WAIT_SECONDS:-20}"
@@ -236,8 +236,8 @@ if [[ ! -d "${APP_PATH}" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${DO_KEY}" ]]; then
-  log "missing DigitalOcean key at ${DO_KEY}"
+if [[ -z "${REMOTE_HOST}" ]] || [[ -z "${REMOTE_KEY}" ]] || [[ ! -f "${REMOTE_KEY}" ]]; then
+  log "missing remote host/key; set REMOTE_HOST and REMOTE_SSH_KEY"
   exit 1
 fi
 

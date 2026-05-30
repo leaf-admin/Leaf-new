@@ -47,7 +47,7 @@ const NOTIFICATION_SCREEN_ALIASES = {
     ride: 'RobotaxiPrototypeTrip',
     ride_status: 'RobotaxiPrototypeTrip',
     trip_update: 'RobotaxiPrototypeTrip',
-    driver_trip: 'RobotaxiPrototypeDriverTrip',
+    driver_trip: 'RobotaxiPrototype',
     driver_offer: 'RobotaxiPrototypeDriverOffer',
     new_ride_offer: 'RobotaxiPrototypeDriverOffer',
     payment: 'RobotaxiPrototypePayment',
@@ -767,7 +767,7 @@ class FCMNotificationService {
         const resolvedRouteName =
             routeName ||
             (userType === 'driver' && data.bookingId
-                ? 'RobotaxiPrototypeDriverTrip'
+                ? 'RobotaxiPrototype'
                 : data.bookingId
                     ? 'RobotaxiPrototypeTrip'
                     : 'Notifications');

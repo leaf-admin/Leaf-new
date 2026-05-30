@@ -4,7 +4,8 @@ const { performance } = require('perf_hooks');
 
 class VPSStressTestSystem {
     constructor() {
-        this.vpsUrl = 'http://147.182.204.181:3001';
+        this.apiUrl = process.env.API_BASE_URL || 'https://api.leaf.app.br';
+        this.wsUrl = process.env.WS_URL || 'https://socket.leaf.app.br';
         this.results = {
             http: { requests: 0, success: 0, errors: 0, times: [] },
             websocket: { connections: 0, success: 0, errors: 0, times: [] }
@@ -16,7 +17,7 @@ class VPSStressTestSystem {
 
     async testVPSHttpLoad(concurrency = 20, duration = 15000) {
         console.log(`🌐 TESTE VPS HTTP: ${concurrency} usuários simultâneos por ${duration/1000}s`);
-        console.log(`🎯 Target: ${this.vpsUrl}`);
+        console.log(`🎯 Target: ${this.apiUrl}`);
         
         const promises = [];
         for (let i = 0; i < concurrency; i++) {
@@ -35,7 +36,7 @@ class VPSStressTestSystem {
 
     async testVPSWebSocketLoad(concurrency = 30, duration = 15000) {
         console.log(`🔌 TESTE VPS WEBSOCKET: ${concurrency} conexões simultâneas por ${duration/1000}s`);
-        console.log(`🎯 Target: ${this.vpsUrl}`);
+        console.log(`🎯 Target: ${this.wsUrl}`);
         
         const promises = [];
         for (let i = 0; i < concurrency; i++) {
@@ -57,7 +58,7 @@ class VPSStressTestSystem {
         while (Date.now() < endTime) {
             const start = performance.now();
             try {
-                const response = await axios.get(`${this.vpsUrl}/health`, { 
+                const response = await axios.get(`${this.apiUrl}/health`, {
                     timeout: 5000,
                     headers: {
                         'Connection': 'keep-alive',
@@ -81,7 +82,7 @@ class VPSStressTestSystem {
     async simulateVPSWebSocketUser(userId, duration) {
         return new Promise((resolve) => {
             const start = performance.now();
-            const socket = io(this.vpsUrl, {
+            const socket = io(this.wsUrl, {
                 transports: ['websocket'],
                 auth: { uid: `vps-user-${userId}`, token: `vps-token-${userId}`, userType: 'passenger' },
                 timeout: 10000,
@@ -124,7 +125,7 @@ class VPSStressTestSystem {
     async runVPSStressTest() {
         console.log('🚀 INICIANDO TESTE DE STRESS DA VPS VULTR');
         console.log('=========================================');
-        console.log(`🎯 Target VPS: ${this.vpsUrl}`);
+        console.log(`🎯 Target API: ${this.apiUrl}`);
         console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
         
         // Teste 1: HTTP VPS Load
@@ -154,7 +155,7 @@ class VPSStressTestSystem {
         
         console.log('\n📋 RELATÓRIO FINAL DE STRESS TEST - VPS VULTR');
         console.log('==============================================');
-        console.log(`🎯 Target VPS: ${this.vpsUrl}`);
+        console.log(`🎯 Target WebSocket: ${this.wsUrl}`);
         console.log(`⏱️ Tempo total: ${totalTime.toFixed(2)}s`);
         console.log(`🔗 Máximo de conexões simultâneas: ${this.maxConcurrentConnections}`);
         
@@ -190,13 +191,13 @@ class VPSStressTestSystem {
         const wsCPS = wsResults.connections / totalTime;
         
         if (httpSuccessRate > 95 && wsSuccessRate > 90 && httpRPS > 50 && wsCPS > 5) {
-            console.log('🚀 VPS EXCELENTE: Vultr tem capacidade real!');
+            console.log('🚀 Servidor excelente: servidor atual tem capacidade real!');
         } else if (httpSuccessRate > 90 && wsSuccessRate > 80 && httpRPS > 25 && wsCPS > 2) {
-            console.log('✅ VPS BOM: Vultr tem boa capacidade!');
+            console.log('✅ Servidor bom: servidor atual tem boa capacidade!');
         } else if (httpSuccessRate > 80 && wsSuccessRate > 70 && httpRPS > 10 && wsCPS > 1) {
-            console.log('⚠️ VPS REGULAR: Vultr tem capacidade básica!');
+            console.log('⚠️ Servidor regular: servidor atual tem capacidade básica!');
         } else {
-            console.log('❌ VPS RUIM: Vultr precisa de mais recursos!');
+            console.log('❌ Servidor ruim: servidor atual precisa de mais recursos!');
         }
         
         // Projeção para 500k usuários

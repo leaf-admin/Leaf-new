@@ -25,8 +25,8 @@ RELEASE_APP_PATH="${MOBILE_DIR}/ios/build/Build/Products/Release-iphonesimulator
 
 API_BASE_URL="${API_BASE_URL:-https://api.leaf.app.br}"
 WS_URL="${WS_URL:-https://socket.leaf.app.br}"
-DO_HOST="${DO_HOST:-147.182.204.181}"
-DO_KEY="${DO_KEY:-${ROOT_DIR}/digitaloceankey}"
+REMOTE_HOST="${REMOTE_HOST:-${VPS_HOST:-}}"
+REMOTE_KEY="${REMOTE_SSH_KEY:-${VPS_KEY:-${SSH_KEY_PATH:-${REMOTE_KEY:-}}}}"
 
 PASSENGER_PHONE="${PASSENGER_PHONE:-21102938475}"
 PASSENGER_TWO_PHONE="${PASSENGER_TWO_PHONE:-21102938476}"
@@ -306,15 +306,15 @@ seed_driver_auths() {
 }
 
 cleanup_remote_runtime_state() {
-  if [[ ! -f "${DO_KEY}" ]]; then
-    log "warning: DO key not found at ${DO_KEY}; skipping remote runtime cleanup"
+  if [[ -z "${REMOTE_HOST}" ]] || [[ -z "${REMOTE_KEY}" ]] || [[ ! -f "${REMOTE_KEY}" ]]; then
+    log "warning: remote host/key not configured; skipping remote runtime cleanup"
     return 0
   fi
 
   local cleanup_out="${ARTIFACTS_DIR}/remote-cleanup-$(date +%s).json"
   local passenger_uid_list
   passenger_uid_list="$(passenger_uid_csv)"
-  if ssh -i "${DO_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${DO_HOST}" \
+  if ssh -i "${REMOTE_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${REMOTE_HOST}" \
     "docker exec -i -e TEST_PASSENGER_UIDS='${passenger_uid_list}' -e TEST_DRIVER_ONE_UID='${DRIVER_ONE_UID}' -e TEST_DRIVER_TWO_UID='${DRIVER_TWO_UID}' leaf-websocket node -" > "${cleanup_out}" 2>&1 <<'NODE'
 const Redis = require('ioredis');
 

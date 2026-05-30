@@ -19,7 +19,10 @@ const SKIP_DIRS = new Set([
   '.codex-artifacts',
   '.maestro',
   '.tmp',
+  '.pytest_cache',
+  '.venv',
   '.venv_image',
+  '__pycache__',
   'android-sdk',
   'build',
   'coverage',
@@ -93,6 +96,20 @@ const CONTENT_RULES = [
   }
 ];
 
+const ALLOWED_CONTENT_FINDINGS = new Set([
+  // Diagnostic strings inside the production runtime validator, not enabled env values.
+  'leaf-websocket-backend/scripts/deploy/validate-runtime-config.js:woovi-signature-disabled',
+  'leaf-websocket-backend/scripts/deploy/validate-runtime-config.js:woovi-unsigned-prod-risk',
+
+  // Health endpoint reports unsafe env state; the string is a blocker label, not an enabled bypass.
+  'leaf-websocket-backend/routes/health.js:payment-bypass-enabled',
+
+  // Prelaunch QA scripts intentionally run isolated flows; do not generalize this outside scripts/prelaunch.
+  'scripts/prelaunch/assert-store-go-static.cjs:hardcoded-test-password',
+  'scripts/prelaunch/run-native-navigation-5x-android-release.sh:payment-bypass-enabled',
+  'scripts/prelaunch/run-native-navigation-5x-ios-release.sh:payment-bypass-enabled'
+]);
+
 const findings = [];
 
 function rel(filePath) {
@@ -152,13 +169,11 @@ function shouldScanContent(file) {
     relative === 'leaf-websocket-backend/server.vps.js' ||
     relative.startsWith('services/support-agent-orchestrator/src/') ||
     relative.startsWith('services/kyc-service/src/') ||
-    relative.startsWith('services/kyc-microservice/src/') ||
     relative === 'mobile-app/eas.json' ||
     relative === 'mobile-app/app.config.js' ||
     relative.startsWith('mobile-app/config/') ||
     relative.startsWith('mobile-app/plugins/') ||
-    relative === 'docker-compose.observability.yml' ||
-    relative === '.do/app.yaml'
+    relative === 'docker-compose.observability.yml'
   );
 }
 
@@ -229,6 +244,10 @@ function scanContent(file) {
     rule.pattern.lastIndex = 0;
     let match;
     while ((match = rule.pattern.exec(content)) !== null) {
+      const relative = rel(file);
+      if (ALLOWED_CONTENT_FINDINGS.has(`${relative}:${rule.id}`)) {
+        continue;
+      }
       addFinding({
         severity: rule.severity,
         id: rule.id,

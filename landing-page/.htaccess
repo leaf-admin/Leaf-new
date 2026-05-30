@@ -9,14 +9,20 @@ RewriteBase /
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^excluir-conta$ excluir-conta.html [L]
+RewriteRule ^delete-account/?$ excluir-conta/index.html [L]
+RewriteRule ^account-deletion/?$ excluir-conta/index.html [L]
+RewriteRule ^privacy/?$ privacy-policy.html [L]
 RewriteRule ^privacy-policy$ privacy-policy.html [L]
+RewriteRule ^terms/?$ terms-of-service.html [L]
+RewriteRule ^terms-of-service/?$ terms-of-service.html [L]
+RewriteRule ^refund-policy/?$ refund-policy.html [L]
+RewriteRule ^support/?$ support/index.html [L]
 RewriteRule ^em-breve$ em-breve.html [L]
 RewriteRule ^convite/([^/]+)/?$ convite/index.html [L]
 RewriteRule ^motorista/convite/([^/]+)/?$ motorista/convite/index.html [L]
 
 # NÃO redirecionar se já for .html (evitar loop)
 RewriteCond %{REQUEST_URI} !\.html$
-
 
 
 

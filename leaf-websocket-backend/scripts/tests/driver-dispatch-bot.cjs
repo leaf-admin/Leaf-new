@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 
-const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
 const DRIVER_UID = process.env.TEST_DRIVER_UID || 'gl3uJkLwBjbeOtbbvVSryhziVBx1';
 const PICKUP = {
   lat: Number(process.env.TEST_PICKUP_LAT || 37.779026),

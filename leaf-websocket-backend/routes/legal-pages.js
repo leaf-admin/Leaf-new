@@ -100,7 +100,7 @@ function renderPage({ title, subtitle, sections, req }) {
 </html>`;
 }
 
-router.get('/privacy-policy', (req, res) => {
+function sendPrivacyPolicy(req, res) {
   res.type('html').send(
     renderPage({
       title: 'Política de Privacidade',
@@ -145,9 +145,9 @@ router.get('/privacy-policy', (req, res) => {
       ]
     })
   );
-});
+}
 
-router.get('/terms-of-service', (req, res) => {
+function sendTermsOfService(req, res) {
   res.type('html').send(
     renderPage({
       title: 'Termos de Serviço',
@@ -192,9 +192,9 @@ router.get('/terms-of-service', (req, res) => {
       ]
     })
   );
-});
+}
 
-router.get('/refund-policy', (req, res) => {
+function sendRefundPolicy(req, res) {
   res.type('html').send(
     renderPage({
       title: 'Política de Reembolso',
@@ -232,9 +232,9 @@ router.get('/refund-policy', (req, res) => {
       ]
     })
   );
-});
+}
 
-router.get('/account-deletion', (req, res) => {
+function sendAccountDeletion(req, res) {
   const baseUrl = getBaseUrl(req);
   const appDeleteEndpoint = `${baseUrl}/api/account/delete`;
 
@@ -268,15 +268,62 @@ router.get('/account-deletion', (req, res) => {
       ]
     })
   );
-});
+}
+
+function sendSupport(req, res) {
+  res.type('html').send(
+    renderPage({
+      title: 'Suporte Leaf',
+      subtitle: 'Canais públicos de ajuda para passageiros, motoristas, conta, privacidade, pagamentos e segurança.',
+      req,
+      sections: [
+        {
+          title: '1. Canal principal',
+          paragraphs: [
+            'Para falar com o suporte, envie uma mensagem para suporte@leaf.app.br.',
+            'Inclua o telefone da conta, cidade, data do ocorrido e, se houver, o número da corrida.'
+          ]
+        },
+        {
+          title: '2. Durante uma viagem',
+          paragraphs: [
+            'Se a situação estiver acontecendo durante a corrida, use primeiro os recursos de segurança e suporte dentro do aplicativo.',
+            'Esses recursos preservam o contexto da viagem e aceleram a análise.'
+          ]
+        },
+        {
+          title: '3. Conta e privacidade',
+          paragraphs: [
+            'Para solicitações de privacidade ou exclusão de conta, use o fluxo do aplicativo ou envie o pedido para suporte@leaf.app.br.',
+            'A página pública de exclusão de conta está disponível em /delete-account.'
+          ]
+        },
+        {
+          title: '4. Prazo de resposta',
+          paragraphs: [
+            'Casos de segurança e pagamento têm prioridade.',
+            'As demais solicitações são analisadas conforme ordem de chegada e complexidade.'
+          ]
+        }
+      ]
+    })
+  );
+}
+
+router.get(['/privacy-policy', '/privacy'], sendPrivacyPolicy);
+router.get(['/terms-of-service', '/terms'], sendTermsOfService);
+router.get('/refund-policy', sendRefundPolicy);
+router.get(['/account-deletion', '/delete-account'], sendAccountDeletion);
+router.get('/support', sendSupport);
 
 router.get('/api/legal/links', (req, res) => {
   const baseUrl = getBaseUrl(req);
   res.json({
-    privacyPolicyUrl: `${baseUrl}/privacy-policy`,
-    termsOfServiceUrl: `${baseUrl}/terms-of-service`,
+    privacyPolicyUrl: `${baseUrl}/privacy`,
+    termsOfServiceUrl: `${baseUrl}/terms`,
     refundPolicyUrl: `${baseUrl}/refund-policy`,
-    accountDeletionUrl: `${baseUrl}/account-deletion`
+    accountDeletionUrl: `${baseUrl}/delete-account`,
+    supportUrl: `${baseUrl}/support`
   });
 });
 

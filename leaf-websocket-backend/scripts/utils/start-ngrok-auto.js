@@ -19,7 +19,7 @@ const path = require('path');
 const PORT = process.env.PORT || 3001;
 const NGROK_CONFIG_FILE = path.join(__dirname, '../../.ngrok-url.json');
 const WOOVI_CONFIG = {
-  apiToken: process.env.WOOVI_API_TOKEN || 'Q2xpZW50X0lkXzE4YzBkYzI3LTYzMDYtNDFkYy1hMmRlLWI2MzAzMzQ3YzNhZTpDbGllbnRfU2VjcmV0X01ENWpTTW1DMExBYWx2WHhiY0tTSnlrVmYyM0g1Z0FxS0pZaE5zT0tUK1E9',
+  apiToken: process.env.WOOVI_API_TOKEN || '',
   baseUrl: process.env.WOOVI_BASE_URL || 'https://api.woovi-sandbox.com/api/v1'
 };
 
@@ -215,6 +215,12 @@ async function getNgrokUrl() {
 
 async function updateWooviWebhook(webhookUrl) {
   try {
+    if (!WOOVI_CONFIG.apiToken) {
+      console.warn('   ⚠️ WOOVI_API_TOKEN ausente; webhook não será atualizado automaticamente.');
+      console.warn('   💡 Configure WOOVI_API_TOKEN no ambiente ou ajuste manualmente na Woovi Dashboard.');
+      return false;
+    }
+
     console.log('🔄 Tentando atualizar webhook na Woovi via API...');
     
     const api = axios.create({
@@ -274,4 +280,3 @@ async function updateWooviWebhook(webhookUrl) {
     return false;
   }
 }
-

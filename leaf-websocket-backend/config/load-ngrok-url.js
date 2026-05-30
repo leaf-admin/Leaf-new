@@ -30,7 +30,7 @@ function getNgrokWebhookUrl() {
   
   // 2. Em produção, usar URL do servidor (sem ngrok)
   if (process.env.NODE_ENV === 'production') {
-    const serverUrl = process.env.SERVER_URL || process.env.WOOVI_WEBHOOK_BASE_URL || 'http://147.182.204.181';
+    const serverUrl = process.env.SERVER_URL || process.env.WOOVI_WEBHOOK_BASE_URL || 'https://api.leaf.app.br';
     return `${serverUrl}/api/woovi/webhook`;
   }
   

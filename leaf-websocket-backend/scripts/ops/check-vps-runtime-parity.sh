@@ -9,8 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-RUNTIME_MODE="${RUNTIME_MODE:-vps}"
-VPS_HOST="${VPS_HOST:-62.169.31.231}"
+RUNTIME_MODE="${RUNTIME_MODE:-modular}"
+VPS_HOST="${VPS_HOST:-${CONTABO_HOST:-}}"
 VPS_USER="${VPS_USER:-root}"
 STRICT="${STRICT:-true}"
 FETCH_REMOTE="${FETCH_REMOTE:-false}"
@@ -20,7 +20,6 @@ resolve_default_vps_key() {
     "$HOME/.ssh/leaf_contabo_20260412_ed25519"
     "$HOME/.ssh/serafy_contabo_ed25519"
     "$BACKEND_DIR/../contabokey"
-    "$BACKEND_DIR/../digitaloceankey"
   )
   for candidate in "${candidates[@]}"; do
     if [[ -f "$candidate" ]]; then
@@ -28,7 +27,7 @@ resolve_default_vps_key() {
       return 0
     fi
   done
-  echo "$BACKEND_DIR/../digitaloceankey"
+  return 0
 }
 
 VPS_KEY="${VPS_KEY:-$(resolve_default_vps_key)}"
@@ -56,8 +55,13 @@ if [[ ! -f "$LOCAL_RUNTIME_FILE" ]]; then
   exit 2
 fi
 
-if [[ ! -f "$VPS_KEY" ]]; then
-  echo "[parity][error] Chave SSH não encontrada: $VPS_KEY"
+if [[ -z "$VPS_HOST" ]]; then
+  echo "[parity][error] Configure VPS_HOST ou CONTABO_HOST para o host Contabo"
+  exit 2
+fi
+
+if [[ -z "$VPS_KEY" || ! -f "$VPS_KEY" ]]; then
+  echo "[parity][error] Configure VPS_KEY ou uma chave Contabo padrão válida"
   exit 2
 fi
 

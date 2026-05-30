@@ -87,8 +87,8 @@
 ### 🌐 **HOSTING/SERVIDORES**
 ```bash
 # Custos por corrida (estimativa)
-- VPS Vultr: R$ 0,0001 por corrida
-- VPS Hostinger: R$ 0,0001 por corrida
+- VPS backend atual: R$ 0,0001 por corrida
+- VPS contingencia/servico dedicado: R$ 0,0001 por corrida
 - CDN: R$ 0,00001 por corrida
 └── Total Hosting: R$ 0,00021
 ```
@@ -165,4 +165,4 @@
 
 **Custo por corrida: R$ 0,102984**
 
-**Este é o custo REAL e COMPLETO. Não há custos surpresa!** ✅ 
+**Este é o custo REAL e COMPLETO. Não há custos surpresa!** ✅

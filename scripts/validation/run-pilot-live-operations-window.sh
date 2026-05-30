@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-API_BASE_URL="${API_BASE_URL:-${LEAF_API_BASE_URL:-https://api.147.182.204.181.sslip.io}}"
+API_BASE_URL="${API_BASE_URL:-${LEAF_API_BASE_URL:-https://api.leaf.app.br}}"
 WINDOW_MINUTES="${WINDOW_MINUTES:-15}"
 INTERVAL_SECONDS="${INTERVAL_SECONDS:-15}"
 AUTH_TOKEN="${AUTH_TOKEN:-${LEAF_ADMIN_BEARER_TOKEN:-}}"

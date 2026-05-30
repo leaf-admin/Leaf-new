@@ -17,9 +17,9 @@ function parseArgs(argv) {
     skipBuilds: false,
     skipMaestro: false,
     evidenceFile: process.env.PRELAUNCH_EVIDENCE_FILE || '',
-    apiBaseUrl: process.env.PRELAUNCH_API_BASE_URL || process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io',
-    wsUrl: process.env.PRELAUNCH_WS_URL || process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io',
-    rideServerUrl: process.env.PRELAUNCH_RIDE_SERVER_URL || process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io',
+    apiBaseUrl: process.env.PRELAUNCH_API_BASE_URL || process.env.API_BASE_URL || 'https://api.leaf.app.br',
+    wsUrl: process.env.PRELAUNCH_WS_URL || process.env.WS_URL || 'https://socket.leaf.app.br',
+    rideServerUrl: process.env.PRELAUNCH_RIDE_SERVER_URL || process.env.API_BASE_URL || 'https://api.leaf.app.br',
     metricsUrl: process.env.PRELAUNCH_METRICS_URL || '',
     metricsToken: process.env.PRELAUNCH_METRICS_TOKEN || process.env.AUTH_TOKEN || process.env.LEAF_ADMIN_BEARER_TOKEN || '',
     reportDir: process.env.PRELAUNCH_REPORT_DIR || ''

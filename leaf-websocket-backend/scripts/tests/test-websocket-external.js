@@ -2,7 +2,7 @@ const WebSocket = require('ws');
 
 console.log('Testando WebSocket externo na VPS...');
 
-const ws = new WebSocket('ws://147.182.204.181:3001');
+const ws = new WebSocket('wss://socket.leaf.app.br/socket.io/?EIO=4&transport=websocket');
 
 ws.on('open', () => {
     console.log('WebSocket conectado com sucesso na VPS!');

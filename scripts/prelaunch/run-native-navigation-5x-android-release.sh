@@ -10,8 +10,8 @@ source "${MOBILE_DIR}/scripts/source-local-build-env.sh" >/dev/null 2>&1 || true
 
 APP_ID="${APP_ID:-br.com.leaf.ride}"
 APK_PATH="${ANDROID_RELEASE_APK:-${MOBILE_DIR}/android/app/build/outputs/apk/release/app-release.apk}"
-API_BASE_URL="${API_BASE_URL:-https://api.62.169.31.231.sslip.io}"
-WS_URL="${WS_URL:-https://socket.62.169.31.231.sslip.io}"
+API_BASE_URL="${API_BASE_URL:-https://api.leaf.app.br}"
+WS_URL="${WS_URL:-https://socket.leaf.app.br}"
 RUNS="${RUNS:-5}"
 PICKUP_APPROACH_WAIT_SECONDS="${PICKUP_APPROACH_WAIT_SECONDS:-45}"
 DRIVER_ACTION_MODE="${DRIVER_ACTION_MODE:-automation}"

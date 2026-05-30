@@ -11,7 +11,7 @@ var { height, width } = Dimensions.get('window');
 import { fonts } from './font';
 import { useState } from 'react';
 import {Tooltip,Icon } from 'react-native-elements';
-import { getLangKey } from '../common-local/other/getLangKey';
+import { getLangKey } from '../services/runtime/localizationBridge';
 
 
 export const MAIN_COLOR = colors.TAXIPRIMARY;

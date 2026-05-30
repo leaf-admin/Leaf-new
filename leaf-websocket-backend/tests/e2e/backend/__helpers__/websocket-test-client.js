@@ -32,7 +32,7 @@ function deriveApiBaseUrl(wsUrl) {
 
   const resolvedWsUrl = String(wsUrl || process.env.WS_URL || '').trim();
   if (!resolvedWsUrl) {
-    return 'https://api.62.169.31.231.sslip.io';
+    return 'https://api.leaf.app.br';
   }
 
   try {
@@ -42,7 +42,7 @@ function deriveApiBaseUrl(wsUrl) {
     }
     return normalizeBaseUrl(parsed.toString());
   } catch (_error) {
-    return 'https://api.62.169.31.231.sslip.io';
+    return 'https://api.leaf.app.br';
   }
 }
 

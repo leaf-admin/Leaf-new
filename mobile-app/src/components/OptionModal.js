@@ -11,7 +11,7 @@ import i18n from '../i18n';
 import RadioForm, { RadioButton, RadioButtonInput, RadioButtonLabel } from 'react-native-simple-radio-button';
 import { SECONDORY_COLOR, MAIN_COLOR } from '../common/sharedFunctions';
 import { fonts } from '../common/font';
-import { getLangKey } from '../common-local/other/getLangKey';
+import { getLangKey } from '../services/runtime/localizationBridge';
 
 export function OptionModal(props) {
     const { t } = i18n;

@@ -1,22 +1,20 @@
-# Contabo Cutover Checklist
+# Contabo Runtime DNS Checklist
 
-## Endpoints temporários
+## Endpoints canônicos
 
-Enquanto o domínio real não estiver regularizado, os hosts provisórios são:
+O runtime atual deve operar pelos domínios Leaf:
 
-- `https://api.62.169.31.231.sslip.io`
-- `https://socket.62.169.31.231.sslip.io`
-- `https://dashboard.62.169.31.231.sslip.io`
-- `https://62.169.31.231.sslip.io`
+- `https://api.leaf.app.br`
+- `https://socket.leaf.app.br`
+- `https://dashboard.leaf.app.br`
 
 ## Proxy
 
-O proxy da Contabo já está preparado para:
+O proxy da Contabo deve responder por:
 
-- responder por `api.62.169.31.231.sslip.io`
-- responder por `socket.62.169.31.231.sslip.io`
-- responder por `dashboard.62.169.31.231.sslip.io`
-- responder por `62.169.31.231.sslip.io`
+- `api.leaf.app.br`
+- `socket.leaf.app.br`
+- `dashboard.leaf.app.br`
 - servir `/.well-known/acme-challenge/` para o Let's Encrypt
 
 Arquivos:
@@ -26,7 +24,7 @@ Arquivos:
 
 ## TLS
 
-Os hosts `sslip` já resolvem. Rode na VPS:
+Rode na VPS:
 
 ```bash
 cd /opt/leaf-app
@@ -37,9 +35,9 @@ bash scripts/ops/issue-contabo-letsencrypt.sh <seu-email>
 
 Depois do TLS, alinhar estas variáveis do runtime:
 
-- `SERVER_URL=https://api.62.169.31.231.sslip.io`
-- `WOOVI_WEBHOOK_URL=https://api.62.169.31.231.sslip.io/api/woovi/webhook`
-- `CORS_ORIGIN=https://dashboard.62.169.31.231.sslip.io,https://62.169.31.231.sslip.io`
+- `SERVER_URL=https://api.leaf.app.br`
+- `WOOVI_WEBHOOK_URL=https://api.leaf.app.br/api/woovi/webhook`
+- `CORS_ORIGIN=https://dashboard.leaf.app.br`
 
 ## Clientes
 
@@ -58,7 +56,7 @@ Os defaults canônicos do stack ativo já foram atualizados para os domínios re
 
 Depois do cutover:
 
-1. `curl https://api.62.169.31.231.sslip.io/health`
+1. `curl https://api.leaf.app.br/health`
 2. smoke de corrida normal
 3. smoke de lifecycle
 4. smoke de reatribuição operacional

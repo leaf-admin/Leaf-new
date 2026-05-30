@@ -7,6 +7,7 @@ import {
   getDirectionsApi,
 } from '../src/common-local/GoogleAPIFunctions';
 import rideCostTelemetryService from '../src/services/RideCostTelemetryService';
+import { allowClientDirectGoogleFallback } from '../src/config/runtimeAccessPolicy';
 
 jest.mock('../src/utils/Logger', () => ({
   log: jest.fn(),
@@ -61,6 +62,7 @@ describe('GoogleAPIFunctions address search', () => {
     jest.clearAllMocks();
     global.fetch = jest.fn();
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = 'test-google-key';
+    allowClientDirectGoogleFallback.mockReturnValue(true);
   });
 
   it('does not apply Brazil country filters for non-Brazil autocomplete searches', async () => {
@@ -291,6 +293,57 @@ describe('GoogleAPIFunctions address search', () => {
     const geocodeUrl = global.fetch.mock.calls[0][0];
     expect(geocodeUrl).toContain('components=country:br');
     expect(geocodeUrl).toContain('region=br');
+  });
+
+  it('does not call Google directly when backend autocomplete fails and fallback is disabled', async () => {
+    allowClientDirectGoogleFallback.mockReturnValue(false);
+    AsyncStorage.getItem.mockResolvedValue(null);
+    global.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({ status: 'unavailable' }),
+    });
+
+    const result = await fetchPlacesAutocomplete('Shopping Leblon', 'token-no-direct', {
+      lat: -22.984,
+      lng: -43.218,
+    });
+
+    expect(result).toEqual([]);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch.mock.calls[0][0]).toContain('backend.leaf.test/api/places/autocomplete');
+  });
+
+  it('does not call Google geocoding directly when fallback is disabled', async () => {
+    allowClientDirectGoogleFallback.mockReturnValue(false);
+
+    const result = await fetchGeocodeAddress('Avenida Paulista', {
+      lat: -23.5614,
+      lng: -46.6559,
+    });
+
+    expect(result).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not call Google directions directly when backend route fails and fallback is disabled', async () => {
+    allowClientDirectGoogleFallback.mockReturnValue(false);
+    global.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({ status: 'unavailable' }),
+    });
+
+    await expect(
+      getDirectionsApi('-22.9100,-43.4100', '-22.9200,-43.4200', null, {
+        sourceMeta: {
+          surface: 'unit_no_direct_google',
+        },
+      }),
+    ).rejects.toContain('Directions backend indisponível');
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch.mock.calls[0][0]).toContain('backend.leaf.test/api/places/directions');
   });
 
   it('reuses sticky destination cache for active trip route calls', async () => {

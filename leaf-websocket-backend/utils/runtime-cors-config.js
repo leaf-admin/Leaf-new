@@ -59,9 +59,9 @@ function buildRuntimeCorsConfig(options = {}) {
 
   const runtimeCorsHosts = resolveRuntimeCorsHosts({
     env,
-    defaultHosts: ['62.169.31.231'],
+    defaultHosts: [],
     allowLegacyFlagName: 'ALLOW_LEGACY_VULTR_CORS',
-    legacyHost: '147.182.204.181'
+    legacyHost: ''
   });
 
   const {

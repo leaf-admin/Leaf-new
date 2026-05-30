@@ -42,7 +42,7 @@ function configureRemoteRuntimeFromApiBaseUrl(apiBaseUrl) {
   const normalizedWsUrl = String(process.env.WS_URL || '').trim().toLowerCase();
   if (
     !process.env.E2E_DRIVER_SIM_MODE &&
-    (normalizedWsUrl.includes('sslip.io') || normalizedWsUrl.startsWith('https://'))
+    normalizedWsUrl.startsWith('https://')
   ) {
     process.env.E2E_DRIVER_SIM_MODE = 'remote_ssh';
   }
@@ -127,7 +127,7 @@ async function repairDriverAvailability({ driverUid, lat, lng, outputEvents }) {
 }
 
 async function main() {
-  const apiBaseUrl = readArg('--api-base-url', process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io');
+  const apiBaseUrl = readArg('--api-base-url', process.env.API_BASE_URL || 'https://api.leaf.app.br');
   const driverUid = readArg('--driver-uid', process.env.TEST_DRIVER_UID || '');
   const lat = readNumberArg('--lat', Number.NaN);
   const lng = readNumberArg('--lng', Number.NaN);

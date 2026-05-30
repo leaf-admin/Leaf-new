@@ -21,7 +21,7 @@ const colors = {
     bold: '\x1b[1m'
 };
 
-const WS_URL = process.env.WS_URL || 'http://147.182.204.181:3001'; // VPS
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br'; // VPS
 
 const log = {
     info: (msg) => console.log(colors.blue(`ℹ️  ${msg}`)),

@@ -610,7 +610,7 @@ function DriverUI(props) {
     // Importar serviço de saldo (usando require para evitar problemas de importação)
     let DriverBalanceService;
     try {
-        DriverBalanceService = require('../../services/DriverBalanceService').default;
+        DriverBalanceService = require('../../services/canonical/paymentService').DriverBalanceService;
     } catch (error) {
         Logger.warn('⚠️ DriverBalanceService não disponível:', error);
         DriverBalanceService = {

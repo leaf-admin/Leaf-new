@@ -41,7 +41,7 @@ Responder de forma objetiva se o protótipo está realmente pronto para build/te
 - Runtime endpoints hardcode scan: **PASS**
   - `scripts/check-runtime-endpoints.sh`
 - Redis em VPS: saudável e estável (health dedicado)
-  - ver relatório: `/Users/izaakdias/Documents/Leaf-new/mobile-app/docs/REDIS_VPS_DIAGNOSTICO_2026-03-18.md`
+  - ver relatório histórico: `/Users/izaakdias/Documents/Leaf-new/docs/archive/legacy-infra-2026-05-29/mobile-app/REDIS_VPS_DIAGNOSTICO_2026-03-18.md`
 
 ## Achados importantes (riscos remanescentes)
 

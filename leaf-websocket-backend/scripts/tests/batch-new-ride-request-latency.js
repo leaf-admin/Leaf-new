@@ -9,15 +9,15 @@
  *
  * Variáveis:
  *   RUNS=10
- *   WS_URL=https://socket.62.169.31.231.sslip.io
- *   API_BASE_URL=https://api.62.169.31.231.sslip.io
+ *   WS_URL=https://socket.leaf.app.br
+ *   API_BASE_URL=https://api.leaf.app.br
  */
 
 const path = require('path');
 const { spawnSync } = require('child_process');
 
 const RUNS = Number(process.env.RUNS || 10);
-const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
 const CWD = path.join(__dirname, '..', '..');
 const TARGET = path.join('scripts', 'tests', 'measure-new-ride-request-latency.js');
 
@@ -49,7 +49,7 @@ async function run() {
       env: {
         ...process.env,
         WS_URL,
-        API_BASE_URL: process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io'
+        API_BASE_URL: process.env.API_BASE_URL || 'https://api.leaf.app.br'
       },
       encoding: 'utf8',
       timeout: 70000,

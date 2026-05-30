@@ -14,7 +14,7 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from './i18n/LanguageProvider';
-import { createPixCharge as createPixChargeRequest } from '../services/paymentService';
+import { createPixCharge as createPixChargeRequest } from '../services/canonical/paymentService';
 import SecurePaymentBadge from './payment/SecurePaymentBadge';
 
 const { width } = Dimensions.get('window');

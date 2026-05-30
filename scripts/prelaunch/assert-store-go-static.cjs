@@ -28,7 +28,7 @@ const storeBlockingFiles = [
 
 const storeHistoricalFiles = [
   'mobile-app/docs/STORE_COMPLIANCE_AUDIT_2026-03-23.md',
-  'mobile-app/docs/CHECKLIST_LOJAS_APPLE_GOOGLE_2026-03-19.md',
+  'docs/archive/legacy-infra-2026-05-29/mobile-app/CHECKLIST_LOJAS_APPLE_GOOGLE_2026-03-19.md',
   'mobile-app/docs/GO_LIVE_STORE_CHECKLIST_2026-03-19.md',
   'mobile-app/docs/GO_LIVE_STORE_CHECKLIST_2026-03-23.md',
   'mobile-app/docs/GO_NO_GO_BUILD_CHECKLIST_2026-03-19.md',

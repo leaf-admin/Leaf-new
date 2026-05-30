@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { QRCode } from 'react-native-qrcode-svg';
 import BottomSheetWrapper from './BottomSheetWrapper';
-import { createPixCharge, checkPaymentStatus } from '../services/paymentService';
+import { createPixCharge, checkPaymentStatus } from '../services/canonical/paymentService';
 import { getFinalFareValue } from '../utils/minimumFareValidator';
 import { useTranslation } from './i18n/LanguageProvider';
 import SecurePaymentBadge from './payment/SecurePaymentBadge';

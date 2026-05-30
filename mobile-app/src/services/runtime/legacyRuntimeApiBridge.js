@@ -1,4 +1,4 @@
-import { api } from '../../common-local';
+import { api } from '../canonical/legacyApiService';
 
 export { api };
 export default api;

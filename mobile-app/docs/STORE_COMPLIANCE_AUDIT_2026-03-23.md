@@ -10,7 +10,7 @@
 - Account deletion flow hardened (backend purge + mobile session reset after deletion).
 - Dedicated entry in settings: `Privacidade e Exclusão`.
 - Background-location disclosure gate before requesting `always/background` permission.
-- Runtime references to legacy provider naming removed from mobile runtime (`Hostinger/Vultr` wording).
+- Runtime references to legacy provider naming removed from mobile runtime.
 - API base URL usage standardized in key services through `src/config/backendBaseUrl.js`.
 
 ## Remaining items before store submission (operational, outside code)

@@ -23,17 +23,16 @@ describe('runtime-cors-config', () => {
     expect(config.allowedOrigins).not.toContain('http://localhost:3000');
   });
 
-  it('allows runtime sslip hosts and legacy host only when enabled', () => {
+  it('allows runtime sslip hosts from explicit env values', () => {
     const config = buildRuntimeCorsConfig({
       env: {
         NODE_ENV: 'production',
-        CORS_RUNTIME_HOSTS: '10.0.0.1',
-        ALLOW_LEGACY_VULTR_CORS: 'true'
+        CORS_RUNTIME_HOSTS: '10.0.0.1'
       }
     });
 
     expect(config.allowedOrigins).toContain('https://api.10.0.0.1.sslip.io');
-    expect(config.allowedOrigins).toContain('https://api.147.182.204.181.sslip.io');
+    expect(config.allowedOrigins).not.toContain('https://api.10.0.0.9.sslip.io');
   });
 
   it('honors explicit env whitelist additions via CORS_ORIGIN', () => {
@@ -47,15 +46,15 @@ describe('runtime-cors-config', () => {
     expect(config.allowedOrigins).toContain('https://custom.example.com');
   });
 
-  it('blocks unknown web origin and accepts known runtime sslip origin', (done) => {
+  it('blocks unknown web origin and accepts explicit runtime sslip origin', (done) => {
     const config = buildRuntimeCorsConfig({
       env: {
         NODE_ENV: 'production',
-        CORS_RUNTIME_HOSTS: '62.169.31.231'
+        CORS_RUNTIME_HOSTS: '10.0.0.1'
       }
     });
 
-    config.corsOptions.origin('https://api.62.169.31.231.sslip.io', (errAllowed, okAllowed) => {
+    config.corsOptions.origin('https://api.10.0.0.1.sslip.io', (errAllowed, okAllowed) => {
       expect(errAllowed).toBeNull();
       expect(okAllowed).toBe(true);
 

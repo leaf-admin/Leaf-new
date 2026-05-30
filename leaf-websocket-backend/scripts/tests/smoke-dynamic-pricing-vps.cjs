@@ -9,9 +9,9 @@ const { runDynamicPricingEngine } = require('../../services/pricing');
 
 const ROOT_DIR = path.join(__dirname, '..', '..');
 const REPORTS_DIR = path.join(ROOT_DIR, 'reports');
-const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
-const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
-const VPS_IP = process.env.VPS_IP || '62.169.31.231';
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.leaf.app.br';
+const VPS_IP = process.env.VPS_IP || 'api.leaf.app.br';
 const VPS_USER = process.env.VPS_USER || 'root';
 const DEFAULT_SSH_KEY_CANDIDATES = [
   process.env.SSH_KEY_PATH,

@@ -1,18 +1,21 @@
 // Configuração Woovi Sandbox
 const { getNgrokWebhookUrl } = require('./load-ngrok-url');
+const { getWooviConfig } = require('./woovi-config');
 
 // ✅ Função para obter webhookUrl dinamicamente (carrega do ngrok automaticamente)
 function getWebhookUrl() {
   return getNgrokWebhookUrl();
 }
 
+const runtimeWooviConfig = getWooviConfig();
+
 const WOOVI_SANDBOX_CONFIG = {
   // Credenciais Sandbox
   // IMPORTANTE: preencher via .env / variáveis do ambiente.
   // Não manter segredos hardcoded no repositório.
-  clientId: process.env.WOOVI_APP_ID || '',
+  clientId: runtimeWooviConfig.clientId,
   clientSecret: process.env.WOOVI_CLIENT_SECRET || '',
-  apiToken: process.env.WOOVI_API_TOKEN || '',
+  apiToken: runtimeWooviConfig.apiToken,
   
   // URLs da API
   // Endpoint REST da API Woovi Sandbox
@@ -64,8 +67,6 @@ const WOOVI_SANDBOX_CONFIG = {
 
 module.exports = WOOVI_SANDBOX_CONFIG;
 module.exports.getWebhookUrl = getWebhookUrl;
-
-
 
 
 

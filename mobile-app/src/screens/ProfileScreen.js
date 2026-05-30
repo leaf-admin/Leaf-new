@@ -22,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { colors } from '../theme/runtimeTokens';
 import { fonts } from '../theme/runtimeTokens';
-import { cardTypography } from '../common-local/typography';
+import { cardTypography } from '../services/runtime/typographyBridge';
 import { MAIN_COLOR } from '../common/sharedFunctions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SkeletonLoader, LoadingSpinner } from '../components/LoadingStates';
@@ -66,7 +66,7 @@ export default function ProfileScreen({ navigation }) {
     // Importar serviço de saldo
     let DriverBalanceService;
     try {
-        DriverBalanceService = require('../services/DriverBalanceService').default;
+        DriverBalanceService = require('../services/canonical/paymentService').DriverBalanceService;
     } catch (error) {
         Logger.warn('⚠️ DriverBalanceService não disponível:', error);
         DriverBalanceService = {

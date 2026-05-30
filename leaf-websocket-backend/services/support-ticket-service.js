@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const firebaseConfig = require('../firebase-config');
+const SupportLegacyRtdbRepository = require('../repositories/support-legacy-rtdb-repository');
 const { logStructured, logError } = require('../utils/logger');
 
 const TICKETS_COLLECTION = 'support_tickets';
@@ -133,7 +134,7 @@ async function chunkedBatchWrite(items, writer) {
 class SupportTicketService {
   constructor() {
     this.firestore = null;
-    this.legacyDb = null;
+    this.legacyRepository = null;
   }
 
   getFirestore() {
@@ -141,9 +142,14 @@ class SupportTicketService {
     return this.firestore;
   }
 
-  getLegacyDb() {
-    if (!this.legacyDb) this.legacyDb = getLegacyDb();
-    return this.legacyDb;
+  getLegacyRepository() {
+    if (!this.legacyRepository) {
+      this.legacyRepository = new SupportLegacyRtdbRepository(getLegacyDb(), {
+        ticketsPath: LEGACY_TICKETS_PATH,
+        messagesPath: LEGACY_MESSAGES_PATH
+      });
+    }
+    return this.legacyRepository;
   }
 
   ticketDoc(ticketId) {
@@ -156,13 +162,11 @@ class SupportTicketService {
 
   async importLegacyTicket(ticketId, { includeMessages = true } = {}) {
     if (!LEGACY_IMPORT_ENABLED) return null;
-    const db = this.getLegacyDb();
-    if (!db) return null;
+    const legacyRepository = this.getLegacyRepository();
+    if (!legacyRepository.isAvailable()) return null;
 
-    const ticketSnapshot = await db.ref(`${LEGACY_TICKETS_PATH}/${ticketId}`).once('value');
-    if (!ticketSnapshot.exists()) return null;
-
-    const rawTicket = ticketSnapshot.val() || {};
+    const rawTicket = await legacyRepository.getTicket(ticketId);
+    if (!rawTicket) return null;
     const ticket = normalizeTicket(ticketId, { ...rawTicket, source: 'rtdb_migrated' });
 
     await this.ticketDoc(ticketId).set({
@@ -172,8 +176,7 @@ class SupportTicketService {
     }, { merge: true });
 
     if (includeMessages) {
-      const messagesSnapshot = await db.ref(`${LEGACY_MESSAGES_PATH}/${ticketId}`).once('value');
-      const rawMessages = messagesSnapshot.val() || {};
+      const rawMessages = await legacyRepository.getMessages(ticketId);
       const normalizedMessages = Object.entries(rawMessages).map(([messageId, value]) =>
         normalizeMessage(ticketId, messageId, value)
       );
@@ -201,17 +204,12 @@ class SupportTicketService {
 
   async importLegacyTicketsForQuery({ userId, isAgent, status, priority, category, agent }) {
     if (!LEGACY_IMPORT_ENABLED) return [];
-    const db = this.getLegacyDb();
-    if (!db) return [];
+    const legacyRepository = this.getLegacyRepository();
+    if (!legacyRepository.isAvailable()) return [];
 
-    let snapshot;
-    if (!isAgent && userId) {
-      snapshot = await db.ref(LEGACY_TICKETS_PATH).orderByChild('userId').equalTo(String(userId)).once('value');
-    } else {
-      snapshot = await db.ref(LEGACY_TICKETS_PATH).once('value');
-    }
-
-    const rawTickets = snapshot.val() || {};
+    const rawTickets = !isAgent && userId
+      ? await legacyRepository.listTicketsByUser(userId)
+      : await legacyRepository.listTickets();
     const filtered = filterTickets(
       Object.entries(rawTickets).map(([ticketId, value]) =>
         normalizeTicket(ticketId, { ...value, source: 'rtdb_migrated' })
@@ -296,16 +294,14 @@ class SupportTicketService {
 
   async mirrorLegacyTicket(ticket) {
     if (!LEGACY_MIRROR_ENABLED) return;
-    const db = this.getLegacyDb();
-    if (!db) return;
-    await db.ref(`${LEGACY_TICKETS_PATH}/${ticket.id}`).update(ticket);
+    const legacyRepository = this.getLegacyRepository();
+    await legacyRepository.updateTicket(ticket.id, ticket);
   }
 
   async mirrorLegacyMessage(ticketId, message) {
     if (!LEGACY_MIRROR_ENABLED) return;
-    const db = this.getLegacyDb();
-    if (!db) return;
-    await db.ref(`${LEGACY_MESSAGES_PATH}/${ticketId}/${message.id}`).set(message);
+    const legacyRepository = this.getLegacyRepository();
+    await legacyRepository.setMessage(ticketId, message.id, message);
   }
 
   async createTicket({

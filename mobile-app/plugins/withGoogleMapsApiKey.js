@@ -66,11 +66,6 @@ const withGoogleMapsApiKey = (config) => {
         NSAllowsLocalNetworking: true,
         NSExceptionDomains: {
           ...currentExceptionDomains,
-        '62.169.31.231': {
-          ...(currentExceptionDomains['62.169.31.231'] || {}),
-          NSExceptionAllowsInsecureHTTPLoads: true,
-          NSIncludesSubdomains: true
-        }
       }
     };
 

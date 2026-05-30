@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_BASE_URL="${1:-${LEAF_API_BASE_URL:-https://api.147.182.204.181.sslip.io}}"
+API_BASE_URL="${1:-${LEAF_API_BASE_URL:-https://api.leaf.app.br}}"
 INTERVAL_SECONDS="${INTERVAL_SECONDS:-20}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 OUTPUT_FILE="${OUTPUT_FILE:-}"

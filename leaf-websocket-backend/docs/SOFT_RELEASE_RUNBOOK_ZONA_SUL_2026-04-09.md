@@ -4,10 +4,10 @@
 Abrir a operação da Zona Sul com oferta suficiente para sustentar até `250` corridas simultâneas com qualidade aceitável no stack ativo atual rodando na Contabo.
 
 Infra base:
-- host: `62.169.31.231`
+- host: Contabo principal, definido pelos segredos operacionais
 - endpoint ativo:
-  - `https://api.62.169.31.231.sslip.io`
-  - `https://socket.62.169.31.231.sslip.io`
+  - `https://api.leaf.app.br`
+  - `https://socket.leaf.app.br`
 
 ## O Que Foi Validado
 ### Cenário saturado: `250` corridas simultâneas com `250` motoristas
@@ -151,7 +151,7 @@ Critérios de manutenção:
 
 ## Checklist Pré-Abertura
 1. Confirmar health:
-   - `https://api.62.169.31.231.sslip.io/health`
+   - `https://api.leaf.app.br/health`
 2. Confirmar containers `healthy`:
    - `leaf-websocket`
    - `leaf-nginx`

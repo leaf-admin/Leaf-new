@@ -25,6 +25,6 @@ URL de exclusao recomendada:
 - Submissao publica App Store/Play Store: NO-GO ate concluir os 3 itens de console acima
 
 ## 5) Evidencias de referencia
-- [CHECKLIST_LOJAS_APPLE_GOOGLE_2026-03-19.md](/Users/izaakdias/Documents/Leaf-new/mobile-app/docs/CHECKLIST_LOJAS_APPLE_GOOGLE_2026-03-19.md)
+- [CHECKLIST_LOJAS_APPLE_GOOGLE_2026-03-19.md](/Users/izaakdias/Documents/Leaf-new/docs/archive/legacy-infra-2026-05-29/mobile-app/CHECKLIST_LOJAS_APPLE_GOOGLE_2026-03-19.md)
 - [GO_NO_GO_BUILD_CHECKLIST_2026-03-19.md](/Users/izaakdias/Documents/Leaf-new/mobile-app/docs/GO_NO_GO_BUILD_CHECKLIST_2026-03-19.md)
-- [STORE_CONSOLE_BLOCKERS_PLAYBOOK_2026-03-19.md](/Users/izaakdias/Documents/Leaf-new/mobile-app/docs/STORE_CONSOLE_BLOCKERS_PLAYBOOK_2026-03-19.md)
+- [STORE_CONSOLE_BLOCKERS_PLAYBOOK_2026-03-19.md](/Users/izaakdias/Documents/Leaf-new/docs/archive/legacy-infra-2026-05-29/mobile-app/STORE_CONSOLE_BLOCKERS_PLAYBOOK_2026-03-19.md)

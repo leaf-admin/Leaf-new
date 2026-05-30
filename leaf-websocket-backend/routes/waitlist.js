@@ -31,9 +31,9 @@ const isProductionRuntime = process.env.NODE_ENV === 'production';
 const allowLocalCors = String(process.env.ALLOW_LOCAL_CORS || (!isProductionRuntime)).toLowerCase() === 'true';
 const waitlistRuntimeHosts = resolveRuntimeCorsHosts({
   env: process.env,
-  defaultHosts: ['62.169.31.231'],
+  defaultHosts: [],
   allowLegacyFlagName: 'ALLOW_LEGACY_VULTR_CORS',
-  legacyHost: '147.182.204.181'
+  legacyHost: ''
 });
 const waitlistBaseAllowedOrigins = [
   'https://leaf.app.br',

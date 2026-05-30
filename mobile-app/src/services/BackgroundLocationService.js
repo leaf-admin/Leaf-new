@@ -9,7 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const LOCATION_TASK_NAME = 'background-location-task';
 const BACKGROUND_LOCATION_TIME_INTERVAL_MS = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_INTERVAL_MS || '2000', 10);
 const BACKGROUND_LOCATION_DISTANCE_INTERVAL_M = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_DISTANCE_M || '0', 10);
-const BACKGROUND_DISCLOSURE_ACCEPTED_KEY = 'has_shown_background_location_modal';
+const BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY = 'has_shown_background_location_modal';
 
 // ✅ Registrar task de background (se ainda não estiver registrada)
 if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
@@ -90,7 +90,7 @@ class BackgroundLocationService {
             // Solicitar permissão de background apenas após disclosure explícito no app
             let backgroundStatus = 'denied';
             const hasAcceptedDisclosure =
-                (await AsyncStorage.getItem(BACKGROUND_DISCLOSURE_ACCEPTED_KEY)) === 'true';
+                (await AsyncStorage.getItem(BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY)) === 'true';
 
             if (!hasAcceptedDisclosure) {
                 Logger.warn('⚠️ Background location bloqueada até disclosure explícito do usuário');
@@ -321,4 +321,4 @@ class BackgroundLocationService {
 // Exportar tanto a classe quanto a instância
 const instance = BackgroundLocationService.getInstance();
 export default instance;
-export { BackgroundLocationService };
+export { BackgroundLocationService, BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY };

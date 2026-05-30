@@ -3,12 +3,29 @@
 ## Importante
 Este documento descreve **um segundo host realtime em outra VPS**.
 
-Não é:
-- um segundo processo na mesma VPS
-- um segundo container no mesmo host
-- um “scale up” interno da Contabo atual
+Ele nao descreve o multi-gateway gerenciado dentro da Contabo atual. Esse outro desenho existe separadamente em:
 
-Isso já foi testado e não trouxe ganho material em `800`, porque os dois gateways continuaram disputando os mesmos `6 vCPU` do host atual.
+- [MULTI_GATEWAY_CONTABO_RUNBOOK_2026-05-30.md](/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/docs/MULTI_GATEWAY_CONTABO_RUNBOOK_2026-05-30.md)
+
+A regra atual e:
+
+- `websocket-secondary` solto/orfao no host principal continua proibido;
+- `websocket-gateway-2` e `websocket-gateway-3` sao permitidos apenas quando declarados no compose ativo, com Redis Adapter obrigatorio e jobs duplicados desligados;
+- segundo host realtime continua sendo o caminho de escala horizontal real quando a Contabo atual deixar de ter margem.
+
+## Estado Atual
+
+Em 2026-05-30, foi encontrado um `leaf-websocket-secondary` órfão ainda rodando no host principal, fora do `docker compose` ativo e com versão de código diferente do `leaf-websocket`.
+
+A decisão operacional para `websocket-secondary` é:
+
+- não manter `websocket-secondary` na mesma Contabo;
+- não recolocar `websocket-secondary` no `nginx.multi-gateway.conf`;
+- remover containers órfãos `leaf-websocket-secondary` do host principal;
+- usar `docker-compose.realtime-secondary.yml` somente quando houver um segundo host real;
+- só adicionar o segundo host ao upstream depois de validar versão, healthcheck, Socket.IO Redis adapter e smoke de corrida.
+
+Se um `docker ps` voltar a mostrar `leaf-websocket-secondary` no host principal, trate como regressão de infraestrutura.
 
 ## Objetivo
 Adicionar um segundo host apenas para `gateway realtime`, mantendo no host principal:
@@ -29,10 +46,10 @@ O segundo host entra para dividir:
 ## Topologia
 
 ### Host principal
-- IP atual: `62.169.31.231`
+- host atual: Contabo principal, definido por segredo operacional
 - endpoints públicos:
-  - `https://api.62.169.31.231.sslip.io`
-  - `https://socket.62.169.31.231.sslip.io`
+  - `https://api.leaf.app.br`
+  - `https://socket.leaf.app.br`
 - continua rodando:
   - `redis`
   - `nginx`
@@ -94,7 +111,7 @@ No host secundário:
 3. rodar:
 
 ```bash
-PRIMARY_SSH_HOST=62.169.31.231 \
+PRIMARY_SSH_HOST=<host-contabo-principal> \
 PRIMARY_SSH_USER=root \
 TUNNEL_KEY_PATH=/root/.ssh/leaf-primary-redis \
 bash /root/install-secondary-redis-tunnel.sh
@@ -115,10 +132,10 @@ Da máquina de operação/local:
 ```bash
 cd /Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend
 VPS_IP=<ip-do-segundo-host> \
-SSH_KEY=/Users/izaakdias/Documents/Leaf-new/digitaloceankey \
+SSH_KEY=<caminho-da-chave-operacional> \
 PRIMARY_REDIS_HOST=host.docker.internal \
 PRIMARY_REDIS_PORT=6381 \
-PRIMARY_REDIS_PASSWORD=leaf_redis_2024 \
+PRIMARY_REDIS_PASSWORD=<senha-redis-via-segredo-operacional> \
 bash scripts/deploy/deploy-secondary-realtime-host.sh
 ```
 
@@ -148,7 +165,7 @@ docker compose restart nginx
 No host principal:
 
 ```bash
-curl -fsS https://api.62.169.31.231.sslip.io/health | jq
+curl -fsS https://api.leaf.app.br/health | jq
 docker stats --no-stream
 ```
 

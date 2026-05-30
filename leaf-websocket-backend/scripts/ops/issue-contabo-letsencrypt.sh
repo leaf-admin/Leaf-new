@@ -9,10 +9,9 @@ CERTBOT_CONF_DIR="$ROOT_DIR/certbot/conf"
 CERTBOT_WORK_DIR="$ROOT_DIR/certbot/work"
 CERTBOT_LOG_DIR="$ROOT_DIR/certbot/logs"
 DOMAINS=(
-  "api.62.169.31.231.sslip.io"
-  "socket.62.169.31.231.sslip.io"
-  "dashboard.62.169.31.231.sslip.io"
-  "62.169.31.231.sslip.io"
+  "api.leaf.app.br"
+  "socket.leaf.app.br"
+  "dashboard.leaf.app.br"
 )
 
 mkdir -p "$WEBROOT_DIR" "$CERTBOT_CONF_DIR" "$CERTBOT_WORK_DIR" "$CERTBOT_LOG_DIR"

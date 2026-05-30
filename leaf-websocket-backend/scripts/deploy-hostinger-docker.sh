@@ -1,17 +1,20 @@
 #!/bin/bash
 
-# 🚀 DEPLOY LEAF APP - HOSTINGER VPS COM DOCKER
+# 🚀 DEPLOY LEAF APP - CONTABO VPS COM DOCKER
 # Script completo de deploy com Docker Compose
 
 set -e
 
 # ===== CONFIGURAÇÕES =====
-VPS_IP="147.182.204.181"
-VPS_USER="root"
-VPS_SSH_KEY="/Users/izaakdias/Documents/Leaf-new/digitaloceankey"
+VPS_IP="${VPS_IP:-${CONTABO_HOST:-}}"
+VPS_USER="${VPS_USER:-root}"
+VPS_SSH_KEY="${VPS_SSH_KEY:-${SSH_KEY_PATH:-${CONTABO_KEY:-}}}"
 APP_DIR="/opt/leaf-app"
 PROJECT_DIR="leaf-websocket-backend"
 CHECK_RUNTIME_PARITY="${CHECK_RUNTIME_PARITY:-true}"
+PUBLIC_API_URL="${PUBLIC_API_URL:-https://api.leaf.app.br}"
+PUBLIC_SOCKET_URL="${PUBLIC_SOCKET_URL:-https://socket.leaf.app.br}"
+WOOVI_WEBHOOK_PUBLIC_URL="${WOOVI_WEBHOOK_PUBLIC_URL:-$PUBLIC_API_URL/api/woovi/webhook}"
 
 # Cores
 RED='\033[0;31m'
@@ -20,9 +23,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${BLUE}🚀 DEPLOY LEAF APP - HOSTINGER VPS${NC}"
+echo -e "${BLUE}🚀 DEPLOY LEAF APP - CONTABO VPS${NC}"
 echo "=========================================="
-echo -e "📍 IP: ${YELLOW}$VPS_IP${NC}"
+echo -e "📍 Host: ${YELLOW}${VPS_IP:-"não configurado"}${NC}"
 echo -e "🔑 Key: ${YELLOW}${VPS_SSH_KEY:-"None"}${NC}"
 echo -e "📁 Diretório: ${YELLOW}$APP_DIR${NC}"
 echo ""
@@ -30,6 +33,16 @@ echo ""
 # ===== FUNÇÃO: Verificar pré-requisitos =====
 check_prerequisites() {
     echo -e "${BLUE}🔍 Verificando pré-requisitos...${NC}"
+
+    if [ -z "$VPS_IP" ]; then
+        echo -e "${RED}❌ Configure VPS_IP ou CONTABO_HOST para o host Contabo${NC}"
+        exit 1
+    fi
+
+    if [ -z "$VPS_SSH_KEY" ] || [ ! -f "$VPS_SSH_KEY" ]; then
+        echo -e "${RED}❌ Configure VPS_SSH_KEY, SSH_KEY_PATH ou CONTABO_KEY com uma chave SSH válida${NC}"
+        exit 1
+    fi
     
     # Verificar se estamos no diretório correto
     if [ ! -f "package.json" ] || [ ! -f "Dockerfile" ]; then
@@ -60,7 +73,7 @@ runtime_parity_precheck() {
 
     if [[ -x "./scripts/ops/check-vps-runtime-parity.sh" ]]; then
         echo -e "${BLUE}🧭 Verificando paridade de runtime (pré-deploy, informativo)...${NC}"
-        RUNTIME_MODE=vps STRICT=false FETCH_REMOTE=true ./scripts/ops/check-vps-runtime-parity.sh || true
+        VPS_HOST="$VPS_IP" VPS_KEY="$VPS_SSH_KEY" RUNTIME_MODE=modular STRICT=false FETCH_REMOTE=true ./scripts/ops/check-vps-runtime-parity.sh || true
         echo ""
     fi
 }
@@ -318,7 +331,7 @@ runtime_parity_postcheck() {
 
     if [[ -x "./scripts/ops/check-vps-runtime-parity.sh" ]]; then
         echo -e "${BLUE}🧭 Verificando paridade de runtime (pós-deploy, obrigatório)...${NC}"
-        RUNTIME_MODE=vps STRICT=true FETCH_REMOTE=false ./scripts/ops/check-vps-runtime-parity.sh
+        VPS_HOST="$VPS_IP" VPS_KEY="$VPS_SSH_KEY" RUNTIME_MODE=modular STRICT=true FETCH_REMOTE=false ./scripts/ops/check-vps-runtime-parity.sh
         echo -e "${GREEN}✅ Runtime em paridade após deploy${NC}"
         echo ""
     fi
@@ -332,10 +345,10 @@ show_final_info() {
     echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "${BLUE}📍 URLs:${NC}"
-    echo -e "   🌐 API: ${YELLOW}http://$VPS_IP${NC}"
-    echo -e "   🔌 WebSocket: ${YELLOW}ws://$VPS_IP${NC}"
-    echo -e "   🔗 Health Check: ${YELLOW}http://$VPS_IP/health${NC}"
-    echo -e "   💳 Webhook Woovi: ${YELLOW}http://$VPS_IP/api/woovi/webhook${NC}"
+    echo -e "   🌐 API: ${YELLOW}$PUBLIC_API_URL${NC}"
+    echo -e "   🔌 WebSocket: ${YELLOW}$PUBLIC_SOCKET_URL${NC}"
+    echo -e "   🔗 Health Check: ${YELLOW}$PUBLIC_API_URL/health${NC}"
+    echo -e "   💳 Webhook Woovi: ${YELLOW}$WOOVI_WEBHOOK_PUBLIC_URL${NC}"
     echo ""
     echo -e "${BLUE}📋 Comandos úteis:${NC}"
     echo -e "   Ver logs: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && docker-compose logs -f'${NC}"
@@ -344,7 +357,7 @@ show_final_info() {
     echo -e "   Parar: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && docker-compose down'${NC}"
     echo ""
     echo -e "${YELLOW}⚠️  IMPORTANTE:${NC}"
-    echo -e "   1. Configure o webhook na Woovi: ${YELLOW}http://$VPS_IP/api/woovi/webhook${NC}"
+    echo -e "   1. Configure o webhook na Woovi: ${YELLOW}$WOOVI_WEBHOOK_PUBLIC_URL${NC}"
     echo -e "   2. Verifique as variáveis de ambiente em ${YELLOW}$APP_DIR/.env${NC}"
     echo -e "   3. Configure firewall se necessário (portas 80, 443, 3001)"
     echo ""

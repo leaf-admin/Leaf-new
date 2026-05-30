@@ -14,7 +14,7 @@ const WOOVI_API_TOKEN = process.env.WOOVI_API_TOKEN;
 const WOOVI_BASE_URL = process.env.WOOVI_BASE_URL || 'https://api.woovi-sandbox.com/api/v1';
 const CORRECT_WEBHOOK_URL =
   process.env.WEBHOOK_URL ||
-  'https://api.62.169.31.231.sslip.io/api/woovi/webhook';
+  'https://api.leaf.app.br/api/woovi/webhook';
 const TARGET_EVENT = process.env.WEBHOOK_EVENT || 'OPENPIX:CHARGE_COMPLETED';
 
 if (!WOOVI_API_TOKEN) {

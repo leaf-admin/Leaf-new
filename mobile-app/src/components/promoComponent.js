@@ -15,7 +15,7 @@ import { colors } from '../common/theme';
 import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import { fonts } from '../common/font';
-import { getLangKey } from "../common-local/other/getLangKey";
+import { getLangKey } from "../services/runtime/localizationBridge";
 var { width, height } = Dimensions.get('window');
 
 export default function PromoComp(props) {

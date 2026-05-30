@@ -1,5 +1,4 @@
 import Logger from '../utils/Logger';
-import { firebase } from '../common-local/configureFirebase';
 import auth from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
 import { toUserFriendlyError } from '../utils/friendlyErrorMessages';

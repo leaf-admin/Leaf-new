@@ -51,7 +51,7 @@ try {
 ### 📋 **1. BACKUP SERVER (RECOMENDADO)**
 ```bash
 # Configurar servidor de backup
-- VPS alternativo (DigitalOcean, Linode)
+- VPS alternativo em provedor operacional aprovado
 - API idêntica ao Firebase Functions
 - Deploy automático em caso de falha
 - Load balancer para redirecionamento
@@ -231,4 +231,4 @@ const alerts = {
 [ ] Testar todos os fallbacks
 ```
 
-**O Leaf tem fallbacks robustos para garantir disponibilidade!** 🎯 
+**O Leaf tem fallbacks robustos para garantir disponibilidade!** 🎯

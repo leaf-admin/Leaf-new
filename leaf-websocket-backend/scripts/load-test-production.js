@@ -29,8 +29,8 @@ try {
 
 // ==================== CONFIGURAÇÕES ====================
 const CONFIG = {
-    // Servidor WebSocket (VPS)
-    WS_URL: process.env.WS_URL || 'http://147.182.204.181:3001',
+    // Servidor WebSocket publico
+    WS_URL: process.env.WS_URL || 'https://socket.leaf.app.br',
     
     // Número de simulações
     NUM_PASSENGERS: parseInt(process.env.NUM_PASSENGERS || '50'), // 50 passageiros simultâneos
@@ -849,4 +849,3 @@ if (require.main === module) {
 }
 
 module.exports = { runLoadTest, PassengerSimulator, DriverSimulator };
-

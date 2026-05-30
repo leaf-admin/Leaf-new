@@ -75,10 +75,10 @@ ensure_xcode_developer_dir
 PASSENGER_UDID="${PASSENGER_UDID:-195D2C57-87DC-4953-ABF1-4FD351ADBBEF}"
 DRIVER_UDID="${DRIVER_UDID:-2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C}"
 APP_ID="${APP_ID:-br.com.leaf.ride}"
-API_BASE_URL="${API_BASE_URL:-https://api.147.182.204.181.sslip.io}"
-DO_HOST="${DO_HOST:-147.182.204.181}"
-DO_KEY="${DO_KEY:-${ROOT_DIR}/digitaloceankey}"
-DO_REMOTE_ENV_PATH="${DO_REMOTE_ENV_PATH:-/opt/leaf-app/.env}"
+API_BASE_URL="${API_BASE_URL:-https://api.leaf.app.br}"
+REMOTE_HOST="${REMOTE_HOST:-${VPS_HOST:-}}"
+REMOTE_KEY="${REMOTE_SSH_KEY:-${VPS_KEY:-${SSH_KEY_PATH:-${REMOTE_KEY:-}}}}"
+REMOTE_ENV_PATH="${REMOTE_ENV_PATH:-/opt/leaf-app/.env}"
 DRIVER_UID="${DRIVER_UID:-${DEFAULT_DRIVER_UID:-8vg2kxxqi3TYKlpD6eBlWgYseIq2}}"
 OTHER_DRIVER_UIDS="${OTHER_DRIVER_UIDS:-${DEFAULT_OTHER_DRIVER_UIDS:-F0CIj7noqrc74qdPJD80T9FCxME2}}"
 PASSENGER_PROFILE_KEY="${PASSENGER_PROFILE_KEY:-}"
@@ -278,8 +278,8 @@ load_runtime_admin_token() {
     return 0
   fi
 
-  if [[ ! -f "$DO_KEY" ]]; then
-    echo "[lifecycle][warn] Missing DO key at ${DO_KEY}; dispatch-ready polling will skip token fetch."
+  if [[ -z "$REMOTE_HOST" ]] || [[ ! -f "$REMOTE_KEY" ]]; then
+    echo "[lifecycle][warn] Missing remote host/key; dispatch-ready polling will skip token fetch."
     return 1
   fi
 
@@ -290,13 +290,13 @@ load_runtime_admin_token() {
 
   local token=""
   token="$(
-    ssh -i "$DO_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${DO_HOST}" \
-      "grep -E '^(RUNTIME_ADMIN_TOKEN)=' '${DO_REMOTE_ENV_PATH}' | head -n 1 | cut -d= -f2-" 2>/dev/null || true
+    ssh -i "$REMOTE_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${REMOTE_HOST}" \
+      "grep -E '^(RUNTIME_ADMIN_TOKEN)=' '${REMOTE_ENV_PATH}' | head -n 1 | cut -d= -f2-" 2>/dev/null || true
   )"
 
   token="$(printf '%s' "$token" | tr -d '\r')"
   if [[ -z "$token" ]]; then
-    echo "[lifecycle][warn] Runtime admin token not found in ${DO_REMOTE_ENV_PATH}; dispatch-ready polling will fall back."
+    echo "[lifecycle][warn] Runtime admin token not found in ${REMOTE_ENV_PATH}; dispatch-ready polling will fall back."
     return 1
   fi
 
@@ -322,11 +322,11 @@ clear_driver_lock_if_possible() {
 }
 
 probe_driver_dispatch_ready_via_ssh() {
-  if [[ ! -f "$DO_KEY" ]] || ! have_cmd ssh; then
+  if [[ -z "$REMOTE_HOST" ]] || [[ ! -f "$REMOTE_KEY" ]] || ! have_cmd ssh; then
     return 1
   fi
 
-  ssh -i "$DO_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${DO_HOST}" \
+  ssh -i "$REMOTE_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${REMOTE_HOST}" \
     "docker exec -i -e TEST_DRIVER_UID='${DRIVER_UID}' leaf-websocket node - <<'NODE'
 const redisPool = require('./utils/redis-pool');
 (async () => {
@@ -364,21 +364,21 @@ NODE" 2>/dev/null | grep '^__READY__' | tail -n 1
 }
 
 can_probe_backend_ssh() {
-  if [[ ! -f "$DO_KEY" ]] || ! have_cmd ssh; then
+  if [[ -z "$REMOTE_HOST" ]] || [[ ! -f "$REMOTE_KEY" ]] || ! have_cmd ssh; then
     return 1
   fi
 
   run_with_timeout 6 \
-    ssh -i "$DO_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=4 \
-      "root@${DO_HOST}" "exit 0" >/dev/null 2>&1
+    ssh -i "$REMOTE_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=4 \
+      "root@${REMOTE_HOST}" "exit 0" >/dev/null 2>&1
 }
 
 clear_driver_lock_via_ssh() {
-  if [[ ! -f "$DO_KEY" ]] || ! have_cmd ssh; then
+  if [[ -z "$REMOTE_HOST" ]] || [[ ! -f "$REMOTE_KEY" ]] || ! have_cmd ssh; then
     return 1
   fi
 
-  ssh -i "$DO_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${DO_HOST}" \
+  ssh -i "$REMOTE_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${REMOTE_HOST}" \
     "docker exec -i -e TEST_DRIVER_UID='${DRIVER_UID}' leaf-websocket node - <<'NODE'
 const redisPool = require('./utils/redis-pool');
 (async () => {
@@ -396,11 +396,11 @@ NODE" >/dev/null 2>&1
 }
 
 isolate_other_test_drivers_via_ssh() {
-  if [[ ! -f "$DO_KEY" ]] || ! have_cmd ssh || [[ -z "$OTHER_DRIVER_UIDS" ]]; then
+  if [[ -z "$REMOTE_HOST" ]] || [[ ! -f "$REMOTE_KEY" ]] || ! have_cmd ssh || [[ -z "$OTHER_DRIVER_UIDS" ]]; then
     return 1
   fi
 
-  ssh -i "$DO_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${DO_HOST}" \
+  ssh -i "$REMOTE_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8 "root@${REMOTE_HOST}" \
     "docker exec -i -e OTHER_DRIVER_UIDS='${OTHER_DRIVER_UIDS}' leaf-websocket node - <<'NODE'
 const redisPool = require('./utils/redis-pool');
 (async () => {

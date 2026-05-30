@@ -12,10 +12,10 @@ function escapeRegExp(value) {
 function resolveRuntimeCorsHosts(options = {}) {
   const {
     env = process.env,
-    defaultHosts = ['62.169.31.231'],
+    defaultHosts = [],
     runtimeHostEnvKeys = ['CORS_RUNTIME_HOSTS', 'RUNTIME_CORS_HOSTS'],
     allowLegacyFlagName = 'ALLOW_LEGACY_VULTR_CORS',
-    legacyHost = '147.182.204.181'
+    legacyHost = ''
   } = options;
 
   const hosts = [...defaultHosts];

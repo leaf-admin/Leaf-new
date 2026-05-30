@@ -38,8 +38,8 @@ const CONFIG = {
     ALERT_COOLDOWN: 30, // 30 minutos
     
     // URLs e endpoints
-    SERVER_URL: process.env.SERVER_URL || 'http://147.182.204.181:3001',
-    DASHBOARD_API: process.env.DASHBOARD_API || 'http://147.182.204.181:3001/api/alerts',
+    SERVER_URL: process.env.SERVER_URL || 'https://api.leaf.app.br',
+    DASHBOARD_API: process.env.DASHBOARD_API || 'https://api.leaf.app.br/api/alerts',
     
     // Configurações de email (opcional)
     EMAIL: {
@@ -408,5 +408,4 @@ module.exports = {
     getAlertStatus,
     sendAlert
 };
-
 

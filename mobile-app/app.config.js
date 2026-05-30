@@ -50,6 +50,7 @@ const updatesChannel = String(
         process.env.EXPO_UPDATE_CHANNEL,
         process.env.EAS_UPDATE_CHANNEL,
         process.env.LEAF_UPDATES_CHANNEL,
+        buildProfile === 'release-test' ? 'production' : '',
         buildProfile.includes('production') ? 'production' : '',
         buildProfile.includes('preview') ? 'preview' : ''
     ) || ''
@@ -195,6 +196,9 @@ module.exports = {
         enableTestUserTools:
             process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS === 'true' ||
             process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS === '1',
+        allowClientDirectGoogleFallback:
+            process.env.EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK === 'true' ||
+            process.env.EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK === '1',
         launchProfile,
         pilotControlled,
         pilotFeatureFlags,

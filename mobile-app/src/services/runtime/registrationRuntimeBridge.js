@@ -1,10 +1,7 @@
-import { api } from '../../common-local';
-
-export const {
+export {
   mainSignUp,
   validateReferer,
   checkUserExists,
   editreferral,
   countries
-} = api;
-
+} from '../canonical/registrationService';

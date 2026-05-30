@@ -15,11 +15,11 @@ Também não é Redis.
 O limitador real no topo do envelope atual é **CPU total do host realtime**.
 
 ## Infra Atual
-- Host: `62.169.31.231`
+- Host: Contabo principal, definido por segredo operacional
 - Plano: `6 vCPU`, `~11.7 GiB RAM`
 - endpoint ativo:
-  - `https://api.62.169.31.231.sslip.io`
-  - `https://socket.62.169.31.231.sslip.io`
+  - `https://api.leaf.app.br`
+  - `https://socket.leaf.app.br`
 
 Runtime ativo validado:
 - `leaf-websocket`: `5.50 CPUs`, `6 GiB`

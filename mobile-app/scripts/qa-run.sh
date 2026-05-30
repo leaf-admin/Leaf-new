@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MOBILE_DIR="$ROOT_DIR/mobile-app"
 BACKEND_DIR="$ROOT_DIR/leaf-websocket-backend"
 
-BACKEND_URL="${BACKEND_URL:-https://api.147.182.204.181.sslip.io}"
+BACKEND_URL="${BACKEND_URL:-https://api.leaf.app.br}"
 APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
 SEED_TEST_USERS="${SEED_TEST_USERS:-true}"
 OPEN_APP="${OPEN_APP:-false}"

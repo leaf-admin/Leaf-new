@@ -1,4 +1,19 @@
 const DEFAULT_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
+const CLIENT_ID_PATTERN = /^Client_Id_/i;
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return '';
+}
+
+function looksLikeClientId(value) {
+  return CLIENT_ID_PATTERN.test(String(value || '').trim());
+}
 
 function normalizeBaseUrl(rawUrl) {
   const source = String(rawUrl || '').trim();
@@ -16,27 +31,52 @@ function normalizeBaseUrl(rawUrl) {
 
 function getWooviConfig() {
   const environment = (process.env.WOOVI_ENVIRONMENT || process.env.NODE_ENV || 'sandbox').toLowerCase();
-  const clientSecret = process.env.WOOVI_CLIENT_SECRET || '';
-  const appId = process.env.WOOVI_APP_ID || '';
-  const preferApiToken = String(process.env.WOOVI_PREFER_API_TOKEN || '').toLowerCase() === 'true';
-  const envApiToken = process.env.WOOVI_API_TOKEN || '';
-  const derivedApiToken = appId && clientSecret
-    ? Buffer.from(`${appId}:${clientSecret}`).toString('base64')
+  const legacyWooviAppId = firstNonEmpty(process.env.WOOVI_APP_ID);
+  const clientId = firstNonEmpty(
+    process.env.WOOVI_CLIENT_ID,
+    looksLikeClientId(legacyWooviAppId) ? legacyWooviAppId : ''
+  );
+  const clientSecret = firstNonEmpty(process.env.WOOVI_CLIENT_SECRET);
+  const derivedAuthorizationAppId = clientId && clientSecret
+    ? Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
     : '';
-  const apiToken = (!preferApiToken && derivedApiToken) ? derivedApiToken : (envApiToken || derivedApiToken);
+
+  // Na documentação da Woovi/OpenPix, o header Authorization recebe o "AppID".
+  // O valor Client_Id_... não deve ser enviado como Authorization.
+  const authorizationAppId = firstNonEmpty(
+    process.env.WOOVI_AUTHORIZATION_APP_ID,
+    process.env.WOOVI_APP_ID_TOKEN,
+    process.env.WOOVI_API_TOKEN,
+    looksLikeClientId(legacyWooviAppId) ? '' : legacyWooviAppId,
+    derivedAuthorizationAppId
+  );
+
   const rawBaseUrl = process.env.WOOVI_BASE_URL || DEFAULT_BASE_URL;
   const forcingSandbox = environment !== 'production' && /api\.woovi\.com/i.test(rawBaseUrl);
   const baseUrl = normalizeBaseUrl(forcingSandbox ? DEFAULT_BASE_URL : rawBaseUrl);
 
   return {
     environment,
-    apiToken,
-    appId,
+    apiToken: authorizationAppId,
+    authorizationAppId,
+    clientId,
+    // Compatibilidade com código legado: daqui para frente appId representa o
+    // identificador da aplicação, não o token de Authorization.
+    appId: clientId,
     baseUrl,
     // Fallback para reduzir erros operacionais: se não houver chave master dedicada,
     // usa o token principal informado em WOOVI_API_TOKEN.
-    masterApiToken: process.env.WOOVI_MASTER_API_TOKEN || apiToken || null,
-    masterAppId: process.env.WOOVI_MASTER_APP_ID || process.env.WOOVI_APP_ID || null,
+    masterApiToken: firstNonEmpty(
+      process.env.WOOVI_MASTER_AUTHORIZATION_APP_ID,
+      process.env.WOOVI_MASTER_APP_ID_TOKEN,
+      process.env.WOOVI_MASTER_API_TOKEN,
+      authorizationAppId
+    ) || null,
+    masterAppId: firstNonEmpty(
+      process.env.WOOVI_MASTER_CLIENT_ID,
+      process.env.WOOVI_MASTER_APP_ID,
+      clientId
+    ) || null,
     leafPixKey: process.env.LEAF_PIX_KEY || ''
   };
 }
@@ -46,15 +86,17 @@ function getWooviAuthHeaders(config = getWooviConfig()) {
     'Content-Type': 'application/json'
   };
 
-  if (config.apiToken) {
-    headers.Authorization = config.apiToken;
+  const authorizationAppId = config.authorizationAppId || config.apiToken;
+  if (authorizationAppId) {
+    headers.Authorization = authorizationAppId;
   }
 
-  // Alguns ambientes sandbox rejeitam x-app-id mesmo com token válido.
-  // Só envia quando explicitamente habilitado.
+  // A criação/listagem de cobranças usa Authorization: <AppID>. O x-app-id fica
+  // reservado para cenários legados/diagnóstico e só é enviado via opt-in.
   const sendAppId = String(process.env.WOOVI_SEND_APP_ID || '').toLowerCase() === 'true';
-  if (sendAppId && config.appId) {
-    headers['x-app-id'] = config.appId;
+  const clientId = config.clientId || config.appId;
+  if (sendAppId && clientId) {
+    headers['x-app-id'] = clientId;
   }
 
   return headers;
@@ -63,6 +105,7 @@ function getWooviAuthHeaders(config = getWooviConfig()) {
 module.exports = {
   DEFAULT_BASE_URL,
   normalizeBaseUrl,
+  looksLikeClientId,
   getWooviConfig,
   getWooviAuthHeaders
 };

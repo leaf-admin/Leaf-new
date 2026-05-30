@@ -18,7 +18,7 @@ class RedisDriverSimulator {
     const resolvedDefaultKeyPath = this.resolveDefaultSshKeyPath();
 
     this.remoteSsh = {
-      host: process.env.E2E_REMOTE_SSH_HOST || '62.169.31.231',
+      host: process.env.E2E_REMOTE_SSH_HOST || 'api.leaf.app.br',
       user: process.env.E2E_REMOTE_SSH_USER || 'root',
       keyPath: process.env.E2E_REMOTE_SSH_KEY_PATH || resolvedDefaultKeyPath
     };
@@ -68,7 +68,6 @@ class RedisDriverSimulator {
 
     const wsUrl = String(process.env.WS_URL || '').trim().toLowerCase();
     const isClearlyRemote =
-      wsUrl.includes('sslip.io') ||
       wsUrl.startsWith('https://') ||
       (wsUrl.startsWith('http://') && !wsUrl.includes('localhost') && !wsUrl.includes('127.0.0.1'));
 

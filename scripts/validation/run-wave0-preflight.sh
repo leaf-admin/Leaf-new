@@ -85,7 +85,7 @@ ADMIN_AUTH_STATUS="fail"
 ADMIN_AUTH_LOG="${WAVE_DIR}/logs-admin-auth.log"
 if (
   cd "${ROOT_DIR}/leaf-websocket-backend" && \
-  API_URL="${API_BASE_URL:-https://api.147.182.204.181.sslip.io}" \
+  API_URL="${API_BASE_URL:-https://api.leaf.app.br}" \
   TEST_ADMIN_EMAIL="${DEFAULT_TEST_ADMIN_EMAIL}" \
   TEST_ADMIN_PASSWORD="${DEFAULT_TEST_ADMIN_PASSWORD}" \
   node "${BACKEND_ADMIN_AUTH}"

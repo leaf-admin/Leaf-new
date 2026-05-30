@@ -5,8 +5,8 @@ const crypto = require('crypto');
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
 const { getIdTokenForUid } = require('../../tests/e2e/backend/__helpers__/firebase-id-token');
 
-const WS_URL = process.env.WS_URL || 'https://socket.62.169.31.231.sslip.io';
-const API_BASE_URL = process.env.API_BASE_URL || 'https://api.62.169.31.231.sslip.io';
+const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.leaf.app.br';
 const PASSENGER_UID = String(
   process.env.TEST_PASSENGER_UID || process.env.PASSENGER_UID || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2'
 ).trim();

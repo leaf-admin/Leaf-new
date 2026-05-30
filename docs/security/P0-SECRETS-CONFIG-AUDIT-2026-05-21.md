@@ -52,7 +52,7 @@ Operational action: keep these files out of Git, move operational secrets to the
 
 - CORS: backend has a whitelist implementation in `leaf-websocket-backend/utils/runtime-cors-config.js`; production compose requires `CORS_ORIGIN`. Local compose examples still contain wildcard CORS and dev JWT defaults and must stay non-production only.
 - JWT: canonical backend routes use `leaf-websocket-backend/utils/jwt-secret-resolver.js`; production compose requires `JWT_SECRET`. Any fallback in maintenance or local-only servers should remain outside production paths.
-- Redis: production Hostinger compose requires `REDIS_PASSWORD`; older local/simple docker compose files still use unauthenticated Redis URLs and should not be used for production.
+- Redis: production compose requires `REDIS_PASSWORD`; older local/simple docker compose files still use unauthenticated Redis URLs and should not be used for production.
 - Woovi webhook: `leaf-websocket-backend/routes/woovi.js` supports authorization token, public-key signature, HMAC signature, idempotency, and amount validation. Production must set `WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true`, `WOOVI_WEBHOOK_ALLOW_UNSIGNED=false`, and at least one verifier secret/public key.
 - Payment bypass: production must keep `PAYMENT_BYPASS_ON_WOOVI_FAILURE=false`, `PAYMENT_FORCE_BYPASS=false`, legacy `FORCE_PAYMENT_BYPASS=false`, and public build flags such as `EXPO_PUBLIC_FORCE_PAYMENT_BYPASS=false`.
 

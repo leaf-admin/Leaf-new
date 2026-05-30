@@ -177,7 +177,11 @@ function isActivationOrVehicleStatusError(message) {
     normalized.includes("veiculo ativo") ||
     normalized.includes("vehicle_required") ||
     normalized.includes("driver_not_eligible") ||
-    normalized.includes("ativacao do motorista pendente")
+    normalized.includes("ativacao do motorista pendente") ||
+    normalized.includes("verificacao facial") ||
+    normalized.includes("liveness") ||
+    normalized.includes("kyc") ||
+    normalized.includes("ficar online")
   );
 }
 

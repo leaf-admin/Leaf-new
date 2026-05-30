@@ -6504,6 +6504,17 @@ function attachSocketListeners() {
       return;
     }
 
+    if (isRuntimeQALockActive()) {
+      writeRuntimeDebugProbe("event_active_ride_sync_ignored_qa_lock", {
+        bookingId: syncedBookingId || runtimeState.activeBookingId || null,
+        syncedStatus: resolveSyncedBookingStatus(payload),
+        localStatus: runtimeState.bookingStatus || null,
+        role: runtimeState.activeRole || null,
+        lockUntil: runtimeQALockUntil,
+      });
+      return;
+    }
+
     const syncedStatus = resolveSyncedBookingStatus(payload);
     const normalizedLocalBookingStatus = String(runtimeState.bookingStatus || "")
       .trim()
@@ -9004,6 +9015,18 @@ function attachSocketListeners() {
       return;
     }
 
+    if (isRuntimeQALockActive()) {
+      writeRuntimeDebugProbe("driver_status_updated_ignored_qa_lock", {
+        driverId:
+          payload?.driverId || payload?.uid || runtimeState?.profileUid || null,
+        status: payload?.status || payload?.driverStatus || payload?.state || null,
+        isOnline:
+          typeof payload?.isOnline === "boolean" ? payload.isOnline : null,
+        lockUntil: runtimeQALockUntil,
+      });
+      return;
+    }
+
     const normalizedStatus = String(
       payload?.status || payload?.driverStatus || payload?.state || "",
     )
@@ -9080,6 +9103,18 @@ function attachSocketListeners() {
 
   const handleDriverStatusError = (payload) => {
     if (resolveRuntimeRole() !== "driver") {
+      return;
+    }
+
+    if (isRuntimeQALockActive()) {
+      writeRuntimeDebugProbe("driver_status_error_ignored_qa_lock", {
+        driverId:
+          payload?.driverId || payload?.uid || runtimeState?.profileUid || null,
+        code: payload?.code || null,
+        reason: payload?.reason || null,
+        message: payload?.message || payload?.error || null,
+        lockUntil: runtimeQALockUntil,
+      });
       return;
     }
 
@@ -9644,6 +9679,19 @@ async function refreshPrototypeRealtimeSession(
 ) {
   const userId = String(profile?.uid || "").trim();
   if (!userId) {
+    return false;
+  }
+
+  if (isRuntimeQALockActive()) {
+    await writeRuntimeDebugProbe("socket_realtime_refresh_ignored_qa_lock", {
+      userId,
+      reason,
+      syncActiveRide: Boolean(syncActiveRide),
+      role: resolveRuntimeRole(profile),
+      bookingStatus: runtimeState.bookingStatus || null,
+      activeBookingId: runtimeState.activeBookingId || null,
+      lockUntil: runtimeQALockUntil,
+    });
     return false;
   }
 

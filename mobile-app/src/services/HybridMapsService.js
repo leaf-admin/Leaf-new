@@ -1,11 +1,11 @@
 import Logger from '../utils/Logger';
+import { allowClientDirectGoogleFallback } from '../config/runtimeAccessPolicy';
 // HybridMapsService.js - Serviço híbrido Google Maps + OpenStreetMap para otimização de custos
 // Integrado com Redis e Firebase
 const { costMonitoringService } = require('./CostMonitoringService');
 const apiKeys = require('../../config/api-keys');
 const { RedisApiService } = require('./RedisApiService');
 const { MAP_PROVIDER_CONFIG } = require('../config/mapProvider');
-
 
 class HybridMapsService {
     constructor() {
@@ -89,17 +89,19 @@ class HybridMapsService {
         };
         
         // Estratégia de provedores (ordem de prioridade)
+        this.clientDirectGoogleFallbackEnabled = allowClientDirectGoogleFallback();
+        const directGoogleProviders = this.clientDirectGoogleFallbackEnabled ? ['google'] : [];
         this.providerStrategy = {
             geocoding: MAP_PROVIDER_CONFIG.enableOsmApiFallback
-                ? ['google', 'mapbox', 'locationiq', 'osm']
-                : ['google', 'mapbox', 'locationiq'],
+                ? [...directGoogleProviders, 'mapbox', 'locationiq', 'osm']
+                : [...directGoogleProviders, 'mapbox', 'locationiq'],
             directions: MAP_PROVIDER_CONFIG.enableOsmApiFallback
-                ? ['google', 'mapbox', 'locationiq', 'osm']
-                : ['google', 'mapbox', 'locationiq'],
+                ? [...directGoogleProviders, 'mapbox', 'locationiq', 'osm']
+                : [...directGoogleProviders, 'mapbox', 'locationiq'],
             reverse: MAP_PROVIDER_CONFIG.enableOsmApiFallback
-                ? ['google', 'locationiq', 'mapbox', 'osm']
-                : ['google', 'locationiq', 'mapbox'],
-            places: ['google']
+                ? [...directGoogleProviders, 'locationiq', 'mapbox', 'osm']
+                : [...directGoogleProviders, 'locationiq', 'mapbox'],
+            places: this.clientDirectGoogleFallbackEnabled ? ['google'] : []
         };
         
         Logger.log('🗺️ HybridMapsService integrado com Redis e Firebase');
@@ -181,8 +183,9 @@ class HybridMapsService {
             Logger.log('⚠️ Cache Redis não disponível, continuando...');
         }
 
-        // Usar Google Maps para geocoding (melhor precisão)
-        const result = await this._googleGeocode(address);
+        const result = await this._tryMultipleProviders('geocoding', this.providerStrategy.geocoding, {
+            address
+        });
         
         // Cache do resultado no Redis
         try {
@@ -194,10 +197,7 @@ class HybridMapsService {
             Logger.log('⚠️ Erro ao salvar no cache Redis:', error.message);
         }
 
-        // Monitorar custo
-        await this.costMonitoring.trackGoogleMapsCost('geocoding', 1);
-        
-        Logger.log(`🗺️ Google Geocoding: ${address} → ${result.lat}, ${result.lng}`);
+        Logger.log(`🗺️ Geocoding: ${address} → ${result.lat}, ${result.lng}`);
         return result;
     }
 
@@ -312,6 +312,11 @@ class HybridMapsService {
         }
 
         try {
+            if (!this.clientDirectGoogleFallbackEnabled) {
+                Logger.log('⛔ HybridMapsService Places direto bloqueado neste runtime.');
+                return [];
+            }
+
             // Usar Google Places API (dados ricos)
             const result = await this._googlePlaces(query, location, radius);
             

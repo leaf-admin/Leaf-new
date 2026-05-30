@@ -1,7 +1,7 @@
 import Logger from './Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { store } from '../state/appStore';
-import { firebase } from '../common-local/config/configureFirebase';
+import { firebase } from '../services/runtime/firebaseConfigBridge';
 
 
 // Constantes para as chaves do AsyncStorage
@@ -133,4 +133,3 @@ export const clearAuthData = async () => {
         return false;
     }
 };
-
