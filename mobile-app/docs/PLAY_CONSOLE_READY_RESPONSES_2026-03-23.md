@@ -54,7 +54,7 @@ Notas:
 
 ## 3) App content > Account deletion
 - In-app deletion disponível: `Yes`
-- URL externa de exclusao: `https://api.leaf.app.br/account-deletion`
+- URL externa de exclusao: `https://leaf.app.br/delete-account`
 
 ## 4) App content > App access (texto sugerido)
 
@@ -65,6 +65,8 @@ Use the pre-provisioned review accounts below (no sign-up required):
 At login, enter the phone number, tap Continue, and enter the review OTP code above.
 To switch role, log out and log in with the other review account.
 If needed, use two devices or two sessions to validate both flows.`
+
+Important: do not use OTP `000000`; it is not valid for review accounts. The current driver review OTP is `992000`.
 
 ## 5) Checklist de envio no Play Console
 - [ ] Data Safety enviado sem pendência.

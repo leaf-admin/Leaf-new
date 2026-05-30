@@ -133,9 +133,19 @@ Explanation:
 
 Use only current review access credentials from the release manager. Do not reuse historical test credentials from archived docs.
 
+Current review access credentials:
+
+- Passenger account: `+55 21 10293-8475` / OTP code: `992111`.
+- Driver account: `+55 21 12345-6789` / OTP code: `992000`.
+
+Important:
+
+- Never submit `000000` as review OTP. That value is only a placeholder in example Firebase files and is not accepted by the app.
+- If the backend environment overrides review credentials, use `AUTH_TEST_OTP_BYPASS_PHONE_CODES` as the source of truth and update this package before submitting.
+
 Suggested note:
 
-`Leaf is a ride-hailing app with passenger and driver modes in one single app. Please use the review accounts provided in App Review / App Access. Passenger flow covers login, destination selection, PIX payment, ride tracking, chat, support, receipt and account deletion. Driver flow covers login, activation status, online/offline, background location disclosure, ride offer, pickup arrival, trip start, navigation handoff, trip completion, earnings and support. Background location is requested only for drivers while online or on an active trip, and is explained before the OS permission prompt.`
+`Leaf is a ride-hailing app with passenger and driver modes in one single app. Use the pre-provisioned review accounts below: Passenger account +55 21 10293-8475 with OTP 992111; Driver account +55 21 12345-6789 with OTP 992000. Passenger flow covers login, destination selection, PIX payment, ride tracking, chat, support, receipt and account deletion. Driver flow covers login, activation status, online/offline, background location disclosure, ride offer, pickup arrival, trip start, navigation handoff, trip completion, earnings and support. Background location is requested only for drivers while online or on an active trip, and is explained before the OS permission prompt.`
 
 ## 7. Evidence Checklist
 
