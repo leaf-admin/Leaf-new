@@ -759,3 +759,224 @@ Validação:
 Observação:
 
 - `npm --prefix leaf-websocket-backend run config:validate` usando a `.env` local de producao segue bloqueado por `WOOVI_WEBHOOK_AUTHORIZATION/WOOVI_WEBHOOK_AUTH_TOKEN` ausente; a validacao equivalente de sandbox passou com `.env.production.sandbox`.
+
+## Bloco 40 - Handoff Tecnico Pos-Canary
+
+Escopo: documentar a rodada tecnica posterior, sem alterar produto, para orientar novos devs.
+
+- RTDB fica explicitamente classificado como legado vivo/encapsulavel, sem migracao em lote agora.
+- Registrada a causa do problema local de iOS: Xcode/CommandLineTools e artefatos ignorados de Pods/build contaminados.
+- Registrado o procedimento seguro de regeneracao iOS local.
+- Registrados os comandos de canary tecnica, guardrails, runtime smoke, dashboard e evidencias visuais.
+- Registrado o mapa de legado ativo, legado isolado e candidatos de remocao futura.
+- Criado documento de handoff: `docs/TECHNICAL_CANARY_AND_LEGACY_HANDOFF_2026-05-30.md`.
+
+Validação documentada:
+
+- iOS Debug simulator: build e abertura limpa PASS.
+- Android Debug emulator: instalacao e abertura limpa PASS.
+- `npm run canary:preflight:non-device`: GO.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-full-ride-flow`: PASS.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-critical-events`: PASS.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-redis-adapter`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+
+Evidencias principais:
+
+- `reports/canary-preflight/canary-preflight-20260530T014610Z/report.md`
+- `test-results/runtime-full-ride-flow/runtime-full-ride-flow-smoke-1780106112883.json`
+- `test-results/runtime-critical-events/runtime-critical-events-smoke-1780106100119.json`
+- `test-results/runtime-redis-adapter/runtime-redis-adapter-smoke-1780106100074.json`
+- `test-results/technical-canary/ios-debug-clean-launch-20260530T0150.png`
+- `test-results/technical-canary/android-debug-clean-auth-dismissed-20260530T0205.png`
+
+## Bloco 41 - LEA-30/31/32: Canonical Runtime Services
+
+Escopo: primeira fatia segura para servicos canonicos mobile, bridges runtime e `prototypeRideRuntime`, sem remocao de legado vivo.
+
+- Criadas fachadas canonicas em `mobile-app/src/services/canonical` para:
+  - sessao/Firebase
+  - perfil/conta
+  - corrida/booking/estimate/rating
+  - motorista
+  - cadastro/referral
+  - localizacao/directions/geocode/pedagio
+  - pagamento/Pix/Woovi/bypass/saldo/saque
+  - localizacao textual e tipografia herdada
+- Bridges em `mobile-app/src/services/runtime` deixaram de importar `common-local` diretamente.
+- Superficies de pagamento/saldo passaram a usar `services/canonical/paymentService`.
+- `prototypeRideRuntime` foi mantido intacto internamente nesta fatia; a reducao de acoplamento veio pelo `locationRouteBridge` apontando para `locationService`.
+- Documentacao criada: `mobile-app/docs/CANONICAL_RUNTIME_SERVICES_SLICE_2026-05-30.md`.
+
+Validação:
+
+- `npm --prefix mobile-app test -- --runTestsByPath __tests__/woovi-payment-modal.test.js __tests__/driver-balance-service-pilot.test.js --runInBand`: PASS (`6/6`).
+- `npm --prefix mobile-app test -- --runTestsByPath __tests__/runtime-access-policy.test.js __tests__/google-api-functions.test.js --runInBand`: PASS (`16/16`).
+- `npm --prefix mobile-app run qa:production-guards`: PASS.
+- `cd mobile-app && npx expo export --platform android --output-dir /tmp/leaf-export-check`: PASS.
+- `cd mobile-app && npx expo export --platform ios --output-dir /tmp/leaf-export-check-ios`: PASS.
+- `cd mobile-app && EAS_BUILD_PROFILE=production npx expo config --type prebuild --json`: PASS, legal URLs em `https://leaf.app.br` e `allowClientDirectGoogleFallback=false`.
+- `git diff --check`: PASS.
+
+Observacao:
+
+- `common-local` segue como legado vivo, agora concentrado nas fachadas canonicas e em `state/appStore.js`.
+- A proxima remocao segura deve acontecer por dominio, a partir de `LEA-33`.
+
+## Bloco 42 - LEA-23: Links legais publicos e websocket-secondary
+
+Escopo: desbloquear o gate de store/preflight que dependia dos links publicos em `https://leaf.app.br` e registrar o achado do `websocket-secondary`.
+
+- Confirmado que `leaf.app.br` esta servindo paginas legais pelo Express do backend na Contabo, nao pela pasta estatica `landing-page`.
+- Deploy seguro aplicado na VPS:
+  - backup de `/opt/leaf-app/routes/legal-pages.js` em `/opt/leaf-app/backups/legal-pages/`.
+  - copia da rota versionada `leaf-websocket-backend/routes/legal-pages.js`.
+  - rebuild/recreate apenas do servico `websocket`.
+- Durante a validacao, o Nginx ativo (`/opt/leaf-app/nginx.multi-gateway.conf`) balanceava entre `websocket` e `websocket-secondary`.
+- O `websocket-secondary` estava como container orfao fora do compose atual e com codigo antigo, causando respostas inconsistentes entre links novos e antigos.
+- Para estabilizar o gate de release, `websocket-secondary` foi retirado temporariamente do upstream ativo do Nginx, sem apagar o container e sem descartar a estrategia de secondary.
+- Arquivo versionado ajustado em `leaf-websocket-backend/nginx.multi-gateway.conf` para refletir o estado seguro atual: upstream apenas em `websocket`.
+- Criado follow-up no Linear: `LEA-87` - formalizar `websocket-secondary` no compose e no deploy antes de recolocar no upstream.
+
+Validação:
+
+- `docker compose build websocket && docker compose up -d --no-deps websocket`: PASS na Contabo.
+- `docker exec leaf-nginx nginx -t`: PASS.
+- `docker exec leaf-nginx nginx -s reload`: PASS.
+- `curl` publico em 5 rodadas para `/privacy`, `/terms`, `/refund-policy`, `/delete-account`, `/support` e `/api/legal/links`: PASS, todos 200.
+- `bash mobile-app/scripts/store-console-preflight.sh`: PASS (`22` checks OK, `0` failures).
+
+Observação:
+
+- `websocket-secondary` nasceu como parte da otimizacao/redundancia para realtime/corridas, mas precisa voltar como componente gerenciado, com deploy atomico junto do primary.
+- Nao recolocar `websocket-secondary` no upstream antes de resolver compose, versao, healthcheck, runbook e smoke de Socket.IO/corrida.
+
+## Bloco 43 - LEA-87: Fechamento do websocket-secondary orfao
+
+Escopo: matar a ambiguidade do `websocket-secondary` no host principal sem quebrar realtime/corrida.
+
+- Decisao tecnica: `websocket-secondary` nao deve rodar na mesma Contabo por padrao.
+- Motivo: a propria documentacao de capacidade ja registrava que dois gateways na mesma VPS disputam o mesmo orcamento de vCPU e nao trazem ganho material.
+- `docker-compose.gateway-scale.yml` deixou de declarar `websocket-secondary`.
+- `nginx.multi-gateway.conf` manteve apenas `websocket:3001` no upstream e ganhou comentario operacional para impedir reintroducao acidental.
+- Runbook `leaf-websocket-backend/docs/SECONDARY_REALTIME_HOST_RUNBOOK_2026-04-09.md` atualizado:
+  - secondary passa a ser somente segundo host realtime real.
+  - `leaf-websocket-secondary` no host principal deve ser tratado como regressao de infraestrutura.
+- Na Contabo:
+  - backup criado em `/opt/leaf-app/backups/websocket-secondary-20260530T045139Z`.
+  - arquivos `docker-compose.gateway-scale.yml` e `nginx.multi-gateway.conf` atualizados.
+  - `leaf-websocket-secondary` removido como container orfao.
+  - Nginx testado e recarregado.
+
+Validação:
+
+- `docker compose -f docker-compose.yml -f docker-compose.gateway-scale.yml config --services`: PASS, sem `websocket-secondary`.
+- `docker exec leaf-nginx nginx -t`: PASS.
+- `docker rm -f leaf-websocket-secondary`: PASS.
+- `docker compose ps`: PASS, `websocket`, `nginx`, `redis`, `billing-worker`, `sideeffects-worker` e `queue-worker` healthy.
+- Check remoto: `leaf-websocket-secondary` ausente.
+- `https://leaf.app.br/health/liveness`: 200.
+- `/privacy`, `/terms`, `/refund-policy`, `/delete-account`, `/support`, `/api/legal/links`: 200.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-redis-adapter`: PASS, evidencia `test-results/runtime-redis-adapter/runtime-redis-adapter-smoke-1780116813797.json`.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-full-ride-flow`: PASS, evidencia `test-results/runtime-full-ride-flow/runtime-full-ride-flow-smoke-1780116879860.json`.
+- `bash mobile-app/scripts/store-console-preflight.sh`: PASS (`22/22`).
+- `git diff --check`: PASS.
+
+Resultado:
+
+- O ticket `LEA-87` fica resolvido pela opcao segura: desativacao formal do secondary no host principal.
+- A estrategia de secondary continua viva apenas para segunda VPS dedicada, via `docker-compose.realtime-secondary.yml` e runbook proprio.
+
+## Bloco 44 - LEA-88: Multi-gateway gerenciado na Contabo
+
+Escopo: reintroduzir paralelismo de realtime no host atual sem voltar ao `websocket-secondary` orfao.
+
+- Criado ticket Linear `LEA-88` para rastrear a mudanca.
+- `docker-compose.gateway-scale.yml` passou a declarar replicas gerenciadas:
+  - `websocket-gateway-2`
+  - `websocket-gateway-3`
+- `nginx.multi-gateway.conf` passou a balancear com `least_conn` entre:
+  - `websocket`
+  - `websocket-gateway-2`
+  - `websocket-gateway-3`
+- Redis Adapter do Socket.IO e obrigatorio nos tres gateways.
+- Gateways extras ficam com jobs/schedulers desligados para evitar duplicidade.
+- Nginx passou a ter `cpus: 0.75` e `mem_limit: 512m` no overlay.
+- Criado runbook: `leaf-websocket-backend/docs/MULTI_GATEWAY_CONTABO_RUNBOOK_2026-05-30.md`.
+- Runbook de segundo host atualizado para diferenciar:
+  - `websocket-secondary` orfao: proibido;
+  - `websocket-gateway-2/3` gerenciado por compose: permitido;
+  - segundo host realtime: caminho futuro de escala horizontal real.
+
+Deploy Contabo:
+
+- Backup remoto criado antes de trocar `docker-compose.gateway-scale.yml`.
+- `websocket`, `websocket-gateway-2` e `websocket-gateway-3` ficaram `healthy`.
+- Nginx recriado com overlay atualizado e voltou `healthy`.
+- `docker stats` apos retune mostrou todos os containers principais dentro dos limites esperados:
+  - `leaf-nginx`: `25.68MiB / 512MiB`
+  - gateways: entre `139MiB` e `146MiB` de `1536MiB`
+  - workers em idle baixo apos estabilizacao.
+
+Validação:
+
+- `ruby -e "require 'yaml'; YAML.safe_load(..., aliases: true)"`: PASS.
+- Links publicos Leaf: `/health/liveness`, `/privacy`, `/terms`, `/refund-policy`, `/delete-account`, `/support`, `/api/legal/links`: PASS HTTP 200.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-redis-adapter`: PASS, evidencia `test-results/runtime-redis-adapter/runtime-redis-adapter-smoke-1780117992260.json`.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-full-ride-flow`: PASS, evidencia `test-results/runtime-full-ride-flow/runtime-full-ride-flow-smoke-1780118187770.json`.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-critical-events`: PASS, evidencia `test-results/runtime-critical-events/runtime-critical-events-smoke-1780118261967.json`.
+- `bash mobile-app/scripts/store-console-preflight.sh`: PASS `22/22`.
+
+Benchmark sem APIs pagas:
+
+- Baseline single gateway: `leaf-websocket-backend/reports/no-paid-api-gateway-benchmark-lea-88-before-single-gateway-1780117608855.json`.
+- Tres gateways antes do retune: `leaf-websocket-backend/reports/no-paid-api-gateway-benchmark-lea-88-after-three-gateways-1780118195194.json`.
+- Tres gateways apos retune: `leaf-websocket-backend/reports/no-paid-api-gateway-benchmark-lea-88-after-resource-retune-three-gateways-1780118641799.json`.
+
+Resultado numerico:
+
+- Baseline HTTP `400/40`: avg `388.67ms`, p95 `1020ms`, p99 `1643ms`, throughput `97.09/s`.
+- Baseline Socket `180/36`: avg `1160.31ms`, p95 `2050ms`, p99 `2390ms`, throughput `24.48/s`.
+- Multi-gateway retunado HTTP `400/40`: avg `464.45ms`, p95 `1316ms`, p99 `1520ms`, throughput `83.30/s`.
+- Multi-gateway retunado Socket `180/36`: avg `1486.84ms`, p95 `2189ms`, p99 `2864ms`, throughput `20.73/s`.
+- Canary sustentada `180` sockets com permanencia de `15s`: `100%`, avg `1325.88ms`, p95 `2296ms`, p99 `3368ms`, evidencia `leaf-websocket-backend/reports/no-paid-api-gateway-benchmark-lea-88-canary-sustained-180sockets-1780130638883.json`.
+- Readiness publico em 30 amostras durante a janela: `100%`, avg `269.03ms`, p95 `425ms`, p99 `744ms`.
+- `docker stats` durante a janela: containers healthy; gateways entre `139MiB` e `145MiB`; Nginx cerca de `27MiB`; sem crescimento anormal de memoria.
+
+Conclusao:
+
+- A mudanca melhora previsibilidade e headroom de CPU por event loop Node.js.
+- Nao melhorou latencia de burst curto no benchmark publico.
+- Na canary sustentada, a topologia ficou estavel e sem falhas.
+- Decisao: manter em observacao operacional. Se a canary real do app mostrar regressao de experiencia, rollback recomendado e voltar para single gateway ate termos carga sustentada ou segundo host dedicado.
+
+## Bloco 45 - LEA-23/17/20/21/22/30/31/32: Fechamento por evidencia
+
+Escopo: validar criterios dos tickets de release/store/runtime/canonical services e separar o que pode fechar do que ainda depende de console externo ou canary oficial.
+
+- Criado relatorio: `docs/LINEAR_RELEASE_BACKLOG_CLOSURE_2026-05-30.md`.
+- `LEA-17`: fallback direto Google no app protegido por `runtimeAccessPolicy`; `HybridMapsService` deixou de ler somente env e passou a usar a mesma policy.
+- `LEA-20`: pacote de privacidade/data safety pronto; links e scripts passaram, mas publicacao nos consoles segue manual.
+- `LEA-21`: links legais finais em `https://leaf.app.br` validados com HTTP 200.
+- `LEA-22`: disclosure e solicitacao centralizada de background location validados no codigo; video/declaração Play Console seguem manuais.
+- `LEA-23`: canary tecnica e smoke runtime passaram; smoke oficial TestFlight/Internal Testing segue pendente.
+- `LEA-30/31`: fachadas canonicas e runtime bridges validados.
+- `LEA-32`: primeira fatia segura concluida; `prototypeRideRuntime` segue vivo e deve ser extraido por dominio.
+
+Validação:
+
+- `npm --prefix mobile-app run qa:production-guards`: PASS.
+- `bash mobile-app/scripts/store-console-preflight.sh`: PASS (`22/22`).
+- `npm --prefix mobile-app test -- --runTestsByPath __tests__/runtime-access-policy.test.js __tests__/google-api-functions.test.js --runInBand`: PASS (`16/16`).
+- `npm --prefix mobile-app test -- --runTestsByPath __tests__/woovi-payment-modal.test.js __tests__/driver-balance-service-pilot.test.js --runInBand`: PASS (`6/6`).
+- `cd mobile-app && EAS_BUILD_PROFILE=production npx expo config --type prebuild --json`: PASS, `allowClientDirectGoogleFallback=false`.
+- `cd mobile-app && npx expo export --platform android --output-dir /tmp/leaf-export-check-android-closure`: PASS.
+- `cd mobile-app && npx expo export --platform ios --output-dir /tmp/leaf-export-check-ios-closure`: PASS.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-full-ride-flow`: PASS, evidencia `test-results/runtime-full-ride-flow/runtime-full-ride-flow-smoke-1780132534343.json`.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-critical-events`: PASS, evidencia `test-results/runtime-critical-events/runtime-critical-events-smoke-1780132522505.json`.
+- `npm --prefix leaf-websocket-backend run smoke:runtime-redis-adapter`: PASS, evidencia `test-results/runtime-redis-adapter/runtime-redis-adapter-smoke-1780132586328.json`.
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
+- `git diff --check`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
