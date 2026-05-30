@@ -736,3 +736,25 @@ Validação:
 - `node -c leaf-websocket-backend/bootstrap/register-http-routes.js && node -c leaf-websocket-backend/routes/kyc-onboarding.js && node -c leaf-websocket-backend/services/IntegratedKYCService.js`: PASS.
 - `cd leaf-websocket-backend && npx jest --config config/jest.unit.config.js --runInBand --runTestsByPath tests/unit/services/kyc-legacy-boundary.unit.test.js tests/unit/services/kyc-biometric-production-policy.unit.test.js tests/unit/services/device-face-embedding-verification-service.unit.test.js tests/unit/routes/kyc-routes-auth.unit.test.js tests/unit/services/driver-document-analysis-queue-biometric-retry.unit.test.js tests/unit/services/kyc-service.unit.test.js`: PASS (`25/25`).
 - `cd mobile-app && npx jest --config jest.config.js --runInBand --runTestsByPath __tests__/kyc-service.liveness.test.js __tests__/document-step.kyc.test.js`: PASS (`14/14`).
+
+## Bloco 39 - QA Final Da Sanitização
+
+Escopo: validar os guardrails principais depois dos commits atomicos dos 8 blocos.
+
+Validação:
+
+- `git status --short`: PASS, arvore tracked limpa.
+- `npm --prefix mobile-app run qa:production-guards`: PASS.
+- `cd mobile-app && npx expo config --json`: PASS (`Leaf`).
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
+- `npm --prefix leaf-websocket-backend run config:validate:real-sandbox`: PASS, sandbox Woovi com warnings esperados (`NODE_ENV=production` usando Woovi sandbox; biometria estrita ainda desligada).
+- `npm run lint:dashboard`: PASS.
+- `npm run build:dashboard`: PASS, com warnings conhecidos do Next sobre root inferido/middleware deprecated.
+- `npm --prefix leaf-websocket-backend run smoke:woovi-sandbox`: PASS (`chargeStatus=ACTIVE`, QR gerado, cleanup OK).
+- `git diff --check`: PASS.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
+
+Observação:
+
+- `npm --prefix leaf-websocket-backend run config:validate` usando a `.env` local de producao segue bloqueado por `WOOVI_WEBHOOK_AUTHORIZATION/WOOVI_WEBHOOK_AUTH_TOKEN` ausente; a validacao equivalente de sandbox passou com `.env.production.sandbox`.
