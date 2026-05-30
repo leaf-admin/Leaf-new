@@ -14,7 +14,7 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
-import { createPixCharge, checkPaymentStatus } from '../services/paymentService';
+import { createPixCharge, checkPaymentStatus } from '../services/canonical/paymentService';
 import { updateTripStatus } from '../actions/tripActions';
 import { formatMinimumFare, getFinalFareValue } from '../utils/minimumFareValidator';
 import { useTranslation } from './i18n/LanguageProvider';

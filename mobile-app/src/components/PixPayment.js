@@ -11,7 +11,7 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { colors } from '../theme/runtimeTokens';
 import { fonts } from '../theme/runtimeTokens';
-import WooviService from '../services/WooviService';
+import { WooviService } from '../services/canonical/paymentService';
 import { useTranslation } from './i18n/LanguageProvider';
 import SecurePaymentBadge from './payment/SecurePaymentBadge';
 

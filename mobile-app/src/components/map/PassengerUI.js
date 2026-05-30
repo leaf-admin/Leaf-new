@@ -56,7 +56,7 @@ import RideLocationManager from '../../services/RideLocationManager';
 import PriceCard from './PriceCard';
 import WooviPaymentModal from '../payment/WooviPaymentModal';
 // import { useLocationIntelligence } from '../../hooks/useLocationIntelligence';
-import PaymentBypassService from '../../services/PaymentBypassService';
+import { PaymentBypassService } from '../../services/canonical/paymentService';
 import RatingModal from '../common/RatingModal';
 import DriverAvailabilityService from '../../services/DriverAvailabilityService';
 import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteService';

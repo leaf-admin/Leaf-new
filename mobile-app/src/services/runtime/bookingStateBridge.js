@@ -1,1 +1,1 @@
-export { setBooking, clearBooking } from '../../common-local/actions/bookingactions';
+export { setBooking, clearBooking } from '../canonical/rideService';

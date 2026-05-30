@@ -66,7 +66,7 @@ export default function ProfileScreen({ navigation }) {
     // Importar serviço de saldo
     let DriverBalanceService;
     try {
-        DriverBalanceService = require('../services/DriverBalanceService').default;
+        DriverBalanceService = require('../services/canonical/paymentService').DriverBalanceService;
     } catch (error) {
         Logger.warn('⚠️ DriverBalanceService não disponível:', error);
         DriverBalanceService = {

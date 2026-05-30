@@ -1,1 +1,1 @@
-export { getLangKey } from '../../common-local/other/getLangKey';
+export { getLangKey } from '../canonical/localizationService';

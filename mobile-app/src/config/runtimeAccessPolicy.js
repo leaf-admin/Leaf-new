@@ -56,10 +56,13 @@ export const allowPaymentBypass = () => allowTestUserTools() && hasExplicitPayme
 
 export const allowForcedPaymentBypass = () => allowTestUserTools() && hasExplicitPaymentBypassFlag();
 
+export const hasExplicitClientDirectGoogleFallbackFlag = () =>
+    normalizeFlag(process.env.EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK) ||
+    normalizeExtraFlag('allowClientDirectGoogleFallback');
+
 export const allowClientDirectGoogleFallback = () =>
-    isDevelopmentBuild() ||
-    isE2ETestBuild() ||
-    isSimulatorBuild();
+    hasExplicitClientDirectGoogleFallbackFlag() &&
+    (isDevelopmentBuild() || isE2ETestBuild() || isSimulatorBuild());
 
 export const canUseProfileBypass = (profile) => {
     const uid = String(profile?.uid || '').trim();
@@ -91,6 +94,7 @@ export const getRuntimeAccessPolicySnapshot = () => ({
     allowTestUserTools: allowTestUserTools(),
     allowPaymentBypass: allowPaymentBypass(),
     allowForcedPaymentBypass: allowForcedPaymentBypass(),
+    hasExplicitClientDirectGoogleFallbackFlag: hasExplicitClientDirectGoogleFallbackFlag(),
     hasExplicitCustomOtpFallbackFlag: hasExplicitCustomOtpFallbackFlag(),
     hasExplicitQaOtpForceFlag: hasExplicitQaOtpForceFlag(),
     hasExplicitTestUserToolsFlag: hasExplicitTestUserToolsFlag(),

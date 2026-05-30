@@ -1,4 +1,4 @@
-import { api } from '../../common-local';
+import { api } from '../canonical/legacyApiService';
 
 export const {
   fetchAddressfromCoords,
@@ -21,4 +21,3 @@ export const {
   checkUserExists,
   storeAddresses
 } = api;
-

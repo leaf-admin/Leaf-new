@@ -5,4 +5,4 @@ export {
   getUserTripHistory,
   saveTracking,
   startTripTracking,
-} from '../../common-local/actions/locationactions';
+} from '../canonical/locationService';

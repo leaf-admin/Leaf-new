@@ -1,1 +1,1 @@
-export { addRating } from '../../common-local/actions/ratingactions';
+export { addRating } from '../canonical/rideService';

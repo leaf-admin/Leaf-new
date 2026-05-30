@@ -12,7 +12,7 @@ import i18n from '../i18n';
 import { useSelector } from 'react-redux';
 import { MAIN_COLOR } from '../common/sharedFunctions';
 import { fonts } from '../common/font';
-import DriverBalanceService from '../services/DriverBalanceService';
+import { DriverBalanceService } from '../services/canonical/paymentService';
 import SecurePaymentBadge from '../components/payment/SecurePaymentBadge';
 
 export default function WithdrawMoneyScreen(props) {

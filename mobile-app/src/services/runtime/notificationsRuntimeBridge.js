@@ -1,4 +1,1 @@
-import { api } from '../../common-local';
-
-export const { getNotifications } = api;
-
+export { getNotifications } from '../canonical/notificationService';

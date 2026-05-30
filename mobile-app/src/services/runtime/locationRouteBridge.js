@@ -5,4 +5,4 @@ export {
   getDistanceMatrix,
   detectInputType,
   fetchGeocodeAddress
-} from '../../common-local/GoogleAPIFunctions';
+} from '../canonical/locationService';

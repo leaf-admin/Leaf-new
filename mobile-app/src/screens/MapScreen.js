@@ -65,6 +65,7 @@ import { tollData } from '../services/runtime/passengerMapBridge';
 import { calcularPedagiosPorPolyline } from '../services/runtime/mapGeoService';
 import * as SplashScreen from 'expo-splash-screen';
 import { GoogleMapApiConfig } from '../../config/GoogleMapApiConfig';
+import { allowClientDirectGoogleFallback } from '../config/runtimeAccessPolicy';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import splashImg from '../../assets/images/splash.png';
 
@@ -270,6 +271,11 @@ function getStreetAndNumber(address) {
 
 // Função para buscar o nome do local pelo place_id
 async function fetchPlaceName(placeId) {
+    if (!allowClientDirectGoogleFallback()) {
+        Logger.log('⛔ Place Details direto bloqueado neste runtime.');
+        return null;
+    }
+
     const apiKey = Platform.OS === 'ios' ? GoogleMapApiConfig.ios : GoogleMapApiConfig.android;
     try {
         const response = await fetch(

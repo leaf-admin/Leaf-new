@@ -1,1 +1,1 @@
-export { FirebaseContext, firebase } from '../../common-local';
+export { FirebaseContext, firebase } from '../canonical/sessionService';

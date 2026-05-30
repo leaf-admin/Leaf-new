@@ -41,7 +41,7 @@ import AWSLivenessWebViewScreen from '../components/KYC/AWSLivenessWebViewScreen
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
 import useFeatureFlag from '../hooks/useFeatureFlag';
-import DriverBalanceService from '../services/DriverBalanceService';
+import { DriverBalanceService } from '../services/canonical/paymentService';
 import kycService from '../services/KYCService';
 import { usePrototypeMapOcclusion } from './prototype/prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototype/prototypeRideRuntime';

@@ -66,6 +66,7 @@ DANGEROUS_FLAGS=(
   EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS
   EXPO_PUBLIC_ENABLE_CUSTOM_OTP_FALLBACK
   EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW
+  EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK
   EXPO_PUBLIC_ALLOW_INSECURE_HTTP
 )
 
@@ -102,6 +103,7 @@ check_json_false "$TMP_PUBLIC_JSON" '.extra.isReview // false' "extra.isReview"
 check_json_false "$TMP_PUBLIC_JSON" '.extra.e2eTest // false' "extra.e2eTest"
 check_json_false "$TMP_PUBLIC_JSON" '.extra.forcePaymentBypass // false' "extra.forcePaymentBypass"
 check_json_false "$TMP_PUBLIC_JSON" '.extra.enableTestUserTools // false' "extra.enableTestUserTools"
+check_json_false "$TMP_PUBLIC_JSON" '.extra.allowClientDirectGoogleFallback // false' "extra.allowClientDirectGoogleFallback"
 
 ANDROID_PACKAGE="$(jq -r '.android.package // ""' "$TMP_PUBLIC_JSON")"
 IOS_BUNDLE="$(jq -r '.ios.bundleIdentifier // ""' "$TMP_PUBLIC_JSON")"

@@ -3,4 +3,4 @@ export {
   updateProfileImage,
   signOff,
   checkUserExists
-} from '../../common-local/actions/authactions';
+} from '../canonical/profileService';

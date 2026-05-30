@@ -15,9 +15,8 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { Icon } from 'react-native-elements';
 import auth from '@react-native-firebase/auth';
-import WooviService from '../../services/WooviService';
+import { WooviService, PaymentBypassService } from '../../services/canonical/paymentService';
 import WebSocketManager from '../../services/WebSocketManager';
-import PaymentBypassService from '../../services/PaymentBypassService';
 import QRCode from 'react-native-qrcode-svg';
 import { fonts } from '../../theme/runtimeTokens';
 import { allowForcedPaymentBypass } from '../../config/runtimeAccessPolicy';

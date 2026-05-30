@@ -54,4 +54,35 @@ describe('runtimeAccessPolicy payment bypass gates', () => {
     expect(policy.allowTestUserTools()).toBe(true);
     expect(policy.allowForcedPaymentBypass()).toBe(true);
   });
+
+  it('does not allow direct Google fallback on simulator without explicit flag', () => {
+    const policy = loadPolicy({
+      isDevice: false,
+      dev: false,
+    });
+
+    expect(policy.hasExplicitClientDirectGoogleFallbackFlag()).toBe(false);
+    expect(policy.allowClientDirectGoogleFallback()).toBe(false);
+  });
+
+  it('allows direct Google fallback only in dev or QA runtime with explicit flag', () => {
+    const productionPolicy = loadPolicy({
+      isDevice: true,
+      dev: false,
+      env: {
+        EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK: 'true',
+      },
+    });
+    expect(productionPolicy.allowClientDirectGoogleFallback()).toBe(false);
+
+    const devPolicy = loadPolicy({
+      isDevice: true,
+      dev: true,
+      env: {
+        EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK: 'true',
+      },
+    });
+    expect(devPolicy.hasExplicitClientDirectGoogleFallbackFlag()).toBe(true);
+    expect(devPolicy.allowClientDirectGoogleFallback()).toBe(true);
+  });
 });

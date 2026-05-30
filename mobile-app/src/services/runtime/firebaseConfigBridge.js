@@ -1,1 +1,1 @@
-export { firebase } from '../../common-local/config/configureFirebase';
+export { firebase } from '../canonical/sessionService';

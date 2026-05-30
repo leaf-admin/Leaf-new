@@ -26,6 +26,7 @@ import carIcon from '../../assets/images/track_Car.png';
 import { FareCalculator, getDistanceMatrix } from '../common/sharedFunctions';
 import { fonts } from '../common/font';
 import { colors } from '../common/theme';
+import { allowClientDirectGoogleFallback } from '../config/runtimeAccessPolicy';
 
 const { width, height } = Dimensions.get('window');
 const DEFAULT_MAP_REGION = {
@@ -413,7 +414,13 @@ export default function NewMapScreen(props) {
 
     // Função para obter endereço mais preciso do Google Places
     const getAddressFromGooglePlaces = async (latitude, longitude) => {
+        if (!allowClientDirectGoogleFallback()) {
+            Logger.log('⛔ Reverse geocode direto bloqueado neste runtime.');
+            return null;
+        }
+
         try {
+            const { GoogleMapApiConfig } = require('../../config/GoogleMapApiConfig');
             const googleMapsApiKey = GoogleMapApiConfig?.android || GoogleMapApiConfig?.ios || '';
             if (!googleMapsApiKey) {
                 Logger.log('⚠️ Google Places API key ausente no ambiente, pulando consulta externa');
@@ -454,37 +461,7 @@ export default function NewMapScreen(props) {
     const getAddressFromMultipleSources = async (latitude, longitude) => {
         Logger.log('🔍 Tentando obter endereço de múltiplas fontes...');
 
-        // 1. Tentar Google Places API primeiro
-        try {
-            const googleAddress = await getAddressFromGooglePlaces(latitude, longitude);
-            if (googleAddress) {
-                Logger.log('✅ Endereço obtido com Google Places:', googleAddress);
-                return googleAddress;
-            }
-        } catch (error) {
-            Logger.log('⚠️ Google Places API falhou (billing não habilitado):', error.message);
-        }
-
-        // 2. Tentar Location.reverseGeocodeAsync com configurações diferentes
-        try {
-            const addressResponse = await Location.reverseGeocodeAsync({
-                latitude,
-                longitude,
-                useGoogleMaps: true // Tentar com Google Maps
-            });
-
-            if (addressResponse.length > 0) {
-                const address = addressResponse[0];
-                if (address.formattedAddress && address.formattedAddress !== 'Brasil') {
-                    Logger.log('✅ Endereço obtido com Google Maps:', address.formattedAddress);
-                    return address.formattedAddress;
-                }
-            }
-        } catch (error) {
-            Logger.log('⚠️ Google Maps reverse geocoding falhou:', error);
-        }
-
-        // 2. Tentar com configuração nativa
+        // 1. Tentar reverse geocode nativo sem API key propria.
         try {
             const addressResponse = await Location.reverseGeocodeAsync({
                 latitude,
@@ -510,6 +487,17 @@ export default function NewMapScreen(props) {
             }
         } catch (error) {
             Logger.log('⚠️ Reverse geocoding nativo falhou:', error);
+        }
+
+        // 2. Fallback direto Google apenas em dev/e2e com flag explicita.
+        try {
+            const googleAddress = await getAddressFromGooglePlaces(latitude, longitude);
+            if (googleAddress) {
+                Logger.log('✅ Endereço obtido com fallback direto controlado:', googleAddress);
+                return googleAddress;
+            }
+        } catch (error) {
+            Logger.log('⚠️ Fallback direto controlado falhou:', error.message);
         }
 
         // 3. Fallback: usar coordenadas formatadas

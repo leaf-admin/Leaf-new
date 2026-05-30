@@ -906,8 +906,14 @@ export const detectInputType = (text) => {
 export const fetchGeocodeAddress = (address, location = null, telemetryContext = null) => {
     return new Promise((resolve, reject) => {
         Logger.log('📍 fetchGeocodeAddress chamado com endereço:', address, 'location:', location);
+
+        if (!allowClientDirectGoogleFallback()) {
+            Logger.log('⛔ [PlacesCache] Geocoding direto bloqueado neste runtime.');
+            resolve([]);
+            return;
+        }
         
-        // ✅ Usar API do Google Geocoding diretamente (Forward Geocoding)
+        // Fallback permitido somente em desenvolvimento/teste com flag explícita.
         const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
         // Construir URL da API Geocoding (Forward)
