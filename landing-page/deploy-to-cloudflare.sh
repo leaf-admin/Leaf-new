@@ -54,7 +54,13 @@ case $option in
         cp index.html $TEMP_DIR/
         cp em-breve.html $TEMP_DIR/
         cp privacy-policy.html $TEMP_DIR/ 2>/dev/null || echo "⚠️  privacy-policy.html não encontrado"
+        cp terms-of-service.html $TEMP_DIR/ 2>/dev/null || echo "⚠️  terms-of-service.html não encontrado"
+        cp refund-policy.html $TEMP_DIR/ 2>/dev/null || echo "⚠️  refund-policy.html não encontrado"
         cp excluir-conta.html $TEMP_DIR/ 2>/dev/null || echo "⚠️  excluir-conta.html não encontrado"
+        cp _redirects $TEMP_DIR/ 2>/dev/null || echo "⚠️  _redirects não encontrado"
+        cp _headers $TEMP_DIR/ 2>/dev/null || echo "⚠️  _headers não encontrado"
+        cp -r excluir-conta $TEMP_DIR/ 2>/dev/null || echo "⚠️  excluir-conta/ não encontrado"
+        cp -r support $TEMP_DIR/ 2>/dev/null || echo "⚠️  support/ não encontrado"
         cp -r assets $TEMP_DIR/
         
         # Criar .gitignore
@@ -107,5 +113,4 @@ echo ""
 echo -e "${GREEN}✅ Concluído!${NC}"
 echo ""
 echo "📖 Para mais detalhes, consulte: DEPLOY_CLOUDFLARE.md"
-
 

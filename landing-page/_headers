@@ -14,6 +14,18 @@
   X-Frame-Options: SAMEORIGIN
   Access-Control-Allow-Origin: *
 
+/terms-of-service.html
+  X-Frame-Options: SAMEORIGIN
+  Access-Control-Allow-Origin: *
+
+/refund-policy.html
+  X-Frame-Options: SAMEORIGIN
+  Access-Control-Allow-Origin: *
+
+/support/*
+  X-Frame-Options: SAMEORIGIN
+  Access-Control-Allow-Origin: *
+
 /index.html
   X-Frame-Options: SAMEORIGIN
   Access-Control-Allow-Origin: *
@@ -35,7 +47,6 @@
   X-Frame-Options: SAMEORIGIN
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-
 
 
 

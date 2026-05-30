@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suporte | Leaf App</title>
+    <link rel="canonical" href="https://leaf.app.br/support/">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #1a1a1a;
+            background: #f8f9fa;
+        }
+
+        header {
+            background: #003002;
+            color: white;
+            padding: 2rem 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo a {
+            display: inline-block;
+            text-decoration: none;
+        }
+
+        .logo img {
+            height: 43px;
+            width: auto;
+        }
+
+        .back-link {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            transition: background 0.3s;
+        }
+
+        .back-link:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 3rem 24px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 2.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        h1 {
+            font-size: 2.4rem;
+            line-height: 1.15;
+            color: #003002;
+            margin-bottom: 0.75rem;
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            margin: 2rem 0 0.75rem;
+            color: #1a1a1a;
+        }
+
+        p {
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
+        ul {
+            margin: 0 0 1.25rem 1.25rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        a {
+            color: #0b57d0;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .contact-box {
+            background: #f2f6f0;
+            border-left: 4px solid #1a330e;
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin: 1.5rem 0;
+        }
+
+        .footer-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e3e6e2;
+            font-size: 0.95rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 2rem 16px;
+            }
+
+            .card {
+                padding: 2rem 1.25rem;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <a href="/">
+                    <img src="../assets/logo-leaf.jpg" alt="LEAF">
+                </a>
+            </div>
+            <a href="/" class="back-link">Voltar</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="card">
+            <h1>Suporte Leaf</h1>
+            <p>Estamos aqui para ajudar com dúvidas sobre cadastro, viagens, pagamentos, segurança e uso da plataforma.</p>
+
+            <div class="contact-box">
+                <p><strong>Canal principal:</strong> <a href="mailto:suporte@leaf.app.br">suporte@leaf.app.br</a></p>
+                <p>Inclua o telefone da conta, cidade, data do ocorrido e, se houver, o número da corrida.</p>
+            </div>
+
+            <h2>Durante uma viagem</h2>
+            <p>Se a situação estiver acontecendo durante a corrida, use primeiro os recursos de segurança e suporte dentro do aplicativo. Eles preservam o contexto da viagem e aceleram a análise.</p>
+
+            <h2>Conta e privacidade</h2>
+            <ul>
+                <li>Para exercer direitos de privacidade, envie sua solicitação para o suporte.</li>
+                <li>Para excluir sua conta, acesse a página pública de <a href="/delete-account">exclusão de conta</a> ou use o fluxo dentro do app.</li>
+                <li>Para dúvidas legais, consulte a <a href="/privacy">política de privacidade</a> e os <a href="/terms">termos de serviço</a>.</li>
+            </ul>
+
+            <h2>Prazo de resposta</h2>
+            <p>Casos de segurança e pagamento têm prioridade. As demais solicitações são analisadas conforme ordem de chegada e complexidade.</p>
+
+            <div class="footer-links">
+                <a href="/privacy">Privacidade</a>
+                <a href="/terms">Termos</a>
+                <a href="/refund-policy">Reembolsos</a>
+                <a href="/delete-account">Excluir conta</a>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

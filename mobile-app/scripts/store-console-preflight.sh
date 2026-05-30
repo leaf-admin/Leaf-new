@@ -155,6 +155,18 @@ else
   bad "Fluxo OTP real via Firebase Phone Auth não encontrado"
 fi
 
+if rg -n "BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY|driverBackgroundDisclosureVisible|locationType=\"background\"" src/screens/prototype/RobotaxiHomeScreen.js src/services/BackgroundLocationService.js src/components/PermissionExplanationModal.js >/dev/null 2>&1; then
+  ok "Disclosure de localização em segundo plano conectado ao fluxo atual do motorista"
+else
+  bad "Disclosure de localização em segundo plano não encontrado no fluxo atual do motorista"
+fi
+
+if rg -n "requestBackgroundPermissionsAsync" src/services/BackgroundLocationService.js >/dev/null 2>&1; then
+  ok "Solicitação de background location centralizada em BackgroundLocationService"
+else
+  bad "Solicitação de background location não encontrada no serviço central"
+fi
+
 section "Checks automatizados"
 if bash scripts/check-permissions-hardening.sh >/tmp/leaf-store-preflight-perm.log 2>&1; then
   ok "check-permissions-hardening.sh: PASS"

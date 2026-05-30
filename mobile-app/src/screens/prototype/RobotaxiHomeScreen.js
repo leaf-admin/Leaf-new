@@ -11,6 +11,7 @@ import PrototypeScreenTransition from '../../components/prototype/PrototypeScree
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import { PrototypeBottomIsland, PrototypeTopControls } from '../../components/prototype/PrototypeScaffold';
+import PermissionExplanationModal from '../../components/PermissionExplanationModal';
 import PassengerHomeOverlay, {
   PASSENGER_HOME_CARD_METRICS,
   PassengerHomeOverlaySkeleton,
@@ -73,6 +74,7 @@ import {
 import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 import kycService from '../../services/KYCService';
 import nativeAwsLivenessService from '../../services/NativeAwsLivenessService';
+import { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } from '../../services/BackgroundLocationService';
 import Logger from '../../utils/Logger';
 
 const { color } = robotaxiPrototypeTokens;
@@ -1142,6 +1144,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [driverKycAwsSessionId, setDriverKycAwsSessionId] = useState(null);
   const [driverKycProviderLoading, setDriverKycProviderLoading] = useState(false);
   const [driverKycProcessing, setDriverKycProcessing] = useState(false);
+  const [driverBackgroundDisclosureVisible, setDriverBackgroundDisclosureVisible] = useState(false);
   const driverH3RefreshTimerRef = useRef(null);
   const driverH3OverlayWasVisibleRef = useRef(false);
   const driverH3LastFetchKeyRef = useRef('');
@@ -4475,6 +4478,98 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     profileUid,
   ]);
 
+  const runDriverOnlineMutation = useCallback(async (nextValue) => {
+    try {
+      const result = await setDriverOnline(nextValue);
+      if (nextValue && isDriverKycRequiredResult(result)) {
+        openDriverKycModal(result);
+        return;
+      }
+
+      if (result?.blocked) {
+        Alert.alert(
+          'Ativação pendente',
+          'Conclua CNH, CRLV e consentimento antes de ficar online.',
+          [
+            { text: 'Depois' },
+            {
+              text: 'Abrir ativação',
+              onPress: () => navigation.navigate('RobotaxiPrototypeDriverActivation')
+            }
+          ]
+        );
+        return;
+      }
+
+      if (result?.success === false) {
+        const resultError = result?.error || 'Não foi possível atualizar o status online agora.';
+        const isLocationIssue = /localiza|location|permiss/i.test(resultError);
+        if (nextValue && isLocationIssue) {
+          Alert.alert(
+            'Ative a localização para ficar online',
+            'A Leaf precisa da sua localização para mostrar corridas próximas e manter a viagem sincronizada com segurança.',
+            [
+              { text: 'Agora não', style: 'cancel' },
+              { text: 'Abrir Ajustes', onPress: () => Linking.openSettings() }
+            ],
+            { __skipFriendlyAlertPatch: true }
+          );
+          return;
+        }
+
+        if (nextValue && isDriverKycRequiredResult(result)) {
+          openDriverKycModal(result);
+          return;
+        }
+
+        Alert.alert(
+          'Modo motorista',
+          resultError
+        );
+      }
+    } catch (error) {
+      if (nextValue && isDriverKycRequiredResult(error)) {
+        openDriverKycModal(error);
+        return;
+      }
+      Alert.alert('Modo motorista', error?.message || 'Não foi possível atualizar o status online agora.');
+    }
+  }, [navigation, openDriverKycModal, setDriverOnline]);
+
+  const ensureDriverBackgroundLocationDisclosure = useCallback(async () => {
+    try {
+      const hasAcceptedDisclosure =
+        (await AsyncStorage.getItem(BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY)) === 'true';
+      if (hasAcceptedDisclosure) {
+        return true;
+      }
+    } catch (error) {
+      Logger.warn('⚠️ [DriverLocationDisclosure] Falha ao ler aceite:', error?.message || error);
+    }
+
+    setDriverBackgroundDisclosureVisible(true);
+    return false;
+  }, []);
+
+  const handleDriverBackgroundDisclosureAccept = useCallback(async () => {
+    try {
+      await AsyncStorage.setItem(BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY, 'true');
+    } catch (error) {
+      Logger.warn('⚠️ [DriverLocationDisclosure] Falha ao salvar aceite:', error?.message || error);
+    }
+
+    setDriverBackgroundDisclosureVisible(false);
+    await runDriverOnlineMutation(true);
+  }, [runDriverOnlineMutation]);
+
+  const handleDriverBackgroundDisclosureCancel = useCallback(() => {
+    appendPrototypeRuntimeDebugStep('driver_background_location_disclosure_cancelled', {
+      driverOnline,
+      driverOnlinePending,
+    });
+    setDriverBackgroundDisclosureVisible(false);
+  }, [driverOnline, driverOnlinePending]);
+
   const handleDriverOnlineToggle = useCallback(async () => {
     appendPrototypeRuntimeDebugStep('driver_home_toggle_pressed', {
       driverOnline,
@@ -4482,63 +4577,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       driverCanGoOnline,
       driverActivationResolved
     });
-    const runToggle = async (nextValue) => {
-      try {
-        const result = await setDriverOnline(nextValue);
-        if (nextValue && isDriverKycRequiredResult(result)) {
-          openDriverKycModal(result);
-          return;
-        }
-
-        if (result?.blocked) {
-          Alert.alert(
-            'Ativação pendente',
-            'Conclua CNH, CRLV e consentimento antes de ficar online.',
-            [
-              { text: 'Depois' },
-              {
-                text: 'Abrir ativação',
-                onPress: () => navigation.navigate('RobotaxiPrototypeDriverActivation')
-              }
-            ]
-          );
-          return;
-        }
-
-        if (result?.success === false) {
-          const resultError = result?.error || 'Não foi possível atualizar o status online agora.';
-          const isLocationIssue = /localiza|location|permiss/i.test(resultError);
-          if (nextValue && isLocationIssue) {
-            Alert.alert(
-              'Ative a localização para ficar online',
-              'A Leaf precisa da sua localização para mostrar corridas próximas e manter a viagem sincronizada com segurança.',
-              [
-                { text: 'Agora não', style: 'cancel' },
-                { text: 'Abrir Ajustes', onPress: () => Linking.openSettings() }
-              ],
-              { __skipFriendlyAlertPatch: true }
-            );
-            return;
-          }
-
-          if (nextValue && isDriverKycRequiredResult(result)) {
-            openDriverKycModal(result);
-            return;
-          }
-
-          Alert.alert(
-            'Modo motorista',
-            resultError
-          );
-        }
-      } catch (error) {
-        if (nextValue && isDriverKycRequiredResult(error)) {
-          openDriverKycModal(error);
-          return;
-        }
-        Alert.alert('Modo motorista', error?.message || 'Não foi possível atualizar o status online agora.');
-      }
-    };
 
     if (driverHasAcceptedOrActiveWork) {
       appendPrototypeRuntimeDebugStep('driver_home_toggle_ignored_active_work', {
@@ -4555,13 +4593,18 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         'Deseja parar de receber corridas agora?',
         [
           { text: 'Não', style: 'cancel' },
-          { text: 'Sim', onPress: () => runToggle(false) }
+          { text: 'Sim', onPress: () => runDriverOnlineMutation(false) }
         ]
       );
       return;
     }
 
-    runToggle(true);
+    const disclosureAccepted = await ensureDriverBackgroundLocationDisclosure();
+    if (!disclosureAccepted) {
+      return;
+    }
+
+    runDriverOnlineMutation(true);
   }, [
     driverActiveRide?.bookingId,
     driverActiveRide?.id,
@@ -4572,10 +4615,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverLiveOffer?.id,
     driverOnline,
     driverOnlinePending,
+    ensureDriverBackgroundLocationDisclosure,
     navigation,
     normalizedBookingStatus,
-    openDriverKycModal,
-    setDriverOnline
+    runDriverOnlineMutation
   ]);
 
   const handleTopLeftPress = () => {
@@ -5615,6 +5658,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             onPressSettings={() => navigation.navigate('RobotaxiPrototypeSettings')}
           />
         ) : null}
+
+        <PermissionExplanationModal
+          visible={driverBackgroundDisclosureVisible}
+          onClose={handleDriverBackgroundDisclosureCancel}
+          onAccept={handleDriverBackgroundDisclosureAccept}
+          permissionType="location"
+          userType="driver"
+          locationType="background"
+        />
 
         <Modal
           visible={driverKycModalVisible}
