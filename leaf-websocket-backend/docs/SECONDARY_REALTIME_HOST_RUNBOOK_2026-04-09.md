@@ -3,12 +3,29 @@
 ## Importante
 Este documento descreve **um segundo host realtime em outra VPS**.
 
-Não é:
-- um segundo processo na mesma VPS
-- um segundo container no mesmo host
-- um “scale up” interno da Contabo atual
+Ele nao descreve o multi-gateway gerenciado dentro da Contabo atual. Esse outro desenho existe separadamente em:
 
-Isso já foi testado e não trouxe ganho material em `800`, porque os dois gateways continuaram disputando os mesmos `6 vCPU` do host atual.
+- [MULTI_GATEWAY_CONTABO_RUNBOOK_2026-05-30.md](/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/docs/MULTI_GATEWAY_CONTABO_RUNBOOK_2026-05-30.md)
+
+A regra atual e:
+
+- `websocket-secondary` solto/orfao no host principal continua proibido;
+- `websocket-gateway-2` e `websocket-gateway-3` sao permitidos apenas quando declarados no compose ativo, com Redis Adapter obrigatorio e jobs duplicados desligados;
+- segundo host realtime continua sendo o caminho de escala horizontal real quando a Contabo atual deixar de ter margem.
+
+## Estado Atual
+
+Em 2026-05-30, foi encontrado um `leaf-websocket-secondary` órfão ainda rodando no host principal, fora do `docker compose` ativo e com versão de código diferente do `leaf-websocket`.
+
+A decisão operacional para `websocket-secondary` é:
+
+- não manter `websocket-secondary` na mesma Contabo;
+- não recolocar `websocket-secondary` no `nginx.multi-gateway.conf`;
+- remover containers órfãos `leaf-websocket-secondary` do host principal;
+- usar `docker-compose.realtime-secondary.yml` somente quando houver um segundo host real;
+- só adicionar o segundo host ao upstream depois de validar versão, healthcheck, Socket.IO Redis adapter e smoke de corrida.
+
+Se um `docker ps` voltar a mostrar `leaf-websocket-secondary` no host principal, trate como regressão de infraestrutura.
 
 ## Objetivo
 Adicionar um segundo host apenas para `gateway realtime`, mantendo no host principal:
