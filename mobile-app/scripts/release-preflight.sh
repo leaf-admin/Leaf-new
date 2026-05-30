@@ -111,6 +111,7 @@ APP_NAME="$(jq -r '.name // ""' "$TMP_PUBLIC_JSON")"
 APP_SLUG="$(jq -r '.slug // ""' "$TMP_PUBLIC_JSON")"
 APP_VERSION="$(jq -r '.version // ""' "$TMP_PUBLIC_JSON")"
 APP_RUNTIME_VERSION="$(jq -r '.runtimeVersion // ""' "$TMP_PUBLIC_JSON")"
+EXPECTED_APP_VERSION="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
 UPDATES_ENABLED="$(jq -r '.updates.enabled // true' "$TMP_PREBUILD_JSON")"
 UPDATES_CHANNEL="$(jq -r '.updates.requestHeaders["expo-channel-name"] // ""' "$TMP_PREBUILD_JSON")"
 ANDROID_ICON="$(jq -r '.android.icon // ""' "$TMP_PUBLIC_JSON")"
@@ -138,7 +139,7 @@ else
   fail "iOS bundleIdentifier divergente: ${IOS_BUNDLE:-<vazio>}"
 fi
 
-if [[ "$APP_NAME" == "Leaf" && "$APP_SLUG" == "leafapp-reactnative" && "$APP_VERSION" == "1.0.1" && "$APP_RUNTIME_VERSION" == "1.0.1" ]]; then
+if [[ "$APP_NAME" == "Leaf" && "$APP_SLUG" == "leafapp-reactnative" && "$APP_VERSION" == "$EXPECTED_APP_VERSION" && "$APP_RUNTIME_VERSION" == "$EXPECTED_APP_VERSION" ]]; then
   pass "Expo config principal correta: $APP_NAME/$APP_SLUG v$APP_VERSION runtime $APP_RUNTIME_VERSION"
 else
   fail "Expo config principal divergente: name=${APP_NAME:-<vazio>} slug=${APP_SLUG:-<vazio>} version=${APP_VERSION:-<vazio>} runtime=${APP_RUNTIME_VERSION:-<vazio>}"

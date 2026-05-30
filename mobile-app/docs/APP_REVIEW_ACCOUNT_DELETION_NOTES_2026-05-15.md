@@ -1,6 +1,6 @@
 # App Review Notes - Account Deletion
 
-Use this in the App Review Information notes before submitting iOS build 23 for review.
+Use this in the App Review Information notes before submitting iOS build 24 for review.
 
 ```text
 Account deletion is available directly from the Profile screen.

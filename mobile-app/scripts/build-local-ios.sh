@@ -126,6 +126,13 @@ sync_native_ios_version() {
     || /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string ${microphone_usage}" "${info_plist_path}"
   /usr/libexec/PlistBuddy -c "Set :NSSpeechRecognitionUsageDescription ${speech_usage}" "${info_plist_path}" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string ${speech_usage}" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "${info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads false" "${info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool false" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking false" "${info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool false" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity:NSExceptionDomains" "${info_plist_path}" >/dev/null 2>&1 || true
 
   echo "✅ Info.plist iOS sincronizado: ${expected_version} (${expected_build_number})."
 }
@@ -192,17 +199,19 @@ assert_ios_app_artifact() {
 
   expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
 
+  LEAF_EXPECTED_IOS_VERSION="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")" \
   LEAF_EXPECTED_IOS_BUILD_NUMBER="${expected_build_number}" node - "${app_config_path}" <<'NODE'
 const fs = require('fs');
 
 const appConfigPath = process.argv[2];
 const config = JSON.parse(fs.readFileSync(appConfigPath, 'utf8'));
+const expectedVersion = process.env.LEAF_EXPECTED_IOS_VERSION;
 const expectedBuildNumber = process.env.LEAF_EXPECTED_IOS_BUILD_NUMBER;
 const expected = {
   name: 'Leaf',
   slug: 'leafapp-reactnative',
-  version: '1.0.1',
-  runtimeVersion: '1.0.1',
+  version: expectedVersion,
+  runtimeVersion: expectedVersion,
 };
 
 const failures = [];

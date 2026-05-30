@@ -28,6 +28,7 @@ EOF
 sync_native_android_version() {
   local build_gradle_path="${PROJECT_DIR}/android/app/build.gradle"
   local expected_version_code
+  local expected_version_name
 
   if [[ ! -f "${build_gradle_path}" ]]; then
     echo "❌ build.gradle nativo do Android não encontrado: ${build_gradle_path}"
@@ -35,13 +36,19 @@ sync_native_android_version() {
   fi
 
   expected_version_code="$(node -e "console.log(require('./config/AppConfig').AppConfig.android_app_version)")"
+  expected_version_name="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
   if ! [[ "${expected_version_code}" =~ ^[0-9]+$ ]]; then
     echo "❌ android_app_version inválido no AppConfig: ${expected_version_code}"
     exit 1
   fi
+  if [[ -z "${expected_version_name}" ]]; then
+    echo "❌ ios_app_version inválido no AppConfig para versionName Android."
+    exit 1
+  fi
 
   perl -0pi -e "s/versionCode\\s+\\d+/versionCode ${expected_version_code}/" "${build_gradle_path}"
-  echo "✅ build.gradle Android sincronizado: versionCode ${expected_version_code}."
+  perl -0pi -e "s/versionName\\s+\"[^\"]+\"/versionName \"${expected_version_name}\"/" "${build_gradle_path}"
+  echo "✅ build.gradle Android sincronizado: versionCode ${expected_version_code}, versionName ${expected_version_name}."
 }
 
 sync_android_inter_fonts() {
