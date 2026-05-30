@@ -751,6 +751,7 @@ Validação:
 - `npm run lint:dashboard`: PASS.
 - `npm run build:dashboard`: PASS, com warnings conhecidos do Next sobre root inferido/middleware deprecated.
 - `npm --prefix leaf-websocket-backend run smoke:woovi-sandbox`: PASS (`chargeStatus=ACTIVE`, QR gerado, cleanup OK).
+- `npm --prefix leaf-websocket-backend run smoke:runtime-full-ride-flow`: PASS, runtime legado `vps` e runtime modular exercitados com passageiro/motorista, aceite, chegada, inicio, conclusao, distribuicao financeira e limpeza de chaves ativas no Redis. Evidencia versionada em `test-results/runtime-full-ride-flow/runtime-full-ride-flow-smoke-1780099321773.json`.
 - `git diff --check`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
