@@ -23,6 +23,17 @@ function createService(overrides = {}) {
     disputes: { openCount: 0 },
     activePolicies: []
   });
+  const getReviewQueueSummary = jest.fn().mockResolvedValue({
+    source: 'driver_documents_index_stats',
+    summary: {
+      total: 6,
+      byStatus: {
+        pending: 3,
+        approved: 2,
+        rejected: 1
+      }
+    }
+  });
   const service = new BackofficeCommandCenterService({
     redis: {
       ensureConnection: jest.fn().mockResolvedValue(true),
@@ -70,6 +81,9 @@ function createService(overrides = {}) {
     health: {
       quickCheck: jest.fn().mockResolvedValue({ status: 'healthy' })
     },
+    driverApplications: {
+      getReviewQueueSummary
+    },
     workerHealthMonitor: {
       getHealth: jest.fn().mockResolvedValue({ status: 'healthy', consumers: { count: 2 } }),
       getStreamLag: jest.fn().mockResolvedValue({ lag: 0 }),
@@ -78,12 +92,12 @@ function createService(overrides = {}) {
     ...overrides
   });
 
-  return { service, redis, opsGetOverview };
+  return { service, redis, opsGetOverview, getReviewQueueSummary };
 }
 
 describe('backoffice-command-center-service', () => {
   it('builds one cached operational snapshot without external paid API calls', async () => {
-    const { service, redis, opsGetOverview } = createService();
+    const { service, redis, opsGetOverview, getReviewQueueSummary } = createService();
 
     const snapshot = await service.getSnapshot({ hours: 1, period: 'today' });
 
@@ -101,11 +115,18 @@ describe('backoffice-command-center-service', () => {
     });
     expect(snapshot.support.totalOpenTickets).toBe(4);
     expect(snapshot.campaigns.active).toBe(2);
+    expect(snapshot.driverOnboarding).toMatchObject({
+      totalDocuments: 6,
+      pendingDocuments: 3,
+      approvedDocuments: 2,
+      rejectedDocuments: 1
+    });
     expect(snapshot.costControls.externalPaidApisCalled).toBe(false);
     expect(snapshot.costControls.paidApiFamilies).toEqual([]);
     expect(snapshot.cache.status).toBe('MISS');
     expect(redis.set).toHaveBeenCalledTimes(1);
     expect(opsGetOverview).toHaveBeenCalledWith({ hours: 1, autoEscalate: false });
+    expect(getReviewQueueSummary).toHaveBeenCalledTimes(1);
   });
 
   it('serves Redis cache before collecting sources', async () => {

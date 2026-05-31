@@ -9,6 +9,7 @@ const rideCostTelemetryService = require('../services/ride-cost-telemetry-servic
 const rideCostAlertService = require('../services/ride-cost-alert-service');
 const dailyEarningsReportService = require('../services/daily-earnings-report-service');
 const backofficeCommandCenterService = require('../services/backoffice-command-center-service');
+const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
@@ -30,6 +31,22 @@ function userCanBypassCommandCenterCache(user = {}) {
   return roleCandidates.some((role) => MUTATION_ROLES.includes(role));
 }
 
+function buildFirestoreCostActionItem(costGuard = {}) {
+  if (!['warning', 'danger', 'limit'].includes(costGuard.budgetStatus)) {
+    return null;
+  }
+
+  return {
+    id: 'firestore-read-budget',
+    priority: costGuard.budgetStatus === 'limit' || costGuard.budgetStatus === 'danger' ? 'alta' : 'media',
+    title: costGuard.budgetStatus === 'limit'
+      ? 'Teto de leituras Firestore atingido'
+      : 'Leituras Firestore em atenção',
+    description: `${costGuard.budgetUsagePercent}% do orçamento diário estimado usado no backoffice.`,
+    href: '/dashboard'
+  };
+}
+
 router.get('/command-center', async (req, res) => {
   try {
     const requestedForceRefresh =
@@ -41,8 +58,22 @@ router.get('/command-center', async (req, res) => {
       forceRefresh
     });
 
+    const costGuard = await backofficeCostGuardService.recordEndpointReadEstimate('ops.commandCenter', {
+      cacheStatus: snapshot.cache?.status || 'UNKNOWN'
+    });
+    const firestoreActionItem = buildFirestoreCostActionItem(costGuard);
+    backofficeCostGuardService.setHeaders(res, costGuard);
     res.set('X-Leaf-Command-Center-Cache', snapshot.cache?.status || 'UNKNOWN');
-    res.json(snapshot);
+    res.json({
+      ...snapshot,
+      actionItems: firestoreActionItem
+        ? [firestoreActionItem, ...(snapshot.actionItems || [])].slice(0, 8)
+        : snapshot.actionItems,
+      costControls: {
+        ...(snapshot.costControls || {}),
+        firestoreReadGuard: costGuard
+      }
+    });
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'command-center' });
     res.status(500).json({ success: false, error: 'Erro ao buscar command center operacional' });

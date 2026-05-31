@@ -653,6 +653,10 @@ class DriverApplicationService {
           updatedAt: doc.updatedAt || null,
           reviewedAt: doc.reviewedAt || null,
           rejectionReason: doc.rejectionReason || null,
+          requestStatus: doc.requestStatus || null,
+          requiredUpdate: doc.requiredUpdate === true,
+          requestedAt: doc.requestedAt || null,
+          requestReason: doc.requestReason || null,
           fileUrl: doc.fileUrl || null,
           sortTs: parseTimestampValue(doc[safeSortBy])
         });
@@ -715,6 +719,32 @@ class DriverApplicationService {
         search: searchText
       },
       summary
+    };
+  }
+
+  async getReviewQueueSummary() {
+    const db = this.getRealtimeDb();
+    const snapshot = await db.ref('driver_documents_index_stats').once('value');
+    const statsByType = snapshot.val() || {};
+    const byStatus = {
+      pending: 0,
+      approved: 0,
+      rejected: 0
+    };
+
+    Object.values(statsByType).forEach((typeStats) => {
+      if (!typeStats || typeof typeStats !== 'object') return;
+      byStatus.pending += Number.parseInt(typeStats.pending, 10) || 0;
+      byStatus.approved += Number.parseInt(typeStats.approved, 10) || 0;
+      byStatus.rejected += Number.parseInt(typeStats.rejected, 10) || 0;
+    });
+
+    return {
+      source: 'driver_documents_index_stats',
+      summary: {
+        total: byStatus.pending + byStatus.approved + byStatus.rejected,
+        byStatus
+      }
     };
   }
 }

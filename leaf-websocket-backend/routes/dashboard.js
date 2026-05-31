@@ -23,6 +23,8 @@ const modernMetricsService = require('../services/modern-metrics-service');
 const h3MapService = require('../services/h3-map-service');
 const financialReconciliationDashboardService = require('../services/financial-reconciliation-dashboard-service');
 const FinancialLedgerService = require('../services/financial-ledger-service');
+const auditService = require('../services/audit-service');
+const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const { resolveDriverReactivationState } = require('../services/dashboard-user-management-service');
 const {
   recomputeDriverActivationStatus
@@ -190,6 +192,12 @@ function rejectDashboardMockEndpointInProduction(req, res, routeName) {
     routeName
   });
   return true;
+}
+
+function parseAuditDate(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 const adminDocumentUpload = multer({
@@ -828,10 +836,18 @@ router.get(
   async (req, res) => {
     try {
       const data = await driverApplicationService.listReviewQueue(req.query || {});
-      return res.json({
-        success: true,
-        data
-      });
+      const payload = await backofficeCostGuardService.attachToResponse(
+        res,
+        'drivers.documents.reviewQueue',
+        {
+          success: true,
+          data
+        },
+        {
+          limit: req.query?.limit
+        }
+      );
+      return res.json(payload);
     } catch (error) {
       logError(error, 'Erro ao buscar fila de revisão de documentos', { service: 'dashboard-routes' });
       return res.status(500).json({
@@ -1583,7 +1599,13 @@ router.get('/api/financial/reconciliation/reports', authenticateJWT, requireRole
     return res.status(statusCode).json(result);
   }
 
-  return res.json(result);
+  const payload = await backofficeCostGuardService.attachToResponse(
+    res,
+    'financial.reconciliation.reports',
+    result,
+    { limit: req.query.limit }
+  );
+  return res.json(payload);
 });
 
 router.get('/api/financial/reconciliation/rides/:rideId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
@@ -1594,7 +1616,12 @@ router.get('/api/financial/reconciliation/rides/:rideId', authenticateJWT, requi
     return res.status(statusCode).json(result);
   }
 
-  return res.json(result);
+  const payload = await backofficeCostGuardService.attachToResponse(
+    res,
+    'financial.reconciliation.ride',
+    result
+  );
+  return res.json(payload);
 });
 
 router.post('/api/financial/reconciliation/rides/:rideId/run', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
@@ -1606,7 +1633,13 @@ router.post('/api/financial/reconciliation/rides/:rideId/run', authenticateJWT, 
     return res.status(statusCode).json(result);
   }
 
-  return res.json(result);
+  const payload = await backofficeCostGuardService.attachToResponse(
+    res,
+    'financial.reconciliation.run',
+    result,
+    { limit: 1 }
+  );
+  return res.json(payload);
 });
 
 router.post('/api/financial/reconciliation/run', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
@@ -1622,7 +1655,65 @@ router.post('/api/financial/reconciliation/run', authenticateJWT, requireRole(DA
     return res.status(statusCode).json(result);
   }
 
-  return res.json(result);
+  const payload = await backofficeCostGuardService.attachToResponse(
+    res,
+    'financial.reconciliation.run',
+    result,
+    { limit: req.body?.limit || req.query.limit || 100 }
+  );
+  return res.json(payload);
+});
+
+// Auditoria operacional: logs de ações críticas e leitura RBAC para backoffice
+router.get('/api/audit/logs', authenticateJWT, requireRole(DASHBOARD_MONITORING_ROLES), async (req, res) => {
+  const limit = Math.max(1, Math.min(Number(req.query.limit || 50), 200));
+  const filters = {
+    userId: req.query.userId || undefined,
+    action: req.query.action || undefined,
+    resource: req.query.resource || undefined,
+    severity: req.query.severity || undefined,
+    startDate: parseAuditDate(req.query.startDate),
+    endDate: parseAuditDate(req.query.endDate)
+  };
+
+  Object.keys(filters).forEach((key) => {
+    if (!filters[key]) delete filters[key];
+  });
+
+  const result = await auditService.getAuditLogs(filters, limit);
+  if (!result.success) {
+    return res.status(503).json(result);
+  }
+
+  const payload = await backofficeCostGuardService.attachToResponse(
+    res,
+    'audit.logs',
+    {
+      ...result,
+      filters,
+      limit
+    },
+    { limit }
+  );
+  return res.json(payload);
+});
+
+router.get('/api/audit/stats', authenticateJWT, requireRole(DASHBOARD_MONITORING_ROLES), async (req, res) => {
+  const result = await auditService.getAuditStats(
+    parseAuditDate(req.query.startDate),
+    parseAuditDate(req.query.endDate)
+  );
+
+  if (!result.success) {
+    return res.status(503).json(result);
+  }
+
+  const payload = await backofficeCostGuardService.attachToResponse(
+    res,
+    'audit.stats',
+    result
+  );
+  return res.json(payload);
 });
 
 // 📊 Financial Metrics - DADOS REAIS (Firebase)

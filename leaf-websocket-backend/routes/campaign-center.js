@@ -3,6 +3,7 @@ const admin = require('firebase-admin');
 const multer = require('multer');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const campaignCenterService = require('../services/campaign-center-service');
+const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const { logError, logStructured } = require('../utils/logger');
 const {
   isLaunchFeatureEnabled,
@@ -120,7 +121,12 @@ router.get('/campaigns', authenticateJWT, requireRole(ADMIN_ROLES), async (req, 
   try {
     const campaigns = await campaignCenterService.listCampaigns(req.query || {});
     const stats = await campaignCenterService.getStats(req.query || {});
-    return res.json({ success: true, campaigns, stats });
+    const payload = await backofficeCostGuardService.attachToResponse(
+      res,
+      'campaigns.list',
+      { success: true, campaigns, stats }
+    );
+    return res.json(payload);
   } catch (error) {
     logError(error, 'Erro ao listar campanhas in-app', {
       service: 'campaign-center',
@@ -164,7 +170,12 @@ router.get('/campaigns/:campaignId', authenticateJWT, requireRole(ADMIN_ROLES), 
     if (!campaign) {
       return res.status(404).json({ success: false, error: 'Campanha nao encontrada' });
     }
-    return res.json({ success: true, campaign });
+    const payload = await backofficeCostGuardService.attachToResponse(
+      res,
+      'campaigns.get',
+      { success: true, campaign }
+    );
+    return res.json(payload);
   } catch (error) {
     logError(error, 'Erro ao buscar campanha in-app', {
       service: 'campaign-center',
@@ -226,12 +237,18 @@ router.post(
         ...(req.body || {}),
         limit: 10
       });
-      return res.json({
-        success: true,
-        eligible: result.campaigns.some((item) => item.id === campaign.id),
-        campaigns: result.campaigns,
-        evaluatedAt: result.evaluatedAt
-      });
+      const payload = await backofficeCostGuardService.attachToResponse(
+        res,
+        'campaigns.previewEligibility',
+        {
+          success: true,
+          eligible: result.campaigns.some((item) => item.id === campaign.id),
+          campaigns: result.campaigns,
+          evaluatedAt: result.evaluatedAt
+        },
+        { limit: 10 }
+      );
+      return res.json(payload);
     } catch (error) {
       logError(error, 'Erro no preview de elegibilidade in-app', {
         service: 'campaign-center',
@@ -246,7 +263,12 @@ router.post(
 router.get('/stats', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
   try {
     const stats = await campaignCenterService.getStats(req.query || {});
-    return res.json({ success: true, stats });
+    const payload = await backofficeCostGuardService.attachToResponse(
+      res,
+      'campaigns.stats',
+      { success: true, stats }
+    );
+    return res.json(payload);
   } catch (error) {
     logError(error, 'Erro ao consolidar stats de campanhas', {
       service: 'campaign-center',
@@ -259,7 +281,12 @@ router.get('/stats', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res)
 router.get('/commercial-report', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
   try {
     const report = await campaignCenterService.getCommercialReport(req.query || {});
-    return res.json({ success: true, report });
+    const payload = await backofficeCostGuardService.attachToResponse(
+      res,
+      'campaigns.commercialReport',
+      { success: true, report }
+    );
+    return res.json(payload);
   } catch (error) {
     logError(error, 'Erro ao gerar relatório comercial de campanhas', {
       service: 'campaign-center',
@@ -271,10 +298,15 @@ router.get('/commercial-report', authenticateJWT, requireRole(ADMIN_ROLES), asyn
 
 router.get('/slots', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, res) => {
   try {
-    return res.json({
-      success: true,
-      slots: campaignCenterService.getSlotDefinitions()
-    });
+    const payload = await backofficeCostGuardService.attachToResponse(
+      res,
+      'campaigns.slots',
+      {
+        success: true,
+        slots: campaignCenterService.getSlotDefinitions()
+      }
+    );
+    return res.json(payload);
   } catch (error) {
     logError(error, 'Erro ao listar slots de campanhas', {
       service: 'campaign-center',

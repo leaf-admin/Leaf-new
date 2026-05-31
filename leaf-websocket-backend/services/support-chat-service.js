@@ -73,6 +73,37 @@ class SupportChatService {
         }
     }
 
+    getMessagesKey(userId) {
+        return `support:chat:messages:${userId}`;
+    }
+
+    parseJson(value, fallback = null) {
+        if (!value) return fallback;
+        try {
+            return typeof value === 'string' ? JSON.parse(value) : value;
+        } catch {
+            return fallback;
+        }
+    }
+
+    getMessageScore(message) {
+        const timestamp = message?.timestamp || message?.createdAt || new Date().toISOString();
+        const score = new Date(timestamp).getTime();
+        return Number.isFinite(score) ? score : Date.now();
+    }
+
+    summarizeMessage(message) {
+        if (!message) return null;
+        return {
+            id: message.id || null,
+            message: String(message.message || '').slice(0, 180),
+            senderType: message.senderType || 'user',
+            createdAt: message.createdAt || message.timestamp || null,
+            timestamp: message.timestamp || message.createdAt || null,
+            read: message.read === true
+        };
+    }
+
     /**
      * Processar mensagem recebida via Redis Pub/Sub
      */
@@ -81,7 +112,7 @@ class SupportChatService {
             const { userId } = messageData;
             
             // ✅ Armazenar mensagem no Redis (sorted set por timestamp)
-            const messagesKey = `support:chat:messages:${userId}`;
+            const messagesKey = this.getMessagesKey(userId);
             const score = new Date(messageData.timestamp).getTime();
             
             await this.redis.zadd(messagesKey, score, JSON.stringify(messageData));
@@ -91,17 +122,33 @@ class SupportChatService {
             
             // ✅ Garantir que o chat está marcado como "ativo" se ainda não existe
             const chatStatus = await this.redis.hget(this.chatStatusKey, userId);
+            const isUnreadUserMessage = messageData.senderType === 'user' && messageData.read !== true;
             if (!chatStatus) {
                 await this.redis.hset(this.chatStatusKey, userId, JSON.stringify({
                     userId,
                     status: 'active',
                     createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
+                    updatedAt: new Date().toISOString(),
+                    lastMessageAt: messageData.timestamp || messageData.createdAt || new Date().toISOString(),
+                    lastSenderType: messageData.senderType || 'user',
+                    lastMessagePreview: String(messageData.message || '').slice(0, 180),
+                    unreadFromUser: isUnreadUserMessage ? 1 : 0,
+                    messageCount: 1
                 }));
             } else {
                 // Atualizar updatedAt
-                const status = JSON.parse(chatStatus);
+                const status = this.parseJson(chatStatus, {});
                 status.updatedAt = new Date().toISOString();
+                status.lastMessageAt = messageData.timestamp || messageData.createdAt || status.updatedAt;
+                status.lastSenderType = messageData.senderType || 'user';
+                status.lastMessagePreview = String(messageData.message || '').slice(0, 180);
+                status.messageCount = Number(status.messageCount || 0) + 1;
+                status.unreadFromUser = Number(status.unreadFromUser || 0) + (isUnreadUserMessage ? 1 : 0);
+                if (status.status === 'closed') {
+                    status.status = 'active';
+                    status.reopenedAt = status.updatedAt;
+                    status.reopenReason = 'new_message';
+                }
                 await this.redis.hset(this.chatStatusKey, userId, JSON.stringify(status));
             }
 
@@ -129,7 +176,7 @@ class SupportChatService {
      */
     async closeChat(userId, closedBy = 'agent') {
         try {
-            const messagesKey = `support:chat:messages:${userId}`;
+            const messagesKey = this.getMessagesKey(userId);
             
             // ✅ Buscar todas as mensagens do Redis
             const messages = await this.redis.zrange(messagesKey, 0, -1);
@@ -170,9 +217,7 @@ class SupportChatService {
                 status: 'closed',
                 closedAt: now,
                 closedBy,
-                createdAt: (await this.redis.hget(this.chatStatusKey, userId)) 
-                    ? JSON.parse(await this.redis.hget(this.chatStatusKey, userId)).createdAt 
-                    : now,
+                createdAt: this.parseJson(await this.redis.hget(this.chatStatusKey, userId), {})?.createdAt || now,
                 updatedAt: now,
                 messageCount: messages.length
             }));
@@ -301,10 +346,76 @@ class SupportChatService {
                     createdAt: new Date().toISOString()
                 };
             }
-            return JSON.parse(statusJson);
+            return this.parseJson(statusJson, { status: 'active' });
         } catch (error) {
             logger.error('❌ Erro ao obter status do chat:', error);
             return { status: 'active' };
+        }
+    }
+
+    /**
+     * Listar chats N0 ativos para a central de suporte.
+     * O índice vem do Redis para evitar varreduras caras em Firestore.
+     */
+    async listActiveChats({ limit = 50, includeClosed = false } = {}) {
+        try {
+            const statusMap = await this.redis.hgetall(this.chatStatusKey);
+            const entries = Object.entries(statusMap || {})
+                .map(([userId, statusJson]) => ({
+                    userId,
+                    status: this.parseJson(statusJson, { userId, status: 'active' })
+                }))
+                .filter((entry) => includeClosed || entry.status?.status !== 'closed');
+
+            if (entries.length === 0) {
+                return [];
+            }
+
+            const pipeline = this.redis.pipeline();
+            entries.forEach(({ userId }) => {
+                const key = this.getMessagesKey(userId);
+                pipeline.zrange(key, -1, -1);
+            });
+            const replies = await pipeline.exec();
+
+            const chats = entries.map((entry, index) => {
+                const latestReply = replies[index] || [];
+                const latestRaw = latestReply[1]?.[0] || null;
+                const latestMessage = this.parseJson(latestRaw) || null;
+                const unreadFromUser = Number(entry.status?.unreadFromUser || 0);
+                const lastMessageAt = latestMessage?.timestamp
+                    || latestMessage?.createdAt
+                    || entry.status?.lastMessageAt
+                    || entry.status?.updatedAt
+                    || entry.status?.createdAt
+                    || null;
+
+                return {
+                    userId: entry.userId,
+                    status: entry.status?.status || 'active',
+                    ticketId: entry.status?.ticketId || null,
+                    ticketStatus: entry.status?.ticketStatus || null,
+                    createdAt: entry.status?.createdAt || null,
+                    updatedAt: entry.status?.updatedAt || lastMessageAt,
+                    closedAt: entry.status?.closedAt || null,
+                    lastMessageAt,
+                    lastSenderType: latestMessage?.senderType || entry.status?.lastSenderType || null,
+                    lastMessage: this.summarizeMessage(latestMessage) || {
+                        message: entry.status?.lastMessagePreview || '',
+                        senderType: entry.status?.lastSenderType || null,
+                        timestamp: lastMessageAt
+                    },
+                    unreadFromUser,
+                    messageCount: Number(entry.status?.messageCount || 0)
+                };
+            });
+
+            return chats
+                .sort((a, b) => new Date(b.lastMessageAt || b.updatedAt || 0) - new Date(a.lastMessageAt || a.updatedAt || 0))
+                .slice(0, Math.max(1, Number(limit) || 50));
+        } catch (error) {
+            logger.error('❌ Erro ao listar chats N0:', error);
+            return [];
         }
     }
 
@@ -315,10 +426,10 @@ class SupportChatService {
      */
     async getActiveMessages(userId) {
         try {
-            const messagesKey = `support:chat:messages:${userId}`;
+            const messagesKey = this.getMessagesKey(userId);
             const messages = await this.redis.zrange(messagesKey, 0, -1);
             
-            return messages.map(msg => JSON.parse(msg)).sort((a, b) => 
+            return messages.map(msg => this.parseJson(msg)).filter(Boolean).sort((a, b) =>
                 new Date(a.timestamp) - new Date(b.timestamp)
             );
         } catch (error) {
@@ -375,14 +486,14 @@ class SupportChatService {
      * @param {number} limit - Limite de mensagens
      * @returns {Promise<Array>} Lista de mensagens
      */
-    async getMessageHistory(userId, limit = 50) {
+    async getMessageHistory(userId, limit = 50, { includeArchived = true } = {}) {
         try {
             // ✅ Primeiro, buscar mensagens ativas do Redis
             const activeMessages = await this.getActiveMessages(userId);
             
             // ✅ Depois, buscar mensagens encerradas do Firestore
             let firestoreMessages = [];
-            if (this.firestore) {
+            if (includeArchived && this.firestore) {
                 const snapshot = await this.firestore
                     .collection(this.historyCollection)
                     .where('userId', '==', userId)
@@ -421,9 +532,56 @@ class SupportChatService {
     async markAsRead(userId, messageIds = []) {
         try {
             const now = new Date().toISOString();
-            const batch = this.firestore.batch();
+            const ids = Array.isArray(messageIds) ? messageIds : [];
+            const normalizedIds = new Set(ids.map((id) => String(id)));
+            const messagesKey = this.getMessagesKey(userId);
+            const activeMessages = await this.redis.zrange(messagesKey, 0, -1);
+            const multi = this.redis.multi();
+            let redisUpdates = 0;
+            let userRedisUpdates = 0;
 
-            if (messageIds.length === 0) {
+            activeMessages.forEach((rawMessage) => {
+                const message = this.parseJson(rawMessage);
+                if (!message) return;
+                const shouldMark = normalizedIds.size > 0
+                    ? normalizedIds.has(String(message.id))
+                    : message.senderType === 'user' && message.read !== true;
+                if (!shouldMark) return;
+
+                const updated = {
+                    ...message,
+                    read: true,
+                    readAt: now,
+                    readByAgentAt: now
+                };
+                multi.zrem(messagesKey, rawMessage);
+                multi.zadd(messagesKey, this.getMessageScore(updated), JSON.stringify(updated));
+                redisUpdates += 1;
+                if (message.senderType === 'user') userRedisUpdates += 1;
+            });
+
+            if (redisUpdates > 0) {
+                await multi.exec();
+            }
+
+            const currentStatus = this.parseJson(await this.redis.hget(this.chatStatusKey, userId), null);
+            if (currentStatus) {
+                currentStatus.updatedAt = now;
+                currentStatus.unreadFromUser = ids.length === 0
+                    ? 0
+                    : Math.max(0, Number(currentStatus.unreadFromUser || 0) - userRedisUpdates);
+                await this.redis.hset(this.chatStatusKey, userId, JSON.stringify(currentStatus));
+            }
+
+            if (!this.firestore) {
+                logger.info(`✅ Mensagens ativas marcadas como lidas para usuário: ${userId}`);
+                return;
+            }
+
+            const batch = this.firestore.batch();
+            let firestoreUpdates = 0;
+
+            if (ids.length === 0) {
                 // Marcar todas as mensagens não lidas do usuário
                 const snapshot = await this.firestore
                     .collection(this.historyCollection)
@@ -439,10 +597,11 @@ class SupportChatService {
                         read: true,
                         readAt: now
                     });
+                    firestoreUpdates += 1;
                 });
             } else {
                 // Marcar mensagens específicas
-                messageIds.forEach((messageId) => {
+                ids.forEach((messageId) => {
                     const messageRef = this.firestore
                         .collection(this.historyCollection)
                         .doc(messageId);
@@ -450,14 +609,89 @@ class SupportChatService {
                         read: true,
                         readAt: now
                     });
+                    firestoreUpdates += 1;
                 });
             }
 
-            await batch.commit();
+            if (firestoreUpdates > 0) {
+                await batch.commit();
+            }
             logger.info(`✅ Mensagens marcadas como lidas para usuário: ${userId}`);
 
         } catch (error) {
             logger.error('❌ Erro ao marcar como lida:', error);
+        }
+    }
+
+    /**
+     * Converter chat N0 em ticket operacional sem perder histórico.
+     */
+    async convertChatToTicket(userId, {
+        subject = '',
+        description = '',
+        category = 'chat',
+        priority = 'N3',
+        actorId = 'support-agent',
+        userInfo = {},
+        metadata = {}
+    } = {}) {
+        try {
+            const messages = await this.getMessageHistory(userId, 80);
+            const excerpt = messages
+                .slice(-12)
+                .map((message) => {
+                    const sender = message.senderType === 'agent' ? 'Suporte' : 'Usuario';
+                    return `${sender}: ${message.message || ''}`;
+                })
+                .join('\n');
+            const resolvedSubject = String(subject || '').trim() || 'Atendimento via chat';
+            const resolvedDescription = String(description || '').trim()
+                || `Chat N0 convertido em chamado para acompanhamento.\n\n${excerpt || 'Sem histórico disponível.'}`;
+
+            const supportQueueService = require('./support-queue-service');
+            const result = await supportQueueService.createSupportTicket({
+                subject: resolvedSubject,
+                description: resolvedDescription,
+                category,
+                priority,
+                requesterId: userId,
+                userType: metadata.userType || userInfo.userType || 'passenger',
+                userInfo,
+                metadata: {
+                    ...metadata,
+                    source: 'n0_chat_conversion',
+                    convertedFromChat: true,
+                    chatUserId: userId,
+                    convertedBy: actorId,
+                    convertedAt: new Date().toISOString(),
+                    chatMessageCount: messages.length
+                }
+            });
+
+            await this.reopenChat(userId, 'converted_to_ticket', {
+                ticketId: result.ticket?.id || null,
+                ticketStatus: result.ticket?.status || 'open',
+                convertedAt: new Date().toISOString(),
+                convertedBy: actorId
+            });
+
+            if (this.io) {
+                this.io.emit('support:chat:converted', {
+                    userId,
+                    ticketId: result.ticket?.id || null,
+                    convertedBy: actorId
+                });
+            }
+
+            return {
+                success: true,
+                ticket: result.ticket,
+                initialMessage: result.initialMessage,
+                messageCount: messages.length
+            };
+        } catch (error) {
+            logger.error('❌ Erro ao converter chat em ticket:', error);
+            throw error;
         }
     }
 

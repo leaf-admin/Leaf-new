@@ -1,6 +1,10 @@
 const mockCollectionGet = jest.fn();
 const mockCollectionDocSet = jest.fn();
 const mockCollectionDocGet = jest.fn();
+const mockRealtimeOnce = jest.fn();
+const mockRealtimeRef = jest.fn(() => ({
+  once: mockRealtimeOnce
+}));
 const mockFirestoreCollection = jest.fn(() => ({
   get: mockCollectionGet,
   doc: jest.fn(() => ({
@@ -25,7 +29,9 @@ jest.mock('../../../firebase-config', () => ({
       commit: jest.fn().mockResolvedValue(undefined)
     }))
   })),
-  getRealtimeDB: jest.fn(() => null)
+  getRealtimeDB: jest.fn(() => ({
+    ref: mockRealtimeRef
+  }))
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -47,6 +53,7 @@ describe('driver-application-service', () => {
     jest.clearAllMocks();
     jest.resetModules();
     mockFirestoreApplications([]);
+    mockRealtimeOnce.mockResolvedValue({ val: () => ({}) });
     service = require('../../../services/driver-application-service');
   });
 
@@ -143,6 +150,36 @@ describe('driver-application-service', () => {
         pending: 1,
         approved: 0,
         rejected: 0
+      }
+    });
+  });
+
+  it('builds a lightweight review queue summary from denormalized counters', async () => {
+    mockRealtimeOnce.mockResolvedValue({
+      val: () => ({
+        cnh: {
+          pending: 2,
+          approved: 4
+        },
+        crlv: {
+          pending: '3',
+          rejected: 1
+        }
+      })
+    });
+
+    const result = await service.getReviewQueueSummary();
+
+    expect(mockRealtimeRef).toHaveBeenCalledWith('driver_documents_index_stats');
+    expect(result).toMatchObject({
+      source: 'driver_documents_index_stats',
+      summary: {
+        total: 10,
+        byStatus: {
+          pending: 5,
+          approved: 4,
+          rejected: 1
+        }
       }
     });
   });

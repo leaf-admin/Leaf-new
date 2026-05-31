@@ -3,6 +3,7 @@ const modernMetricsService = require('./modern-metrics-service');
 const opsOverviewService = require('./ops-overview-service');
 const campaignCenterService = require('./campaign-center-service');
 const healthCheckService = require('./health-check-service');
+const driverApplicationService = require('./driver-application-service');
 const WorkerHealthMonitor = require('../workers/health-monitor');
 const { logStructured } = require('../utils/logger');
 
@@ -57,6 +58,172 @@ function classifyStatus({ sources = [], health, workerHealth, workerLag, workerD
   return 'healthy';
 }
 
+function sourceStatus(sources, id, fallback = 'unknown') {
+  return sources.find((source) => source.id === id)?.status || fallback;
+}
+
+function buildDomainHealth({ sources, status, campaignStats, driverOnboardingSummary, opsOverview, workerDLQ, workerLag }) {
+  const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
+  const lag = toNumber(workerLag?.lag?.lag ?? workerLag?.lag ?? workerLag, 0);
+  const supportBreaches = toNumber(opsOverview?.supportQueue?.overdueAckCount, 0)
+    + toNumber(opsOverview?.supportQueue?.overdueFirstResponseCount, 0);
+  const pendingDocuments = toNumber(driverOnboardingSummary?.byStatus?.pending, 0);
+
+  const domains = [
+    {
+      id: 'api',
+      label: 'API e dashboard',
+      status: sourceStatus(sources, 'health') === 'ok' ? status : 'unhealthy',
+      source: 'health',
+      action: sourceStatus(sources, 'health') === 'ok'
+        ? 'Manter monitoramento normal.'
+        : 'Abrir health check e revisar API antes da operação.'
+    },
+    {
+      id: 'socket',
+      label: 'Socket e tempo real',
+      status: sourceStatus(sources, 'workerHealth') === 'ok' && lag <= 100 ? 'healthy' : 'warning',
+      source: 'workerHealth',
+      action: lag > 100
+        ? 'Checar lag dos workers e consumidores ativos.'
+        : 'Conexões em acompanhamento pelo snapshot.'
+    },
+    {
+      id: 'support',
+      label: 'Suporte',
+      status: supportBreaches > 0 ? 'warning' : 'healthy',
+      source: 'opsOverview',
+      action: supportBreaches > 0
+        ? 'Priorizar tickets fora do SLA.'
+        : 'Fila dentro do esperado.'
+    },
+    {
+      id: 'campaigns',
+      label: 'Campanhas',
+      status: sourceStatus(sources, 'campaignStats') === 'ok' ? 'healthy' : 'warning',
+      source: 'campaignStats',
+      action: toNumber(campaignStats?.active, 0) > 0
+        ? 'Campanhas ativas com leitura agregada.'
+        : 'Validar se existe campanha ativa para as superfícies principais.'
+    },
+    {
+      id: 'driver-onboarding',
+      label: 'Cadastro motorista',
+      status: pendingDocuments > 0 ? 'warning' : 'healthy',
+      source: 'driverOnboarding',
+      action: pendingDocuments > 0
+        ? 'Revisar documentos pendentes na fila de motoristas.'
+        : 'Sem pendência crítica de documentos.'
+    },
+    {
+      id: 'finance',
+      label: 'Financeiro',
+      status: sourceStatus(sources, 'financialToday') === 'ok' && sourceStatus(sources, 'operationalRevenue') === 'ok'
+        ? 'healthy'
+        : 'warning',
+      source: 'financialToday',
+      action: 'Conferir holding, split e divergências na reconciliação.'
+    },
+    {
+      id: 'workers',
+      label: 'Workers e filas',
+      status: dlqSize > 0 || lag > 100 ? 'warning' : 'healthy',
+      source: 'workerDLQ',
+      action: dlqSize > 0
+        ? 'Inspecionar DLQ antes de novos canaries.'
+        : 'Sem DLQ crítica no snapshot.'
+    }
+  ];
+
+  return domains.map((domain) => ({
+    ...domain,
+    lastCheckedAt: new Date().toISOString()
+  }));
+}
+
+function buildActionItems({ status, sources, opsOverview, campaignStats, driverOnboardingSummary, workerDLQ, workerLag }) {
+  const items = [];
+  const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
+  const lag = toNumber(workerLag?.lag?.lag ?? workerLag?.lag ?? workerLag, 0);
+  const supportBreaches = toNumber(opsOverview?.supportQueue?.overdueAckCount, 0)
+    + toNumber(opsOverview?.supportQueue?.overdueFirstResponseCount, 0);
+  const ticketsWithoutOwner = toNumber(opsOverview?.supportQueue?.ticketsWithoutOwner, 0);
+  const pendingDocuments = toNumber(driverOnboardingSummary?.byStatus?.pending, 0);
+
+  for (const source of sources) {
+    if (source.status !== 'error') continue;
+    items.push({
+      id: `source-${source.id}`,
+      priority: source.critical ? 'alta' : 'media',
+      title: `${source.label} falhou`,
+      description: source.error || 'Fonte sem resposta no snapshot.',
+      href: '/observability'
+    });
+  }
+
+  if (supportBreaches > 0) {
+    items.push({
+      id: 'support-sla',
+      priority: 'alta',
+      title: 'Suporte fora do SLA',
+      description: `${supportBreaches} item(ns) precisam de resposta agora.`,
+      href: '/support'
+    });
+  }
+
+  if (ticketsWithoutOwner > 0) {
+    items.push({
+      id: 'support-owner',
+      priority: 'media',
+      title: 'Tickets sem responsável',
+      description: `${ticketsWithoutOwner} ticket(s) ainda sem dono.`,
+      href: '/support'
+    });
+  }
+
+  if (pendingDocuments > 0) {
+    items.push({
+      id: 'driver-docs',
+      priority: 'media',
+      title: 'Documentos aguardando revisão',
+      description: `${pendingDocuments} documento(s) de motorista pendente(s).`,
+      href: '/drivers/review-queue'
+    });
+  }
+
+  if (toNumber(campaignStats?.active, 0) === 0) {
+    items.push({
+      id: 'campaigns-empty',
+      priority: 'baixa',
+      title: 'Sem campanha ativa',
+      description: 'Confira se passenger_home e driver_home devem ter banner publicado hoje.',
+      href: '/campaign-center'
+    });
+  }
+
+  if (dlqSize > 0 || lag > 100) {
+    items.push({
+      id: 'workers-attention',
+      priority: dlqSize > 0 ? 'alta' : 'media',
+      title: 'Workers pedem atenção',
+      description: dlqSize > 0 ? `${dlqSize} item(ns) em DLQ.` : `Lag em ${lag}.`,
+      href: '/observability'
+    });
+  }
+
+  if (!items.length) {
+    items.push({
+      id: 'operation-ok',
+      priority: 'baixa',
+      title: status === 'healthy' ? 'Operação estável' : 'Operação em acompanhamento',
+      description: 'Nenhuma ação urgente apareceu no snapshot cacheado.',
+      href: '/dashboard'
+    });
+  }
+
+  return items.slice(0, 8);
+}
+
 function buildSource(id, label, critical, settled, startedAt) {
   const durationMs = Math.max(0, Date.now() - startedAt);
   if (settled.status === 'fulfilled') {
@@ -89,6 +256,7 @@ class BackofficeCommandCenterService {
     ops = opsOverviewService,
     campaignCenter = campaignCenterService,
     health = healthCheckService,
+    driverApplications = driverApplicationService,
     workerHealthMonitor = new WorkerHealthMonitor()
   } = {}) {
     this.redisPool = redis;
@@ -96,6 +264,7 @@ class BackofficeCommandCenterService {
     this.ops = ops;
     this.campaignCenter = campaignCenter;
     this.health = health;
+    this.driverApplications = driverApplications;
     this.workerHealthMonitor = workerHealthMonitor;
     this.ttlSeconds = clampNumber(
       process.env.BACKOFFICE_COMMAND_CENTER_TTL_SECONDS,
@@ -194,6 +363,12 @@ class BackofficeCommandCenterService {
         run: () => this.campaignCenter.getStats({})
       },
       {
+        id: 'driverOnboarding',
+        label: 'Cadastro de motoristas',
+        critical: false,
+        run: () => this.driverApplications.getReviewQueueSummary()
+      },
+      {
         id: 'workerHealth',
         label: 'Workers',
         critical: true,
@@ -232,6 +407,7 @@ class BackofficeCommandCenterService {
     const financialToday = this.sourceValue(sources, 'financialToday', {});
     const operationalRevenue = this.sourceValue(sources, 'operationalRevenue', {});
     const campaignStats = this.sourceValue(sources, 'campaignStats', {});
+    const driverOnboardingQueue = this.sourceValue(sources, 'driverOnboarding', {});
     const workerHealth = this.sourceValue(sources, 'workerHealth', null);
     const workerLag = this.sourceValue(sources, 'workerLag', null);
     const workerDLQ = this.sourceValue(sources, 'workerDLQ', null);
@@ -241,6 +417,8 @@ class BackofficeCommandCenterService {
     const totalCustomers = toNumber(usersStatus?.customers?.total, 0);
     const completedRides = toNumber(financialToday.totalRides ?? ridesToday.completedToday, 0);
     const openSupportTickets = toNumber(opsOverview?.supportQueue?.totalOpenTickets, 0);
+    const driverOnboardingSummary = driverOnboardingQueue?.summary || {};
+    const driverOnboardingByStatus = driverOnboardingSummary.byStatus || {};
 
     const status = classifyStatus({
       sources,
@@ -249,6 +427,24 @@ class BackofficeCommandCenterService {
       workerLag,
       workerDLQ,
       opsOverview
+    });
+    const domainHealth = buildDomainHealth({
+      sources,
+      status,
+      campaignStats,
+      driverOnboardingSummary,
+      opsOverview,
+      workerDLQ,
+      workerLag
+    });
+    const actionItems = buildActionItems({
+      status,
+      sources,
+      opsOverview,
+      campaignStats,
+      driverOnboardingSummary,
+      workerDLQ,
+      workerLag
     });
 
     return {
@@ -266,8 +462,10 @@ class BackofficeCommandCenterService {
         workerHealth,
         workerLag,
         workerDLQ,
+        domainHealth,
         sources: sources.map(({ value, ...source }) => source)
       },
+      actionItems,
       dailyMetrics: {
         activeDrivers: toNumber(usersStatus?.drivers?.online, 0),
         activePassengers: toNumber(usersStatus?.customers?.online, 0),
@@ -301,6 +499,13 @@ class BackofficeCommandCenterService {
         campaignValueCents: toNumber(campaignStats.campaignValueCents, 0),
         effectiveCpmCents: toNumber(campaignStats.effectiveCpmCents, 0),
         effectiveCpcCents: toNumber(campaignStats.effectiveCpcCents, 0)
+      },
+      driverOnboarding: {
+        totalDocuments: toNumber(driverOnboardingSummary.total, 0),
+        pendingDocuments: toNumber(driverOnboardingByStatus.pending, 0),
+        approvedDocuments: toNumber(driverOnboardingByStatus.approved, 0),
+        rejectedDocuments: toNumber(driverOnboardingByStatus.rejected, 0),
+        reviewQueueSource: driverOnboardingQueue?.source || 'driver_documents_index_stats'
       },
       operations: {
         overview: opsOverview,

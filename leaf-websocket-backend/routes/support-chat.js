@@ -10,8 +10,41 @@
 const express = require('express');
 const router = express.Router();
 const supportChatService = require('../services/support-chat-service');
+const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const { authenticateSupport, canAccessUserScope, isSupportAgent } = require('../middleware/support-auth');
 const { logger } = require('../utils/logger');
+
+/**
+ * GET /api/support/chat/inbox
+ * Listar chats N0 ativos para atendimento simples.
+ */
+router.get('/chat/inbox', authenticateSupport, async (req, res) => {
+    try {
+        if (!isSupportAgent(req.user)) {
+            return res.status(403).json({ error: 'Apenas agentes podem listar chats' });
+        }
+
+        const limit = parseInt(req.query.limit, 10) || 50;
+        const includeClosed = String(req.query.includeClosed || '').toLowerCase() === 'true';
+        const chats = await supportChatService.listActiveChats({ limit, includeClosed });
+
+        const payload = await backofficeCostGuardService.attachToResponse(
+            res,
+            'support.chat.inbox',
+            {
+                success: true,
+                chats,
+                count: chats.length
+            },
+            { limit, includeClosed }
+        );
+
+        res.json(payload);
+    } catch (error) {
+        logger.error('❌ Erro ao listar inbox de chat:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
 
 /**
  * GET /api/support/chat/:userId/history
@@ -21,19 +54,27 @@ router.get('/chat/:userId/history', authenticateSupport, async (req, res) => {
     try {
         const { userId } = req.params;
         const limit = parseInt(req.query.limit) || 50;
+        const includeArchived = String(req.query.includeArchived || 'true').toLowerCase() !== 'false';
 
         // Verificar se usuário tem permissão (próprio usuário ou admin)
         if (!canAccessUserScope(req.user, userId)) {
             return res.status(403).json({ error: 'Acesso negado' });
         }
 
-        const messages = await supportChatService.getMessageHistory(userId, limit);
+        const messages = await supportChatService.getMessageHistory(userId, limit, { includeArchived });
 
-        res.json({
-            success: true,
-            messages,
-            count: messages.length
-        });
+        const payload = await backofficeCostGuardService.attachToResponse(
+            res,
+            'support.chat.history',
+            {
+                success: true,
+                messages,
+                count: messages.length
+            },
+            { limit, includeArchived }
+        );
+
+        res.json(payload);
 
     } catch (error) {
         logger.error('❌ Erro ao buscar histórico:', error);
@@ -108,6 +149,47 @@ router.post('/chat/:userId/message', authenticateSupport, async (req, res) => {
 
     } catch (error) {
         logger.error('❌ Erro ao enviar mensagem:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+});
+
+/**
+ * POST /api/support/chat/:userId/convert-ticket
+ * Converter um chat N0 em chamado operacional.
+ */
+router.post('/chat/:userId/convert-ticket', authenticateSupport, async (req, res) => {
+    try {
+        if (!isSupportAgent(req.user)) {
+            return res.status(403).json({ error: 'Apenas agentes podem converter chats em chamados' });
+        }
+
+        const { userId } = req.params;
+        const {
+            subject,
+            description,
+            category = 'chat',
+            priority = 'N3',
+            userInfo = {},
+            metadata = {}
+        } = req.body || {};
+
+        const actorId = req.user?.id || req.user?.uid || req.user?.email || 'support-agent';
+        const result = await supportChatService.convertChatToTicket(userId, {
+            subject,
+            description,
+            category,
+            priority,
+            actorId,
+            userInfo,
+            metadata
+        });
+
+        res.json({
+            success: true,
+            ...result
+        });
+    } catch (error) {
+        logger.error('❌ Erro ao converter chat em ticket:', error);
         res.status(500).json({ error: 'Erro interno do servidor' });
     }
 });

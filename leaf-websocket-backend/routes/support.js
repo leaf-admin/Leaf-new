@@ -31,6 +31,7 @@ try {
 
 const supportTicketService = require('../services/support-ticket-service');
 const supportQueueService = require('../services/support-queue-service');
+const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const supportDriverIdentityReverificationService = require('../services/support-driver-identity-reverification-service');
 
 const AGENT_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
@@ -135,7 +136,12 @@ router.get('/faq', (_req, res) => {
 router.get('/queue/summary', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (_req, res) => {
   try {
     const summary = await supportQueueService.getQueueSummary({ autoEscalate: true });
-    res.json({ success: true, summary });
+    const payload = await backofficeCostGuardService.attachToResponse(
+      res,
+      'support.queue.summary',
+      { success: true, summary }
+    );
+    res.json(payload);
   } catch (error) {
     logError(error, { service: 'support-routes', operation: 'queueSummary' });
     res.status(500).json({ error: 'Erro interno do servidor' });
@@ -152,7 +158,13 @@ router.get('/queue/backlog', authenticateSupport, requireSupportRoles(AGENT_ROLE
       offset,
       autoEscalate: true
     });
-    res.json({ success: true, ...backlog });
+    const payload = await backofficeCostGuardService.attachToResponse(
+      res,
+      'support.queue.backlog',
+      { success: true, ...backlog },
+      { limit, offset }
+    );
+    res.json(payload);
   } catch (error) {
     logError(error, { service: 'support-routes', operation: 'queueBacklog' });
     res.status(500).json({ error: 'Erro interno do servidor' });
