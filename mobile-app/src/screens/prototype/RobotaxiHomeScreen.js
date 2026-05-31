@@ -5,6 +5,7 @@ import { useIsFocused, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Polygon } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
+import polyline from '@mapbox/polyline';
 import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
@@ -75,6 +76,7 @@ import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 import kycService from '../../services/KYCService';
 import nativeAwsLivenessService from '../../services/NativeAwsLivenessService';
 import { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } from '../../services/BackgroundLocationService';
+import { getDirectionsApi } from '../../services/runtime/locationRouteBridge';
 import Logger from '../../utils/Logger';
 
 const { color } = robotaxiPrototypeTokens;
@@ -593,6 +595,45 @@ function isFiniteCoordinate(candidate) {
   );
 }
 
+function formatDirectionsCoordinate(coordinate) {
+  if (!isFiniteCoordinate(coordinate)) {
+    return '';
+  }
+
+  return `${Number(coordinate.latitude).toFixed(6)},${Number(coordinate.longitude).toFixed(6)}`;
+}
+
+function buildHomeRoutePreviewKey(origin, destination) {
+  const originKey = formatDirectionsCoordinate(origin);
+  const destinationKey = formatDirectionsCoordinate(destination);
+
+  if (!originKey || !destinationKey) {
+    return '';
+  }
+
+  return `${originKey}|${destinationKey}`;
+}
+
+function decodeRoutePolyline(polylinePoints) {
+  if (!polylinePoints) {
+    return [];
+  }
+
+  try {
+    const decoded = polyline.decode(polylinePoints);
+    if (!Array.isArray(decoded) || decoded.length < 2) {
+      return [];
+    }
+
+    return decoded
+      .map(([latitude, longitude]) => ({ latitude, longitude }))
+      .filter(isFiniteCoordinate);
+  } catch (error) {
+    Logger.warn('[PassengerHome] Falha ao decodificar polyline da rota:', error?.message || error);
+    return [];
+  }
+}
+
 function distanceBetweenCoordinatesKm(origin, destination) {
   if (!isFiniteCoordinate(origin) || !isFiniteCoordinate(destination)) {
     return Number.POSITIVE_INFINITY;
@@ -1083,6 +1124,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const lastConnectionHealthyRef = useRef(false);
   const hasConnectionSnapshotRef = useRef(false);
   const lastDriverAutomationWatchdogCommandRef = useRef('');
+  const homeRoutePreviewRequestRef = useRef('');
   const latestPrototypeHomeAutomationPayload = useMemo(
     () => getLatestPrototypeHomeAutomationPayload(),
     []
@@ -1112,6 +1154,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [homeSelectedDestination, setHomeSelectedDestination] = useState(null);
   const [homeSelectedCategoryId, setHomeSelectedCategoryId] = useState('plus');
   const [homeLeafDelasEnabled, setHomeLeafDelasEnabled] = useState(false);
+  const [homeRoutePreview, setHomeRoutePreview] = useState(null);
   const [homePickupCoordinate, setHomePickupCoordinate] = useState(null);
   const [homePickupAddress, setHomePickupAddress] = useState('');
   const [cachedHomePickupAddress, setCachedHomePickupAddress] = useState('');
@@ -1237,7 +1280,19 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     ]
   );
   const homeQuoteDestinationCoordinate = homeSelectedDestination?.coordinate || null;
+  const homeRoutePreviewKey = useMemo(
+    () => buildHomeRoutePreviewKey(effectiveHomePickupCoordinate, homeQuoteDestinationCoordinate),
+    [effectiveHomePickupCoordinate, homeQuoteDestinationCoordinate],
+  );
   const homeQuoteDistanceKm = useMemo(() => {
+    if (
+      homeRoutePreview?.key === homeRoutePreviewKey &&
+      Number.isFinite(homeRoutePreview?.distanceKm) &&
+      homeRoutePreview.distanceKm > 0
+    ) {
+      return Number(homeRoutePreview.distanceKm.toFixed(1));
+    }
+
     if (!isFiniteCoordinate(effectiveHomePickupCoordinate) || !isFiniteCoordinate(homeQuoteDestinationCoordinate)) {
       return 3.8;
     }
@@ -1253,16 +1308,33 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     return Math.max(1.2, Number((straightDistance * 1.32).toFixed(1)));
   }, [
     effectiveHomePickupCoordinate,
+    homeRoutePreview?.distanceKm,
+    homeRoutePreview?.key,
+    homeRoutePreviewKey,
     homeQuoteDestinationCoordinate,
   ]);
   const homeQuoteDurationMin = useMemo(() => {
+    if (
+      homeRoutePreview?.key === homeRoutePreviewKey &&
+      Number.isFinite(homeRoutePreview?.durationMin) &&
+      homeRoutePreview.durationMin > 0
+    ) {
+      return Math.max(4, Math.round(homeRoutePreview.durationMin));
+    }
+
     const destinationEta = Number.parseInt(homeSelectedDestination?.eta || '', 10);
     if (Number.isFinite(destinationEta) && destinationEta > 0) {
       return Math.max(4, destinationEta + 4);
     }
 
     return Math.max(6, Math.round(homeQuoteDistanceKm * 4.2));
-  }, [homeQuoteDistanceKm, homeSelectedDestination?.eta]);
+  }, [
+    homeQuoteDistanceKm,
+    homeRoutePreview?.durationMin,
+    homeRoutePreview?.key,
+    homeRoutePreviewKey,
+    homeSelectedDestination?.eta,
+  ]);
   const homePickupEtaBaseMin = useMemo(() => {
     const destinationEta = Number.parseInt(homeSelectedDestination?.eta || '', 10);
     return Number.isFinite(destinationEta) && destinationEta > 0
@@ -4159,9 +4231,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!homeSelectedDestination?.coordinate) {
+      homeRoutePreviewRequestRef.current = '';
+      setHomeRoutePreview(previous => (previous ? null : previous));
       return;
     }
 
+    const routeKey = buildHomeRoutePreviewKey(
+      effectiveHomePickupCoordinate,
+      homeSelectedDestination.coordinate,
+    );
+    if (!routeKey) {
+      return;
+    }
+
+    homeRoutePreviewRequestRef.current = routeKey;
     setPrototypeMapRoute({
       origin: effectiveHomePickupCoordinate,
       destination: homeSelectedDestination.coordinate,
@@ -4172,6 +4255,63 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         homeSelectedDestination.name ||
         '',
     });
+
+    const startLoc = formatDirectionsCoordinate(effectiveHomePickupCoordinate);
+    const destLoc = formatDirectionsCoordinate(homeSelectedDestination.coordinate);
+    const destinationName = homeSelectedDestination.name || 'Destino';
+    const destinationAddress =
+      homeSelectedDestination.address ||
+      homeSelectedDestination.description ||
+      homeSelectedDestination.name ||
+      '';
+
+    if (!startLoc || !destLoc) {
+      return;
+    }
+
+    let cancelled = false;
+    getDirectionsApi(startLoc, destLoc, null, {
+      routeScope: 'passenger_home_preview',
+      routeFamily: 'passenger_home_preview',
+      cacheMode: 'exact',
+      sourceKey: routeKey,
+      sourceMeta: {
+        surface: 'passenger_home_category_preview',
+      },
+    })
+      .then(route => {
+        if (cancelled || homeRoutePreviewRequestRef.current !== routeKey) {
+          return;
+        }
+
+        const coordinates = decodeRoutePolyline(route?.polylinePoints);
+        if (coordinates.length >= 2) {
+          setPrototypeMapRoute({
+            origin: effectiveHomePickupCoordinate,
+            destination: homeSelectedDestination.coordinate,
+            coordinates,
+            destinationLabel: destinationName,
+            destinationAddress,
+          });
+        }
+
+        const distanceKm = Number(route?.distance_in_km);
+        const durationMin = Number(route?.time_in_secs) / 60;
+        setHomeRoutePreview({
+          key: routeKey,
+          distanceKm: Number.isFinite(distanceKm) && distanceKm > 0 ? distanceKm : null,
+          durationMin: Number.isFinite(durationMin) && durationMin > 0 ? durationMin : null,
+        });
+      })
+      .catch(error => {
+        if (!cancelled) {
+          Logger.warn('[PassengerHome] Rota real indisponível; mantendo fallback visual.', error?.message || error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     effectiveHomePickupCoordinate,
     homeSelectedDestination?.address,

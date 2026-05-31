@@ -55,6 +55,7 @@ Notas:
 ## 3) App content > Account deletion
 - In-app deletion disponível: `Yes`
 - URL externa de exclusao: `https://leaf.app.br/delete-account`
+- Caminho no app: `Menu > Perfil > Excluir conta`
 
 ## 4) App content > App access (texto sugerido)
 
@@ -63,6 +64,8 @@ Use the pre-provisioned review accounts below (no sign-up required):
 - Passenger account: +55 21 10293-8475 / OTP code: 992111.
 - Driver account: +55 21 12345-6789 / OTP code: 992000.
 At login, enter the phone number, tap Continue, and enter the review OTP code above.
+Do not use OTP 000000.
+Account deletion is available inside the app from Menu > Perfil > Excluir conta and also at https://leaf.app.br/delete-account.
 To switch role, log out and log in with the other review account.
 If needed, use two devices or two sessions to validate both flows.`
 

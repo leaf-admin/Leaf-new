@@ -127,7 +127,7 @@ Answers:
 
 Explanation:
 
-`Users can initiate account deletion inside the app under Privacy settings. The app also provides a public account deletion page with instructions and support contact. After a valid request, the account is disabled and personal data is removed or anonymized according to the retention policy and applicable legal obligations.`
+`Users can initiate account deletion inside the app from Menu > Perfil > Excluir conta. The app also provides a public account deletion page with instructions and support contact. After a valid request, the account is disabled and personal data is removed or anonymized according to the retention policy and applicable legal obligations.`
 
 ## 6. Review Notes
 
@@ -145,7 +145,7 @@ Important:
 
 Suggested note:
 
-`Leaf is a ride-hailing app with passenger and driver modes in one single app. Use the pre-provisioned review accounts below: Passenger account +55 21 10293-8475 with OTP 992111; Driver account +55 21 12345-6789 with OTP 992000. Passenger flow covers login, destination selection, PIX payment, ride tracking, chat, support, receipt and account deletion. Driver flow covers login, activation status, online/offline, background location disclosure, ride offer, pickup arrival, trip start, navigation handoff, trip completion, earnings and support. Background location is requested only for drivers while online or on an active trip, and is explained before the OS permission prompt.`
+`Leaf is a ride-hailing app with passenger and driver modes in one single app. Use the pre-provisioned review accounts below: Passenger account +55 21 10293-8475 with OTP 992111; Driver account +55 21 12345-6789 with OTP 992000. At login, enter the phone number, tap Continue, and enter the review OTP code above. Do not use OTP 000000. Passenger flow covers login, destination selection, PIX payment, ride tracking, chat, support, receipt and account deletion. Account deletion is available inside the app from Menu > Perfil > Excluir conta and also at https://leaf.app.br/delete-account. Driver flow covers login, activation status, online/offline, background location disclosure, ride offer, pickup arrival, trip start, navigation handoff, trip completion, earnings and support. Background location is requested only for drivers while online or on an active trip, and is explained before the OS permission prompt.`
 
 ## 7. Evidence Checklist
 

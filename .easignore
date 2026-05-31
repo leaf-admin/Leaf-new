@@ -8,22 +8,36 @@ node_modules
 *.apk
 *.aab
 *.ipa
+*.key
+*.pub
 
 # Root-level local artifacts and evidence not needed by mobile EAS builds.
-reports/
-tmp/
-.tmp/
-.tmp-*/
-.local-tools/
-docs/
-tests/
-deploy-package/
-web-app/
-store-assets/
+/reports/
+/tmp/
+/.tmp/
+/.tmp-*/
+/.local-tools/
+/.venv/
+/.venv_*/
+/.venv_image/
+/docs/
+/tests/
+/deploy-package/
+/web-app/
+/landing-page/
+/observability/
+/platform-tools/
+/platforms/
+/services/
+/store-assets/
+/system-images/
+/vehicle-image-bank/
+/digitaloceankey
+/digitaloceankey.pub
 
 # Exclude sibling workspaces from mobile EAS uploads.
-leaf-websocket-backend/
-leaf-dashboard-js/
+/leaf-websocket-backend/
+/leaf-dashboard-js/
 
 # Mobile local build artifacts and QA evidence.
 mobile-app/node_modules

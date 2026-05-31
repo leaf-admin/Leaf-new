@@ -2,13 +2,33 @@ node_modules
 # package-lock.json
 .git
 .expo
+
+# Monorepo/workspace artifacts outside the mobile build surface
+.local-tools/
+.venv/
+.venv_*/
+.venv_image/
+leaf-dashboard-js/
+leaf-websocket-backend/
+landing-page/
+observability/
+platform-tools/
+platforms/
+store-assets/
+system-images/
+vehicle-image-bank/
+digitaloceankey
+digitaloceankey.pub
+*.pem
+*.key
+*.pub
+
 android/app/build
 android/app/.cxx
 ios/build
 ios/Pods
 *.log
 .DS_Store
-*.pem
 .env.local
 .env.development.local
 .env.test.local
