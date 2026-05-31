@@ -9,41 +9,42 @@ import { canAccessItem, isLaunchFeatureEnabled } from "@/src/utils/dashboard-acc
 
 const groups = [
   {
-    id: "overview",
-    section: "Operação",
-    label: "Monitoramento",
+    id: "daily",
+    section: "Diário",
+    label: "Operação diária",
     href: "/dashboard",
     items: [
-      { href: "/dashboard", label: "Dashboard" },
+      { href: "/dashboard", label: "Visão geral" },
+      { href: "/support", label: "Suporte" },
+      { href: "/campaign-center", label: "Campanhas", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/drivers/review-queue", label: "Cadastro motorista" },
+    ],
+  },
+  {
+    id: "overview",
+    section: "Análise",
+    label: "Dados e saúde",
+    href: "/observability",
+    items: [
       { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
       { href: "/metrics", label: "Métricas", blockedRoles: ["support"] },
       { href: "/metrics/history", label: "Histórico", blockedRoles: ["support"] },
       { href: "/metrics/marketplace", label: "Marketplace", blockedRoles: ["support"] },
+      { href: "/maps", label: "Mapa operacional" },
+      { href: "/audit", label: "Auditoria", allowedRoles: ["admin", "super-admin", "manager", "development"] },
     ],
   },
   {
     id: "organization",
-    section: "Operação",
-    label: "Pessoas",
+    section: "Gestão",
+    label: "Pessoas e financeiro",
     href: "/drivers",
     items: [
       { href: "/drivers", label: "Motoristas" },
-      { href: "/drivers/review-queue", label: "Documentos" },
       { href: "/users", label: "Usuários" },
-      { href: "/maps", label: "Mapas" },
       { href: "/subscriptions", label: "Assinaturas", blockedRoles: ["support", "development"] },
       { href: "/programs", label: "Programas", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "referralProgramsEnabled" },
-    ],
-  },
-  {
-    id: "project",
-    section: "Growth",
-    label: "Ações",
-    href: "/support",
-    items: [
-      { href: "/support", label: "Suporte" },
       { href: "/notifications", label: "Notificações" },
-      { href: "/campaign-center", label: "Campanhas in-app", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "campaignCenterEnabled" },
       { href: "/reports", label: "Relatórios" },
       { href: "/promotions", label: "Promoções" },
       { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
@@ -161,18 +162,24 @@ export default function AppNav() {
         </div>
         <div className="app-topbar-right">
           <Link href="/dashboard" className="app-topbar-link">
-            Dashboard
+            Visão geral
+          </Link>
+          <Link href="/support" className="app-topbar-link">
+            Suporte
+          </Link>
+          <Link href="/campaign-center" className="app-topbar-link">
+            Campanhas
+          </Link>
+          <Link href="/drivers/review-queue" className="app-topbar-link">
+            Cadastro
           </Link>
           <Link
             href={apiDocsHref}
-            className="app-topbar-link"
+            className="app-topbar-link app-topbar-link-secondary"
             target={isApiDocsExternal ? "_blank" : undefined}
             rel={isApiDocsExternal ? "noreferrer" : undefined}
           >
             API Docs
-          </Link>
-          <Link href="/support" className="app-topbar-link">
-            Suporte
           </Link>
           <div className="app-topbar-avatar" title={user?.name || user?.email || "Admin"}>
             {userInitials}

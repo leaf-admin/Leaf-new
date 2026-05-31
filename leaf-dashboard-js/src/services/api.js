@@ -765,6 +765,28 @@ class LeafApiService {
     });
   }
 
+  async listAuditLogs(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/audit/logs${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async getAuditStats(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.append(key, String(value));
+      }
+    });
+    const suffix = query.toString();
+    return this.request(`/audit/stats${suffix ? `?${suffix}` : ""}`);
+  }
+
   async getSupportTickets(params = {}) {
     const query = new URLSearchParams();
     if (params.status) query.append("status", params.status);
@@ -848,18 +870,42 @@ class LeafApiService {
     });
   }
 
-  async getChatHistory(userId, limit = 50) {
-    return this.request(`/support/chat/${userId}/history?limit=${limit}`);
+  async getChatHistory(userId, limit = 50, { includeArchived = true } = {}) {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (!includeArchived) params.set("includeArchived", "false");
+    return this.request(`/support/chat/${userId}/history?${params.toString()}`);
+  }
+
+  async getSupportChatInbox({ limit = 50, includeClosed = false } = {}) {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (includeClosed) params.set("includeClosed", "true");
+    return this.request(`/support/chat/inbox?${params.toString()}`);
   }
 
   async getChatStatus(userId) {
     return this.request(`/support/chat/${userId}/status`);
   }
 
+  async markChatRead(userId, messageIds = []) {
+    return this.request(`/support/chat/${userId}/mark-read`, {
+      method: "POST",
+      body: JSON.stringify({ messageIds }),
+    });
+  }
+
   async sendChatMessage(userId, message) {
     return this.request(`/support/chat/${userId}/message`, {
       method: "POST",
       body: JSON.stringify({ message, senderType: "agent" }),
+    });
+  }
+
+  async convertChatToTicket(userId, payload = {}) {
+    return this.request(`/support/chat/${userId}/convert-ticket`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   }
 

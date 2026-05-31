@@ -90,6 +90,22 @@ function resolveRejectionReason(documentType) {
   return typed;
 }
 
+function formatDocumentRequestMessage(result) {
+  if (result?.push?.success) return "Ajuste solicitado e push enviado ao motorista.";
+  if (result?.push?.skipped) return "Ajuste solicitado sem envio de push.";
+  return "Ajuste solicitado. O backend não confirmou a entrega do push.";
+}
+
+function resolveNextAction(item) {
+  const status = String(item?.status || "pending").toLowerCase();
+  if (item?.requiredUpdate || item?.requestStatus === "requested") return "Aguardar reenvio do motorista";
+  if (!item?.fileUrl) return "Pedir envio pelo app";
+  if (status === "pending") return "Abrir documento e decidir";
+  if (status === "rejected") return "Aguardar correção";
+  if (status === "approved") return "Sem ação";
+  return "Revisar cadastro";
+}
+
 export default function DriversReviewQueuePage() {
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState({ total: 0, byStatus: { pending: 0, approved: 0, rejected: 0 } });
@@ -157,8 +173,31 @@ export default function DriversReviewQueuePage() {
       pending: Number(byStatus.pending || 0),
       approved: Number(byStatus.approved || 0),
       rejected: Number(byStatus.rejected || 0),
+      requested: items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length,
     };
-  }, [summary]);
+  }, [items, summary]);
+  const reviewChecklist = useMemo(() => {
+    const missingFiles = items.filter((item) => !item?.fileUrl).length;
+    const waitingResubmit = items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length;
+    const readyToReview = items.filter((item) => String(item?.status || "pending").toLowerCase() === "pending" && item?.fileUrl).length;
+    return [
+      {
+        label: "Prontos para decisão",
+        value: readyToReview,
+        detail: "visualizar documento, aprovar ou rejeitar",
+      },
+      {
+        label: "Sem arquivo visível",
+        value: missingFiles,
+        detail: "pedir envio pelo app antes da análise",
+      },
+      {
+        label: "Aguardando reenvio",
+        value: waitingResubmit,
+        detail: "push já solicitado, esperar nova versão",
+      },
+    ];
+  }, [items]);
 
   const reviewDocument = async (item, action) => {
     const driverId = String(item?.driverId || "").trim();
@@ -184,6 +223,32 @@ export default function DriversReviewQueuePage() {
     }
   };
 
+  const requestDocumentUpdate = async (item) => {
+    const driverId = String(item?.driverId || "").trim();
+    const documentType = String(item?.documentType || "").trim().toLowerCase();
+    if (!driverId || !documentType) return;
+
+    const defaultReason = item?.rejectionReason || "Precisamos que você envie uma versão atualizada deste documento no app.";
+    const reason = String(window.prompt("Mensagem para o motorista:", defaultReason) || "").trim();
+    if (!reason) return;
+
+    try {
+      setBusyKey(`${driverId}:${documentType}:request`);
+      setError("");
+      setActionMessage("");
+      const result = await leafAPI.requestDriverDocument(driverId, documentType, {
+        reason,
+        sendPush: true,
+      });
+      setActionMessage(formatDocumentRequestMessage(result));
+      await load({ silent: true });
+    } catch (err) {
+      setError(err?.message || "Falha ao solicitar ajuste do documento");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -202,6 +267,7 @@ export default function DriversReviewQueuePage() {
           <KpiCard title="Pendentes" value={counters.pending} tone="warning" />
           <KpiCard title="Aprovados" value={counters.approved} tone="positive" />
           <KpiCard title="Rejeitados" value={counters.rejected} tone="danger" />
+          <KpiCard title="Ajuste solicitado" value={counters.requested} tone={counters.requested > 0 ? "warning" : "default"} />
         </section>
 
         <section className="grid">
@@ -286,6 +352,20 @@ export default function DriversReviewQueuePage() {
             </div>
           </Panel>
 
+          <Panel title="Checklist da fila" subtitle="Próxima ação por bloco, sem abrir cada ficha manualmente.">
+            <div className="metric-list">
+              {reviewChecklist.map((item) => (
+                <div className="row" key={item.label}>
+                  <div className="label">
+                    <span>{item.label}</span>
+                    <small>{item.detail}</small>
+                  </div>
+                  <div className="value">{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
           <Panel
             className="panel-span-full"
             title="Documentos"
@@ -298,6 +378,7 @@ export default function DriversReviewQueuePage() {
                     <th>Motorista</th>
                     <th>Documento</th>
                     <th>Status</th>
+                    <th>Próxima ação</th>
                     <th>Atualização</th>
                     <th>Contato</th>
                     <th>Ações</th>
@@ -306,7 +387,7 @@ export default function DriversReviewQueuePage() {
                 <tbody>
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={6}>Nenhum item encontrado para os filtros selecionados.</td>
+                      <td colSpan={7}>Nenhum item encontrado para os filtros selecionados.</td>
                     </tr>
                   ) : (
                     items.map((item, index) => {
@@ -314,7 +395,8 @@ export default function DriversReviewQueuePage() {
                       const statusKey = String(item?.status || "pending").toLowerCase();
                       const badgeClass = statusTone[statusKey] || "status-warn";
                       const actionKey = `${item?.driverId || ""}:${item?.documentType || ""}`;
-                      const isBusy = busyKey === actionKey;
+                      const requestKey = `${item?.driverId || ""}:${item?.documentType || ""}:request`;
+                      const isBusy = busyKey === actionKey || busyKey === requestKey;
                       return (
                         <tr key={rowKey}>
                           <td>
@@ -327,9 +409,21 @@ export default function DriversReviewQueuePage() {
                           </td>
                           <td>
                             <span className={badgeClass}>{statusKey}</span>
+                            {item?.requiredUpdate || item?.requestStatus === "requested" ? (
+                              <span className="status-warn">ajuste solicitado</span>
+                            ) : null}
                             {item?.rejectionReason ? (
                               <span className="table-muted error">{item.rejectionReason}</span>
                             ) : null}
+                            {item?.requestReason ? (
+                              <span className="table-muted">{item.requestReason}</span>
+                            ) : null}
+                          </td>
+                          <td>
+                            <strong>{resolveNextAction(item)}</strong>
+                            <span className="table-muted">
+                              {item?.requestStatus ? `Solicitação: ${item.requestStatus}` : "sem solicitação aberta"}
+                            </span>
                           </td>
                           <td>
                             <div>{formatDateTime(item?.uploadedAt)}</div>
@@ -365,6 +459,13 @@ export default function DriversReviewQueuePage() {
                                 onClick={() => reviewDocument(item, "reject")}
                               >
                                 Rejeitar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => requestDocumentUpdate(item)}
+                              >
+                                Solicitar ajuste
                               </button>
                             </div>
                           </td>

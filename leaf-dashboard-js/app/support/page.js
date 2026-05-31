@@ -9,10 +9,21 @@ import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
+import wsService from "@/src/services/websocket-service";
 
 const OPEN_STATUSES = new Set(["open", "assigned", "in_progress", "escalated"]);
 const SUPPORT_POLL_MS = 30000;
 const MESSAGE_POLL_MS = 5000;
+const SUPPORT_QUICK_REPLIES = [
+  "Obrigado pelo contato. Vou verificar isso agora e te retorno por aqui.",
+  "Recebemos sua mensagem. Para seguir com segurança, vou transformar este atendimento em chamado.",
+  "Conferi aqui e já atualizei o status para acompanhamento.",
+];
+const N0_QUICK_REPLIES = [
+  "Oi! Estou por aqui. Como posso ajudar?",
+  "Pode me mandar um pouco mais de detalhe, por favor?",
+  "Perfeito, resolvido por aqui. Vou encerrar este atendimento simples.",
+];
 
 function formatDateTime(value) {
   if (!value) return "-";
@@ -48,6 +59,26 @@ function getTicketTitle(ticket) {
 
 function getTicketDescription(ticket) {
   return ticket?.description || ticket?.metadata?.description || ticket?.resolution || "";
+}
+
+function getChatTitle(chat) {
+  return chat?.userInfo?.name || chat?.userName || chat?.userId || "Usuario";
+}
+
+function getUserDisplayName(user, fallback = "-") {
+  return user?.name || user?.displayName || user?.firstName || user?.fullName || fallback;
+}
+
+function getUserType(user) {
+  return user?.type || user?.usertype || user?.userType || user?.profileSelection?.userType || "-";
+}
+
+function getUserStatus(user) {
+  if (!user) return "-";
+  if (user.blocked === true) return "blocked";
+  if (user.suspended === true) return "suspended";
+  if (user.isApproved === true || user.approved === true) return "approved";
+  return user.status || user.operationalStatus || "-";
 }
 
 function statusBadge(status) {
@@ -157,11 +188,19 @@ export default function SupportPage() {
   const { user } = useAuth();
   const [tickets, setTickets] = useState([]);
   const [queueSummary, setQueueSummary] = useState(null);
+  const [chatInbox, setChatInbox] = useState([]);
+  const [selectedN0Chat, setSelectedN0Chat] = useState(null);
+  const [chatRealtime, setChatRealtime] = useState("polling");
+  const [showClosedN0Chats, setShowClosedN0Chats] = useState(false);
+  const [supportUserContext, setSupportUserContext] = useState(null);
+  const [supportUserContextError, setSupportUserContextError] = useState("");
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [ticketMessages, setTicketMessages] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
+  const [n0ChatMessages, setN0ChatMessages] = useState([]);
   const [chatStatus, setChatStatus] = useState(null);
   const [newMessage, setNewMessage] = useState("");
+  const [n0ChatReply, setN0ChatReply] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [ticketSearch, setTicketSearch] = useState("");
@@ -178,6 +217,7 @@ export default function SupportPage() {
   const [orchestratorError, setOrchestratorError] = useState("");
 
   const selectedUserId = selectedTicket?.userId || selectedTicket?.user?.id || null;
+  const activeContextUserId = selectedN0Chat?.userId || selectedUserId || null;
   const orchestratorEnabled = leafAPI.isSupportOrchestratorEnabled();
 
   const loadTickets = useCallback(
@@ -227,6 +267,20 @@ export default function SupportPage() {
     [priorityFilter, statusFilter],
   );
 
+  const loadChatInbox = useCallback(async () => {
+    try {
+      const response = await leafAPI.getSupportChatInbox({ limit: 80, includeClosed: showClosedN0Chats });
+      const nextChats = response?.chats || [];
+      setChatInbox(nextChats);
+      setSelectedN0Chat((current) => {
+        if (!current) return nextChats[0] || null;
+        return nextChats.find((chat) => chat.userId === current.userId) || nextChats[0] || null;
+      });
+    } catch (err) {
+      setError(err?.message || "Falha ao carregar chats N0");
+    }
+  }, [showClosedN0Chats]);
+
   const loadOrchestratorOverview = useCallback(async () => {
     if (!orchestratorEnabled) return;
     setOrchestratorError("");
@@ -255,6 +309,55 @@ export default function SupportPage() {
       clearInterval(timer);
     };
   }, [loadTickets]);
+
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      if (!mounted) return;
+      await loadChatInbox();
+    };
+    run();
+    const timer = setInterval(run, MESSAGE_POLL_MS);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [loadChatInbox]);
+
+  useEffect(() => {
+    let mounted = true;
+    const onNewChatMessage = (message) => {
+      if (!message?.userId) return;
+      loadChatInbox();
+      setN0ChatMessages((current) => {
+        if (selectedN0Chat?.userId !== message.userId) return current;
+        if (current.some((item) => item.id === message.id)) return current;
+        return [...current, message].slice(-80);
+      });
+    };
+    const onChatStatusChange = () => {
+      loadChatInbox();
+    };
+
+    wsService.on("support:chat:new", onNewChatMessage);
+    wsService.on("support:chat:closed", onChatStatusChange);
+    wsService.on("support:chat:converted", onChatStatusChange);
+    wsService
+      .connect()
+      .then(() => {
+        if (mounted) setChatRealtime("tempo real");
+      })
+      .catch(() => {
+        if (mounted) setChatRealtime("polling");
+      });
+
+    return () => {
+      mounted = false;
+      wsService.off("support:chat:new", onNewChatMessage);
+      wsService.off("support:chat:closed", onChatStatusChange);
+      wsService.off("support:chat:converted", onChatStatusChange);
+    };
+  }, [loadChatInbox, selectedN0Chat?.userId]);
 
   useEffect(() => {
     if (!orchestratorEnabled) return undefined;
@@ -322,6 +425,60 @@ export default function SupportPage() {
   }, [selectedUserId]);
 
   useEffect(() => {
+    if (!selectedN0Chat?.userId) {
+      setN0ChatMessages([]);
+      return;
+    }
+    let mounted = true;
+    const loadN0Chat = async () => {
+      try {
+        const includeArchived = showClosedN0Chats || selectedN0Chat.status === "closed";
+        const history = await leafAPI.getChatHistory(selectedN0Chat.userId, 80, { includeArchived });
+        if (!mounted) return;
+        const messages = history?.messages || [];
+        setN0ChatMessages(messages);
+        if (messages.some((message) => message.senderType === "user" && message.read !== true)) {
+          await leafAPI.markChatRead(selectedN0Chat.userId).catch(() => null);
+        }
+      } catch (err) {
+        if (mounted) setError(err?.message || "Falha ao carregar chat N0");
+      }
+    };
+    loadN0Chat();
+    const timer = setInterval(loadN0Chat, MESSAGE_POLL_MS);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [selectedN0Chat?.status, selectedN0Chat?.userId, showClosedN0Chats]);
+
+  useEffect(() => {
+    if (!activeContextUserId) {
+      setSupportUserContext(null);
+      setSupportUserContextError("");
+      return;
+    }
+
+    let mounted = true;
+    const loadContext = async () => {
+      try {
+        setSupportUserContextError("");
+        const data = await leafAPI.getUserDetails(activeContextUserId);
+        if (mounted) setSupportUserContext(data || null);
+      } catch (err) {
+        if (!mounted) return;
+        setSupportUserContext(null);
+        setSupportUserContextError(err?.message || "Contexto indisponível");
+      }
+    };
+
+    loadContext();
+    return () => {
+      mounted = false;
+    };
+  }, [activeContextUserId]);
+
+  useEffect(() => {
     if (!orchestratorEnabled || !selectedTicket?.id) {
       setOrchestratorAnalysis(null);
       return;
@@ -348,6 +505,10 @@ export default function SupportPage() {
   }, [orchestratorEnabled, selectedTicket?.id]);
 
   const summary = useMemo(() => deriveSummary(tickets, queueSummary), [queueSummary, tickets]);
+  const n0UnreadCount = useMemo(
+    () => chatInbox.reduce((total, chat) => total + Number(chat?.unreadFromUser || 0), 0),
+    [chatInbox],
+  );
   const currentMessages = useMemo(
     () => (mode === "ticket" ? ticketMessages : chatMessages),
     [mode, ticketMessages, chatMessages],
@@ -387,6 +548,47 @@ export default function SupportPage() {
       incidentId: selectedTicket.metadata?.incidentId || "-",
     };
   }, [selectedTicket]);
+  const activeUserTickets = useMemo(() => {
+    if (!activeContextUserId) return [];
+    return tickets.filter((ticket) => String(ticket?.userId || ticket?.user?.id || "") === String(activeContextUserId));
+  }, [activeContextUserId, tickets]);
+  const supportUserDetails = useMemo(() => {
+    const latestTicket = activeUserTickets[0] || null;
+    return {
+      usuario: activeContextUserId || "-",
+      nome: getUserDisplayName(supportUserContext, latestTicket?.user?.name || "-"),
+      telefone: supportUserContext?.phone || supportUserContext?.mobile || supportUserContext?.phoneNumber || "-",
+      email: supportUserContext?.email || "-",
+      tipo: getUserType(supportUserContext),
+      status: getUserStatus(supportUserContext),
+      cidade: supportUserContext?.city || supportUserContext?.cityCode || "-",
+      ticketsAbertos: activeUserTickets.filter((ticket) => OPEN_STATUSES.has(normalize(ticket?.status))).length,
+      ticketsNaFila: activeUserTickets.length,
+      ultimoTicket: latestTicket?.id || "-",
+    };
+  }, [activeContextUserId, activeUserTickets, supportUserContext]);
+  const supportOpsStatus = useMemo(() => {
+    const overdue = summary.overdueAckCount + summary.overdueFirstResponseCount;
+    if (overdue > 0) {
+      return {
+        className: "status-bad",
+        label: "SLA pede ação",
+        detail: `${overdue} item(ns) vencido(s). Priorize antes de abrir novas frentes.`,
+      };
+    }
+    if (summary.ticketsWithoutOwner > 0 || n0UnreadCount > 0) {
+      return {
+        className: "status-warn",
+        label: "Fila em atenção",
+        detail: `${summary.ticketsWithoutOwner} ticket(s) sem dono e ${n0UnreadCount} chat(s) N0 nao lido(s).`,
+      };
+    }
+    return {
+      className: "status-ok",
+      label: "Suporte estável",
+      detail: "Sem SLA vencido no snapshot atual.",
+    };
+  }, [n0UnreadCount, summary]);
 
   const sendMessage = async () => {
     if (!selectedTicket || !newMessage.trim()) return;
@@ -482,6 +684,75 @@ export default function SupportPage() {
       setActionMessage("Chat encerrado com sucesso.");
     } catch (err) {
       setError(err?.message || "Falha ao encerrar chat");
+    } finally {
+      setActionBusy("");
+    }
+  };
+
+  const sendN0ChatMessage = async () => {
+    if (!selectedN0Chat?.userId || !n0ChatReply.trim()) return;
+    const text = n0ChatReply.trim();
+    setN0ChatReply("");
+    try {
+      setActionBusy("n0-message");
+      setError("");
+      setActionMessage("");
+      await leafAPI.sendChatMessage(selectedN0Chat.userId, text);
+      const history = await leafAPI.getChatHistory(selectedN0Chat.userId, 80);
+      setN0ChatMessages(history?.messages || []);
+      await loadChatInbox();
+      setActionMessage("Mensagem enviada no chat N0.");
+    } catch (err) {
+      setError(err?.message || "Falha ao responder chat N0");
+      setN0ChatReply(text);
+    } finally {
+      setActionBusy("");
+    }
+  };
+
+  const convertN0ChatToTicket = async () => {
+    if (!selectedN0Chat?.userId) return;
+    const subject = window.prompt("Titulo do chamado:", `Atendimento de ${getChatTitle(selectedN0Chat)}`);
+    if (subject === null) return;
+    const priority = window.prompt("Prioridade do chamado (N1, N2 ou N3):", "N3");
+    if (priority === null) return;
+    try {
+      setActionBusy("n0-convert");
+      setError("");
+      setActionMessage("");
+      const result = await leafAPI.convertChatToTicket(selectedN0Chat.userId, {
+        subject: subject.trim() || "Atendimento via chat",
+        priority: ["N1", "N2", "N3"].includes(priority.trim().toUpperCase()) ? priority.trim().toUpperCase() : "N3",
+        category: "chat",
+        metadata: {
+          source: "dashboard_n0_chat"
+        }
+      });
+      await Promise.all([loadTickets({ silent: true }), loadChatInbox()]);
+      if (result?.ticket) {
+        setSelectedTicket(result.ticket);
+        setMode("ticket");
+      }
+      setActionMessage(`Chat convertido em chamado ${result?.ticket?.id || ""}.`.trim());
+    } catch (err) {
+      setError(err?.message || "Falha ao converter chat em chamado");
+    } finally {
+      setActionBusy("");
+    }
+  };
+
+  const closeN0Chat = async () => {
+    if (!selectedN0Chat?.userId) return;
+    if (!window.confirm("Encerrar este atendimento simples?")) return;
+    try {
+      setActionBusy("n0-close");
+      setError("");
+      setActionMessage("");
+      await leafAPI.closeChat(selectedN0Chat.userId, "agent");
+      await loadChatInbox();
+      setActionMessage("Chat N0 encerrado e historico arquivado.");
+    } catch (err) {
+      setError(err?.message || "Falha ao encerrar chat N0");
     } finally {
       setActionBusy("");
     }
@@ -611,9 +882,35 @@ export default function SupportPage() {
             value={formatMinutes(summary.medianFirstResponseMinutes)}
             subtitle="tickets respondidos"
           />
+          <KpiCard title="Chats N0" value={chatInbox.length} subtitle="atendimentos simples" />
+          <KpiCard title="Nao lidas N0" value={n0UnreadCount} tone={n0UnreadCount > 0 ? "warning" : "positive"} />
+          <KpiCard title="Chat" value={chatRealtime} subtitle="notificacoes" />
         </section>
 
         <section className="grid orchestrator-grid">
+          <Panel
+            title="Status operacional"
+            subtitle="Leitura rápida para decidir se o atendimento segue no N0 ou vira chamado."
+          >
+            <div className="orchestrator-summary">
+              <span className={supportOpsStatus.className}>{supportOpsStatus.label}</span>
+              <span className="meta-badge">chat: {chatRealtime}</span>
+              <span className="meta-badge">polling tickets: {SUPPORT_POLL_MS / 1000}s</span>
+              <span className="meta-badge">polling mensagens: {MESSAGE_POLL_MS / 1000}s</span>
+            </div>
+            <p className="text-muted">{supportOpsStatus.detail}</p>
+            <div className="metric-list">
+              <div className="row">
+                <div className="label">Quando virar chamado</div>
+                <div className="value">caso precise dono, SLA, histórico longo ou N2/N3</div>
+              </div>
+              <div className="row">
+                <div className="label">Quando manter N0</div>
+                <div className="value">dúvida simples, orientação rápida ou resposta única</div>
+              </div>
+            </div>
+          </Panel>
+
           <Panel
             title="Copiloto de suporte"
             subtitle={
@@ -660,6 +957,59 @@ export default function SupportPage() {
                   ? "Sem execucoes recentes ainda."
                   : "O dashboard ja tem o contrato de leitura preparado para o orquestrador desacoplado."}
               </p>
+            )}
+          </Panel>
+        </section>
+
+        <section className="grid orchestrator-grid">
+          <Panel
+            title="Contexto do usuário"
+            subtitle="Dados essenciais para decidir rápido sem sair do atendimento."
+            actions={
+              activeContextUserId ? (
+                <a href={`/users/${activeContextUserId}`}>
+                  Abrir perfil
+                </a>
+              ) : null
+            }
+          >
+            {activeContextUserId ? (
+              <div className="section-stack">
+                <KeyValueGrid
+                  data={supportUserDetails}
+                  labels={{
+                    usuario: "Usuário",
+                    nome: "Nome",
+                    telefone: "Telefone",
+                    email: "E-mail",
+                    tipo: "Tipo",
+                    status: "Status",
+                    cidade: "Cidade",
+                    ticketsAbertos: "Tickets abertos",
+                    ticketsNaFila: "Tickets na fila",
+                    ultimoTicket: "Último ticket",
+                  }}
+                  maxItems={10}
+                />
+                {supportUserContextError ? (
+                  <p className="text-muted">
+                    Perfil completo indisponível agora. Mantive o contexto vindo da fila/chat.
+                  </p>
+                ) : null}
+                {activeUserTickets.length > 0 ? (
+                  <div className="orchestrator-summary">
+                    {activeUserTickets.slice(0, 4).map((ticket) => (
+                      <span key={ticket.id} className={statusBadge(ticket.status)}>
+                        {ticket.id}: {ticket.status || "open"}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted">Sem tickets recentes carregados para este usuário.</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-muted">Selecione um ticket ou chat para ver o contexto.</p>
             )}
           </Panel>
         </section>
@@ -874,6 +1224,13 @@ export default function SupportPage() {
                 </div>
 
                 <div className="filters">
+                  <div className="quick-reply-row">
+                    {SUPPORT_QUICK_REPLIES.map((template) => (
+                      <button key={template} type="button" onClick={() => setNewMessage(template)}>
+                        {template}
+                      </button>
+                    ))}
+                  </div>
                   <input
                     placeholder={mode === "chat" ? "Responder chat..." : "Responder ticket..."}
                     value={newMessage}
@@ -891,6 +1248,137 @@ export default function SupportPage() {
               </div>
             ) : (
               <p>Selecione um ticket.</p>
+            )}
+          </Panel>
+        </section>
+
+        <section className="grid support-grid">
+          <Panel
+            title="Chats N0"
+            subtitle="Atendimentos simples antes de virar chamado."
+            actions={
+              <>
+                <label className="meta-badge">
+                  <input
+                    type="checkbox"
+                    checked={showClosedN0Chats}
+                    onChange={(event) => setShowClosedN0Chats(event.target.checked)}
+                  />
+                  Arquivados
+                </label>
+                <button type="button" onClick={loadChatInbox} disabled={actionBusy === "n0-refresh"}>
+                  Atualizar chats
+                </button>
+              </>
+            }
+          >
+            <div className="support-list">
+              {chatInbox.map((chat) => (
+                <button
+                  key={chat.userId}
+                  type="button"
+                  className={selectedN0Chat?.userId === chat.userId ? "ticket-btn ticket-btn-active" : "ticket-btn"}
+                  onClick={() => setSelectedN0Chat(chat)}
+                >
+                  <strong>{getChatTitle(chat)}</strong>
+                  <span className="ticket-meta-row">
+                    <span className={chat.status === "active" ? "status-ok" : "status-warn"}>{chat.status || "active"}</span>
+                    <span className={chat.unreadFromUser > 0 ? "status-warn" : "meta-badge"}>
+                      {chat.unreadFromUser || 0} nao lida(s)
+                    </span>
+                    {chat.ticketId ? <span className="meta-badge">ticket {chat.ticketId}</span> : null}
+                  </span>
+                  <span>{chat.lastMessage?.message || "Sem mensagem recente."}</span>
+                  <span className="table-muted">
+                    {formatDateTime(chat.lastMessageAt || chat.updatedAt)}
+                    {chat.messageCount ? ` • ${chat.messageCount} msg` : ""}
+                  </span>
+                </button>
+              ))}
+              {chatInbox.length === 0 ? (
+                <p className="text-muted">Nenhum chat N0 ativo neste momento.</p>
+              ) : null}
+            </div>
+          </Panel>
+
+          <Panel
+            title="Atendimento N0"
+            subtitle="Resolva pedidos simples no chat ou transforme em chamado quando precisar acompanhar."
+            actions={
+              selectedN0Chat ? (
+                <>
+                  <button type="button" disabled={!!actionBusy} onClick={convertN0ChatToTicket}>
+                    Transformar em chamado
+                  </button>
+                  <button type="button" disabled={!!actionBusy || selectedN0Chat.status === "closed"} onClick={closeN0Chat}>
+                    Encerrar
+                  </button>
+                </>
+              ) : null
+            }
+          >
+            {selectedN0Chat ? (
+              <div className="section-stack">
+                <KeyValueGrid
+                  data={{
+                    usuario: selectedN0Chat.userId,
+                    status: selectedN0Chat.status || "active",
+                    ticket: selectedN0Chat.ticketId || "sem chamado",
+                    mensagens: selectedN0Chat.messageCount || 0,
+                    naoLidas: selectedN0Chat.unreadFromUser || 0,
+                    ultimaMensagem: formatDateTime(selectedN0Chat.lastMessageAt || selectedN0Chat.updatedAt),
+                  }}
+                  labels={{
+                    usuario: "Usuario",
+                    status: "Status",
+                    ticket: "Chamado",
+                    mensagens: "Mensagens",
+                    naoLidas: "Nao lidas",
+                    ultimaMensagem: "Ultima mensagem",
+                  }}
+                  maxItems={6}
+                />
+
+                <div className="support-messages">
+                  {n0ChatMessages.length === 0 ? (
+                    <p className="text-muted">Sem histórico neste chat.</p>
+                  ) : (
+                    n0ChatMessages.map((message) => (
+                      <div
+                        key={message.id || `${message.createdAt}-${message.message}`}
+                        className={`support-message-row support-message-${message.senderType || "user"}`}
+                      >
+                        <strong>{message.senderType === "agent" ? "Suporte" : "Usuario"}</strong>
+                        <span>{message.message || "-"}</span>
+                        <small>{formatDateTime(message.createdAt || message.timestamp)}</small>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="filters">
+                  <div className="quick-reply-row">
+                    {N0_QUICK_REPLIES.map((template) => (
+                      <button key={template} type="button" onClick={() => setN0ChatReply(template)}>
+                        {template}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    placeholder="Responder atendimento simples..."
+                    value={n0ChatReply}
+                    onChange={(event) => setN0ChatReply(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") sendN0ChatMessage();
+                    }}
+                  />
+                  <button type="button" onClick={sendN0ChatMessage} disabled={!!actionBusy || !n0ChatReply.trim()}>
+                    {actionBusy === "n0-message" ? "Enviando..." : "Enviar"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-muted">Selecione um chat N0.</p>
             )}
           </Panel>
         </section>

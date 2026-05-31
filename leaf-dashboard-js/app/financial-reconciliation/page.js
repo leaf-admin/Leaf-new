@@ -48,6 +48,56 @@ function issueText(issue) {
   return `${code}: ${message}`;
 }
 
+function reportHasIssue(report, matcher) {
+  const issues = report?.issues || [];
+  return issues.some((issue) => matcher.test(`${issue?.code || ""} ${issue?.message || ""}`));
+}
+
+function buildMoneyFlowChecklist(report, detail) {
+  const totals = report?.totals || {};
+  const paymentAmount = Number(totals.paymentAmountCents || 0);
+  const distributionTotal = Number(totals.distributionTotalCents || 0);
+  const ledgerEventCount = Number(totals.ledgerEventCount || detail?.ledgerEvents?.length || 0);
+  const paymentIssue = reportHasIssue(report, /PAYMENT|PIX|WOOVI/i);
+  const holdingIssue = reportHasIssue(report, /HOLDING|ESCROW|RESERVE/i);
+  const splitIssue = reportHasIssue(report, /SPLIT|DISTRIBUTION|DRIVER_BALANCE|OPERATIONAL_FEE/i);
+  const ledgerIssue = reportHasIssue(report, /LEDGER|IDEMPOTENCY|EVENT/i);
+  const withdrawalIssue = reportHasIssue(report, /WITHDRAW|PAYOUT|SAQUE/i);
+
+  return [
+    {
+      label: "Pagamento Pix",
+      status: paymentAmount > 0 && !paymentIssue ? "ok" : "attention",
+      value: formatMoneyCents(paymentAmount),
+      detail: paymentIssue ? "há divergência no pagamento" : "valor capturado para a corrida",
+    },
+    {
+      label: "Holding backend",
+      status: !holdingIssue && paymentAmount >= distributionTotal ? "ok" : "attention",
+      value: paymentAmount >= distributionTotal ? "coberto" : "revisar",
+      detail: "pagamento fica reservado até a corrida ser concluída",
+    },
+    {
+      label: "Split e taxa Leaf",
+      status: !splitIssue && distributionTotal <= paymentAmount ? "ok" : "attention",
+      value: formatMoneyCents(distributionTotal),
+      detail: splitIssue ? "split precisa de auditoria" : "distribuição reconciliada com o total pago",
+    },
+    {
+      label: "Ledger idempotente",
+      status: ledgerEventCount > 0 && !ledgerIssue ? "ok" : "attention",
+      value: `${ledgerEventCount} evento(s)`,
+      detail: ledgerIssue ? "evento duplicado, ausente ou divergente" : "eventos financeiros encontrados",
+    },
+    {
+      label: "Saldo e saque",
+      status: withdrawalIssue ? "attention" : "ok",
+      value: withdrawalIssue ? "revisar" : "bloqueado por saldo",
+      detail: "saque deve respeitar saldo líquido, taxa aplicável e KYC/senha",
+    },
+  ];
+}
+
 export default function FinancialReconciliationPage() {
   const [status, setStatus] = useState("divergent");
   const [severity, setSeverity] = useState("");
@@ -144,6 +194,10 @@ export default function FinancialReconciliationPage() {
   const issueCount = Number(summary?.totalIssueCount || 0);
   const divergentCount = Number(summary?.divergentInPage || 0);
   const okCount = Number(summary?.okInPage || 0);
+  const moneyFlowChecklist = useMemo(
+    () => buildMoneyFlowChecklist(selectedReport, detail),
+    [detail, selectedReport],
+  );
 
   return (
     <ProtectedRoute>
@@ -219,6 +273,23 @@ export default function FinancialReconciliationPage() {
         </Panel>
 
         <section className="grid">
+          <Panel
+            title="Fluxo do dinheiro"
+            subtitle="Pagamento antecipado, holding, split, ledger, saldo e saque em uma leitura única."
+          >
+            <div className="metric-list">
+              {moneyFlowChecklist.map((item) => (
+                <div className="row" key={item.label}>
+                  <div className="label">
+                    <span className={item.status === "ok" ? "status-ok" : "status-warn"}>{item.label}</span>
+                    <small>{item.detail}</small>
+                  </div>
+                  <div className="value">{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
           <Panel title="Relatórios" subtitle="Últimos resultados gravados pelo ledger">
             {loading ? <LoadingState message="Carregando relatórios financeiros..." /> : null}
             {!loading && reports.length === 0 ? <EmptyState message="Nenhuma divergência financeira encontrada para os filtros atuais." /> : null}

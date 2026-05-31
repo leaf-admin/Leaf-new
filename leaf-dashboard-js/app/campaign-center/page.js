@@ -208,6 +208,74 @@ function formatNumber(value) {
   return new Intl.NumberFormat("pt-BR").format(Number(value || 0) || 0);
 }
 
+function dateIsPast(value) {
+  if (!value) return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.getTime() < Date.now();
+}
+
+function campaignUsesSurface(campaign, surface) {
+  return Array.isArray(campaign?.surfaces) && campaign.surfaces.includes(surface);
+}
+
+function buildCampaignAlerts(rows, commercialReport) {
+  const alerts = [];
+  const activeRows = rows.filter((row) => row.status === "active");
+  const commercialRows = commercialReport?.rows || [];
+
+  for (const surface of ["passenger_home", "driver_home"]) {
+    if (!activeRows.some((row) => campaignUsesSurface(row, surface))) {
+      alerts.push({
+        id: `missing-${surface}`,
+        tone: "status-warn",
+        title: `${surface} sem campanha ativa`,
+        detail: "Confira se o app deve exibir banner nessa superfície hoje.",
+      });
+    }
+  }
+
+  activeRows.forEach((campaign) => {
+    if (!campaign.content?.imageUrl) {
+      alerts.push({
+        id: `image-${campaign.id}`,
+        tone: "status-warn",
+        title: `${campaign.name} sem arte`,
+        detail: "Sem imagem, o app pode cair no estado textual/fallback.",
+      });
+    }
+    if (dateIsPast(campaign.endAt)) {
+      alerts.push({
+        id: `expired-${campaign.id}`,
+        tone: "status-bad",
+        title: `${campaign.name} venceu`,
+        detail: "Campanha ativa com fim no passado. Pause ou ajuste a janela.",
+      });
+    }
+  });
+
+  commercialRows.forEach((row) => {
+    if (Number(row.contractedImpressions || 0) > 0 && Number(row.deliveryProgress || 0) >= 1) {
+      alerts.push({
+        id: `delivery-${row.id}`,
+        tone: "status-ok",
+        title: `${row.name} bateu a meta de visualizações`,
+        detail: "Pode encerrar, renovar ou trocar prioridade.",
+      });
+    }
+  });
+
+  if (!alerts.length) {
+    alerts.push({
+      id: "campaigns-ok",
+      tone: "status-ok",
+      title: "Campanhas sem alerta crítico",
+      detail: "Inventário e métricas estão dentro do esperado para o filtro atual.",
+    });
+  }
+
+  return alerts.slice(0, 8);
+}
+
 export default function CampaignCenterPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -464,6 +532,23 @@ export default function CampaignCenterPage() {
     fallbackHomeBannerSlot;
   const homeBannerSlot = slots.find((slot) => slot.id === "passenger_home_banner_stack") || fallbackHomeBannerSlot;
   const homeBannerDimensions = homeBannerSlot.dimensions || fallbackHomeBannerSlot.dimensions;
+  const campaignAlerts = useMemo(() => buildCampaignAlerts(rows, commercialReport), [commercialReport, rows]);
+  const surfaceOverview = useMemo(() => {
+    return surfaceOptions.map((surface) => {
+      const surfaceRows = rows.filter((row) => campaignUsesSurface(row, surface));
+      const activeRows = surfaceRows.filter((row) => row.status === "active");
+      const impressions = surfaceRows.reduce((total, row) => total + Number(row.metrics?.impressions || 0), 0);
+      const clicks = surfaceRows.reduce((total, row) => total + Number(row.metrics?.clicks || 0), 0);
+      return {
+        surface,
+        total: surfaceRows.length,
+        active: activeRows.length,
+        impressions,
+        clicks,
+        ctr: impressions > 0 ? clicks / impressions : 0,
+      };
+    });
+  }, [rows]);
   const applyCampaignSlot = (slotId) => {
     const slot = slots.find((candidate) => candidate.id === slotId) || fallbackCampaignSlots.find((candidate) => candidate.id === slotId);
     if (!slot) return;
@@ -563,6 +648,41 @@ export default function CampaignCenterPage() {
         </section>
 
         <section className="grid">
+          <Panel
+            title="Alertas operacionais"
+            subtitle="Validação rápida antes de publicar ou vender inventário."
+          >
+            <div className="metric-list">
+              {campaignAlerts.map((alert) => (
+                <div className="row" key={alert.id}>
+                  <div className="label">
+                    <span className={alert.tone}>{alert.title}</span>
+                    <small>{alert.detail}</small>
+                  </div>
+                  <div className="value">campanhas</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title="Visão diária por superfície" subtitle="Onde existe inventário ativo e o que está performando.">
+            <div className="metric-list">
+              {surfaceOverview.map((surface) => (
+                <div className="row" key={surface.surface}>
+                  <div className="label">
+                    <span>{surface.surface}</span>
+                    <small>
+                      {surface.active}/{surface.total} ativa(s) · CTR {formatPercent(surface.ctr)}
+                    </small>
+                  </div>
+                  <div className="value">
+                    {formatNumber(surface.impressions)} imp · {formatNumber(surface.clicks)} cliques
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
           <Panel
             title="Slots de campanha"
             subtitle="Passageiro e motorista são inventários separados. Cadastre até 3 campanhas por slot para virar carrossel."
