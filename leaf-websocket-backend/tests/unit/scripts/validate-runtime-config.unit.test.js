@@ -33,34 +33,35 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     CORS_ORIGIN: 'https://api.leaf.example'
   };
 
-  it('blocks production deploy without webhook authorization or signature verifier', () => {
+  it('allows production deploy with the bundled Woovi webhook public-key verifier', () => {
     const result = runValidator(baseProdEnv);
 
-    expect(result.status).toBe(1);
-    expect(result.report.ok).toBe(false);
-    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
-      'Webhook Woovi/OpenPix em produção exige Authorization configurado no webhook (WOOVI_WEBHOOK_AUTHORIZATION/WOOVI_WEBHOOK_AUTH_TOKEN) ou verificação por assinatura pública quando disponível'
-    ]));
+    expect(result.status).toBe(0);
+    expect(result.report.ok).toBe(true);
+    expect(result.report.summary.blockers).toEqual([]);
     expect(result.report.diagnostics.webhookSignature).toMatchObject({
-      verifierKeysPresent: [],
-      hasVerifier: false,
+      verifierKeysPresent: ['WOOVI_WEBHOOK_PUBLIC_KEY(default)'],
+      hasVerifier: true,
       authorizationKeysPresent: [],
       hasAuthorization: false,
       providerVerificationFallback: false,
       requireSignature: {
-        value: false,
-        source: 'default',
-        expected: false
-      },
-      allowUnsigned: {
         value: true,
         source: 'default',
         expected: true
+      },
+      allowUnsigned: {
+        value: false,
+        source: 'default',
+        expected: false
       }
+    });
+    expect(result.report.sensitivePresence).toMatchObject({
+      WOOVI_WEBHOOK_PUBLIC_KEY: 'default-public'
     });
   });
 
-  it('allows production deploy with webhook authorization and provider verification fallback', () => {
+  it('blocks production deploy that disables Woovi x-webhook-signature validation', () => {
     const result = runValidator({
       ...baseProdEnv,
       WOOVI_WEBHOOK_AUTHORIZATION: 'Bearer webhook-token',
@@ -69,18 +70,20 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: 'true'
     });
 
-    expect(result.status).toBe(0);
-    expect(result.report.ok).toBe(true);
-    expect(result.report.summary.blockers).toEqual([]);
+    expect(result.status).toBe(1);
+    expect(result.report.ok).toBe(false);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'WOOVI_WEBHOOK_REQUIRE_SIGNATURE=true obrigatório em produção'
+    ]));
     expect(result.report.sensitivePresence).toMatchObject({
       WOOVI_API_TOKEN: 'present',
       WOOVI_WEBHOOK_AUTHORIZATION: 'present',
       LEAF_PIX_KEY: 'present'
     });
     expect(result.report.diagnostics.webhookSignature).toMatchObject({
-      hasVerifier: false,
+      hasVerifier: true,
       hasAuthorization: true,
-      providerVerificationFallback: true
+      providerVerificationFallback: false
     });
     expect(result.stdout).not.toContain('webhook-token');
   });

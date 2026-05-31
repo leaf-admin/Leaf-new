@@ -329,6 +329,8 @@ services:
       dockerfile: Dockerfile
     container_name: leaf-billing-worker
     command: ["node", "workers/worker-billing.js"]
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - RUNTIME_ROLE=billing

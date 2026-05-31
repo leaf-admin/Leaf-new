@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const { logStructured, logError } = require('../utils/logger');
 const { getWooviConfig, getWooviAuthHeaders } = require('../config/woovi-config');
+const { getDefaultWooviWebhookPublicKey } = require('../config/woovi-webhook-public-key');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 const WOOVI_CONFIG = getWooviConfig();
@@ -272,7 +273,15 @@ function verifyWooviWebhookSignature(req) {
   const recommendedSignature = req.get('x-webhook-signature');
   const deprecatedHmacSignature = req.get('x-openpix-signature');
   const authDecision = verifyWebhookAuthorization(req);
-  const publicKey = process.env.WOOVI_WEBHOOK_PUBLIC_KEY || process.env.OPENPIX_WEBHOOK_PUBLIC_KEY || '';
+  const isProdRuntime = isProductionRuntime();
+  const isSandboxRuntime = isWooviSandboxRuntime();
+  const explicitPublicKey =
+    process.env.WOOVI_WEBHOOK_PUBLIC_KEY ||
+    process.env.OPENPIX_WEBHOOK_PUBLIC_KEY ||
+    '';
+  const publicKey = explicitPublicKey || (isProdRuntime && !isSandboxRuntime
+    ? getDefaultWooviWebhookPublicKey()
+    : '');
   const recommendedHmacSecret =
     process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET ||
     process.env.OPENPIX_WEBHOOK_SIGNATURE_SECRET ||
@@ -284,8 +293,6 @@ function verifyWooviWebhookSignature(req) {
   const verifiersConfigured = Boolean(publicKey || recommendedHmacSecret || deprecatedHmacSecret);
   const signaturePresent = Boolean(recommendedSignature || deprecatedHmacSignature);
   const webhookRequireSignature = readBooleanEnv('WOOVI_WEBHOOK_REQUIRE_SIGNATURE', verifiersConfigured);
-  const isProdRuntime = isProductionRuntime();
-  const isSandboxRuntime = isWooviSandboxRuntime();
   const strictSignatureRuntime = isProdRuntime && !isSandboxRuntime;
   const allowUnsignedWebhook = readBooleanEnv(
     'WOOVI_WEBHOOK_ALLOW_UNSIGNED',

@@ -1,4 +1,6 @@
-const DEFAULT_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
+const SANDBOX_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
+const PRODUCTION_BASE_URL = 'https://api.woovi.com/api/v1';
+const DEFAULT_BASE_URL = SANDBOX_BASE_URL;
 const CLIENT_ID_PATTERN = /^Client_Id_/i;
 
 function firstNonEmpty(...values) {
@@ -18,7 +20,7 @@ function looksLikeClientId(value) {
 function normalizeBaseUrl(rawUrl) {
   const source = String(rawUrl || '').trim();
   if (!source) {
-    return DEFAULT_BASE_URL;
+    return SANDBOX_BASE_URL;
   }
 
   const noTrailingSlash = source.replace(/\/+$/, '');
@@ -51,9 +53,12 @@ function getWooviConfig() {
     derivedAuthorizationAppId
   );
 
-  const rawBaseUrl = process.env.WOOVI_BASE_URL || DEFAULT_BASE_URL;
+  const rawBaseUrl = firstNonEmpty(
+    process.env.WOOVI_BASE_URL,
+    environment === 'production' ? PRODUCTION_BASE_URL : SANDBOX_BASE_URL
+  );
   const forcingSandbox = environment !== 'production' && /api\.woovi\.com/i.test(rawBaseUrl);
-  const baseUrl = normalizeBaseUrl(forcingSandbox ? DEFAULT_BASE_URL : rawBaseUrl);
+  const baseUrl = normalizeBaseUrl(forcingSandbox ? SANDBOX_BASE_URL : rawBaseUrl);
 
   return {
     environment,
@@ -104,6 +109,8 @@ function getWooviAuthHeaders(config = getWooviConfig()) {
 
 module.exports = {
   DEFAULT_BASE_URL,
+  PRODUCTION_BASE_URL,
+  SANDBOX_BASE_URL,
   normalizeBaseUrl,
   looksLikeClientId,
   getWooviConfig,

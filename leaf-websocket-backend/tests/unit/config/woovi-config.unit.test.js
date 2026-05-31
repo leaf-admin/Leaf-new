@@ -108,4 +108,20 @@ describe('woovi-config', () => {
 
     expect(getWooviConfig().baseUrl).toBe('https://api.woovi-sandbox.com/api/v1');
   });
+
+  it('defaults to the production Woovi host when runtime is production', () => {
+    process.env.WOOVI_ENVIRONMENT = 'production';
+
+    const { getWooviConfig } = loadConfig();
+
+    expect(getWooviConfig().baseUrl).toBe('https://api.woovi.com/api/v1');
+  });
+
+  it('keeps the sandbox host as the default outside production', () => {
+    process.env.WOOVI_ENVIRONMENT = 'sandbox';
+
+    const { getWooviConfig } = loadConfig();
+
+    expect(getWooviConfig().baseUrl).toBe('https://api.woovi-sandbox.com/api/v1');
+  });
 });

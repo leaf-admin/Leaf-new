@@ -12,6 +12,9 @@ const dotenv = require('dotenv');
 const {
   evaluateProductionReadiness
 } = require('../../services/kyc-biometric-production-policy');
+const {
+  getDefaultWooviWebhookPublicKey
+} = require('../../config/woovi-webhook-public-key');
 
 const REQUIRED_BASE = [
   'NODE_ENV'
@@ -175,8 +178,16 @@ function main() {
     : [];
   const warnings = [];
   const blockers = [];
+  const hasDefaultWooviWebhookPublicKey =
+    nodeEnv === 'production' &&
+    !paymentProviderSandboxRuntime &&
+    Boolean(getDefaultWooviWebhookPublicKey());
   const webhookVerifierKeysPresent = WEBHOOK_VERIFIER_KEYS.filter((key) => String(process.env[key] || '').trim());
-  const hasWebhookVerifier = webhookVerifierKeysPresent.length > 0;
+  const effectiveWebhookVerifierKeysPresent = hasDefaultWooviWebhookPublicKey
+    ? [...webhookVerifierKeysPresent, 'WOOVI_WEBHOOK_PUBLIC_KEY(default)']
+    : webhookVerifierKeysPresent;
+  const hasWebhookVerifier = effectiveWebhookVerifierKeysPresent.length > 0;
+  const explicitWebhookPublicKey = process.env.WOOVI_WEBHOOK_PUBLIC_KEY || process.env.OPENPIX_WEBHOOK_PUBLIC_KEY;
   const webhookAuthorizationKeysPresent = WEBHOOK_AUTHORIZATION_KEYS.filter((key) => String(process.env[key] || '').trim());
   const hasWebhookAuthorization = webhookAuthorizationKeysPresent.length > 0;
   const webhookRequireSignature = booleanDiagnostic(
@@ -366,7 +377,9 @@ function main() {
     },
     sensitivePresence: {
       WOOVI_API_TOKEN: presence(process.env.WOOVI_API_TOKEN),
-      WOOVI_WEBHOOK_PUBLIC_KEY: presence(process.env.WOOVI_WEBHOOK_PUBLIC_KEY || process.env.OPENPIX_WEBHOOK_PUBLIC_KEY),
+      WOOVI_WEBHOOK_PUBLIC_KEY: explicitWebhookPublicKey
+        ? presence(explicitWebhookPublicKey)
+        : (hasDefaultWooviWebhookPublicKey ? 'default-public' : '(empty)'),
       WOOVI_WEBHOOK_SIGNATURE_SECRET: presence(process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET || process.env.OPENPIX_WEBHOOK_SIGNATURE_SECRET),
       WOOVI_WEBHOOK_HMAC_SECRET: presence(process.env.WOOVI_WEBHOOK_HMAC_SECRET || process.env.OPENPIX_WEBHOOK_HMAC_SECRET),
       WOOVI_WEBHOOK_AUTHORIZATION: presence(
@@ -380,7 +393,7 @@ function main() {
     diagnostics: {
       biometricReadiness,
       webhookSignature: {
-        verifierKeysPresent: webhookVerifierKeysPresent,
+        verifierKeysPresent: effectiveWebhookVerifierKeysPresent,
         hasVerifier: hasWebhookVerifier,
         authorizationKeysPresent: webhookAuthorizationKeysPresent,
         hasAuthorization: hasWebhookAuthorization,

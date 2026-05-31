@@ -212,7 +212,7 @@ describe('woovi webhook guards', () => {
     expect(result.providerVerificationRequired).toBe(true);
   });
 
-  it('rejects unsigned webhook in production when provider verification has no webhook authorization', () => {
+  it('rejects unsigned webhook in production because Woovi uses x-webhook-signature', () => {
     process.env.NODE_ENV = 'production';
     process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED = 'true';
     process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED = 'true';
@@ -224,11 +224,11 @@ describe('woovi webhook guards', () => {
 
     expect(result.valid).toBe(false);
     expect(result.method).toBeNull();
-    expect(result.reason).toBe('WEBHOOK_AUTHORIZATION_NOT_CONFIGURED');
+    expect(result.reason).toBe('WEBHOOK_SIGNATURE_MISSING');
     expect(result.providerVerificationRequired).toBe(true);
   });
 
-  it('allows unsigned production webhook with configured authorization and provider verification', () => {
+  it('rejects unsigned production webhook even when custom authorization is configured', () => {
     process.env.NODE_ENV = 'production';
     process.env.WOOVI_WEBHOOK_REQUIRE_SIGNATURE = 'false';
     process.env.WOOVI_WEBHOOK_ALLOW_UNSIGNED = 'true';
@@ -243,8 +243,9 @@ describe('woovi webhook guards', () => {
       }
     }));
 
-    expect(result.valid).toBe(true);
-    expect(result.method).toBe('unsigned_provider_verification');
+    expect(result.valid).toBe(false);
+    expect(result.method).toBeNull();
+    expect(result.reason).toBe('WEBHOOK_SIGNATURE_MISSING');
     expect(result.authorizationConfigured).toBe(true);
     expect(result.providerVerificationRequired).toBe(true);
   });
@@ -275,7 +276,7 @@ describe('woovi webhook guards', () => {
     }));
 
     expect(result.valid).toBe(false);
-    expect(result.reason).toBe('WEBHOOK_AUTHORIZATION_NOT_CONFIGURED');
+    expect(result.reason).toBe('WEBHOOK_SIGNATURE_MISSING');
   });
 
   it('rejects webhook when authorization token is configured but missing', () => {
