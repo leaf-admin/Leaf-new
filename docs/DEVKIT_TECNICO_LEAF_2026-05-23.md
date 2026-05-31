@@ -471,7 +471,7 @@ Auth:
 
 Basic auth opcional:
 
-- Middleware em `leaf-dashboard-js/middleware.js`
+- Proxy em `leaf-dashboard-js/proxy.js`
 - Vars: `DASHBOARD_BASIC_AUTH_ENABLED`, `DASHBOARD_BASIC_AUTH_USER`, `DASHBOARD_BASIC_AUTH_PASSWORD`
 - Ignora rotas `/api/*`.
 
