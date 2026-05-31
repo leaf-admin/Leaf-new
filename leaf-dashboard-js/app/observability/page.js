@@ -9,7 +9,10 @@ import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const grafanaBase = process.env.NEXT_PUBLIC_GRAFANA_URL || "";
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = Math.max(
+  10000,
+  Number.parseInt(process.env.NEXT_PUBLIC_OBSERVABILITY_POLL_MS || "30000", 10) || 30000,
+);
 
 const SOURCE_DEFS = [
   { id: "metrics", label: "Métricas", critical: true },

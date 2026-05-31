@@ -10,22 +10,29 @@ import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 
-const periodMap = {
-  "24h": "today",
-  "3d": "week",
-  week: "week",
-  month: "month",
-};
-const DASHBOARD_REFRESH_MS = 120000;
+const DASHBOARD_REFRESH_MS = 30000;
 
-function get(obj, path, fallback = null) {
-  if (!obj || !path) return fallback;
-  return path.split(".").reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj) ?? fallback;
+function toNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function formatCompact(value) {
+  return toNumber(value).toLocaleString("pt-BR", {
+    maximumFractionDigits: toNumber(value) >= 1000 ? 1 : 0,
+    notation: toNumber(value) >= 10000 ? "compact" : "standard",
+  });
 }
 
 function formatPercent(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  return `${(Number(value) * 100).toFixed(1)}%`;
+  return `${(toNumber(value) * 100).toFixed(1)}%`;
+}
+
+function brlFromCents(value) {
+  return `R$ ${(toNumber(value) / 100).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function formatMinutes(value) {
@@ -33,183 +40,118 @@ function formatMinutes(value) {
   return `${Number(value).toFixed(1)} min`;
 }
 
-function formatDecimal(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  return Number(value).toFixed(2);
+function statusTone(status) {
+  if (status === "healthy") return "positive";
+  if (status === "warning") return "warning";
+  return "danger";
 }
 
-function brl(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  return `R$ ${Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function statusLabel(status) {
+  if (status === "healthy") return "Operação saudável";
+  if (status === "warning") return "Atenção operacional";
+  return "Ação necessária";
 }
 
-function toneGte(value, target) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "warning";
-  return Number(value) >= target ? "positive" : "danger";
-}
-
-function toneLte(value, target) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "warning";
-  return Number(value) <= target ? "positive" : "danger";
-}
-
-function worstTone(...tones) {
-  if (tones.includes("danger")) return "danger";
-  if (tones.includes("warning")) return "warning";
-  if (tones.includes("positive")) return "positive";
-  return "default";
-}
-
-function buildMainSignals(data) {
-  const d30 = get(data, "metrics.growth.driverRetentionD30");
-  const d60 = get(data, "metrics.growth.driverRetentionD60");
-  const ridesPerDriver = get(data, "metrics.drivers.ridesPerDriverPerDay");
-  const cpa = get(data, "metrics.financial.driverAcquisitionCost");
-  const activation = get(data, "metrics.growth.driverActivationRate");
-  const supportResponse = get(data, "metrics.support.averageFirstResponseMinutes");
-  const churn = get(data, "metrics.growth.driverChurnRate");
+function buildKpis(snapshot) {
+  const metrics = snapshot?.dailyMetrics || {};
+  const support = snapshot?.support || {};
+  const campaigns = snapshot?.campaigns || {};
+  const status = snapshot?.status || "unhealthy";
 
   return [
     {
-      id: "retention",
-      title: "Retenção D30 / D60",
-      value: `${formatPercent(d30)} / ${formatPercent(d60)}`,
-      subtitle: "Meta: 65% / 55%",
-      tone: worstTone(toneGte(d30, 0.65), toneGte(d60, 0.55)),
+      id: "services",
+      title: "Serviços",
+      value: statusLabel(status),
+      subtitle: `Cache ${snapshot?.cache?.status || "-"} · ${snapshot?.scope?.ttlSeconds || 0}s`,
+      tone: statusTone(status),
     },
     {
-      id: "ridesPerDriver",
-      title: "Corridas por motorista",
-      value: formatDecimal(ridesPerDriver),
-      subtitle: "Meta: >= 10 por dia",
-      tone: toneGte(ridesPerDriver, 10),
+      id: "drivers",
+      title: "Motoristas ativos",
+      value: formatCompact(metrics.activeDrivers),
+      subtitle: `${formatCompact(metrics.totalDrivers)} cadastrados`,
+      tone: metrics.activeDrivers > 0 ? "positive" : "warning",
     },
     {
-      id: "cpa",
-      title: "CPA motorista",
-      value: brl(cpa),
-      subtitle: "Verba / novos motoristas",
-      tone: cpa == null ? "warning" : "default",
+      id: "rides",
+      title: "Corridas em tempo real",
+      value: formatCompact(metrics.activeRides),
+      subtitle: `${formatCompact(metrics.completedRidesToday)} finalizadas hoje`,
+      tone: metrics.activeRides > 0 ? "positive" : "default",
     },
     {
-      id: "activation",
-      title: "Taxa de ativação",
-      value: formatPercent(activation),
-      subtitle: "Primeira corrida em até 7 dias",
-      tone: toneGte(activation, 0.7),
+      id: "gmv",
+      title: "GMV hoje",
+      value: brlFromCents(metrics.gmvCents),
+      subtitle: `Ticket médio ${brlFromCents(metrics.averageRideTicketCents)}`,
+      tone: "default",
+    },
+    {
+      id: "revenue",
+      title: "Receita bruta Leaf",
+      value: brlFromCents(metrics.grossRevenueCents),
+      subtitle: `ARPU base ${brlFromCents(metrics.arpuBaseCents)}`,
+      tone: "default",
     },
     {
       id: "support",
-      title: "1ª resposta suporte",
-      value: formatMinutes(supportResponse),
-      subtitle: "Meta: <= 30 min",
-      tone: toneLte(supportResponse, 30),
+      title: "Suporte aberto",
+      value: formatCompact(support.totalOpenTickets),
+      subtitle: `${formatCompact(support.overdueAckCount + support.overdueFirstResponseCount)} fora do SLA`,
+      tone: support.overdueAckCount + support.overdueFirstResponseCount > 0 ? "danger" : "positive",
     },
     {
-      id: "churn",
-      title: "Churn motorista",
-      value: formatPercent(churn),
-      subtitle: "Meta: <= 15%",
-      tone: toneLte(churn, 0.15),
+      id: "campaigns",
+      title: "Campanhas ativas",
+      value: formatCompact(campaigns.active),
+      subtitle: `${formatCompact(campaigns.impressions)} views · CTR ${formatPercent(campaigns.ctr)}`,
+      tone: campaigns.active > 0 ? "positive" : "default",
     },
   ];
 }
 
-function buildActionItems(data) {
-  const items = [];
-  const d30 = get(data, "metrics.growth.driverRetentionD30");
-  const d60 = get(data, "metrics.growth.driverRetentionD60");
-  const ridesPerDriver = get(data, "metrics.drivers.ridesPerDriverPerDay");
-  const cpa = get(data, "metrics.financial.driverAcquisitionCost");
-  const activation = get(data, "metrics.growth.driverActivationRate");
-  const supportResponse = get(data, "metrics.support.averageFirstResponseMinutes");
-  const supportOverdue = Number(get(data, "metrics.support.overdueFirstResponseCount", 0) || 0);
-  const churn = get(data, "metrics.growth.driverChurnRate");
-
-  if ((d30 != null && d30 < 0.65) || (d60 != null && d60 < 0.55)) {
-    items.push({
-      label: "Retenção",
-      text: "Acionar recuperação de motorista inativo e medir retorno por coorte.",
-      tone: "status-bad",
-    });
-  }
-
-  if (activation != null && activation < 0.7) {
-    items.push({
-      label: "Onboarding",
-      text: "Priorizar pendências de KYC/documentos e lembretes de primeira corrida.",
-      tone: "status-bad",
-    });
-  }
-
-  if (ridesPerDriver != null && ridesPerDriver < 10) {
-    items.push({
-      label: "Oferta",
-      text: "Revisar demanda por zona e disparar smart push somente onde houver pedido ativo.",
-      tone: "status-warn",
-    });
-  }
-
-  if ((supportResponse != null && supportResponse > 30) || supportOverdue > 0) {
-    items.push({
-      label: "Suporte",
-      text: "Destravar fila N1/N2 antes de aumentar volume de aquisição.",
-      tone: "status-bad",
-    });
-  }
-
-  if (churn != null && churn > 0.15) {
-    items.push({
-      label: "Churn",
-      text: "Segmentar motoristas sem corrida recente para campanha de winback.",
-      tone: "status-bad",
-    });
-  }
-
-  if (cpa == null) {
-    items.push({
-      label: "CPA",
-      text: "Configurar verba de aquisição para o painel deixar de mostrar custo desconhecido.",
-      tone: "status-warn",
-    });
-  }
-
-  if (items.length === 0) {
-    items.push({
-      label: "Operação",
-      text: "Sem desvio crítico nos sinais principais do período.",
-      tone: "status-ok",
-    });
-  }
-
-  return items.slice(0, 4);
+function SourceRows({ sources = [] }) {
+  if (!sources.length) return <p className="text-muted">Sem fontes carregadas.</p>;
+  return (
+    <div className="metric-list">
+      {sources.map((source) => (
+        <div className="row" key={source.id}>
+          <div className="label">
+            <span className={source.status === "ok" ? "status-ok" : "status-bad"}>{source.label}</span>
+          </div>
+          <div className="value">
+            {source.status === "ok" ? `${source.durationMs} ms` : source.error || "falhou"}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function DashboardPage() {
   const { user, signOut } = useAuth();
-  const [period, setPeriod] = useState("24h");
+  const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [marketplace, setMarketplace] = useState(null);
 
   useEffect(() => {
     let mounted = true;
+    let firstLoad = true;
 
     const load = async () => {
       try {
-        if (mounted) {
-          setLoading(true);
-          setError("");
-        }
-
-        const apiPeriod = periodMap[period] || "today";
-        const payload = await leafAPI.getMarketplaceMetrics(apiPeriod);
-
-        if (mounted) setMarketplace(payload);
+        if (mounted && firstLoad) setLoading(true);
+        if (mounted) setError("");
+        const payload = await leafAPI.getCommandCenterSnapshot({ hours: 1, period: "today" });
+        if (mounted) setSnapshot(payload);
       } catch (err) {
-        if (mounted) setError(err?.message || "Falha ao carregar dashboard");
+        if (mounted) setError(err?.message || "Falha ao carregar command center");
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+          firstLoad = false;
+        }
       }
     };
 
@@ -219,31 +161,27 @@ export default function DashboardPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [period]);
+  }, []);
 
-  const signals = useMemo(() => buildMainSignals(marketplace), [marketplace]);
-  const actions = useMemo(() => buildActionItems(marketplace), [marketplace]);
-  const dangerCount = signals.filter((signal) => signal.tone === "danger").length;
-  const warningCount = signals.filter((signal) => signal.tone === "warning").length;
-  const operationTone = dangerCount > 0 ? "status-bad" : warningCount > 0 ? "status-warn" : "status-ok";
-  const operationLabel = dangerCount > 0 ? "Atenção agora" : warningCount > 0 ? "Monitorar" : "Operação estável";
+  const kpis = useMemo(() => buildKpis(snapshot), [snapshot]);
+  const support = snapshot?.support || {};
+  const campaigns = snapshot?.campaigns || {};
+  const services = snapshot?.services || {};
+  const costControls = snapshot?.costControls || {};
 
   return (
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
           <div>
-            <h1>Painel principal</h1>
-            <p>Usuario: {user?.email || "n/a"}</p>
+            <h1>Command Center</h1>
+            <p>Operação diária com snapshot cacheado. Usuário: {user?.email || "n/a"}</p>
           </div>
           <div className="filters">
-            <span className={operationTone}>{operationLabel}</span>
-            <select value={period} onChange={(event) => setPeriod(event.target.value)}>
-              <option value="24h">Ultimas 24h</option>
-              <option value="3d">Ultimos 3 dias</option>
-              <option value="week">Ultima semana</option>
-              <option value="month">Ultimo mes</option>
-            </select>
+            <span className={snapshot?.status === "healthy" ? "status-ok" : snapshot?.status === "warning" ? "status-warn" : "status-bad"}>
+              {statusLabel(snapshot?.status)}
+            </span>
+            <span className="meta-badge">Refresh {DASHBOARD_REFRESH_MS / 1000}s</span>
             <button
               onClick={async () => {
                 await signOut();
@@ -256,65 +194,104 @@ export default function DashboardPage() {
         </header>
 
         <AppNav />
-        {loading ? <LoadingState message="Carregando painel principal..." /> : null}
+        {loading ? <LoadingState message="Carregando command center..." /> : null}
 
         <section className="grid grid-kpi">
-          {signals.map((signal) => (
+          {kpis.map((kpi) => (
             <KpiCard
-              key={signal.id}
-              title={signal.title}
-              value={signal.value}
-              subtitle={signal.subtitle}
-              tone={signal.tone}
+              key={kpi.id}
+              title={kpi.title}
+              value={kpi.value}
+              subtitle={kpi.subtitle}
+              tone={kpi.tone}
             />
           ))}
         </section>
 
         <section className="grid">
-          <Panel title="Prioridade operacional">
+          <Panel
+            title="Status dos serviços"
+            subtitle="Uma chamada agregada; os detalhes técnicos continuam disponíveis em Observabilidade."
+            actions={<Link href="/observability">Abrir detalhes</Link>}
+          >
+            <SourceRows sources={services.sources || []} />
+          </Panel>
+
+          <Panel title="Suporte em tempo real" actions={<Link href="/support">Abrir suporte</Link>}>
             <div className="metric-list">
-              {actions.map((item) => (
-                <div className="row" key={`${item.label}-${item.text}`}>
-                  <div className="label">
-                    <span className={item.tone}>{item.label}</span>
-                  </div>
-                  <div className="value">{item.text}</div>
+              <div className="row">
+                <div className="label">Tickets abertos</div>
+                <div className="value">{formatCompact(support.totalOpenTickets)}</div>
+              </div>
+              <div className="row">
+                <div className="label">Backlog N1 / N2 / N3</div>
+                <div className="value">
+                  {formatCompact(support.backlogByPriority?.N1)} / {formatCompact(support.backlogByPriority?.N2)} / {formatCompact(support.backlogByPriority?.N3)}
                 </div>
-              ))}
+              </div>
+              <div className="row">
+                <div className="label">Sem responsável</div>
+                <div className="value">{formatCompact(support.ticketsWithoutOwner)}</div>
+              </div>
+              <div className="row">
+                <div className="label">Mediana 1ª resposta</div>
+                <div className="value">{formatMinutes(support.medianFirstResponseMinutes)}</div>
+              </div>
             </div>
           </Panel>
 
-          <Panel title="Contexto mínimo">
+          <Panel title="Monitor de campanhas" actions={<Link href="/campaign-center">Abrir campanhas</Link>}>
             <div className="metric-list">
               <div className="row">
-                <div className="label">Corridas no período</div>
-                <div className="value">{Number(get(marketplace, "metrics.summary.ridesRequested", 0)).toLocaleString("pt-BR")}</div>
+                <div className="label">Ativas / pausadas</div>
+                <div className="value">{formatCompact(campaigns.active)} / {formatCompact(campaigns.paused)}</div>
               </div>
               <div className="row">
-                <div className="label">Motoristas ativos</div>
-                <div className="value">{Number(get(marketplace, "metrics.drivers.activeDrivers", 0)).toLocaleString("pt-BR")}</div>
+                <div className="label">Impressões / cliques</div>
+                <div className="value">{formatCompact(campaigns.impressions)} / {formatCompact(campaigns.clicks)}</div>
               </div>
               <div className="row">
-                <div className="label">Receita total</div>
-                <div className="value">{brl(get(marketplace, "metrics.financial.totalRevenue"))}</div>
+                <div className="label">Valor contratado</div>
+                <div className="value">{brlFromCents(campaigns.campaignValueCents)}</div>
               </div>
               <div className="row">
-                <div className="label">Tickets abertos</div>
-                <div className="value">{Number(get(marketplace, "metrics.support.totalOpenTickets", 0)).toLocaleString("pt-BR")}</div>
+                <div className="label">eCPM / eCPC</div>
+                <div className="value">{brlFromCents(campaigns.effectiveCpmCents)} / {brlFromCents(campaigns.effectiveCpcCents)}</div>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel title="Controle de custo">
+            <div className="metric-list">
+              <div className="row">
+                <div className="label">APIs pagas neste snapshot</div>
+                <div className="value">{costControls.externalPaidApisCalled ? "sim" : "não"}</div>
+              </div>
+              <div className="row">
+                <div className="label">Fan-out do dashboard</div>
+                <div className="value">{costControls.dashboardFanOutReduced ? "reduzido" : "não reduzido"}</div>
+              </div>
+              <div className="row">
+                <div className="label">Cache</div>
+                <div className="value">
+                  {snapshot?.cache?.status || "-"} · idade {snapshot?.cache?.ageSeconds ?? "-"}s
+                </div>
+              </div>
+              <div className="row">
+                <div className="label">Mapa operacional</div>
+                <div className="value">separado para evitar custo acidental</div>
               </div>
             </div>
           </Panel>
         </section>
 
-        <Panel
-          title="Drill-down"
-          actions={<span className="meta-badge">Dados completos fora da home</span>}
-        >
+        <Panel title="Drill-down">
           <div className="filters">
+            <Link href="/observability">Observabilidade</Link>
             <Link href="/metrics/marketplace">Marketplace Health</Link>
             <Link href="/support">Suporte</Link>
-            <Link href="/subscriptions">Cobrança</Link>
-            <Link href="/notifications">Comunicação</Link>
+            <Link href="/campaign-center">Campanhas</Link>
+            <Link href="/maps">Mapa operacional</Link>
           </div>
         </Panel>
 

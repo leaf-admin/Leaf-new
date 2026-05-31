@@ -29,7 +29,7 @@ class OpsOverviewService {
     return this.redisPool?.getConnection ? this.redisPool.getConnection() : null;
   }
 
-  async getOverview({ hours = 1, city = null, regionHash = null } = {}) {
+  async getOverview({ hours = 1, city = null, regionHash = null, autoEscalate = true } = {}) {
     const redis = this.getRedis();
     const [
       metrics,
@@ -42,7 +42,7 @@ class OpsOverviewService {
       this.metricsCollector.getAllMetrics(Number.parseInt(hours, 10) || 1),
       this.rideHealthMonitor.getRideOperationsSnapshot(redis, {}),
       this.safetyIncidentService.getOpenSummary({ city, regionHash }),
-      this.supportQueueService.getQueueSummary({ autoEscalate: true }),
+      this.supportQueueService.getQueueSummary({ autoEscalate }),
       this.disputeReviewService.getSummary(),
       this.operationalAreaPolicyService.listPolicies({ city, regionHash, activeOnly: true })
     ]);

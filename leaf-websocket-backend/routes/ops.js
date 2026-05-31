@@ -8,6 +8,7 @@ const opsOverviewService = require('../services/ops-overview-service');
 const rideCostTelemetryService = require('../services/ride-cost-telemetry-service');
 const rideCostAlertService = require('../services/ride-cost-alert-service');
 const dailyEarningsReportService = require('../services/daily-earnings-report-service');
+const backofficeCommandCenterService = require('../services/backoffice-command-center-service');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
@@ -15,6 +16,38 @@ const OPS_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development', 
 const MUTATION_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
 
 router.use(authenticateSupport, requireSupportRoles(OPS_ROLES));
+
+function userCanBypassCommandCenterCache(user = {}) {
+  const roleCandidates = [
+    user.role,
+    user.userType,
+    user.usertype,
+    ...(Array.isArray(user.roles) ? user.roles : [])
+  ]
+    .filter(Boolean)
+    .map((role) => String(role).trim().toLowerCase());
+
+  return roleCandidates.some((role) => MUTATION_ROLES.includes(role));
+}
+
+router.get('/command-center', async (req, res) => {
+  try {
+    const requestedForceRefresh =
+      req.query?.forceRefresh === 'true' || req.query?.force === 'true';
+    const forceRefresh = requestedForceRefresh && userCanBypassCommandCenterCache(req.user);
+    const snapshot = await backofficeCommandCenterService.getSnapshot({
+      hours: req.query?.hours,
+      period: req.query?.period,
+      forceRefresh
+    });
+
+    res.set('X-Leaf-Command-Center-Cache', snapshot.cache?.status || 'UNKNOWN');
+    res.json(snapshot);
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'command-center' });
+    res.status(500).json({ success: false, error: 'Erro ao buscar command center operacional' });
+  }
+});
 
 router.get('/overview', async (req, res) => {
   try {

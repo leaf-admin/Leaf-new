@@ -269,6 +269,15 @@ class LeafApiService {
     return this.request(`/ops/alerts?hours=${encodeURIComponent(hours)}`);
   }
 
+  async getCommandCenterSnapshot({ hours = 1, period = "today", forceRefresh = false } = {}) {
+    const params = new URLSearchParams({
+      hours: String(hours),
+      period: String(period),
+    });
+    if (forceRefresh) params.append("forceRefresh", "true");
+    return this.request(`/ops/command-center?${params.toString()}`);
+  }
+
   async getWorkerHealth() {
     return this.request("/workers/health");
   }
