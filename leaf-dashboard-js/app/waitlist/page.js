@@ -201,7 +201,8 @@ export default function WaitlistPage() {
           <KpiCard title="Pendentes" value={stats?.stats?.pending || 0} />
           <KpiCard title="Aprovados" value={stats?.stats?.approved || 0} />
           <KpiCard title="Leads landing" value={landingStats?.total || 0} />
-          <KpiCard title="Página atual" value={pagination?.page || page} />
+          <KpiCard title="Leads contactados" value={landingStats?.contacted || stats?.funnel?.landing?.contacted || 0} />
+          <KpiCard title="Leads convertidos" value={landingStats?.converted || stats?.funnel?.landing?.converted || 0} tone="positive" />
           <KpiCard
             title="Slots disponíveis"
             value={globalWaitlistEnabled ? (stats?.stats?.availableSlots || 0) : "bloqueado"}
@@ -223,6 +224,9 @@ export default function WaitlistPage() {
                 approved: stats?.stats?.approved || 0,
                 rejected: stats?.stats?.rejected || 0,
                 availableSlots: stats?.stats?.availableSlots || 0,
+                landingPending: landingStats?.pending || stats?.funnel?.landing?.pending || 0,
+                landingConverted: landingStats?.converted || stats?.funnel?.landing?.converted || 0,
+                passengerWaitlist: stats?.funnel?.contract?.passengerWaitlist ? "sim" : "não",
                 totalCities: (stats?.byCity || []).length,
                 currentPage: pagination?.page || page,
                 waitListEnabled: globalWaitlistEnabled ? "sim" : "não",
@@ -232,6 +236,9 @@ export default function WaitlistPage() {
                 approved: "Aprovados",
                 rejected: "Rejeitados",
                 availableSlots: "Slots disponiveis",
+                landingPending: "Landing pendente",
+                landingConverted: "Landing convertida",
+                passengerWaitlist: "Waitlist passageiro",
                 totalCities: "Cidades monitoradas",
                 currentPage: "Pagina atual",
                 waitListEnabled: "Waitlist global",

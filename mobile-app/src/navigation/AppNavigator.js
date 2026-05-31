@@ -368,6 +368,16 @@ const appLinking = {
       RobotaxiPrototypeDriverDocuments: 'robotaxi/driver/documents',
       RobotaxiPrototypeVehicles: 'robotaxi/driver/vehicles',
       RobotaxiPrototypeDriverWaitlist: 'robotaxi/driver/waitlist',
+      RobotaxiPrototypeDriverWaitlistStatus: {
+        path: 'robotaxi/driver/waitlist/status',
+        parse: {
+          status: String,
+          waitlistEvent: String,
+          position: Number,
+          city: String,
+          cityLabel: String,
+        },
+      },
       RobotaxiPrototypeDriverOffer: 'robotaxi/driver/offer',
       RobotaxiPrototypeDriverTrip: 'robotaxi/driver/trip',
       RobotaxiPrototypeProfile: 'robotaxi/profile',

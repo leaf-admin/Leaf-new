@@ -7,7 +7,7 @@ import Panel from "@/src/components/ui/Panel";
 import KpiCard from "@/src/components/ui/KpiCard";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
-import { TechnicalDetails } from "@/src/components/ui/DataViews";
+import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { useAuth } from "@/src/contexts/AuthContext";
 import {
   hasAnyRole,
@@ -282,6 +282,8 @@ export default function ProgramsPage() {
       driverTracking: summary?.invites?.driverTracking || 0,
       passengerBenefitsActive: summary?.invites?.passengerBenefitsActive || 0,
       passengerBenefitsConsumed: summary?.invites?.passengerBenefitsConsumed || 0,
+      driverFunnel: summary?.funnel?.driver || {},
+      passengerFunnel: summary?.funnel?.passenger || {},
       acceptanceRateLabel: `${Math.round(acceptanceRate * 100)}%`,
       rewardRateLabel: `${Math.round(rewardRate * 100)}%`,
     };
@@ -333,6 +335,29 @@ export default function ProgramsPage() {
         </section>
 
         <section className="grid">
+          <Panel
+            title="Funil de aquisição"
+            subtitle="Motorista pode entrar por convite ou waitlist; passageiro entra somente por convite."
+          >
+            <KeyValueGrid
+              data={{
+                driverInvited: summaryCards.driverFunnel.invited || 0,
+                driverAccepted: summaryCards.driverFunnel.accepted || 0,
+                driverRewarded: summaryCards.driverFunnel.rewarded || 0,
+                passengerInvited: summaryCards.passengerFunnel.invited || 0,
+                passengerAccepted: summaryCards.passengerFunnel.accepted || 0,
+                passengerWaitlist: summaryCards.passengerFunnel.waitlistEnabled ? "sim" : "não",
+              }}
+              labels={{
+                driverInvited: "Motoristas convidados",
+                driverAccepted: "Motoristas aceitos",
+                driverRewarded: "Motoristas recompensados",
+                passengerInvited: "Passageiros convidados",
+                passengerAccepted: "Passageiros aceitos",
+                passengerWaitlist: "Waitlist passageiro",
+              }}
+            />
+          </Panel>
           <Panel
             title="Configuração Global"
             subtitle="Parâmetros padrão para programas de motorista, passageiro e founder wave."

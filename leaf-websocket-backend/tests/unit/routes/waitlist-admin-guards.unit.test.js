@@ -81,4 +81,18 @@ describe('waitlist admin mutation guards', () => {
       })
     );
   });
+
+  it('keeps passenger acquisition out of landing waitlist', async () => {
+    const response = await request(createApp())
+      .post('/api/waitlist/landing')
+      .send({
+        nome: 'Passageiro Teste',
+        celular: '+55 (21) 99999-9999',
+        cidade: 'Rio de Janeiro',
+        role: 'passenger'
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Passageiros entram por convite');
+  });
 });

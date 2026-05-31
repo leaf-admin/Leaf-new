@@ -33,6 +33,7 @@ import {
 const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
 const INVITE_BASE_URL = 'https://leaf.app.br/convite';
+const HISTORY_LIMIT = 5;
 
 function buildInviteLink(code) {
   const safeCode = String(code || '').trim();
@@ -52,6 +53,62 @@ function resolveInviteTarget(value) {
 
 function countByStatus(invites, status) {
   return invites.filter((invite) => String(invite.status || '').toLowerCase() === status).length;
+}
+
+function formatInviteStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'accepted') return 'Aceito';
+  if (normalized === 'qualified') return 'Qualificado';
+  if (normalized === 'rewarded') return 'Recompensado';
+  if (normalized === 'expired') return 'Expirado';
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'Cancelado';
+  return 'Pendente';
+}
+
+function formatInviteTarget(invite = {}) {
+  return invite.inviteeEmail || invite.inviteePhone || invite.acceptedBy || 'Link compartilhável';
+}
+
+function formatShortDate(value) {
+  if (!value) return '';
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return '';
+  return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(timestamp);
+}
+
+function InviteHistoryRows({ title, invites, emptyMessage, testID }) {
+  const visibleInvites = invites.slice(1, HISTORY_LIMIT + 1);
+
+  return (
+    <PrototypeMenuSection title={title}>
+      {visibleInvites.length > 0 ? (
+        visibleInvites.map((invite, index) => (
+          <View
+            key={invite.id || invite.code || `${title}-${index}`}
+            style={[styles.historyRow, index === visibleInvites.length - 1 && styles.historyRowLast]}
+            testID={`${testID}-item-${index}`}
+          >
+            <View style={styles.historyCopy}>
+              <Text style={styles.historyTitle} numberOfLines={1}>
+                {invite.code || 'Convite'}
+              </Text>
+              <Text style={styles.historyMeta} numberOfLines={1}>
+                {formatInviteTarget(invite)}
+              </Text>
+            </View>
+            <View style={styles.historySide}>
+              <Text style={styles.historyStatus}>{formatInviteStatus(invite.status)}</Text>
+              {formatShortDate(invite.acceptedAt || invite.createdAt) ? (
+                <Text style={styles.historyDate}>{formatShortDate(invite.acceptedAt || invite.createdAt)}</Text>
+              ) : null}
+            </View>
+          </View>
+        ))
+      ) : (
+        <Text style={styles.emptyHistoryText}>{emptyMessage}</Text>
+      )}
+    </PrototypeMenuSection>
+  );
 }
 
 export default function RobotaxiInvitesScreen({ navigation, route }) {
@@ -78,6 +135,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
     [sentInvites],
   );
   const acceptedCount = useMemo(() => countByStatus(sentInvites, 'accepted'), [sentInvites]);
+  const receivedAcceptedCount = useMemo(() => countByStatus(receivedInvites, 'accepted'), [receivedInvites]);
   const latestInvite = createdInvite || sentInvites[0] || null;
   const latestCode = latestInvite?.code || '';
   const latestLink = useMemo(() => buildInviteLink(latestCode), [latestCode]);
@@ -165,6 +223,12 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
       if (result.invite?.id || result.invite?.code) {
         setReceivedInvites((current) => [result.invite, ...current]);
         setAcceptCode('');
+        if (result.passengerBenefit) {
+          Alert.alert(
+            'Convite aceito',
+            `Benefício aplicado: ${result.passengerBenefit.discountPercent || 0}% em até ${result.passengerBenefit.remainingRides || result.passengerBenefit.maxDiscountRides || 0} corridas.`,
+          );
+        }
       }
     } catch (error) {
       Alert.alert('Convites', error?.message || 'Não foi possível aceitar esse convite.');
@@ -200,7 +264,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
             onLayout={handlePanelLayout}
             eyebrow="Convites"
             title="Convide passageiros"
-            subtitle="Gere links e acompanhe quantas pessoas entraram pela sua indicação."
+            subtitle="Fluxo convite-only para passageiros: gere links, compartilhe e acompanhe aceites."
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -249,7 +313,16 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                 <PrototypeMenuSection title="Último convite">
                   <PrototypeMenuInfoRow label="Código" value={latestCode || 'Aguardando'} />
                   <PrototypeMenuInfoRow label="Link" value={latestLink} />
-                  <PrototypeMenuInfoRow label="Status" value={latestInvite.status || 'pending'} last />
+                  <PrototypeMenuInfoRow label="Status" value={formatInviteStatus(latestInvite.status)} />
+                  <PrototypeMenuInfoRow
+                    label="Benefício"
+                    value={
+                      latestInvite.discountPercent
+                        ? `${latestInvite.discountPercent}% / ${latestInvite.maxDiscountRides || 0} corridas`
+                        : 'Convite ativo'
+                    }
+                    last
+                  />
                   <View style={styles.actionGrid}>
                     <LeafButton
                       label={copied ? 'Copiado' : 'Copiar'}
@@ -257,6 +330,8 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                       tone="leaf"
                       onPress={handleCopy}
                       style={styles.actionButton}
+                      testID="robotaxi-invites-copy-button"
+                      accessibilityLabel="robotaxi-invites-copy-button"
                     />
                     <LeafButton
                       label="Compartilhar"
@@ -264,6 +339,8 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                       tone="ghost"
                       onPress={handleShare}
                       style={styles.actionButton}
+                      testID="robotaxi-invites-share-button"
+                      accessibilityLabel="robotaxi-invites-share-button"
                     />
                   </View>
                 </PrototypeMenuSection>
@@ -305,8 +382,23 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
 
               <PrototypeMenuSection title="Histórico">
                 <PrototypeMenuInfoRow label="Recebidos" value={String(receivedInvites.length)} />
-                <PrototypeMenuInfoRow label="Ativos" value={String(activeInvites.length)} last />
+                <PrototypeMenuInfoRow label="Aceites recebidos" value={String(receivedAcceptedCount)} />
+                <PrototypeMenuInfoRow label="Ativos enviados" value={String(activeInvites.length)} last />
               </PrototypeMenuSection>
+
+              <InviteHistoryRows
+                title="Enviados recentes"
+                invites={sentInvites}
+                emptyMessage="Nenhum convite enviado ainda."
+                testID="robotaxi-invites-sent-history"
+              />
+
+              <InviteHistoryRows
+                title="Aceitos por você"
+                invites={receivedInvites}
+                emptyMessage="Nenhum convite aceito neste perfil."
+                testID="robotaxi-invites-received-history"
+              />
             </ScrollView>
           </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
@@ -363,5 +455,57 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(233,226,216,0.78)',
+    gap: 12,
+  },
+  historyRowLast: {
+    borderBottomWidth: 0,
+  },
+  historyCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  historyTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  historyMeta: {
+    marginTop: 2,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  historySide: {
+    alignItems: 'flex-end',
+  },
+  historyStatus: {
+    color: leafRideColors.leaf,
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  historyDate: {
+    marginTop: 2,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  emptyHistoryText: {
+    paddingVertical: 12,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

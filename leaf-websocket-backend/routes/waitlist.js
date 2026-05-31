@@ -51,13 +51,6 @@ const WAITLIST_ALLOWED_ORIGINS = Array.from(
   ])
 );
 
-function isMissingFirestoreIndexError(error) {
-  if (!error) return false;
-  if (Number(error.code) === 9) return true;
-  const message = String(error.message || '');
-  return message.includes('FAILED_PRECONDITION') && message.includes('requires an index');
-}
-
 function buildAuditOperator(user = {}) {
   return {
     id: user.id || user.uid || null,
@@ -182,6 +175,48 @@ function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+const WAITLIST_PRIORITY_WEIGHTS = {
+  priority: 0,
+  high: 0,
+  normal: 1,
+  low: 2
+};
+
+function normalizeWaitlistPriority(value) {
+  const safe = String(value || 'normal').trim().toLowerCase();
+  if (['priority', 'prioritario', 'prioritária', 'vip', 'urgent', 'urgente', 'high', 'alta'].includes(safe)) {
+    return 'priority';
+  }
+  if (['low', 'baixa'].includes(safe)) return 'low';
+  return 'normal';
+}
+
+function getWaitlistPriorityWeight(priority) {
+  const normalized = normalizeWaitlistPriority(priority);
+  return WAITLIST_PRIORITY_WEIGHTS[normalized] ?? WAITLIST_PRIORITY_WEIGHTS.normal;
+}
+
+function compareWaitlistDocsForQueue(a, b) {
+  const dataA = a.data ? a.data() : {};
+  const dataB = b.data ? b.data() : {};
+  const weightA = Number.isFinite(Number(dataA.priorityWeight))
+    ? Number(dataA.priorityWeight)
+    : getWaitlistPriorityWeight(dataA.priority);
+  const weightB = Number.isFinite(Number(dataB.priorityWeight))
+    ? Number(dataB.priorityWeight)
+    : getWaitlistPriorityWeight(dataB.priority);
+  if (weightA !== weightB) return weightA - weightB;
+  return Number(dataA.position || 0) - Number(dataB.position || 0);
+}
+
+function normalizeLandingWaitlistRole(body = {}) {
+  const raw = String(body.role || body.perfil || body.userType || body.tipo || 'driver')
+    .trim()
+    .toLowerCase();
+  if (['passenger', 'passageiro', 'rider', 'customer', 'cliente'].includes(raw)) return 'passenger';
+  return 'driver';
 }
 
 function normalizeStateCode(value) {
@@ -348,10 +383,17 @@ const validateOrigin = (req, res, next) => {
 // Middleware de sanitização e validação de dados
 const validateWaitlistData = (req, res, next) => {
   const { nome, celular, cidade } = req.body;
+  const role = normalizeLandingWaitlistRole(req.body || {});
   
   // Validação básica
   if (!nome || !celular || !cidade) {
     return res.status(400).json({ error: 'Campos obrigatórios: nome, celular e cidade' });
+  }
+
+  if (role === 'passenger') {
+    return res.status(400).json({
+      error: 'Passageiros entram por convite. A lista de espera e exclusiva para motoristas.'
+    });
   }
   
   // Sanitização e validação
@@ -383,7 +425,9 @@ const validateWaitlistData = (req, res, next) => {
   req.sanitizedData = {
     nome: nomeSanitizado,
     celular: celularSanitizado,
-    cidade: cidadeSanitizada
+    cidade: cidadeSanitizada,
+    role: 'driver',
+    userType: 'driver'
   };
   
   next();
@@ -550,7 +594,7 @@ router.post('/api/waitlist/landing',
         return res.status(400).json({ error: 'Dados inválidos' });
       }
       
-      const { nome, celular, cidade } = req.sanitizedData;
+      const { nome, celular, cidade, role, userType } = req.sanitizedData;
       const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || 'unknown';
       
       // Salvar na coleção waitlist_landing
@@ -560,6 +604,9 @@ router.post('/api/waitlist/landing',
         cidade,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         origem: 'landing_page',
+        role,
+        userType,
+        acquisitionChannel: 'driver_waitlist_landing',
         status: 'pending',
         ip: clientIP.substring(0, 50), // Limitar tamanho do IP
         userAgent: (req.headers['user-agent'] || '').substring(0, 200) // Limitar tamanho
@@ -729,6 +776,10 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
     }
 
     const userData = userSnapshot.data();
+    if (String(userData.usertype || userData.userType || '').toLowerCase() !== 'driver') {
+      return res.status(400).json({ error: 'A waitlist e exclusiva para motoristas' });
+    }
+
     if (userData.isActiveDriver) {
       return res.status(400).json({ error: 'Motorista já está ativo' });
     }
@@ -770,6 +821,8 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
       return Math.max(max, positionValue);
     }, 0);
     const nextPosition = maxPosition + 1;
+    const normalizedPriority = normalizeWaitlistPriority(priority);
+    const priorityWeight = getWaitlistPriorityWeight(normalizedPriority);
 
     // Adicionar à wait list
     const waitListData = {
@@ -777,7 +830,8 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
       position: nextPosition,
       status: 'pending',
       joinedAt: admin.firestore.FieldValue.serverTimestamp(),
-      priority,
+      priority: normalizedPriority,
+      priorityWeight,
       notes,
       adminId: null,
       cityKey: resolvedCity.cityKey,
@@ -794,7 +848,9 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
       waitListJoinedAt: admin.firestore.FieldValue.serverTimestamp(),
       waitListCityKey: resolvedCity.cityKey,
       waitListCityLabel: resolvedCity.cityLabel || requestedCity || userData.city || resolvedCity.cityKey,
-      waitListStateCode: resolvedCity.stateCode
+      waitListStateCode: resolvedCity.stateCode,
+      waitListPriority: normalizedPriority,
+      waitListPriorityWeight: priorityWeight
     });
 
     logger.info(`Motorista ${driverId} adicionado à wait list na posição ${nextPosition}`, {
@@ -804,6 +860,8 @@ router.post('/api/waitlist/join', requireFirebase, async (req, res) => {
     scheduleWaitlistNotification(driverId, WAITLIST_EVENTS.JOINED, {
       status: 'pending',
       position: nextPosition,
+      priority: normalizedPriority,
+      priorityWeight,
       cityKey: resolvedCity.cityKey,
       cityLabel: resolvedCity.cityLabel || requestedCity || userData.city || resolvedCity.cityKey,
     });
@@ -913,46 +971,17 @@ router.get('/api/waitlist/drivers', authenticateSupport, requireSupportRoles(WAI
     const offset = (page - 1) * limit;
     const cityKeyFilter = slugify(city);
 
-    // Buscar motoristas na wait list
-    let waitListDocs = [];
+    let waitListQuery = admin.firestore()
+      .collection('waitList')
+      .where('status', '==', status);
+
     if (cityKeyFilter) {
-      const citySnapshot = await admin.firestore()
-        .collection('waitList')
-        .where('status', '==', status)
-        .where('cityKey', '==', cityKeyFilter)
-        .get();
-      waitListDocs = citySnapshot.docs
-        .sort((a, b) => Number(a.data()?.position || 0) - Number(b.data()?.position || 0))
-        .slice(offset, offset + parseInt(limit, 10));
-    } else {
-      try {
-        const waitListSnapshot = await admin.firestore()
-          .collection('waitList')
-          .where('status', '==', status)
-          .orderBy('position', 'asc')
-          .offset(offset)
-          .limit(parseInt(limit, 10))
-          .get();
-        waitListDocs = waitListSnapshot.docs;
-      } catch (queryError) {
-        // Fallback quando o índice composto status+position ainda não foi criado.
-        if (!isMissingFirestoreIndexError(queryError)) {
-          throw queryError;
-        }
-        logger.warn('Waitlist drivers list fallback sem índice composto status+position', {
-          status,
-          page: Number(page),
-          limit: Number(limit)
-        });
-        const fallbackSnapshot = await admin.firestore()
-          .collection('waitList')
-          .where('status', '==', status)
-          .get();
-        waitListDocs = fallbackSnapshot.docs
-          .sort((a, b) => Number(a.data()?.position || 0) - Number(b.data()?.position || 0))
-          .slice(offset, offset + parseInt(limit, 10));
-      }
+      waitListQuery = waitListQuery.where('cityKey', '==', cityKeyFilter);
     }
+
+    const waitListSnapshot = await waitListQuery.get();
+    const sortedWaitListDocs = waitListSnapshot.docs.sort(compareWaitlistDocsForQueue);
+    const waitListDocs = sortedWaitListDocs.slice(offset, offset + parseInt(limit, 10));
 
     const drivers = [];
     for (const doc of waitListDocs) {
@@ -968,7 +997,10 @@ router.get('/api/waitlist/drivers', authenticateSupport, requireSupportRoles(WAI
           position: waitListData.position,
           status: waitListData.status,
           joinedAt: waitListData.joinedAt,
-          priority: waitListData.priority,
+          priority: normalizeWaitlistPriority(waitListData.priority),
+          priorityWeight: Number.isFinite(Number(waitListData.priorityWeight))
+            ? Number(waitListData.priorityWeight)
+            : getWaitlistPriorityWeight(waitListData.priority),
           notes: waitListData.notes,
           cityKey: waitListData.cityKey || null,
           cityLabel: waitListData.cityLabel || null,
@@ -1181,8 +1213,9 @@ router.post('/api/waitlist/reject', authenticateSupport, requireSupportRoles(WAI
     }
 
     const waitListDoc = waitListSnapshot.docs[0];
-    const position = waitListDoc.data().position;
-    const cityKey = waitListDoc.data().cityKey || null;
+    const waitListData = waitListDoc.data();
+    const position = waitListData.position;
+    const cityKey = waitListData.cityKey || null;
 
     // Rejeitar motorista
     await waitListDoc.ref.update({
@@ -1425,6 +1458,19 @@ router.get('/api/waitlist/stats', authenticateSupport, requireSupportRoles(WAITL
       admin.firestore().collection('waitList').where('status', '==', 'approved').get(),
       admin.firestore().collection('waitList').where('status', '==', 'rejected').get()
     ]);
+    const landingSnapshot = await admin.firestore()
+      .collection('waitlist_landing')
+      .get()
+      .catch(() => ({ docs: [], size: 0 }));
+    const landingRows = landingSnapshot.docs.map((doc) => doc.data ? doc.data() : {});
+    const landingStats = {
+      total: landingRows.length,
+      pending: landingRows.filter((item) => String(item.status || 'pending') === 'pending').length,
+      contacted: landingRows.filter((item) => String(item.status || '') === 'contacted').length,
+      converted: landingRows.filter((item) => String(item.status || '') === 'converted').length,
+      drivers: landingRows.filter((item) => String(item.userType || item.role || 'driver') === 'driver').length,
+      passengerWaitlist: 0
+    };
 
     const cityStatsMap = {};
     const addCityCounter = (docData, counterField) => {
@@ -1506,6 +1552,19 @@ router.get('/api/waitlist/stats', authenticateSupport, requireSupportRoles(WAITL
         avgWaitTime: Math.round(avgWaitTime * 10) / 10, // 1 casa decimal
         availableSlots: config.maxActiveDrivers - config.currentActiveDrivers
       },
+      funnel: {
+        landing: landingStats,
+        driverWaitlist: {
+          pending: pendingSnapshot.size,
+          approved: approvedSnapshot.size,
+          rejected: rejectedSnapshot.size
+        },
+        contract: {
+          passengerWaitlist: false,
+          passengerAcquisition: 'invite_only',
+          driverAcquisition: 'waitlist_or_invite'
+        }
+      },
       byCity
     });
 
@@ -1551,6 +1610,9 @@ router.get('/api/waitlist/landing/list', authenticateSupport, requireSupportRole
         celular: data.celular || '',
         cidade: data.cidade || '',
         status: data.status || 'pending',
+        role: data.role || 'driver',
+        userType: data.userType || data.role || 'driver',
+        acquisitionChannel: data.acquisitionChannel || 'driver_waitlist_landing',
         timestamp: data.timestamp ? data.timestamp.toDate().toISOString() : null,
         origem: data.origem || 'landing_page',
         ip: data.ip || '',
@@ -1595,6 +1657,8 @@ router.get('/api/waitlist/landing/list', authenticateSupport, requireSupportRole
       pending: waitlist.filter(item => item.status === 'pending').length,
       contacted: waitlist.filter(item => item.status === 'contacted').length,
       converted: waitlist.filter(item => item.status === 'converted').length,
+      drivers: waitlist.filter(item => item.userType === 'driver' || item.role === 'driver').length,
+      passengerWaitlist: 0,
       today: waitlist.filter(item => {
         if (!item.timestamp) return false;
         const itemDate = new Date(item.timestamp);

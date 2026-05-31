@@ -89,13 +89,40 @@ function formatAvailableSlots(maxActiveDrivers, currentActiveDrivers) {
   return String(Math.max(0, max - current));
 }
 
+function formatCriteriaValue(value) {
+  if (value === true) return 'ok';
+  if (value === false) return 'pendente';
+  return '--';
+}
+
+function buildStatusFromRouteParams(params = {}) {
+  const waitListStatus = params.waitListStatus || params.status || null;
+  const position = params.position || params.waitListPosition || null;
+  const estimatedWaitTime = params.estimatedWaitTime || params.waitDays || null;
+  const cityLabel = params.cityLabel || params.city || null;
+  const cityKey = params.cityKey || cityLabel || null;
+
+  if (!waitListStatus && !position && !estimatedWaitTime && !cityLabel) {
+    return null;
+  }
+
+  return {
+    waitListStatus: waitListStatus || 'none',
+    position,
+    estimatedWaitTime,
+    city: cityLabel || cityKey ? { cityLabel: cityLabel || cityKey, cityKey: cityKey || cityLabel } : undefined,
+    notificationType: params.notificationType || null,
+    waitlistEvent: params.waitlistEvent || params.event || null,
+  };
+}
+
 export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState(null);
+  const [status, setStatus] = useState(() => buildStatusFromRouteParams(route?.params));
   const [city, setCity] = useState(route?.params?.city || DEFAULT_CITY);
 
   usePrototypeMapOcclusion({
@@ -155,12 +182,31 @@ export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    const routeStatus = buildStatusFromRouteParams(route?.params);
+    if (!routeStatus) {
+      return;
+    }
+
+    setStatus((current) => ({
+      ...(current || {}),
+      ...routeStatus,
+      city: routeStatus.city || current?.city,
+    }));
+
+    const nextCity = routeStatus.city?.cityLabel || routeStatus.city?.cityKey;
+    if (nextCity) {
+      setCity(nextCity);
+    }
+  }, [route?.params]);
+
   const handleJoin = useCallback(async () => {
     setBusy(true);
     try {
       const result = await joinDriverWaitlist({ city });
       setStatus((current) => ({
         ...(current || {}),
+        ...result,
         waitListStatus: 'pending',
         position: result.position || current?.position || null,
         estimatedWaitTime: result.estimatedWaitTime || current?.estimatedWaitTime || null,
@@ -250,6 +296,11 @@ export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }
                     ? 'Quando quiser, volte para a tela inicial do motorista e fique online.'
                     : 'A liberação considera cidade, capacidade operacional e revisão do cadastro.'}
                 </Text>
+                {status?.notificationType ? (
+                  <Text style={styles.pushContextText}>
+                    Aberto por notificação: {status.waitlistEvent || status.notificationType}
+                  </Text>
+                ) : null}
               </View>
 
               <View style={styles.inputBlock}>
@@ -308,6 +359,42 @@ export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }
                   last
                 />
               </PrototypeMenuSection>
+
+              <PrototypeMenuSection title="Critérios">
+                <PrototypeMenuInfoRow
+                  label="Cidade ativa"
+                  value={formatCriteriaValue(status?.criteria?.cityActive ?? status?.city?.cityActive)}
+                  loading={loading}
+                />
+                <PrototypeMenuInfoRow
+                  label="Fila habilitada"
+                  value={formatCriteriaValue(status?.criteria?.waitListEnabled ?? status?.waitListEnabled)}
+                  loading={loading}
+                />
+                <PrototypeMenuInfoRow
+                  label="CNH enviada"
+                  value={formatCriteriaValue(status?.criteria?.cnhUploaded ?? status?.documentsStatus?.cnhUploaded)}
+                  loading={loading}
+                />
+                <PrototypeMenuInfoRow
+                  label="Veículo cadastrado"
+                  value={formatCriteriaValue(status?.criteria?.vehicleRegistered ?? status?.documentsStatus?.vehicleRegistered)}
+                  loading={loading}
+                  last
+                />
+              </PrototypeMenuSection>
+
+              {normalizedStatus === 'approved' ? (
+                <LeafButton
+                  label="Voltar para ficar online"
+                  icon="car-outline"
+                  tone="primary"
+                  onPress={() => navigation.navigate('RobotaxiPrototype')}
+                  style={styles.fullButton}
+                  testID="robotaxi-driver-waitlist-status-online-button"
+                  accessibilityLabel="robotaxi-driver-waitlist-status-online-button"
+                />
+              ) : null}
 
               {normalizedStatus === 'none' ? (
                 <LeafEmptyState
@@ -372,6 +459,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.Regular,
     fontSize: 14,
     lineHeight: 20,
+  },
+  pushContextText: {
+    marginTop: 10,
+    color: leafRideColors.leaf,
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 17,
   },
   inputBlock: {
     borderRadius: 24,

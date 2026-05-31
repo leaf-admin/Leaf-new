@@ -167,20 +167,62 @@ function resolveInviteStatus(invite) {
   return status;
 }
 
-function buildPublicInvitePayload(invite = {}) {
+function resolveCampaignAvailability(campaign, nowTs = Date.now()) {
+  if (!campaign) return 'untracked';
+  const status = normalizeStatus(campaign.status);
+  if (status !== 'active') return status;
+
+  const startTs = parseTimestamp(campaign.startAt || campaign.createdAt) || 0;
+  const endTs = parseTimestamp(campaign.endAt);
+  if (nowTs < startTs) return 'scheduled';
+  if (endTs && nowTs > endTs) return 'ended';
+  return 'active';
+}
+
+function buildCampaignUnavailablePayload(type, campaigns = []) {
+  const states = campaigns.map((campaign) => ({
+    id: campaign.id || null,
+    name: campaign.name || null,
+    status: resolveCampaignAvailability(campaign),
+    startAt: campaign.startAt || null,
+    endAt: campaign.endAt || null
+  }));
+
+  return {
+    error: 'Nenhuma campanha ativa disponivel para este tipo de convite',
+    code: 'REFERRAL_CAMPAIGN_INACTIVE',
+    type,
+    campaigns: states
+  };
+}
+
+function buildPublicInvitePayload(invite = {}, campaign = null) {
   const type = normalizeCampaignType(invite.type);
   const status = resolveInviteStatus(invite);
-  const canAccept = status === 'pending';
+  const hasCampaign = Boolean(normalizeIdentifier(invite.campaignId));
+  const campaignAvailability = hasCampaign ? resolveCampaignAvailability(campaign) : 'untracked';
+  const canAccept = status === 'pending' && (!hasCampaign || campaignAvailability === 'active');
 
   const payload = {
     code: String(invite.code || '').trim().toUpperCase(),
     kind: type === 'driver_referral' ? 'driver' : 'passenger',
     status,
+    campaignStatus: campaignAvailability,
     canAccept,
     message: canAccept
       ? 'Convite ativo'
-      : 'Convite ja utilizado ou indisponivel'
+      : (status === 'pending' ? 'Campanha indisponivel' : 'Convite ja utilizado ou indisponivel')
   };
+
+  if (hasCampaign) {
+    payload.campaign = {
+      id: invite.campaignId,
+      name: campaign?.name || null,
+      status: campaignAvailability,
+      startAt: campaign?.startAt || null,
+      endAt: campaign?.endAt || null
+    };
+  }
 
   if (type === 'driver_referral') {
     payload.driverReward = {
@@ -299,7 +341,8 @@ function getDefaultProgramConfig() {
       enabled: true,
       discountPercent: DEFAULT_PASSENGER_DISCOUNT_PERCENT,
       maxDiscountRides: DEFAULT_PASSENGER_MAX_RIDES,
-      nonCumulative: true
+      nonCumulative: true,
+      avoidDuplicateInvitees: true
     },
     founder: {
       enabled: true,
@@ -343,13 +386,18 @@ function campaignIsActive(campaign, nowTs = Date.now()) {
   return true;
 }
 
-async function resolveCampaignForType(type) {
+async function resolveCampaignSelectionForType(type) {
   const campaigns = await loadCampaigns();
   const nowTs = Date.now();
-  const selected = campaigns.find((campaign) =>
-    normalizeCampaignType(campaign.type) === type && campaignIsActive(campaign, nowTs)
-  );
-  return selected || null;
+  const matchingCampaigns = campaigns.filter((campaign) => normalizeCampaignType(campaign.type) === type);
+  const activeCampaign = matchingCampaigns.find((campaign) => campaignIsActive(campaign, nowTs)) || null;
+  return { activeCampaign, matchingCampaigns };
+}
+
+async function resolveInviteCampaign(invite = {}) {
+  const campaignId = normalizeIdentifier(invite.campaignId);
+  if (!campaignId || typeof referralProgramStateService.getCampaign !== 'function') return null;
+  return referralProgramStateService.getCampaign(campaignId).catch(() => null);
 }
 
 async function loadInvites() {
@@ -560,9 +608,10 @@ router.get('/invites/public/:code', publicInviteLookupLimiter, async (req, res) 
       });
     }
 
+    const campaign = await resolveInviteCampaign(invite);
     return res.json({
       success: true,
-      invite: buildPublicInvitePayload(invite)
+      invite: buildPublicInvitePayload(invite, campaign)
     });
   } catch (error) {
     logError(error, 'Erro ao consultar convite publico', { service: 'referral-programs' });
@@ -757,7 +806,10 @@ router.post('/invites/driver', ensureUserFromFirebaseToken, async (req, res) => 
       return res.status(400).json({ error: 'Informe inviteeId, inviteeEmail ou inviteePhone' });
     }
 
-    const activeCampaign = await resolveCampaignForType('driver_referral');
+    const { activeCampaign, matchingCampaigns } = await resolveCampaignSelectionForType('driver_referral');
+    if (!activeCampaign && matchingCampaigns.length > 0) {
+      return res.status(409).json(buildCampaignUnavailablePayload('driver_referral', matchingCampaigns));
+    }
     const maxInvitesPerDriver = toPositiveInt(
       activeCampaign?.params?.maxInvitesPerDriver ?? config.driver.maxInvitesPerDriver,
       DEFAULT_DRIVER_MAX_INVITES
@@ -826,6 +878,15 @@ router.post('/invites/driver', ensureUserFromFirebaseToken, async (req, res) => 
       updatedAt: createdAt
     }));
 
+    logStructured('info', 'Auditoria referral invite', {
+      service: 'referral-programs',
+      action: 'referral_programs.invite.create',
+      entity: { type: 'referral_invite', id: invitePayload?.id || null },
+      operator: { id: inviterId, role: 'driver' },
+      inviteType: 'driver_referral',
+      campaignId: activeCampaign?.id || null
+    });
+
     res.json({
       success: true,
       invite: invitePayload,
@@ -861,11 +922,26 @@ router.post('/invites/passenger', ensureUserFromFirebaseToken, async (req, res) 
       return res.status(400).json({ error: 'Informe inviteeId, inviteeEmail ou inviteePhone' });
     }
 
-    const activeCampaign = await resolveCampaignForType('passenger_referral');
+    const { activeCampaign, matchingCampaigns } = await resolveCampaignSelectionForType('passenger_referral');
+    if (!activeCampaign && matchingCampaigns.length > 0) {
+      return res.status(409).json(buildCampaignUnavailablePayload('passenger_referral', matchingCampaigns));
+    }
     const allInvites = await loadInvites();
     const campaignQuotaError = enforceCampaignInviteQuota(activeCampaign, allInvites);
     if (campaignQuotaError) {
       return res.status(400).json(campaignQuotaError);
+    }
+
+    if (config.passenger.avoidDuplicateInvitees !== false) {
+      const duplicated = allInvites.find((invite) =>
+        normalizeCampaignType(invite.type) === 'passenger_referral' &&
+        ['pending', 'accepted', 'qualified', 'rewarded'].includes(String(invite.status || '').toLowerCase()) &&
+        sameInviteTarget(invite, inviteeEmail, inviteePhone)
+      );
+
+      if (duplicated) {
+        return res.status(409).json({ error: 'Passageiro ja possui convite ativo' });
+      }
     }
 
     const discountPercent = toPercent(
@@ -896,6 +972,15 @@ router.post('/invites/passenger', ensureUserFromFirebaseToken, async (req, res) 
       createdAt,
       updatedAt: createdAt
     }));
+
+    logStructured('info', 'Auditoria referral invite', {
+      service: 'referral-programs',
+      action: 'referral_programs.invite.create',
+      entity: { type: 'referral_invite', id: invitePayload?.id || null },
+      operator: { id: inviterId },
+      inviteType: 'passenger_referral',
+      campaignId: activeCampaign?.id || null
+    });
 
     res.json({ success: true, invite: invitePayload });
   } catch (error) {
@@ -931,6 +1016,23 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
     if (currentStatus !== 'pending') {
       const statusCode = currentStatus === 'expired' ? 410 : 409;
       return res.status(statusCode).json({ error: `Convite já está ${currentStatus}` });
+    }
+
+    const campaign = await resolveInviteCampaign(invite);
+    const inviteCampaignId = normalizeIdentifier(invite.campaignId);
+    const campaignAvailability = inviteCampaignId ? resolveCampaignAvailability(campaign) : 'untracked';
+    if (inviteCampaignId && campaignAvailability !== 'active') {
+      return res.status(409).json({
+        error: 'Campanha do convite nao esta ativa',
+        code: 'REFERRAL_CAMPAIGN_INACTIVE',
+        campaign: invite.campaignId ? {
+          id: invite.campaignId,
+          name: campaign?.name || null,
+          status: campaignAvailability,
+          startAt: campaign?.startAt || null,
+          endAt: campaign?.endAt || null
+        } : null
+      });
     }
 
     const targetValidation = validateInviteTarget(
@@ -974,6 +1076,15 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
     await referralProgramStateService.updateUserProfile(inviteeId, {
       invitedBy: normalizeIdentifier(invite.inviterId),
       inviteAcceptedAt: acceptedAt
+    });
+
+    logStructured('info', 'Auditoria referral invite', {
+      service: 'referral-programs',
+      action: 'referral_programs.invite.accept',
+      entity: { type: 'referral_invite', id: invite.id },
+      operator: { id: inviteeId },
+      inviteType: normalizeCampaignType(invite.type),
+      campaignId: invite.campaignId || null
     });
 
     res.json({
@@ -1178,6 +1289,11 @@ router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, r
       normalizeCampaignType(invite.type) === 'driver_referral' &&
       String(invite?.qualification?.status || '').toLowerCase() === 'tracking'
     ).length;
+    const driverInvites = invites.filter((invite) => normalizeCampaignType(invite.type) === 'driver_referral');
+    const passengerInvites = invites.filter((invite) => normalizeCampaignType(invite.type) === 'passenger_referral');
+    const countByStatus = (items, acceptedStatuses) => items.filter((invite) =>
+      acceptedStatuses.includes(String(invite.status || '').toLowerCase())
+    ).length;
 
     const summary = {
       campaigns: {
@@ -1218,6 +1334,28 @@ router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, r
           createdAt: invite.createdAt || null,
           acceptedAt: invite.acceptedAt || null,
         }))
+      },
+      funnel: {
+        driver: {
+          invited: driverInvites.length,
+          pending: countByStatus(driverInvites, ['pending']),
+          accepted: countByStatus(driverInvites, ['accepted', 'qualified']),
+          tracking: driverTracking,
+          rewarded: driverInvites.filter((invite) => String(invite.rewardStatus || '').toLowerCase() === 'granted').length
+        },
+        passenger: {
+          invited: passengerInvites.length,
+          pending: countByStatus(passengerInvites, ['pending']),
+          accepted: countByStatus(passengerInvites, ['accepted']),
+          benefitsActive: passengerBenefitsActive,
+          benefitsConsumed: passengerBenefitsConsumed,
+          waitlistEnabled: false
+        },
+        contract: {
+          passengerWaitlist: false,
+          passengerAcquisition: 'invite_only',
+          driverAcquisition: 'invite_or_waitlist'
+        }
       },
       config
     };

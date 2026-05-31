@@ -71,6 +71,7 @@ const NOTIFICATION_SCREEN_ALIASES = {
     driver_waitlist_approved: 'RobotaxiPrototypeDriverWaitlistStatus',
     driver_waitlist_rejected: 'RobotaxiPrototypeDriverWaitlistStatus',
     driver_waitlist_position_updated: 'RobotaxiPrototypeDriverWaitlistStatus',
+    driver_waitlist_status: 'RobotaxiPrototypeDriverWaitlistStatus',
     waitlist: 'RobotaxiPrototypeDriverWaitlistStatus',
     share_trip: 'RobotaxiPrototypeShareTrip',
     public_tracking: 'RobotaxiPrototypePublicTracking',
@@ -792,6 +793,11 @@ class FCMNotificationService {
                 requirement: data.requirement || null,
                 reason: data.reason || null,
                 documentType: data.documentType || null,
+                waitlistEvent: data.waitlistEvent || data.event || null,
+                position: data.position || data.waitListPosition || null,
+                city: data.city || data.cityLabel || null,
+                cityKey: data.cityKey || null,
+                cityLabel: data.cityLabel || data.city || null,
                 ...(hasUntrustedExplicitScreen ? { originalScreen: explicitScreen } : {}),
             }
         };

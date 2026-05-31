@@ -18,6 +18,9 @@ const mockCreateInviteWithUniqueCode = jest.fn();
 const mockAcceptInvite = jest.fn();
 const mockGetUserProfile = jest.fn();
 const mockSavePassengerBenefit = jest.fn();
+const mockListCampaigns = jest.fn();
+const mockGetCampaign = jest.fn();
+const mockListInvites = jest.fn();
 const mockVerifyIdToken = jest.fn();
 
 jest.mock('../../../middleware/jwt-auth', () => ({
@@ -43,11 +46,11 @@ jest.mock('../../../utils/pilot-launch-flags', () => ({
 jest.mock('../../../services/referral-program-state-service', () => ({
   getConfig: mockGetConfig,
   saveConfig: jest.fn(),
-  listCampaigns: jest.fn(),
+  listCampaigns: mockListCampaigns,
   createCampaign: jest.fn(),
-  getCampaign: jest.fn(),
+  getCampaign: mockGetCampaign,
   updateCampaign: jest.fn(),
-  listInvites: jest.fn(),
+  listInvites: mockListInvites,
   getInvite: jest.fn(),
   findInviteByCode: mockFindInviteByCode,
   createInvite: jest.fn(),
@@ -92,6 +95,9 @@ describe('referral-programs admin mutation guards', () => {
     mockAcceptInvite.mockResolvedValue(null);
     mockGetUserProfile.mockResolvedValue(null);
     mockSavePassengerBenefit.mockResolvedValue(null);
+    mockListCampaigns.mockResolvedValue([]);
+    mockGetCampaign.mockResolvedValue(null);
+    mockListInvites.mockResolvedValue([]);
     mockVerifyIdToken.mockResolvedValue({
       uid: 'user_2',
       phone_number: '+5521999999999',
@@ -271,6 +277,94 @@ describe('referral-programs admin mutation guards', () => {
         invitedBy: 'user_1'
       })
     );
+  });
+
+  it('blocks accepting an invite whose campaign is paused', async () => {
+    mockFindInviteByCode.mockResolvedValue({
+      id: 'invite_driver',
+      code: 'DRV-PAUSED',
+      type: 'driver_referral',
+      status: 'pending',
+      inviterId: 'user_1',
+      inviteePhone: '+5521999999999',
+      campaignId: 'campaign_paused'
+    });
+    mockGetCampaign.mockResolvedValue({
+      id: 'campaign_paused',
+      type: 'driver_referral',
+      status: 'paused',
+      name: 'Campanha pausada'
+    });
+
+    const response = await request(createApp())
+      .post('/api/referral-programs/invites/accept')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ code: 'DRV-PAUSED' });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      code: 'REFERRAL_CAMPAIGN_INACTIVE',
+      campaign: {
+        id: 'campaign_paused',
+        status: 'paused'
+      }
+    });
+    expect(mockAcceptInvite).not.toHaveBeenCalled();
+  });
+
+  it('blocks passenger invite creation when the same target already has an active invite', async () => {
+    mockGetConfig.mockResolvedValue({
+      passenger: {
+        enabled: true,
+        avoidDuplicateInvitees: true
+      }
+    });
+    mockListInvites.mockResolvedValue([
+      {
+        id: 'invite_existing',
+        type: 'passenger_referral',
+        status: 'pending',
+        inviteePhone: '+5521999999999'
+      }
+    ]);
+
+    const response = await request(createApp())
+      .post('/api/referral-programs/invites/passenger')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        inviterId: 'user_1',
+        inviteePhone: '+55 (21) 99999-9999'
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toContain('convite ativo');
+    expect(mockCreateInviteWithUniqueCode).not.toHaveBeenCalled();
+  });
+
+  it('blocks invite creation when a matching campaign exists but is not active', async () => {
+    mockListCampaigns.mockResolvedValue([
+      {
+        id: 'campaign_paused',
+        type: 'passenger_referral',
+        status: 'paused',
+        name: 'Campanha pausada'
+      }
+    ]);
+
+    const response = await request(createApp())
+      .post('/api/referral-programs/invites/passenger')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        inviterId: 'user_1',
+        inviteePhone: '+5521999999999'
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      code: 'REFERRAL_CAMPAIGN_INACTIVE',
+      type: 'passenger_referral'
+    });
+    expect(mockCreateInviteWithUniqueCode).not.toHaveBeenCalled();
   });
 
   it('blocks founder assignment when admin mutations are disabled', async () => {

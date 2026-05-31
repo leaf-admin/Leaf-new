@@ -35,6 +35,7 @@ import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../../services/run
 const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
 const DRIVER_INVITE_BASE_URL = 'https://leaf.app.br/motorista/convite';
+const HISTORY_LIMIT = 5;
 
 function buildDriverInviteLink(code) {
   const safeCode = String(code || '').trim();
@@ -58,6 +59,66 @@ function resolveWaitlistStatusLabel(status) {
   if (safeStatus === 'approved') return 'Aprovado';
   if (safeStatus === 'rejected') return 'Revisar';
   return 'Disponível';
+}
+
+function formatInviteStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'accepted') return 'Aceito';
+  if (normalized === 'qualified') return 'Qualificado';
+  if (normalized === 'rewarded') return 'Recompensado';
+  if (normalized === 'expired') return 'Expirado';
+  return 'Pendente';
+}
+
+function formatCriteriaValue(value) {
+  if (value === true) return 'ok';
+  if (value === false) return 'pendente';
+  return '--';
+}
+
+function formatDriverInviteReward(invite = {}) {
+  const trips = Number(invite.requiredCompletedTrips || invite.qualification?.requiredCompletedTrips || 0);
+  const months = Number(invite.rewardMonths || 0);
+  if (trips > 0 && months > 0) {
+    return `${trips} corridas / ${months} mês`;
+  }
+  if (trips > 0) {
+    return `${trips} corridas`;
+  }
+  return 'Critério padrão';
+}
+
+function DriverInviteHistory({ invites }) {
+  const visibleInvites = invites.slice(1, HISTORY_LIMIT + 1);
+
+  return (
+    <PrototypeMenuSection title="Histórico de convites">
+      {visibleInvites.length > 0 ? (
+        visibleInvites.map((invite, index) => (
+          <View
+            key={invite.id || invite.code || `driver-invite-${index}`}
+            style={[styles.historyRow, index === visibleInvites.length - 1 && styles.historyRowLast]}
+            testID={`robotaxi-driver-invite-history-item-${index}`}
+          >
+            <View style={styles.historyCopy}>
+              <Text style={styles.historyTitle} numberOfLines={1}>
+                {invite.code || 'Convite'}
+              </Text>
+              <Text style={styles.historyMeta} numberOfLines={1}>
+                {invite.inviteeEmail || invite.inviteePhone || 'Link compartilhável'}
+              </Text>
+            </View>
+            <View style={styles.historySide}>
+              <Text style={styles.historyStatus}>{formatInviteStatus(invite.status)}</Text>
+              <Text style={styles.historyDate}>{formatDriverInviteReward(invite)}</Text>
+            </View>
+          </View>
+        ))
+      ) : (
+        <Text style={styles.emptyHistoryText}>Nenhum convite de motorista criado ainda.</Text>
+      )}
+    </PrototypeMenuSection>
+  );
 }
 
 export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
@@ -152,6 +213,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
       const result = await joinDriverWaitlist({ city });
       setWaitlistStatus((current) => ({
         ...(current || {}),
+        ...result,
         waitListStatus: 'pending',
         position: result.position || current?.position || null,
         estimatedWaitTime: result.estimatedWaitTime || current?.estimatedWaitTime || null,
@@ -182,8 +244,12 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
         ...target,
       });
       if (result.invite?.code) {
-        setCreatedInvite(result.invite);
-        setSentInvites((current) => [result.invite, ...current]);
+        const driverInvite = {
+          ...result.invite,
+          type: 'driver_referral',
+        };
+        setCreatedInvite(driverInvite);
+        setSentInvites((current) => [driverInvite, ...current]);
         setInviteTarget('');
       }
     } catch (error) {
@@ -309,6 +375,25 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                 />
               </PrototypeMenuSection>
 
+              <PrototypeMenuSection title="Critérios de liberação">
+                <PrototypeMenuInfoRow
+                  label="Cidade ativa"
+                  value={formatCriteriaValue(waitlistStatus?.criteria?.cityActive)}
+                  loading={loading}
+                />
+                <PrototypeMenuInfoRow
+                  label="Fila habilitada"
+                  value={formatCriteriaValue(waitlistStatus?.criteria?.waitListEnabled)}
+                  loading={loading}
+                />
+                <PrototypeMenuInfoRow
+                  label="Documentos completos"
+                  value={formatCriteriaValue(waitlistStatus?.criteria?.documentsComplete)}
+                  loading={loading}
+                  last
+                />
+              </PrototypeMenuSection>
+
               {referralProgramsEnabled ? (
                 <View style={styles.inputBlock}>
                   <Text style={styles.inputLabel}>Convidar motorista</Text>
@@ -329,6 +414,8 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                     onPress={handleCreateDriverInvite}
                     disabled={busy}
                     style={styles.fullButton}
+                    testID="robotaxi-driver-invite-create-button"
+                    accessibilityLabel="robotaxi-driver-invite-create-button"
                   />
                 </View>
               ) : (
@@ -360,6 +447,8 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                     onPress={handleAcceptDriverInvite}
                     disabled={busy}
                     style={styles.fullButton}
+                    testID="robotaxi-driver-invite-accept-button"
+                    accessibilityLabel="robotaxi-driver-invite-accept-button"
                   />
                 </View>
               ) : null}
@@ -367,7 +456,9 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
               {referralProgramsEnabled && latestInvite ? (
                 <PrototypeMenuSection title="Último convite">
                   <PrototypeMenuInfoRow label="Código" value={latestCode || 'Aguardando'} />
-                  <PrototypeMenuInfoRow label="Status" value={latestInvite.status || 'pending'} last />
+                  <PrototypeMenuInfoRow label="Link" value={latestLink} />
+                  <PrototypeMenuInfoRow label="Status" value={formatInviteStatus(latestInvite.status)} />
+                  <PrototypeMenuInfoRow label="Critério" value={formatDriverInviteReward(latestInvite)} last />
                   <View style={styles.actionGrid}>
                     <LeafButton
                       label={copied ? 'Copiado' : 'Copiar'}
@@ -375,6 +466,8 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                       tone="ghost"
                       onPress={handleCopy}
                       style={styles.actionButton}
+                      testID="robotaxi-driver-invite-copy-button"
+                      accessibilityLabel="robotaxi-driver-invite-copy-button"
                     />
                     <LeafButton
                       label="Compartilhar"
@@ -382,6 +475,8 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                       tone="ghost"
                       onPress={handleShare}
                       style={styles.actionButton}
+                      testID="robotaxi-driver-invite-share-button"
+                      accessibilityLabel="robotaxi-driver-invite-share-button"
                     />
                   </View>
                 </PrototypeMenuSection>
@@ -393,6 +488,8 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                   testID="robotaxi-driver-invites-empty-state"
                 />
               ) : null}
+
+              {referralProgramsEnabled ? <DriverInviteHistory invites={driverInvites} /> : null}
             </ScrollView>
           </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
@@ -449,5 +546,57 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(233,226,216,0.78)',
+    gap: 12,
+  },
+  historyRowLast: {
+    borderBottomWidth: 0,
+  },
+  historyCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  historyTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  historyMeta: {
+    marginTop: 2,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  historySide: {
+    alignItems: 'flex-end',
+  },
+  historyStatus: {
+    color: leafRideColors.leaf,
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  historyDate: {
+    marginTop: 2,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  emptyHistoryText: {
+    paddingVertical: 12,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });
