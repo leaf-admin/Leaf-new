@@ -10,7 +10,7 @@ function unauthorized() {
   });
 }
 
-export function middleware(request) {
+export function proxy(request) {
   if (request.nextUrl?.pathname?.startsWith("/api/")) {
     return NextResponse.next();
   }
