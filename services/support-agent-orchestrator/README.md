@@ -27,10 +27,12 @@ Por padrao o servico sobe em `http://localhost:3015`.
 - `GET /v1/status`: status operacional do orquestrador.
 - `GET /v1/runs`: ultimas execucoes de analise.
 - `GET /v1/runs/:runId/actions`: acoes aprovadas/auditadas de uma execucao.
+- `GET /v1/runs/:runId/audit`: trilha de auditoria da execucao.
 - `POST /v1/runs/:runId/actions`: executa acao segura apos aprovacao humana.
 - `GET /v1/tickets/:ticketId/analysis`: retorna analise existente ou cria uma analise sob demanda.
 - `POST /v1/tickets/:ticketId/analyze`: força nova analise de um ticket.
 - `GET /v1/tickets/:ticketId/actions`: acoes aprovadas/auditadas de um ticket.
+- `GET /v1/tickets/:ticketId/audit`: trilha de auditoria do ticket.
 - `POST /v1/tickets/:ticketId/actions`: executa acao segura a partir da ultima analise do ticket.
 - `POST /v1/chat/analyze`: analisa uma conversa enviada pelo caller.
 
@@ -76,7 +78,7 @@ curl -X POST http://localhost:3015/v1/chat/analyze \
 
 ## Modo de seguranca
 
-O servico nasce em modo copiloto. Ele nao executa acoes sensiveis nem responde automaticamente quando:
+O contrato atual e sempre `guarded_copilot`. A variavel `SUPPORT_AUTONOMOUS_MODE` fica registrada como intencao/config solicitada, mas nao libera resposta ao cliente, autoresolucao ou mutacao externa. Ele nao executa acoes sensiveis nem responde automaticamente quando:
 
 - a confianca fica abaixo de `SUPPORT_MIN_CONFIDENCE`;
 - o assunto envolve seguranca, fraude, emergencia, vazamento, pagamento sensivel ou documento/KYC;
@@ -84,6 +86,8 @@ O servico nasce em modo copiloto. Ele nao executa acoes sensiveis nem responde a
 - `SUPPORT_AUTONOMOUS_MODE=false`.
 
 Mesmo com `SUPPORT_AUTONOMOUS_MODE=true`, o contrato atual continua em modo `guarded_copilot`: o orquestrador classifica, recomenda, audita e executa somente acoes seguras aprovadas por humano. Nao ha autosend para cliente nem autoresolve.
+
+Toda analise persistida grava `audit.mode=guarded_copilot`, `audit.replay` e a lista de acoes bloqueadas. Um `POST /v1/tickets/:ticketId/analyze` gera replay auditado quando ja existe run anterior para o ticket.
 
 ## Acoes aprovadas
 
@@ -107,6 +111,12 @@ curl -X POST http://localhost:3015/v1/runs/run_123/actions \
 ```
 
 O `idempotencyKey` evita execucao duplicada quando o dashboard repetir a chamada por timeout, reload ou retry.
+
+Se uma acao falhar, a mesma `idempotencyKey` continua terminal e idempotente. Para tentar de novo apos corrigir o payload, gere uma nova chave com motivo claro, por exemplo `SUP-123:internal-note:payment-check-v2`.
+
+## Runbook operacional
+
+O runbook N0/N1/N2/N3 fica em `RUNBOOK.md` neste diretorio. Use ele para operacao, replay, recuperacao de store persistido e criterios de escalonamento.
 
 ## Fontes permitidas
 

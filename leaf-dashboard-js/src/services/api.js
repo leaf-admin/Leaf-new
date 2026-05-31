@@ -159,11 +159,19 @@ class LeafApiService {
     return this.requestSupportOrchestrator(`/v1/tickets/${encoded}/analysis`);
   }
 
-  async applySupportOrchestratorAction(runId, payload = {}) {
+  async applySupportOrchestratorAction(runId, payload = {}, options = {}) {
     const encoded = encodeURIComponent(runId);
+    const idempotencyKey = options.idempotencyKey || payload.idempotencyKey;
+    const headers = idempotencyKey
+      ? {
+          "Idempotency-Key": idempotencyKey,
+          "X-Idempotency-Key": idempotencyKey,
+        }
+      : undefined;
     return this.requestSupportOrchestrator(`/v1/runs/${encoded}/actions`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      headers,
+      body: JSON.stringify(idempotencyKey ? { ...payload, idempotencyKey } : payload),
     });
   }
 
@@ -902,10 +910,18 @@ class LeafApiService {
     });
   }
 
-  async convertChatToTicket(userId, payload = {}) {
+  async convertChatToTicket(userId, payload = {}, options = {}) {
+    const idempotencyKey = options.idempotencyKey || payload.idempotencyKey;
+    const headers = idempotencyKey
+      ? {
+          "Idempotency-Key": idempotencyKey,
+          "X-Idempotency-Key": idempotencyKey,
+        }
+      : undefined;
     return this.request(`/support/chat/${userId}/convert-ticket`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      headers,
+      body: JSON.stringify(idempotencyKey ? { ...payload, idempotencyKey } : payload),
     });
   }
 

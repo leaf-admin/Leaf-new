@@ -34,6 +34,14 @@ function createApiRouter({ config, orchestrator, store }) {
     });
   });
 
+  router.get("/runs/:runId/audit", auth, (req, res) => {
+    const limit = Number(req.query.limit || 100);
+    res.json({
+      success: true,
+      auditEvents: store.listAuditEvents({ runId: req.params.runId, limit }),
+    });
+  });
+
   router.post("/runs/:runId/actions", auth, async (req, res, next) => {
     try {
       const result = await orchestrator.applyApprovedAction({
@@ -69,6 +77,14 @@ function createApiRouter({ config, orchestrator, store }) {
     res.json({
       success: true,
       actions: store.listActions({ ticketId: req.params.ticketId, limit }),
+    });
+  });
+
+  router.get("/tickets/:ticketId/audit", auth, (req, res) => {
+    const limit = Number(req.query.limit || 100);
+    res.json({
+      success: true,
+      auditEvents: store.listAuditEvents({ ticketId: req.params.ticketId, limit }),
     });
   });
 

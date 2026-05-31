@@ -1,12 +1,15 @@
 class InMemoryStore {
-  constructor({ maxRuns = 250 } = {}) {
+  constructor({ maxRuns = 250, maxAuditEvents = maxRuns * 20 } = {}) {
     this.maxRuns = maxRuns;
+    this.maxAuditEvents = maxAuditEvents;
     this.runs = [];
     this.byRunId = new Map();
     this.byTicketId = new Map();
     this.actions = [];
     this.actionsById = new Map();
     this.actionsByIdempotencyKey = new Map();
+    this.auditEvents = [];
+    this.auditEventsById = new Map();
   }
 
   saveRun(run) {
@@ -83,6 +86,29 @@ class InMemoryStore {
   listActions({ runId, ticketId, limit = 50 } = {}) {
     return this.actions
       .filter((action) => (!runId || action.runId === runId) && (!ticketId || action.ticketId === ticketId))
+      .slice(0, limit);
+  }
+
+  saveAuditEvent(event) {
+    const nextEvent = {
+      ...event,
+      id: event.id || `audit_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      createdAt: event.createdAt || new Date().toISOString(),
+    };
+
+    this.auditEvents.unshift(nextEvent);
+    this.auditEventsById.set(nextEvent.id, nextEvent);
+    if (this.auditEvents.length > this.maxAuditEvents) {
+      const removed = this.auditEvents.slice(this.maxAuditEvents);
+      removed.forEach((auditEvent) => this.auditEventsById.delete(auditEvent.id));
+      this.auditEvents = this.auditEvents.slice(0, this.maxAuditEvents);
+    }
+    return nextEvent;
+  }
+
+  listAuditEvents({ runId, ticketId, limit = 100 } = {}) {
+    return this.auditEvents
+      .filter((event) => (!runId || event.runId === runId) && (!ticketId || event.ticketId === ticketId))
       .slice(0, limit);
   }
 

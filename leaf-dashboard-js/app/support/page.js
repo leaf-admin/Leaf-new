@@ -10,6 +10,7 @@ import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
 import wsService from "@/src/services/websocket-service";
+import { normalizeRole } from "@/src/utils/dashboard-access";
 
 const OPEN_STATUSES = new Set(["open", "assigned", "in_progress", "escalated"]);
 const SUPPORT_POLL_MS = 30000;
@@ -24,6 +25,82 @@ const N0_QUICK_REPLIES = [
   "Pode me mandar um pouco mais de detalhe, por favor?",
   "Perfeito, resolvido por aqui. Vou encerrar este atendimento simples.",
 ];
+const SUPPORT_TIERS = ["N1", "N2", "N3"];
+const SUPPORT_ACTIONS = {
+  assign: "assumir",
+  message: "responder",
+  resolve: "resolver",
+  escalate: "escalar",
+  copilot_note: "registrar nota do copiloto",
+  copilot_escalate: "escalar com copiloto",
+  convert_n0: "converter N0",
+  close_chat: "encerrar chat",
+};
+const FULL_SUPPORT_ACTIONS = Object.keys(SUPPORT_ACTIONS);
+const N1_SUPPORT_ACTIONS = [
+  "assign",
+  "message",
+  "resolve",
+  "escalate",
+  "copilot_note",
+  "copilot_escalate",
+  "convert_n0",
+  "close_chat",
+];
+const N2_SUPPORT_ACTIONS = N1_SUPPORT_ACTIONS;
+const SUPPORT_ROLE_POLICIES = {
+  "super-admin": {
+    label: "Super admin",
+    tiers: SUPPORT_TIERS,
+    actions: FULL_SUPPORT_ACTIONS,
+  },
+  admin: {
+    label: "Admin",
+    tiers: SUPPORT_TIERS,
+    actions: FULL_SUPPORT_ACTIONS,
+  },
+  manager: {
+    label: "Gestão",
+    tiers: SUPPORT_TIERS,
+    actions: FULL_SUPPORT_ACTIONS,
+  },
+  development: {
+    label: "Desenvolvimento",
+    tiers: SUPPORT_TIERS,
+    actions: FULL_SUPPORT_ACTIONS,
+  },
+  support_n1: {
+    label: "Suporte N1",
+    tiers: ["N1"],
+    actions: N1_SUPPORT_ACTIONS,
+  },
+  support_n2: {
+    label: "Suporte N2",
+    tiers: ["N1", "N2"],
+    actions: N2_SUPPORT_ACTIONS,
+  },
+  support_n3: {
+    label: "Suporte N3",
+    tiers: SUPPORT_TIERS,
+    actions: FULL_SUPPORT_ACTIONS,
+  },
+  support: {
+    label: "Suporte N1",
+    tiers: ["N1"],
+    actions: N1_SUPPORT_ACTIONS,
+  },
+};
+const READ_ONLY_SUPPORT_POLICY = {
+  label: "Somente leitura",
+  tiers: [],
+  actions: [],
+};
+const DEFAULT_N0_TICKET_FORM = {
+  subject: "",
+  priority: "N3",
+  category: "chat",
+  description: "",
+};
 
 function formatDateTime(value) {
   if (!value) return "-";
@@ -51,6 +128,54 @@ function formatAge(value) {
 
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function resolveSupportTier(value, fallback = "N3") {
+  const normalized = String(value || fallback || "N3").trim().toUpperCase();
+  return SUPPORT_TIERS.includes(normalized) ? normalized : fallback;
+}
+
+function getSupportPolicy(user) {
+  const rawRole = normalizeRole(user?.role);
+  const role = rawRole.replace(/-/g, "_");
+  const policy = SUPPORT_ROLE_POLICIES[rawRole] || SUPPORT_ROLE_POLICIES[role];
+  if (policy) return { ...policy, role: rawRole || "unknown" };
+  if (rawRole.includes("support") || rawRole.includes("suporte")) {
+    return { ...SUPPORT_ROLE_POLICIES.support, role: rawRole };
+  }
+  return { ...READ_ONLY_SUPPORT_POLICY, role: rawRole || "unknown" };
+}
+
+function canRunSupportAction(policy, action, tier) {
+  if (!policy?.actions?.includes(action)) return false;
+  const resolvedTier = tier ? resolveSupportTier(tier) : null;
+  if (!resolvedTier) return true;
+  return policy?.tiers?.includes(resolvedTier);
+}
+
+function supportActionBlockReason(policy, action, tier) {
+  const label = SUPPORT_ACTIONS[action] || "executar esta ação";
+  if (!policy?.actions?.includes(action)) {
+    return `Perfil ${policy?.label || "atual"} não pode ${label}.`;
+  }
+  const resolvedTier = tier ? resolveSupportTier(tier) : null;
+  if (resolvedTier && !policy?.tiers?.includes(resolvedTier)) {
+    return `Perfil ${policy?.label || "atual"} não opera chamados ${resolvedTier}.`;
+  }
+  return "";
+}
+
+function buildIdempotencyKey(parts) {
+  return parts
+    .map((part) => String(part ?? "").trim())
+    .filter(Boolean)
+    .join(":")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9:_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 180);
 }
 
 function getTicketTitle(ticket) {
@@ -108,6 +233,17 @@ function formatConfidence(confidence) {
   return `${Math.round(value * 100)}%`;
 }
 
+function auditSeverityClass(severity, success = true) {
+  const normalized = String(severity || "").toUpperCase();
+  if (success === false || ["ERROR", "CRITICAL"].includes(normalized)) return "status-bad";
+  if (normalized === "WARNING") return "status-warn";
+  return "status-ok";
+}
+
+function getAuditActionLabel(log) {
+  return log?.action || log?.event || log?.type || "ação registrada";
+}
+
 function getCopilotPriority(analysis) {
   const value = String(
     analysis?.classification?.priority ||
@@ -134,6 +270,20 @@ function getCopilotSuggestion(analysis) {
     analysis?.recommendation?.n3?.reply ||
     ""
   );
+}
+
+function getN0ConversionGaps(chat, messages = []) {
+  if (!chat?.userId || chat?.ticketId) return [];
+  const gaps = [];
+  const unread = Number(chat.unreadFromUser || 0);
+  const messageCount = Number(chat.messageCount || messages.length || 0);
+  const userMessages = messages.filter((message) => message.senderType !== "agent").length;
+
+  if (unread > 0) gaps.push(`${unread} mensagem(ns) do usuário sem resposta`);
+  if (messageCount >= 3 || userMessages >= 2) gaps.push("histórico maior que atendimento simples");
+  if (chat.status !== "closed") gaps.push("sem dono e sem SLA de ticket");
+  if (!gaps.length) gaps.push("chat sem chamado vinculado");
+  return gaps;
 }
 
 function queueHealthBadge(ticket) {
@@ -215,6 +365,13 @@ export default function SupportPage() {
   const [orchestratorAnalysis, setOrchestratorAnalysis] = useState(null);
   const [orchestratorLoading, setOrchestratorLoading] = useState(false);
   const [orchestratorError, setOrchestratorError] = useState("");
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditError, setAuditError] = useState("");
+  const [manualEscalationReason, setManualEscalationReason] = useState("");
+  const [manualResolution, setManualResolution] = useState("");
+  const [copilotNoteDraft, setCopilotNoteDraft] = useState("");
+  const [copilotEscalationReason, setCopilotEscalationReason] = useState("");
+  const [n0TicketForm, setN0TicketForm] = useState(DEFAULT_N0_TICKET_FORM);
 
   const selectedUserId = selectedTicket?.userId || selectedTicket?.user?.id || null;
   const activeContextUserId = selectedN0Chat?.userId || selectedUserId || null;
@@ -296,6 +453,17 @@ export default function SupportPage() {
     }
   }, [orchestratorEnabled]);
 
+  const loadSupportAudit = useCallback(async () => {
+    try {
+      const response = await leafAPI.listAuditLogs({ resource: "support", limit: 12 });
+      setAuditLogs(response?.logs || []);
+      setAuditError("");
+    } catch (err) {
+      setAuditLogs([]);
+      setAuditError(err?.message || "Auditoria indisponível para este perfil.");
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     const run = async (options) => {
@@ -373,6 +541,20 @@ export default function SupportPage() {
       clearInterval(timer);
     };
   }, [loadOrchestratorOverview, orchestratorEnabled]);
+
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      if (!mounted) return;
+      await loadSupportAudit();
+    };
+    run();
+    const timer = setInterval(run, SUPPORT_POLL_MS);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [loadSupportAudit]);
 
   useEffect(() => {
     if (!selectedTicket) {
@@ -589,9 +771,146 @@ export default function SupportPage() {
       detail: "Sem SLA vencido no snapshot atual.",
     };
   }, [n0UnreadCount, summary]);
+  const supportPolicy = useMemo(() => getSupportPolicy(user), [user]);
+  const selectedTicketTier = useMemo(
+    () => resolveSupportTier(selectedTicket?.priority || copilotPriority),
+    [copilotPriority, selectedTicket?.priority],
+  );
+  const selectedN0Priority = useMemo(() => resolveSupportTier(n0TicketForm.priority), [n0TicketForm.priority]);
+  const n0ConversionGaps = useMemo(
+    () => getN0ConversionGaps(selectedN0Chat, n0ChatMessages),
+    [n0ChatMessages, selectedN0Chat],
+  );
+  const selectedN0ChatTitle = useMemo(
+    () => (selectedN0Chat ? getChatTitle(selectedN0Chat) : ""),
+    [selectedN0Chat],
+  );
+  const canAssignSelected = canRunSupportAction(supportPolicy, "assign", selectedTicketTier);
+  const canMessageSelected = canRunSupportAction(supportPolicy, "message", selectedTicketTier);
+  const canResolveSelected = canRunSupportAction(supportPolicy, "resolve", selectedTicketTier);
+  const canEscalateSelected = canRunSupportAction(supportPolicy, "escalate", selectedTicketTier);
+  const canApplyCopilotNote = canRunSupportAction(supportPolicy, "copilot_note", selectedTicketTier);
+  const canApplyCopilotEscalation = canRunSupportAction(supportPolicy, "copilot_escalate", selectedTicketTier);
+  const canConvertSelectedN0 =
+    selectedN0Chat?.userId &&
+    !selectedN0Chat?.ticketId &&
+    n0ConversionGaps.length > 0 &&
+    canRunSupportAction(supportPolicy, "convert_n0", selectedN0Priority);
+  const copilotInternalNoteKey = useMemo(
+    () =>
+      buildIdempotencyKey([
+        "support-copilot",
+        orchestratorAnalysis?.id,
+        selectedTicket?.id,
+        "internal-note",
+        copilotNoteDraft,
+      ]),
+    [copilotNoteDraft, orchestratorAnalysis?.id, selectedTicket?.id],
+  );
+  const copilotEscalationKey = useMemo(
+    () =>
+      buildIdempotencyKey([
+        "support-copilot",
+        orchestratorAnalysis?.id,
+        selectedTicket?.id,
+        "escalate",
+        copilotEscalationReason,
+      ]),
+    [copilotEscalationReason, orchestratorAnalysis?.id, selectedTicket?.id],
+  );
+  const n0ConversionKey = useMemo(
+    () =>
+      buildIdempotencyKey([
+        "support-n0",
+        selectedN0Chat?.userId,
+        selectedN0Chat?.lastMessageAt || selectedN0Chat?.updatedAt,
+        "convert-ticket",
+        n0TicketForm.subject,
+        selectedN0Priority,
+      ]),
+    [
+      n0TicketForm.subject,
+      selectedN0Chat?.lastMessageAt,
+      selectedN0Chat?.updatedAt,
+      selectedN0Chat?.userId,
+      selectedN0Priority,
+    ],
+  );
+  const recentActionItems = useMemo(() => {
+    const auditItems = auditLogs.map((log) => ({
+      id: `audit-${log.id || log.createdAt || getAuditActionLabel(log)}`,
+      type: "Auditoria",
+      label: getAuditActionLabel(log),
+      status: log.success === false ? "falhou" : log.severity || "ok",
+      className: auditSeverityClass(log.severity, log.success),
+      at: log.createdAt || log.timestamp,
+      detail: log.resource || log.resourceId || log.userId || "-",
+    }));
+    const runItems = orchestratorRuns.map((run) => ({
+      id: `run-${run.id}`,
+      type: "Copiloto",
+      label: run.classification?.category || run.source || "triagem",
+      status: run.classification?.supportTier || "-",
+      className: confidenceBadge(run.classification?.confidence),
+      at: run.createdAt || run.updatedAt,
+      detail: run.ticketId || run.userId || "-",
+    }));
+    const actionItems = Array.isArray(orchestratorAnalysis?.actions)
+      ? orchestratorAnalysis.actions.map((action) => ({
+          id: `copilot-action-${action.id || action.type}`,
+          type: "Ação aprovada",
+          label: action.type || action.action || "ação",
+          status: action.status || "-",
+          className: action.status === "succeeded" ? "status-ok" : "status-warn",
+          at: action.createdAt || action.updatedAt,
+          detail: selectedTicket?.id || "-",
+        }))
+      : [];
+
+    return [...actionItems, ...auditItems, ...runItems]
+      .sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0))
+      .slice(0, 8);
+  }, [auditLogs, orchestratorAnalysis?.actions, orchestratorRuns, selectedTicket?.id]);
+
+  useEffect(() => {
+    if (!selectedTicket?.id) {
+      setManualEscalationReason("");
+      setManualResolution("");
+      return;
+    }
+    setManualEscalationReason(copilotRationale[0] || "");
+    setManualResolution("");
+  }, [copilotRationale, selectedTicket?.id]);
+
+  useEffect(() => {
+    if (!selectedTicket?.id) {
+      setCopilotNoteDraft("");
+      setCopilotEscalationReason("");
+      return;
+    }
+    setCopilotNoteDraft(copilotSuggestion || "Triagem revisada. Sem resposta automática enviada ao usuário.");
+    setCopilotEscalationReason(copilotRationale[0] || "Escalado após revisão humana do copiloto.");
+  }, [copilotRationale, copilotSuggestion, selectedTicket?.id]);
+
+  useEffect(() => {
+    if (!selectedN0Chat?.userId) {
+      setN0TicketForm(DEFAULT_N0_TICKET_FORM);
+      return;
+    }
+    setN0TicketForm({
+      subject: `Atendimento de ${selectedN0ChatTitle || selectedN0Chat.userId}`,
+      priority: "N3",
+      category: "chat",
+      description: selectedN0Chat.lastMessage?.message || "",
+    });
+  }, [selectedN0Chat?.lastMessage?.message, selectedN0Chat?.userId, selectedN0ChatTitle]);
 
   const sendMessage = async () => {
     if (!selectedTicket || !newMessage.trim()) return;
+    if (!canMessageSelected) {
+      setError(supportActionBlockReason(supportPolicy, "message", selectedTicketTier));
+      return;
+    }
     const text = newMessage.trim();
     setNewMessage("");
     try {
@@ -619,6 +938,10 @@ export default function SupportPage() {
 
   const assignToMe = async () => {
     if (!selectedTicket) return;
+    if (!canAssignSelected) {
+      setError(supportActionBlockReason(supportPolicy, "assign", selectedTicketTier));
+      return;
+    }
     const agentId = user?.id || user?.uid || user?.email || "dashboard-agent";
     const agentName = user?.name || user?.email || agentId;
     try {
@@ -637,13 +960,20 @@ export default function SupportPage() {
 
   const escalateTicket = async () => {
     if (!selectedTicket) return;
-    const reason = window.prompt("Motivo da escalacao:");
-    if (!reason) return;
+    if (!canEscalateSelected) {
+      setError(supportActionBlockReason(supportPolicy, "escalate", selectedTicketTier));
+      return;
+    }
+    const reason = manualEscalationReason.trim();
+    if (!reason) {
+      setError("Informe o motivo antes de escalar.");
+      return;
+    }
     try {
       setActionBusy("escalate");
       setError("");
       setActionMessage("");
-      await leafAPI.escalateSupportTicket(selectedTicket.id, reason.trim());
+      await leafAPI.escalateSupportTicket(selectedTicket.id, reason);
       setActionMessage("Ticket escalado com sucesso.");
       await loadTickets({ silent: true });
     } catch (err) {
@@ -655,13 +985,20 @@ export default function SupportPage() {
 
   const resolveTicket = async () => {
     if (!selectedTicket) return;
-    const resolution = window.prompt("Resumo da resolucao:");
-    if (resolution === null) return;
+    if (!canResolveSelected) {
+      setError(supportActionBlockReason(supportPolicy, "resolve", selectedTicketTier));
+      return;
+    }
+    const resolution = manualResolution.trim();
+    if (!resolution) {
+      setError("Informe um resumo curto da resolução antes de finalizar.");
+      return;
+    }
     try {
       setActionBusy("resolve");
       setError("");
       setActionMessage("");
-      await leafAPI.resolveSupportTicket(selectedTicket.id, resolution.trim());
+      await leafAPI.resolveSupportTicket(selectedTicket.id, resolution);
       setActionMessage("Ticket resolvido com sucesso.");
       await loadTickets({ silent: true });
     } catch (err) {
@@ -673,6 +1010,10 @@ export default function SupportPage() {
 
   const closeChat = async () => {
     if (!selectedUserId) return;
+    if (!canRunSupportAction(supportPolicy, "close_chat", selectedTicketTier)) {
+      setError(supportActionBlockReason(supportPolicy, "close_chat", selectedTicketTier));
+      return;
+    }
     if (!window.confirm("Encerrar chat deste usuario?")) return;
     try {
       setActionBusy("close-chat");
@@ -691,6 +1032,10 @@ export default function SupportPage() {
 
   const sendN0ChatMessage = async () => {
     if (!selectedN0Chat?.userId || !n0ChatReply.trim()) return;
+    if (!canRunSupportAction(supportPolicy, "message", "N3")) {
+      setError(supportActionBlockReason(supportPolicy, "message", "N3"));
+      return;
+    }
     const text = n0ChatReply.trim();
     setN0ChatReply("");
     try {
@@ -712,22 +1057,32 @@ export default function SupportPage() {
 
   const convertN0ChatToTicket = async () => {
     if (!selectedN0Chat?.userId) return;
-    const subject = window.prompt("Titulo do chamado:", `Atendimento de ${getChatTitle(selectedN0Chat)}`);
-    if (subject === null) return;
-    const priority = window.prompt("Prioridade do chamado (N1, N2 ou N3):", "N3");
-    if (priority === null) return;
+    if (!canConvertSelectedN0) {
+      setError(
+        selectedN0Chat?.ticketId
+          ? "Este chat já tem chamado vinculado."
+          : supportActionBlockReason(supportPolicy, "convert_n0", selectedN0Priority),
+      );
+      return;
+    }
+    const subject = n0TicketForm.subject.trim() || "Atendimento via chat";
+    const description = n0TicketForm.description.trim() || selectedN0Chat.lastMessage?.message || "Chat convertido para acompanhamento.";
     try {
       setActionBusy("n0-convert");
       setError("");
       setActionMessage("");
       const result = await leafAPI.convertChatToTicket(selectedN0Chat.userId, {
-        subject: subject.trim() || "Atendimento via chat",
-        priority: ["N1", "N2", "N3"].includes(priority.trim().toUpperCase()) ? priority.trim().toUpperCase() : "N3",
-        category: "chat",
+        subject,
+        description,
+        priority: selectedN0Priority,
+        category: n0TicketForm.category.trim() || "chat",
         metadata: {
-          source: "dashboard_n0_chat"
-        }
-      });
+          source: "dashboard_n0_chat",
+          gapReasons: n0ConversionGaps,
+          convertedBy: user?.email || user?.id || user?.name || "dashboard-agent",
+        },
+        idempotencyKey: n0ConversionKey,
+      }, { idempotencyKey: n0ConversionKey });
       await Promise.all([loadTickets({ silent: true }), loadChatInbox()]);
       if (result?.ticket) {
         setSelectedTicket(result.ticket);
@@ -743,6 +1098,10 @@ export default function SupportPage() {
 
   const closeN0Chat = async () => {
     if (!selectedN0Chat?.userId) return;
+    if (!canRunSupportAction(supportPolicy, "close_chat", "N3")) {
+      setError(supportActionBlockReason(supportPolicy, "close_chat", "N3"));
+      return;
+    }
     if (!window.confirm("Encerrar este atendimento simples?")) return;
     try {
       setActionBusy("n0-close");
@@ -775,9 +1134,15 @@ export default function SupportPage() {
 
   const applyCopilotInternalNote = async () => {
     if (!orchestratorAnalysis?.id || !selectedTicket?.id || !orchestratorEnabled) return;
-    const suggested = copilotSuggestion || "Registrar triagem do copiloto para revisao humana.";
-    const message = window.prompt("Nota interna para registrar no ticket:", suggested);
-    if (message === null) return;
+    if (!canApplyCopilotNote) {
+      setError(supportActionBlockReason(supportPolicy, "copilot_note", selectedTicketTier));
+      return;
+    }
+    const message = copilotNoteDraft.trim();
+    if (!message) {
+      setError("Revise e confirme a nota interna antes de aplicar.");
+      return;
+    }
     try {
       setActionBusy("copilot-note");
       setError("");
@@ -785,9 +1150,10 @@ export default function SupportPage() {
       await leafAPI.applySupportOrchestratorAction(orchestratorAnalysis.id, {
         action: "internal_note",
         approvedBy: user?.email || user?.id || user?.name || "dashboard-agent",
-        message: message.trim(),
-        idempotencyKey: `${orchestratorAnalysis.id}:internal_note:${selectedTicket.id}:${message.trim()}`,
-      });
+        message,
+        ticketId: selectedTicket.id,
+        idempotencyKey: copilotInternalNoteKey,
+      }, { idempotencyKey: copilotInternalNoteKey });
       const response = await leafAPI.getSupportOrchestratorTicketAnalysis(selectedTicket.id);
       setOrchestratorAnalysis(response?.analysis || null);
       await Promise.all([
@@ -804,8 +1170,15 @@ export default function SupportPage() {
 
   const applyCopilotEscalation = async () => {
     if (!orchestratorAnalysis?.id || !selectedTicket?.id || !orchestratorEnabled) return;
-    const reason = window.prompt("Motivo da escalacao:", copilotRationale[0] || "Escalado apos revisao humana do copiloto.");
-    if (reason === null) return;
+    if (!canApplyCopilotEscalation) {
+      setError(supportActionBlockReason(supportPolicy, "copilot_escalate", selectedTicketTier));
+      return;
+    }
+    const reason = copilotEscalationReason.trim();
+    if (!reason) {
+      setError("Informe o motivo aprovado para escalar com o copiloto.");
+      return;
+    }
     try {
       setActionBusy("copilot-escalate");
       setError("");
@@ -813,9 +1186,11 @@ export default function SupportPage() {
       await leafAPI.applySupportOrchestratorAction(orchestratorAnalysis.id, {
         action: "escalate_ticket",
         approvedBy: user?.email || user?.id || user?.name || "dashboard-agent",
-        reason: reason.trim(),
-        idempotencyKey: `${orchestratorAnalysis.id}:escalate:${selectedTicket.id}:${reason.trim()}`,
-      });
+        reason,
+        ticketId: selectedTicket.id,
+        targetTier: copilotPriority,
+        idempotencyKey: copilotEscalationKey,
+      }, { idempotencyKey: copilotEscalationKey });
       const response = await leafAPI.getSupportOrchestratorTicketAnalysis(selectedTicket.id);
       setOrchestratorAnalysis(response?.analysis || null);
       await Promise.all([loadTickets({ silent: true }), loadOrchestratorOverview()]);
@@ -908,6 +1283,24 @@ export default function SupportPage() {
                 <div className="label">Quando manter N0</div>
                 <div className="value">dúvida simples, orientação rápida ou resposta única</div>
               </div>
+              <div className="row">
+                <div className="label">Seu perfil</div>
+                <div className="value">
+                  {supportPolicy.label} · {supportPolicy.tiers.length ? supportPolicy.tiers.join(", ") : "somente leitura"}
+                </div>
+              </div>
+            </div>
+            <div className="orchestrator-summary">
+              {SUPPORT_TIERS.map((tier) => (
+                <span key={tier} className={supportPolicy.tiers.includes(tier) ? "status-ok" : "meta-badge"}>
+                  {tier}
+                </span>
+              ))}
+              {Object.entries(SUPPORT_ACTIONS).map(([action, label]) => (
+                <span key={action} className={supportPolicy.actions.includes(action) ? "status-ok" : "meta-badge"}>
+                  {label}
+                </span>
+              ))}
             </div>
           </Panel>
 
@@ -1012,6 +1405,34 @@ export default function SupportPage() {
               <p className="text-muted">Selecione um ticket ou chat para ver o contexto.</p>
             )}
           </Panel>
+
+          <Panel
+            title="Auditoria recente"
+            subtitle="Últimas ações de suporte, aprovações humanas e leituras do copiloto."
+            actions={
+              <button type="button" onClick={loadSupportAudit}>
+                Atualizar auditoria
+              </button>
+            }
+          >
+            {auditError ? <p className="text-muted">{auditError}</p> : null}
+            {recentActionItems.length > 0 ? (
+              <div className="run-list">
+                {recentActionItems.map((item) => (
+                  <div key={item.id} className="run-row">
+                    <strong>{item.type}</strong>
+                    <span>{item.label}</span>
+                    <span className={item.className}>{item.status}</span>
+                    <span className="table-muted">
+                      {item.detail} · {formatDateTime(item.at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted">Sem ações recentes disponíveis para este recorte.</p>
+            )}
+          </Panel>
         </section>
 
         <section className="grid support-grid">
@@ -1072,13 +1493,28 @@ export default function SupportPage() {
                   >
                     Chat
                   </button>
-                  <button type="button" disabled={!!actionBusy} onClick={assignToMe}>
+                  <button
+                    type="button"
+                    disabled={!!actionBusy || !canAssignSelected}
+                    title={canAssignSelected ? "" : supportActionBlockReason(supportPolicy, "assign", selectedTicketTier)}
+                    onClick={assignToMe}
+                  >
                     Assumir
                   </button>
-                  <button type="button" disabled={!!actionBusy} onClick={escalateTicket}>
+                  <button
+                    type="button"
+                    disabled={!!actionBusy || !canEscalateSelected || !manualEscalationReason.trim()}
+                    title={canEscalateSelected ? "" : supportActionBlockReason(supportPolicy, "escalate", selectedTicketTier)}
+                    onClick={escalateTicket}
+                  >
                     Escalar
                   </button>
-                  <button type="button" disabled={!!actionBusy} onClick={resolveTicket}>
+                  <button
+                    type="button"
+                    disabled={!!actionBusy || !canResolveSelected || !manualResolution.trim()}
+                    title={canResolveSelected ? "" : supportActionBlockReason(supportPolicy, "resolve", selectedTicketTier)}
+                    onClick={resolveTicket}
+                  >
                     Resolver
                   </button>
                   {orchestratorEnabled ? (
@@ -1087,7 +1523,14 @@ export default function SupportPage() {
                     </button>
                   ) : null}
                   {mode === "chat" ? (
-                    <button type="button" onClick={closeChat} disabled={chatStatus?.status === "closed"}>
+                    <button
+                      type="button"
+                      onClick={closeChat}
+                      disabled={
+                        chatStatus?.status === "closed" ||
+                        !canRunSupportAction(supportPolicy, "close_chat", selectedTicketTier)
+                      }
+                    >
                       Encerrar chat
                     </button>
                   ) : null}
@@ -1123,6 +1566,33 @@ export default function SupportPage() {
                   </p>
                 ) : null}
 
+                <div className="agent-recommendation">
+                  <div className="ticket-meta-row">
+                    <strong>Ações manuais</strong>
+                    <span className={priorityBadge(selectedTicketTier)}>tier atual: {selectedTicketTier}</span>
+                    <span className={canMessageSelected ? "status-ok" : "status-warn"}>
+                      {canMessageSelected ? "resposta liberada" : "resposta bloqueada"}
+                    </span>
+                  </div>
+                  <div className="filters">
+                    <input
+                      placeholder="Motivo para escalar"
+                      value={manualEscalationReason}
+                      onChange={(event) => setManualEscalationReason(event.target.value)}
+                    />
+                    <input
+                      placeholder="Resumo da resolução"
+                      value={manualResolution}
+                      onChange={(event) => setManualResolution(event.target.value)}
+                    />
+                  </div>
+                  {!canResolveSelected || !canEscalateSelected ? (
+                    <p className="text-muted">
+                      RBAC ativo: {supportPolicy.label}. Ações fora do seu tier ficam bloqueadas antes de chamar a API.
+                    </p>
+                  ) : null}
+                </div>
+
                 {orchestratorEnabled ? (
                   <div className="agent-recommendation">
                     <div className="ticket-meta-row">
@@ -1146,7 +1616,6 @@ export default function SupportPage() {
                         <p className="text-muted">
                           Sugestao para triagem. Revise o contexto, ajuste o texto e envie manualmente pelo atendimento.
                         </p>
-                        <p>{copilotSuggestion || "Sem rascunho sugerido para este ticket."}</p>
                         <div className="orchestrator-summary">
                           <span className={priorityBadge(copilotPriority)}>prioridade: {copilotPriority}</span>
                           <span className="meta-badge">acao sugerida: {orchestratorAnalysis.recommendation.nextAction || "-"}</span>
@@ -1163,17 +1632,59 @@ export default function SupportPage() {
                             ))}
                           </ul>
                         ) : null}
+                        <label className="field-stack">
+                          Nota interna aprovada
+                          <textarea
+                            rows={4}
+                            value={copilotNoteDraft}
+                            onChange={(event) => setCopilotNoteDraft(event.target.value)}
+                            placeholder="Revise o texto antes de registrar no ticket."
+                          />
+                        </label>
+                        <label className="field-stack">
+                          Motivo da escalada aprovada
+                          <textarea
+                            rows={3}
+                            value={copilotEscalationReason}
+                            onChange={(event) => setCopilotEscalationReason(event.target.value)}
+                            placeholder="Explique por que o ticket deve subir de tier."
+                          />
+                        </label>
+                        <p className="text-muted">
+                          Idempotency keys: nota <code>{copilotInternalNoteKey || "-"}</code> · escalada{" "}
+                          <code>{copilotEscalationKey || "-"}</code>
+                        </p>
                         <div className="filters">
                           <button
                             type="button"
-                            disabled={actionBusy === "copilot-note" || !orchestratorAnalysis?.id}
+                            disabled={
+                              actionBusy === "copilot-note" ||
+                              !orchestratorAnalysis?.id ||
+                              !copilotNoteDraft.trim() ||
+                              !canApplyCopilotNote
+                            }
+                            title={
+                              canApplyCopilotNote
+                                ? ""
+                                : supportActionBlockReason(supportPolicy, "copilot_note", selectedTicketTier)
+                            }
                             onClick={applyCopilotInternalNote}
                           >
                             {actionBusy === "copilot-note" ? "Aplicando..." : "Registrar nota interna"}
                           </button>
                           <button
                             type="button"
-                            disabled={actionBusy === "copilot-escalate" || !orchestratorAnalysis?.id}
+                            disabled={
+                              actionBusy === "copilot-escalate" ||
+                              !orchestratorAnalysis?.id ||
+                              !copilotEscalationReason.trim() ||
+                              !canApplyCopilotEscalation
+                            }
+                            title={
+                              canApplyCopilotEscalation
+                                ? ""
+                                : supportActionBlockReason(supportPolicy, "copilot_escalate", selectedTicketTier)
+                            }
                             onClick={applyCopilotEscalation}
                           >
                             {actionBusy === "copilot-escalate" ? "Escalando..." : "Escalar com aprovacao"}
@@ -1239,7 +1750,11 @@ export default function SupportPage() {
                       if (event.key === "Enter") sendMessage();
                     }}
                   />
-                  <button type="button" onClick={sendMessage} disabled={!!actionBusy || !newMessage.trim()}>
+                  <button
+                    type="button"
+                    onClick={sendMessage}
+                    disabled={!!actionBusy || !newMessage.trim() || !canMessageSelected}
+                  >
                     {actionBusy === "message" ? "Enviando..." : "Enviar"}
                   </button>
                 </div>
@@ -1307,10 +1822,29 @@ export default function SupportPage() {
             actions={
               selectedN0Chat ? (
                 <>
-                  <button type="button" disabled={!!actionBusy} onClick={convertN0ChatToTicket}>
+                  <button
+                    type="button"
+                    disabled={!!actionBusy || !canConvertSelectedN0}
+                    title={
+                      canConvertSelectedN0
+                        ? ""
+                        : selectedN0Chat?.ticketId
+                          ? "Este chat já tem chamado vinculado."
+                          : supportActionBlockReason(supportPolicy, "convert_n0", selectedN0Priority)
+                    }
+                    onClick={convertN0ChatToTicket}
+                  >
                     Transformar em chamado
                   </button>
-                  <button type="button" disabled={!!actionBusy || selectedN0Chat.status === "closed"} onClick={closeN0Chat}>
+                  <button
+                    type="button"
+                    disabled={
+                      !!actionBusy ||
+                      selectedN0Chat.status === "closed" ||
+                      !canRunSupportAction(supportPolicy, "close_chat", "N3")
+                    }
+                    onClick={closeN0Chat}
+                  >
                     Encerrar
                   </button>
                 </>
@@ -1338,6 +1872,66 @@ export default function SupportPage() {
                   }}
                   maxItems={6}
                 />
+
+                <div className="agent-recommendation">
+                  <div className="ticket-meta-row">
+                    <strong>Lacuna para virar chamado</strong>
+                    {selectedN0Chat.ticketId ? (
+                      <span className="status-ok">já convertido</span>
+                    ) : (
+                      <span className={n0ConversionGaps.length ? "status-warn" : "status-ok"}>
+                        {n0ConversionGaps.length ? "requer ticket" : "N0 suficiente"}
+                      </span>
+                    )}
+                    <span className={priorityBadge(selectedN0Priority)}>novo ticket {selectedN0Priority}</span>
+                  </div>
+                  {n0ConversionGaps.length ? (
+                    <ul className="agent-rationale">
+                      {n0ConversionGaps.map((gap) => (
+                        <li key={gap}>{gap}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-muted">Sem lacuna operacional detectada para abrir ticket agora.</p>
+                  )}
+                  <div className="filters">
+                    <input
+                      placeholder="Título do chamado"
+                      value={n0TicketForm.subject}
+                      onChange={(event) =>
+                        setN0TicketForm((current) => ({ ...current, subject: event.target.value }))
+                      }
+                    />
+                    <select
+                      value={n0TicketForm.priority}
+                      onChange={(event) =>
+                        setN0TicketForm((current) => ({ ...current, priority: event.target.value }))
+                      }
+                    >
+                      <option value="N3">N3 - simples</option>
+                      <option value="N2">N2 - precisa acompanhamento</option>
+                      <option value="N1">N1 - crítico</option>
+                    </select>
+                    <input
+                      placeholder="Categoria"
+                      value={n0TicketForm.category}
+                      onChange={(event) =>
+                        setN0TicketForm((current) => ({ ...current, category: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={n0TicketForm.description}
+                    onChange={(event) =>
+                      setN0TicketForm((current) => ({ ...current, description: event.target.value }))
+                    }
+                    placeholder="Resumo para o ticket"
+                  />
+                  <p className="text-muted">
+                    Idempotency key: <code>{n0ConversionKey || "-"}</code>
+                  </p>
+                </div>
 
                 <div className="support-messages">
                   {n0ChatMessages.length === 0 ? (
@@ -1372,7 +1966,11 @@ export default function SupportPage() {
                       if (event.key === "Enter") sendN0ChatMessage();
                     }}
                   />
-                  <button type="button" onClick={sendN0ChatMessage} disabled={!!actionBusy || !n0ChatReply.trim()}>
+                  <button
+                    type="button"
+                    onClick={sendN0ChatMessage}
+                    disabled={!!actionBusy || !n0ChatReply.trim() || !canRunSupportAction(supportPolicy, "message", "N3")}
+                  >
                     {actionBusy === "n0-message" ? "Enviando..." : "Enviar"}
                   </button>
                 </div>

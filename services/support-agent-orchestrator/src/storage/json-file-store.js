@@ -4,8 +4,8 @@ const path = require("node:path");
 const InMemoryStore = require("./in-memory-store");
 
 class JsonFileStore extends InMemoryStore {
-  constructor({ filePath, maxRuns = 250 } = {}) {
-    super({ maxRuns });
+  constructor({ filePath, maxRuns = 250, maxAuditEvents } = {}) {
+    super({ maxRuns, maxAuditEvents });
     this.filePath = filePath;
     this.loaded = false;
     this.load();
@@ -20,6 +20,7 @@ class JsonFileStore extends InMemoryStore {
     const payload = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
     (payload.runs || []).reverse().forEach((run) => this.saveRun(run));
     (payload.actions || []).reverse().forEach((action) => this.saveAction(action));
+    (payload.auditEvents || []).reverse().forEach((event) => this.saveAuditEvent(event));
     this.loaded = true;
     return this;
   }
@@ -32,6 +33,7 @@ class JsonFileStore extends InMemoryStore {
       updatedAt: new Date().toISOString(),
       runs: this.runs,
       actions: this.actions,
+      auditEvents: this.auditEvents,
     };
     fs.writeFileSync(this.filePath, `${JSON.stringify(payload, null, 2)}\n`);
   }
@@ -52,6 +54,12 @@ class JsonFileStore extends InMemoryStore {
     const updated = super.updateAction(actionId, patch);
     if (updated && this.loaded) this.persist();
     return updated;
+  }
+
+  saveAuditEvent(event) {
+    const nextEvent = super.saveAuditEvent(event);
+    if (this.loaded) this.persist();
+    return nextEvent;
   }
 }
 

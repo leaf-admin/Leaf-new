@@ -1,7 +1,16 @@
 const logger = require("../utils/logger");
 
 const CONTRACT_VERSION = "support-orchestrator.v1";
+const GUARDED_COPILOT_MODE = "guarded_copilot";
 const ALLOWED_APPROVED_ACTIONS = new Set(["internal_note", "escalate_ticket"]);
+const BLOCKED_ACTIONS = Object.freeze([
+  "auto_reply",
+  "auto_send",
+  "auto_resolve",
+  "close_ticket",
+  "external_mutation",
+  "customer_message_without_approval",
+]);
 
 function normalizeApprovedAction(action) {
   const normalized = String(action || "").trim().toLowerCase();
@@ -52,7 +61,8 @@ class SupportOrchestrator {
     return {
       service: this.config.serviceName,
       env: this.config.env,
-      mode: this.config.automation.autonomousMode ? "autonomous_guarded" : "copilot",
+      mode: GUARDED_COPILOT_MODE,
+      requestedAutonomousMode: Boolean(this.config.automation.autonomousMode),
       playbook: this.playbookStore.metadata(),
       polling: {
         enabled: this.config.polling.enabled,
@@ -71,6 +81,7 @@ class SupportOrchestrator {
       },
       execution: {
         allowedApprovedActions: [...ALLOWED_APPROVED_ACTIONS],
+        blockedActions: [...BLOCKED_ACTIONS],
         autoSend: false,
         autoResolve: false,
         requiresHumanApproval: true,
@@ -79,9 +90,9 @@ class SupportOrchestrator {
   }
 
   async analyzeTicket(ticketId, { force = false } = {}) {
+    const previousRun = this.store.getLatestForTicket(ticketId);
     if (!force) {
-      const cached = this.store.getLatestForTicket(ticketId);
-      if (cached) return cached;
+      if (previousRun) return previousRun;
     }
 
     const ticketResponse = await this.leafApiClient.getTicket(ticketId);
@@ -98,6 +109,14 @@ class SupportOrchestrator {
       ticket,
       messages,
       chatMessages: chatResponse?.messages || [],
+      replay: force && previousRun
+        ? {
+            isReplay: true,
+            previousRunId: previousRun.id,
+            previousRunCreatedAt: previousRun.createdAt || null,
+            reason: "forced_reanalysis",
+          }
+        : { isReplay: false },
     });
   }
 
@@ -110,10 +129,11 @@ class SupportOrchestrator {
       },
       messages: [],
       chatMessages: messages,
+      replay: { isReplay: false },
     });
   }
 
-  buildRun({ source, ticket, messages, chatMessages }) {
+  buildRun({ source, ticket, messages, chatMessages, replay = { isReplay: false } }) {
     const classification = this.classifier.classify({ ticket, messages, chatMessages });
     const n1 = this.n1Agent.buildRecommendation({ classification, ticket, messages, chatMessages });
     const n2 = this.n2Router.recommend({ classification, ticket, messages, chatMessages });
@@ -134,14 +154,37 @@ class SupportOrchestrator {
       audit: {
         contractVersion: CONTRACT_VERSION,
         playbookVersion: classification.playbookVersion,
-        autonomousMode: this.config.automation.autonomousMode,
+        requestedAutonomousMode: Boolean(this.config.automation.autonomousMode),
+        autonomousMode: false,
         mode: execution.mode,
         minConfidence: this.config.automation.minConfidence,
         internetSearchUsed: false,
         autoSend: false,
         autoResolve: false,
         requiresHumanApproval: true,
+        humanApprovalRequired: true,
+        allowedApprovedActions: [...ALLOWED_APPROVED_ACTIONS],
+        blockedActions: [...BLOCKED_ACTIONS],
+        replay: {
+          isReplay: Boolean(replay?.isReplay),
+          previousRunId: replay?.previousRunId || null,
+          previousRunCreatedAt: replay?.previousRunCreatedAt || null,
+          reason: replay?.reason || null,
+        },
       },
+    });
+    this.recordAuditEvent({
+      type: replay?.isReplay ? "run_replayed" : "run_created",
+      runId: run.id,
+      ticketId: run.ticketId,
+      source,
+      mode: GUARDED_COPILOT_MODE,
+      contractVersion: CONTRACT_VERSION,
+      playbookVersion: classification.playbookVersion,
+      supportTier: classification.supportTier,
+      category: classification.category,
+      confidence: classification.confidence,
+      replay: run.audit.replay,
     });
     logger.info("Support analysis completed", {
       runId: run.id,
@@ -156,18 +199,15 @@ class SupportOrchestrator {
   buildExecutionPolicy({ classification, n1, n2, n3 }) {
     const activeActions = [n1?.action, n2?.action, n3?.action].filter(Boolean);
     return {
-      mode: this.config.automation.autonomousMode ? "guarded_copilot" : "copilot",
-      canAutoReply: classification.canAutoReply === true,
+      mode: GUARDED_COPILOT_MODE,
+      canAutoReply: false,
+      suggestedCanAutoReply: classification.canAutoReply === true,
       autoSend: false,
       autoResolve: false,
       requiresHumanApproval: true,
       activeActions,
-      blockedActions: [
-        "auto_send",
-        "auto_resolve",
-        "close_ticket",
-        "external_mutation",
-      ],
+      allowedApprovedActions: [...ALLOWED_APPROVED_ACTIONS],
+      blockedActions: [...BLOCKED_ACTIONS],
     };
   }
 
@@ -209,8 +249,22 @@ class SupportOrchestrator {
 
     const key = idempotencyKey || `${run.id}:${normalizedAction}:${approvedByText}`;
     const existing = this.store.getActionByIdempotencyKey(key);
-    if (existing && ["executing", "succeeded"].includes(existing.status)) {
-      return { action: existing, idempotent: true };
+    if (existing) {
+      this.recordAuditEvent({
+        type: "approved_action_idempotent_replay",
+        runId: existing.runId,
+        ticketId: existing.ticketId,
+        actionId: existing.id,
+        actionType: existing.type,
+        status: existing.status,
+        idempotencyKey: key,
+        approvedBy: approvedByText,
+      });
+      return {
+        action: existing,
+        idempotent: true,
+        retryableWithNewIdempotencyKey: existing.status === "failed",
+      };
     }
 
     const actionRecord = this.store.saveAction({
@@ -227,11 +281,22 @@ class SupportOrchestrator {
         reason: reason ? String(reason).trim() : "",
       },
       guardrails: {
+        mode: GUARDED_COPILOT_MODE,
         humanApproved: true,
         autoSend: false,
         autoResolve: false,
         externalCustomerMessage: false,
+        generatedIdempotencyKey: !idempotencyKey,
       },
+    });
+    this.recordAuditEvent({
+      type: "approved_action_started",
+      runId: run.id,
+      ticketId: resolvedTicketId,
+      actionId: actionRecord.id,
+      actionType: normalizedAction,
+      idempotencyKey: key,
+      approvedBy: approvedByText,
     });
 
     try {
@@ -255,6 +320,15 @@ class SupportOrchestrator {
         action: normalizedAction,
         approvedBy: approvedByText,
       });
+      this.recordAuditEvent({
+        type: "approved_action_succeeded",
+        runId: run.id,
+        ticketId: resolvedTicketId,
+        actionId: updated.id,
+        actionType: normalizedAction,
+        idempotencyKey: key,
+        approvedBy: approvedByText,
+      });
       return { action: updated, idempotent: false };
     } catch (error) {
       this.store.updateAction(actionRecord.id, {
@@ -262,8 +336,30 @@ class SupportOrchestrator {
         failedAt: new Date().toISOString(),
         error: error.message,
       });
+      this.recordAuditEvent({
+        type: "approved_action_failed",
+        runId: run.id,
+        ticketId: resolvedTicketId,
+        actionId: actionRecord.id,
+        actionType: normalizedAction,
+        idempotencyKey: key,
+        approvedBy: approvedByText,
+        error: error.message,
+      });
       throw error;
     }
+  }
+
+  recordAuditEvent(event) {
+    if (!this.store?.saveAuditEvent) return null;
+    return this.store.saveAuditEvent({
+      ...event,
+      contractVersion: event.contractVersion || CONTRACT_VERSION,
+      mode: event.mode || GUARDED_COPILOT_MODE,
+      autoSend: false,
+      autoResolve: false,
+      requiresHumanApproval: true,
+    });
   }
 
   async pollBacklogOnce() {

@@ -108,9 +108,13 @@ function createOrchestrator(overrides = {}) {
 function assertNoAutosendOrAutoresolve(run) {
   assert.equal(run.classification.canAutoReply, false);
   assert.equal(run.classification.needsHuman, true);
+  assert.equal(run.recommendation.execution.mode, "guarded_copilot");
+  assert.equal(run.recommendation.execution.canAutoReply, false);
   assert.equal(run.recommendation.execution.autoSend, false);
   assert.equal(run.recommendation.execution.autoResolve, false);
   assert.equal(run.recommendation.execution.requiresHumanApproval, true);
+  assert.equal(run.audit.mode, "guarded_copilot");
+  assert.equal(run.audit.autonomousMode, false);
   assert.equal(run.audit.autoSend, false);
   assert.equal(run.audit.autoResolve, false);
   assert.equal(run.audit.requiresHumanApproval, true);
@@ -124,6 +128,25 @@ function assertNoAutosendOrAutoresolve(run) {
       assert.equal(recommendation.requiresHumanApproval, true);
     });
 }
+
+test("reports guarded copilot mode even when autonomous mode is requested", () => {
+  const orchestrator = createOrchestrator({
+    config: {
+      automation: {
+        autonomousMode: true,
+      },
+    },
+  });
+
+  const status = orchestrator.status();
+
+  assert.equal(status.mode, "guarded_copilot");
+  assert.equal(status.requestedAutonomousMode, true);
+  assert.equal(status.execution.autoSend, false);
+  assert.equal(status.execution.autoResolve, false);
+  assert.equal(status.execution.requiresHumanApproval, true);
+  assert.ok(status.execution.blockedActions.includes("customer_message_without_approval"));
+});
 
 test("classifies common payment tickets as guided N1/N2 copilot work", () => {
   const orchestrator = createOrchestrator();
@@ -289,6 +312,13 @@ test("reuses cached ticket analysis unless force is requested", async () => {
   const forced = await orchestrator.analyzeTicket("ticket_cached_1", { force: true });
   assert.notEqual(forced.id, first.id);
   assert.equal(ticketFetches, 2);
+  assert.equal(forced.audit.replay.isReplay, true);
+  assert.equal(forced.audit.replay.previousRunId, first.id);
+
+  const auditEvents = orchestrator.store.listAuditEvents({ ticketId: "ticket_cached_1" });
+  assert.equal(auditEvents[0].type, "run_replayed");
+  assert.equal(auditEvents[0].replay.previousRunId, first.id);
+  assert.equal(auditEvents[1].type, "run_created");
 });
 
 test("executes only human-approved internal notes with idempotency", async () => {
@@ -337,6 +367,66 @@ test("executes only human-approved internal notes with idempotency", async () =>
   assert.equal(second.action.id, first.action.id);
   assert.equal(orchestrator.store.getRun(run.id).actions[0].type, "internal_note");
   assert.equal(orchestrator.store.getRun(run.id).actions[0].guardrails.autoSend, false);
+  assert.equal(orchestrator.store.getRun(run.id).actions[0].guardrails.mode, "guarded_copilot");
+
+  const auditEvents = orchestrator.store.listAuditEvents({ ticketId: "ticket_note_1" });
+  assert.ok(auditEvents.some((event) => event.type === "approved_action_started"));
+  assert.ok(auditEvents.some((event) => event.type === "approved_action_succeeded"));
+  assert.ok(auditEvents.some((event) => event.type === "approved_action_idempotent_replay"));
+});
+
+test("keeps failed approved action idempotent and requires a new key for retry", async () => {
+  let apiCalls = 0;
+  const orchestrator = createOrchestrator({
+    leafApiClient: {
+      async sendTicketMessage() {
+        apiCalls += 1;
+        return { ok: true };
+      },
+      async escalateTicket() {
+        apiCalls += 1;
+        return { ok: true };
+      },
+    },
+  });
+  const run = orchestrator.analyzeChat({
+    userId: "customer_8",
+    ticket: {
+      id: "ticket_failed_key_1",
+      subject: "Ajuda com recibo",
+      category: "general",
+    },
+    messages: [{ senderType: "customer", message: "preciso do recibo" }],
+  });
+
+  await assert.rejects(
+    () => orchestrator.applyApprovedAction({
+      runId: run.id,
+      action: "internal_note",
+      approvedBy: "agent_3",
+      message: "",
+      idempotencyKey: "ticket_failed_key_1:note:agent_3",
+    }),
+    /message_required/,
+  );
+
+  const second = await orchestrator.applyApprovedAction({
+    runId: run.id,
+    action: "internal_note",
+    approvedBy: "agent_3",
+    message: "Nova tentativa com texto valido.",
+    idempotencyKey: "ticket_failed_key_1:note:agent_3",
+  });
+
+  assert.equal(apiCalls, 0);
+  assert.equal(second.idempotent, true);
+  assert.equal(second.retryableWithNewIdempotencyKey, true);
+  assert.equal(second.action.status, "failed");
+  assert.equal(orchestrator.store.listActions({ ticketId: "ticket_failed_key_1" }).length, 1);
+
+  const auditEvents = orchestrator.store.listAuditEvents({ ticketId: "ticket_failed_key_1" });
+  assert.ok(auditEvents.some((event) => event.type === "approved_action_failed"));
+  assert.ok(auditEvents.some((event) => event.type === "approved_action_idempotent_replay"));
 });
 
 test("rejects unsupported approved actions before touching Leaf API", async () => {

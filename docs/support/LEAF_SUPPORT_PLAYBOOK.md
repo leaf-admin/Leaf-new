@@ -975,16 +975,9 @@ Nesta matriz, `Nivel` significa `classification.supportTier`, ou seja, quem deve
 
 ### 17.6 Politica de automacao
 
-O modo padrao e `SUPPORT_AUTONOMOUS_MODE=false`. Neste modo, o orquestrador nunca responde sozinho; ele gera sugestoes e handoffs.
+LEA-75 congela o contrato atual em `guarded_copilot`. `SUPPORT_AUTONOMOUS_MODE=true` pode ser registrado para auditoria e experimentos controlados, mas nao libera autosend, autoresolve, fechamento de ticket ou mutacao externa. O orquestrador gera sugestoes e handoffs; qualquer contato com usuario ou atualizacao de ticket precisa de aprovacao humana.
 
-Auto-resposta so pode ocorrer quando todos os criterios forem verdadeiros:
-
-1. `SUPPORT_AUTONOMOUS_MODE=true`.
-2. `confidence >= SUPPORT_MIN_CONFIDENCE`.
-3. O playbook retornou referencia clara.
-4. Nao ha flags `emergency`, `fraud`, `payment` ou `kyc`.
-5. O caso nao envolve PII sensivel, documento, pagamento, conta invadida, reembolso, bloqueio, desbloqueio, safety, incidente ou producao.
-6. A resposta usa macro aprovada e registra `run.id` no ticket.
+Auto-resposta fica bloqueada no contrato atual. Para uma fase futura, so pode ser reavaliada com novo contrato versionado, QA de macros aprovadas, kill switch operacional e evidencia de que nao ha flags `emergency`, `fraud`, `payment`, `kyc`, safety, PII, documento, reembolso, bloqueio, desbloqueio ou producao.
 
 Execucao automatica continua proibida para:
 
@@ -1163,18 +1156,20 @@ Token opcional: header `x-orchestrator-token` ou `Authorization: Bearer <token>`
 | `GET /health` | Healthcheck simples | monitoria |
 | `GET /v1/status` | Modo, playbook, polling e integracoes | dashboard e operacao |
 | `GET /v1/runs` | Ultimas analises | auditoria e cockpit |
+| `GET /v1/runs/:runId/audit` | Eventos auditados de uma execucao | replay, investigacao e QA |
 | `GET /v1/tickets/:ticketId/analysis` | Obter analise existente ou criar sob demanda | abrir ticket no painel |
 | `POST /v1/tickets/:ticketId/analyze` | Forcar nova analise | apos novas mensagens/evidencias |
+| `GET /v1/tickets/:ticketId/audit` | Eventos auditados do ticket | replay, investigacao e QA |
 | `POST /v1/chat/analyze` | Analisar conversa enviada pelo caller | chat em tempo real |
 
 Fluxo recomendado para o dashboard:
 
 1. Ao abrir um ticket, chamar `GET /v1/tickets/:ticketId/analysis`.
 2. Exibir categoria, prioridade, confianca, flags e playbook references.
-3. Se `needsHuman=true`, mostrar a recomendacao como sugestao e exigir acao humana.
-4. Se `canAutoReply=true`, permitir envio automatico apenas com macro aprovada.
-5. Ao receber nova mensagem relevante, chamar `POST /v1/tickets/:ticketId/analyze`.
-6. Ao rotear ou responder, gravar comentario interno com `run.id`.
+3. Mostrar a recomendacao como sugestao e exigir acao humana.
+4. Ao receber nova mensagem relevante, chamar `POST /v1/tickets/:ticketId/analyze`; isso cria replay auditado quando ja existe run anterior.
+5. Ao rotear ou responder, gravar comentario interno com `run.id`.
+6. Consultar `/audit` para replay, investigacao ou conferencia de idempotencia.
 
 ### 17.9 Checklist de implantacao
 
@@ -1192,9 +1187,9 @@ Piloto controlado:
 
 1. Habilitar polling de backlog somente em uma fila ou cidade.
 2. Criar painel diario de `confidence`, `needsHuman`, `canAutoReply`, escalacoes e reaberturas.
-3. Permitir auto-resposta apenas para duvidas N1 sem flags de risco.
-4. Revisar 100% das auto-respostas na primeira semana.
-5. Bloquear automaticamente a autonomia se QA, CSAT ou reopen piorarem.
+3. Manter todas as respostas como copiloto guardado ate novo contrato versionado.
+4. Revisar 100% das sugestoes aplicadas na primeira semana.
+5. Bloquear automaticamente qualquer experimento de autonomia se QA, CSAT ou reopen piorarem.
 
 Producao gradual:
 
