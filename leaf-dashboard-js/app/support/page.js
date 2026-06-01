@@ -360,6 +360,7 @@ export default function SupportPage() {
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState("");
   const [mode, setMode] = useState("ticket");
+  const [inboxFilter, setInboxFilter] = useState("all");
   const [orchestratorStatus, setOrchestratorStatus] = useState(null);
   const [orchestratorRuns, setOrchestratorRuns] = useState([]);
   const [orchestratorAnalysis, setOrchestratorAnalysis] = useState(null);
@@ -692,8 +693,11 @@ export default function SupportPage() {
     [chatInbox],
   );
   const currentMessages = useMemo(
-    () => (mode === "ticket" ? ticketMessages : chatMessages),
-    [mode, ticketMessages, chatMessages],
+    () => {
+      if (mode === "n0") return n0ChatMessages;
+      return mode === "ticket" ? ticketMessages : chatMessages;
+    },
+    [chatMessages, mode, n0ChatMessages, ticketMessages],
   );
   const filteredTickets = useMemo(() => {
     const term = ticketSearch.trim().toLowerCase();
@@ -708,6 +712,58 @@ export default function SupportPage() {
         .includes(term),
     );
   }, [currentMessages, messageSearch]);
+  const inboxItems = useMemo(() => {
+    const searchTerm = ticketSearch.trim().toLowerCase();
+    const ticketItems = tickets.map((ticket) => {
+      const health = queueHealthBadge(ticket);
+      return {
+        id: `ticket:${ticket.id}`,
+        type: "ticket",
+        title: getTicketTitle(ticket),
+        subtitle: ticket.user?.name || ticket.userId || "Usuário sem identificação",
+        preview: getTicketDescription(ticket) || ticket.category || "Chamado sem mensagem recente.",
+        timestamp: ticket.updatedAt || ticket.createdAt,
+        unread: ticket.queue?.overdueFirstResponse || ticket.queue?.overdueAck ? 1 : 0,
+        priority: ticket.priority || "N3",
+        status: ticket.status || "open",
+        tone: health.className,
+        badge: health.label,
+        raw: ticket,
+      };
+    });
+    const chatItems = chatInbox.map((chat) => ({
+      id: `chat:${chat.userId}`,
+      type: "n0",
+      title: getChatTitle(chat),
+      subtitle: chat.userId || "Chat N0",
+      preview: chat.lastMessage?.message || "Sem mensagem recente.",
+      timestamp: chat.lastMessageAt || chat.updatedAt,
+      unread: Number(chat.unreadFromUser || 0),
+      priority: chat.ticketId ? "N2" : "N3",
+      status: chat.status || "active",
+      tone: chat.unreadFromUser > 0 ? "status-warn" : "status-ok",
+      badge: chat.ticketId ? "com chamado" : "chat",
+      raw: chat,
+    }));
+    return [...chatItems, ...ticketItems]
+      .filter((item) => {
+        if (inboxFilter === "chats" && item.type !== "n0") return false;
+        if (inboxFilter === "tickets" && item.type !== "ticket") return false;
+        if (!searchTerm) return true;
+        return [item.title, item.subtitle, item.preview, item.status, item.priority]
+          .join(" ")
+          .toLowerCase()
+          .includes(searchTerm);
+      })
+      .sort((left, right) => {
+        const unreadDelta = Number(right.unread > 0) - Number(left.unread > 0);
+        if (unreadDelta !== 0) return unreadDelta;
+        return new Date(right.timestamp || 0).getTime() - new Date(left.timestamp || 0).getTime();
+      });
+  }, [chatInbox, inboxFilter, ticketSearch, tickets]);
+  const selectedInboxId = mode === "n0"
+    ? (selectedN0Chat?.userId ? `chat:${selectedN0Chat.userId}` : "")
+    : (selectedTicket?.id ? `ticket:${selectedTicket.id}` : "");
   const copilotPriority = useMemo(() => getCopilotPriority(orchestratorAnalysis), [orchestratorAnalysis]);
   const copilotRationale = useMemo(() => getCopilotRationale(orchestratorAnalysis), [orchestratorAnalysis]);
   const copilotSuggestion = useMemo(() => getCopilotSuggestion(orchestratorAnalysis), [orchestratorAnalysis]);
@@ -796,6 +852,43 @@ export default function SupportPage() {
     !selectedN0Chat?.ticketId &&
     n0ConversionGaps.length > 0 &&
     canRunSupportAction(supportPolicy, "convert_n0", selectedN0Priority);
+  const activeThreadTitle = mode === "n0"
+    ? selectedN0ChatTitle
+    : mode === "chat"
+      ? `${selectedTicket?.user?.name || selectedTicket?.userId || "Usuário"}`
+      : getTicketTitle(selectedTicket);
+  const activeThreadSubtitle = mode === "n0"
+    ? `${selectedN0Chat?.status || "active"} · ${selectedN0Chat?.unreadFromUser || 0} não lida(s)`
+    : `${selectedTicket?.priority || "N3"} · ${selectedTicket?.status || "open"} · ${selectedTicket?.userId || "sem usuário"}`;
+  const replyValue = mode === "n0" ? n0ChatReply : newMessage;
+  const canReplyActiveThread = mode === "n0"
+    ? canRunSupportAction(supportPolicy, "message", "N3")
+    : canMessageSelected;
+  const selectInboxItem = (item) => {
+    setError("");
+    setActionMessage("");
+    if (item.type === "n0") {
+      setSelectedN0Chat(item.raw);
+      setMode("n0");
+      return;
+    }
+    setSelectedTicket(item.raw);
+    setMode("ticket");
+  };
+  const updateActiveReply = (value) => {
+    if (mode === "n0") {
+      setN0ChatReply(value);
+      return;
+    }
+    setNewMessage(value);
+  };
+  const sendActiveReply = () => {
+    if (mode === "n0") {
+      sendN0ChatMessage();
+      return;
+    }
+    sendMessage();
+  };
   const copilotInternalNoteKey = useMemo(
     () =>
       buildIdempotencyKey([
@@ -1204,13 +1297,13 @@ export default function SupportPage() {
 
   return (
     <ProtectedRoute>
-      <main className="page-shell">
-        <header className="header">
+      <main className="page-shell support-page-shell">
+        <header className="header support-header">
           <div>
             <h1>Suporte</h1>
             <p>Fila operacional N1/N2/N3 com SLA, ownership, ticket e chat.</p>
           </div>
-          <div className="filters">
+          <div className="filters support-header-filters">
             <span className="meta-badge">Polling: 30s</span>
             <input
               placeholder="Buscar ticket, usuario, corrida"
@@ -1240,7 +1333,7 @@ export default function SupportPage() {
         <AppNav />
         {loading ? <LoadingState message="Carregando suporte..." /> : null}
 
-        <section className="grid grid-kpi">
+        <section className="grid grid-kpi support-kpi-strip">
           <KpiCard title="Abertos" value={summary.totalOpenTickets} />
           <KpiCard title="N1" value={summary.n1} tone={summary.n1 > 0 ? "danger" : "default"} />
           <KpiCard title="N2" value={summary.n2} tone={summary.n2 > 0 ? "warning" : "default"} />
@@ -1261,6 +1354,379 @@ export default function SupportPage() {
           <KpiCard title="Nao lidas N0" value={n0UnreadCount} tone={n0UnreadCount > 0 ? "warning" : "positive"} />
           <KpiCard title="Chat" value={chatRealtime} subtitle="notificacoes" />
         </section>
+
+        <section className="support-inbox-layout">
+          <aside className="support-inbox-panel card">
+            <div className="support-inbox-head">
+              <div>
+                <h2>Inbox</h2>
+                <p>Chats e chamados em ordem de atenção.</p>
+              </div>
+              <span className={n0UnreadCount > 0 ? "status-warn" : "status-ok"}>
+                {n0UnreadCount} não lida(s)
+              </span>
+            </div>
+            <div className="support-inbox-tabs">
+              <button
+                type="button"
+                className={inboxFilter === "all" ? "mode-btn mode-btn-active" : "mode-btn"}
+                onClick={() => setInboxFilter("all")}
+              >
+                Tudo
+              </button>
+              <button
+                type="button"
+                className={inboxFilter === "chats" ? "mode-btn mode-btn-active" : "mode-btn"}
+                onClick={() => setInboxFilter("chats")}
+              >
+                Chats
+              </button>
+              <button
+                type="button"
+                className={inboxFilter === "tickets" ? "mode-btn mode-btn-active" : "mode-btn"}
+                onClick={() => setInboxFilter("tickets")}
+              >
+                Chamados
+              </button>
+            </div>
+            <div className="support-inbox-search">
+              <input
+                placeholder="Buscar usuário, mensagem ou corrida"
+                value={ticketSearch}
+                onChange={(event) => setTicketSearch(event.target.value)}
+              />
+            </div>
+            <div className="support-thread-list">
+              {inboxItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={[
+                    "support-thread-row",
+                    selectedInboxId === item.id ? "support-thread-active" : "",
+                    item.unread > 0 ? "support-thread-unread" : "",
+                  ].filter(Boolean).join(" ")}
+                  onClick={() => selectInboxItem(item)}
+                >
+                  <span className="support-thread-avatar">{item.title.slice(0, 1).toUpperCase()}</span>
+                  <span className="support-thread-main">
+                    <span className="support-thread-title-row">
+                      <strong>{item.title}</strong>
+                      <small>{formatDateTime(item.timestamp)}</small>
+                    </span>
+                    <span className="support-thread-preview">{item.preview}</span>
+                    <span className="support-thread-badges">
+                      <span className={item.type === "n0" ? "status-ok" : priorityBadge(item.priority)}>
+                        {item.type === "n0" ? "chat" : item.priority}
+                      </span>
+                      <span className={statusBadge(item.status)}>{item.status}</span>
+                      <span className={item.tone}>{item.badge}</span>
+                    </span>
+                  </span>
+                  {item.unread > 0 ? <span className="support-unread-pill">{item.unread}</span> : null}
+                </button>
+              ))}
+              {inboxItems.length === 0 ? (
+                <p className="text-muted">Nenhuma conversa ou chamado neste filtro.</p>
+              ) : null}
+            </div>
+          </aside>
+
+          <section className="support-conversation-panel card">
+            {mode === "n0" ? (
+              selectedN0Chat ? (
+                <>
+                  <div className="support-conversation-head">
+                    <div className="support-conversation-avatar">{activeThreadTitle.slice(0, 1).toUpperCase()}</div>
+                    <div>
+                      <h2>{activeThreadTitle}</h2>
+                      <p>{activeThreadSubtitle}</p>
+                    </div>
+                    <div className="support-conversation-actions">
+                      <button
+                        type="button"
+                        disabled={!!actionBusy || !canConvertSelectedN0}
+                        title={
+                          canConvertSelectedN0
+                            ? ""
+                            : selectedN0Chat?.ticketId
+                              ? "Este chat já tem chamado vinculado."
+                              : supportActionBlockReason(supportPolicy, "convert_n0", selectedN0Priority)
+                        }
+                        onClick={convertN0ChatToTicket}
+                      >
+                        Virar chamado
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          !!actionBusy ||
+                          selectedN0Chat.status === "closed" ||
+                          !canRunSupportAction(supportPolicy, "close_chat", "N3")
+                        }
+                        onClick={closeN0Chat}
+                      >
+                        Encerrar
+                      </button>
+                    </div>
+                  </div>
+                  <div className="support-messages support-conversation-messages">
+                    {filteredMessages.length === 0 ? (
+                      <p className="text-muted">Sem histórico neste chat.</p>
+                    ) : (
+                      filteredMessages.map((message) => (
+                        <div
+                          key={message.id || `${message.createdAt}-${message.message}`}
+                          className={`support-message-row support-message-${message.senderType || "user"}`}
+                        >
+                          <strong>{message.senderType === "agent" ? "Suporte" : "Usuário"}</strong>
+                          <span>{message.message || "-"}</span>
+                          <small>{formatDateTime(message.createdAt || message.timestamp)}</small>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="support-composer">
+                    <div className="quick-reply-row">
+                      {N0_QUICK_REPLIES.map((template) => (
+                        <button key={template} type="button" onClick={() => updateActiveReply(template)}>
+                          {template}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      rows={2}
+                      placeholder="Responder atendimento simples..."
+                      value={replyValue}
+                      onChange={(event) => updateActiveReply(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey) {
+                          event.preventDefault();
+                          sendActiveReply();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={sendActiveReply}
+                      disabled={!!actionBusy || !replyValue.trim() || !canReplyActiveThread}
+                    >
+                      {actionBusy === "n0-message" ? "Enviando..." : "Enviar"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-muted">Selecione um chat.</p>
+              )
+            ) : selectedTicket ? (
+              <>
+                <div className="support-conversation-head">
+                  <div className="support-conversation-avatar">{activeThreadTitle.slice(0, 1).toUpperCase()}</div>
+                  <div>
+                    <h2>{activeThreadTitle}</h2>
+                    <p>{activeThreadSubtitle}</p>
+                  </div>
+                  <div className="support-conversation-actions">
+                    <button
+                      type="button"
+                      className={mode === "ticket" ? "mode-btn mode-btn-active" : "mode-btn"}
+                      onClick={() => setMode("ticket")}
+                    >
+                      Chamado
+                    </button>
+                    <button
+                      type="button"
+                      className={mode === "chat" ? "mode-btn mode-btn-active" : "mode-btn"}
+                      onClick={() => setMode("chat")}
+                    >
+                      Chat
+                    </button>
+                    <button type="button" disabled={!!actionBusy || !canAssignSelected} onClick={assignToMe}>
+                      Assumir
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!!actionBusy || !canResolveSelected || !manualResolution.trim()}
+                      onClick={resolveTicket}
+                    >
+                      Resolver
+                    </button>
+                  </div>
+                </div>
+                <div className="support-messages support-conversation-messages">
+                  {filteredMessages.length === 0 ? (
+                    <p className="text-muted">Sem mensagens neste canal.</p>
+                  ) : (
+                    filteredMessages.map((message) => (
+                      <div
+                        key={message.id || `${message.createdAt}-${message.message}`}
+                        className={`support-message-row support-message-${message.senderType || "user"}`}
+                      >
+                        <strong>{message.senderType === "agent" ? "Suporte" : "Usuário"}</strong>
+                        <span>{message.message || "-"}</span>
+                        <small>{formatDateTime(message.createdAt || message.timestamp)}</small>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="support-composer">
+                  <div className="quick-reply-row">
+                    {SUPPORT_QUICK_REPLIES.map((template) => (
+                      <button key={template} type="button" onClick={() => updateActiveReply(template)}>
+                        {template}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    rows={2}
+                    placeholder={mode === "chat" ? "Responder chat..." : "Responder chamado..."}
+                    value={replyValue}
+                    onChange={(event) => updateActiveReply(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        sendActiveReply();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={sendActiveReply}
+                    disabled={!!actionBusy || !replyValue.trim() || !canReplyActiveThread}
+                  >
+                    {actionBusy === "message" ? "Enviando..." : "Enviar"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-muted">Selecione uma conversa ou chamado.</p>
+            )}
+          </section>
+
+          <aside className="support-context-panel card">
+            <div className="support-context-section">
+              <h2>Contexto</h2>
+              {activeContextUserId ? (
+                <KeyValueGrid
+                  data={supportUserDetails}
+                  labels={{
+                    nome: "Nome",
+                    telefone: "Telefone",
+                    email: "E-mail",
+                    tipo: "Tipo",
+                    status: "Status",
+                    ticketsAbertos: "Tickets abertos",
+                    ticketsNaFila: "Na fila",
+                  }}
+                  includeKeys={["nome", "telefone", "email", "tipo", "status", "ticketsAbertos", "ticketsNaFila"]}
+                  maxItems={7}
+                />
+              ) : (
+                <p className="text-muted">Selecione alguém na inbox.</p>
+              )}
+            </div>
+
+            {mode === "n0" && selectedN0Chat ? (
+              <div className="support-context-section">
+                <h2>Chamado a partir do chat</h2>
+                <div className="ticket-meta-row">
+                  {selectedN0Chat.ticketId ? (
+                    <span className="status-ok">já convertido</span>
+                  ) : (
+                    <span className={n0ConversionGaps.length ? "status-warn" : "status-ok"}>
+                      {n0ConversionGaps.length ? "acompanhar" : "N0 suficiente"}
+                    </span>
+                  )}
+                  <span className={priorityBadge(selectedN0Priority)}>{selectedN0Priority}</span>
+                </div>
+                {n0ConversionGaps.length ? (
+                  <ul className="agent-rationale">
+                    {n0ConversionGaps.slice(0, 3).map((gap) => (
+                      <li key={gap}>{gap}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <input
+                  placeholder="Título do chamado"
+                  value={n0TicketForm.subject}
+                  onChange={(event) => setN0TicketForm((current) => ({ ...current, subject: event.target.value }))}
+                />
+                <select
+                  value={n0TicketForm.priority}
+                  onChange={(event) => setN0TicketForm((current) => ({ ...current, priority: event.target.value }))}
+                >
+                  <option value="N3">N3 - simples</option>
+                  <option value="N2">N2 - acompanhamento</option>
+                  <option value="N1">N1 - crítico</option>
+                </select>
+              </div>
+            ) : null}
+
+            {mode !== "n0" && selectedTicket ? (
+              <div className="support-context-section">
+                <h2>Ações</h2>
+                <KeyValueGrid
+                  data={selectedTicketDetails}
+                  includeKeys={["id", "prioridade", "status", "categoria", "responsavel", "idade", "bookingId"]}
+                  labels={{
+                    id: "Ticket",
+                    prioridade: "Prioridade",
+                    status: "Status",
+                    categoria: "Categoria",
+                    responsavel: "Responsável",
+                    idade: "Idade",
+                    bookingId: "Corrida",
+                  }}
+                  maxItems={7}
+                />
+                <input
+                  placeholder="Motivo para escalar"
+                  value={manualEscalationReason}
+                  onChange={(event) => setManualEscalationReason(event.target.value)}
+                />
+                <input
+                  placeholder="Resumo para resolver"
+                  value={manualResolution}
+                  onChange={(event) => setManualResolution(event.target.value)}
+                />
+                <div className="support-context-actions">
+                  <button
+                    type="button"
+                    disabled={!!actionBusy || !canEscalateSelected || !manualEscalationReason.trim()}
+                    onClick={escalateTicket}
+                  >
+                    Escalar
+                  </button>
+                  {mode === "chat" ? (
+                    <button
+                      type="button"
+                      disabled={
+                        chatStatus?.status === "closed" ||
+                        !canRunSupportAction(supportPolicy, "close_chat", selectedTicketTier)
+                      }
+                      onClick={closeChat}
+                    >
+                      Encerrar chat
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="support-context-section">
+              <h2>Operação</h2>
+              <div className="orchestrator-summary">
+                <span className={supportOpsStatus.className}>{supportOpsStatus.label}</span>
+                <span className="meta-badge">tempo real: {chatRealtime}</span>
+                <span className="meta-badge">{supportPolicy.label}</span>
+              </div>
+              <p className="text-muted">{supportOpsStatus.detail}</p>
+            </div>
+          </aside>
+        </section>
+
+        <details className="support-advanced-drawer">
+          <summary>Detalhes avançados, auditoria e copiloto</summary>
 
         <section className="grid orchestrator-grid">
           <Panel
@@ -1980,6 +2446,7 @@ export default function SupportPage() {
             )}
           </Panel>
         </section>
+        </details>
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         <ErrorText message={error} />
       </main>

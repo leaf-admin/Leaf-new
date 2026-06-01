@@ -112,6 +112,7 @@ class SupportQueueService {
     const createdAt = toIso(ticket.createdAt, new Date().toISOString());
     const queueMeta = ticket.metadata?.queue || {};
     const ackAt = toIso(ticket.assignedAt, null)
+      || toIso(queueMeta.ackedAt, null)
       || toIso(
         messages.find((message) => message.senderType === 'agent')?.createdAt,
         null
@@ -119,7 +120,8 @@ class SupportQueueService {
     const firstResponseMessage = messages.find((message) =>
       message.senderType === 'agent' && message.isInternal !== true
     );
-    const firstResponseAt = toIso(firstResponseMessage?.createdAt, null);
+    const firstResponseAt = toIso(queueMeta.firstResponseAt, null)
+      || toIso(firstResponseMessage?.createdAt, null);
     const ackTargetAt = queueMeta.ackTargetAt || addMinutes(createdAt, resolveSla(ticket.priority).ack);
     const firstResponseTargetAt = queueMeta.firstResponseTargetAt || addMinutes(createdAt, resolveSla(ticket.priority).firstResponse);
     const nowMs = now.getTime();
@@ -141,8 +143,10 @@ class SupportQueueService {
     };
   }
 
-  async decorateTicket(ticket, now = new Date()) {
-    const messages = await this.ticketService.listMessages(ticket.id);
+  async decorateTicket(ticket, now = new Date(), { importLegacyMessages = false, loadMessages = false } = {}) {
+    const messages = loadMessages
+      ? await this.ticketService.listMessages(ticket.id, { importLegacy: importLegacyMessages })
+      : [];
     return this.deriveTicketState(ticket, messages, now);
   }
 
@@ -214,13 +218,26 @@ class SupportQueueService {
     limit = 100,
     offset = 0
   } = {}) {
-    const result = await this.ticketService.listTickets({
-      isAgent: true,
-      limit: 1000,
-      offset: 0,
-      priority,
-      status
-    });
+    const requestedStatus = status ? String(status) : null;
+    const openStatuses = Array.from(OPEN_STATUSES);
+    const shouldUseOpenQuery = !requestedStatus || OPEN_STATUSES.has(requestedStatus);
+    const result = shouldUseOpenQuery && typeof this.ticketService.listTicketsByStatuses === 'function'
+      ? await this.ticketService.listTicketsByStatuses(
+        requestedStatus ? [requestedStatus] : openStatuses,
+        {
+          isAgent: true,
+          limit: 1000,
+          offset: 0,
+          priority
+        }
+      )
+      : await this.ticketService.listTickets({
+        isAgent: true,
+        limit: 1000,
+        offset: 0,
+        priority,
+        status
+      });
 
     let decorated = await Promise.all(result.tickets.map((ticket) => this.decorateTicket(ticket)));
     if (autoEscalate) {

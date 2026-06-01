@@ -234,6 +234,46 @@ class SupportTicketService {
     return filtered;
   }
 
+  async listTicketsByStatuses(statuses = [], {
+    priority,
+    category,
+    limit = 50,
+    offset = 0,
+    agent = null,
+    isAgent = true
+  } = {}) {
+    const safeStatuses = Array.isArray(statuses)
+      ? statuses.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    if (safeStatuses.length === 0) {
+      return { tickets: [], total: 0, hasMore: false };
+    }
+
+    const snapshot = safeStatuses.length <= 10
+      ? await this.getFirestore()
+        .collection(TICKETS_COLLECTION)
+        .where('status', 'in', safeStatuses)
+        .get()
+      : await this.getFirestore().collection(TICKETS_COLLECTION).get();
+
+    let tickets = snapshot.docs.map((doc) => normalizeTicket(doc.id, doc.data()));
+    tickets = filterTickets(tickets, {
+      status: null,
+      priority,
+      category,
+      agent,
+      isAgent
+    }).filter((ticket) => safeStatuses.includes(String(ticket.status || '')));
+
+    const numericOffset = Number.parseInt(offset, 10) || 0;
+    const numericLimit = Number.parseInt(limit, 10) || 50;
+    return {
+      tickets: tickets.slice(numericOffset, numericOffset + numericLimit),
+      total: tickets.length,
+      hasMore: numericOffset + numericLimit < tickets.length
+    };
+  }
+
   async listTickets({ status, priority, category, limit = 50, offset = 0, userId = null, agent = null, isAgent = false } = {}) {
     let snapshot;
     if (!isAgent && userId) {
@@ -275,12 +315,12 @@ class SupportTicketService {
     return null;
   }
 
-  async listMessages(ticketId) {
+  async listMessages(ticketId, { importLegacy = true } = {}) {
     let snapshot = await this.ticketMessagesCollection(ticketId).get();
     let messages = snapshot.docs.map((doc) => normalizeMessage(ticketId, doc.id, doc.data()));
     messages.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
 
-    if (messages.length === 0) {
+    if (messages.length === 0 && importLegacy) {
       const imported = await this.importLegacyTicket(ticketId, { includeMessages: true });
       if (imported) {
         snapshot = await this.ticketMessagesCollection(ticketId).get();
@@ -399,9 +439,25 @@ class SupportTicketService {
       }
     });
 
+    const ticketUpdates = { updatedAt: now };
+    if (senderType === 'agent') {
+      const currentQueue = ticket.metadata?.queue || {};
+      const nextQueue = {
+        ...currentQueue,
+        ackedAt: currentQueue.ackedAt || now
+      };
+      if (isInternal !== true && !currentQueue.firstResponseAt) {
+        nextQueue.firstResponseAt = now;
+      }
+      ticketUpdates.metadata = {
+        ...(ticket.metadata || {}),
+        queue: nextQueue
+      };
+    }
+
     const batch = this.getFirestore().batch();
     batch.set(this.ticketMessagesCollection(ticketId).doc(messageId), newMessage, { merge: true });
-    batch.set(this.ticketDoc(ticketId), { updatedAt: now }, { merge: true });
+    batch.set(this.ticketDoc(ticketId), ticketUpdates, { merge: true });
     await batch.commit();
 
     ticket = {

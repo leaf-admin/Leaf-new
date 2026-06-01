@@ -135,7 +135,8 @@ router.get('/faq', (_req, res) => {
 
 router.get('/queue/summary', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (_req, res) => {
   try {
-    const summary = await supportQueueService.getQueueSummary({ autoEscalate: true });
+    const autoEscalate = String(_req.query?.autoEscalate || '').toLowerCase() === 'true';
+    const summary = await supportQueueService.getQueueSummary({ autoEscalate });
     const payload = await backofficeCostGuardService.attachToResponse(
       res,
       'support.queue.summary',
@@ -151,12 +152,13 @@ router.get('/queue/summary', authenticateSupport, requireSupportRoles(AGENT_ROLE
 router.get('/queue/backlog', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { priority, status, limit = 100, offset = 0 } = req.query;
+    const autoEscalate = String(req.query?.autoEscalate || '').toLowerCase() === 'true';
     const backlog = await supportQueueService.getBacklog({
       priority,
       status,
       limit,
       offset,
-      autoEscalate: true
+      autoEscalate
     });
     const payload = await backofficeCostGuardService.attachToResponse(
       res,
