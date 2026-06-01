@@ -129,6 +129,7 @@ mobile-app/07-*.png
 
 # Workspace-level test artifacts
 /reports/
+/test-results/
 mobile-app/builds/
 book_20_imagens/
 _debug_grid.png
