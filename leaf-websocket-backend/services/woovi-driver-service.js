@@ -2,13 +2,18 @@ const axios = require('axios');
 const { logStructured, logError } = require('../utils/logger');
 const { getWooviConfig, getWooviAuthHeaders } = require('../config/woovi-config');
 
-const WOOVI_CONFIG = getWooviConfig();
+const DEFAULT_WOOVI_CONFIG = getWooviConfig();
 
 class WooviDriverService {
-  constructor() {
-    this.api = axios.create({
-      baseURL: WOOVI_CONFIG.baseUrl,
-      headers: getWooviAuthHeaders(WOOVI_CONFIG),
+  constructor(options = {}) {
+    this.defaultConfig = options.wooviConfig || DEFAULT_WOOVI_CONFIG;
+    this.api = this.createApi(this.defaultConfig);
+  }
+
+  createApi(wooviConfig = this.defaultConfig) {
+    return axios.create({
+      baseURL: wooviConfig.baseUrl,
+      headers: getWooviAuthHeaders(wooviConfig),
       timeout: 30000,
       maxRedirects: 0, // ✅ NÃO seguir redirecionamentos (evitar receber HTML)
       validateStatus: function (status) {
@@ -17,18 +22,18 @@ class WooviDriverService {
     });
   }
 
-  createMasterApi() {
-    if (!WOOVI_CONFIG.masterApiToken) {
+  createMasterApi(wooviConfig = this.defaultConfig) {
+    if (!wooviConfig.masterApiToken) {
       throw new Error('WOOVI_MASTER_API_TOKEN não configurado');
     }
 
     const sendMasterAppId = String(process.env.WOOVI_MASTER_SEND_APP_ID || '').toLowerCase() === 'true';
     return axios.create({
-      baseURL: WOOVI_CONFIG.baseUrl,
+      baseURL: wooviConfig.baseUrl,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: WOOVI_CONFIG.masterApiToken,
-        ...(sendMasterAppId && WOOVI_CONFIG.masterAppId ? { 'x-app-id': WOOVI_CONFIG.masterAppId } : {})
+        Authorization: wooviConfig.masterApiToken,
+        ...(sendMasterAppId && wooviConfig.masterAppId ? { 'x-app-id': wooviConfig.masterAppId } : {})
       },
       timeout: 30000,
       maxRedirects: 0,
@@ -476,7 +481,7 @@ class WooviDriverService {
       logStructured('info', 'Criando conta BaaS para motorista', { service: 'woovi-driver-service', driverName: driverData.name });
       
       // Verificar se API MASTER está configurada
-      if (!WOOVI_CONFIG.masterApiToken || !WOOVI_CONFIG.masterAppId) {
+      if (!this.defaultConfig.masterApiToken || !this.defaultConfig.masterAppId) {
         logStructured('warn', 'API MASTER não configurada ainda. Retornando erro para usar fallback', { service: 'woovi-driver-service' });
         // Retornar erro específico para que o caller use fallback (createDriverClient)
         return {
@@ -561,7 +566,7 @@ class WooviDriverService {
    */
   async createAccountApi(accountId, applicationName = 'Leaf Driver App') {
     try {
-      if (!WOOVI_CONFIG.masterApiToken || !WOOVI_CONFIG.masterAppId) {
+      if (!this.defaultConfig.masterApiToken || !this.defaultConfig.masterAppId) {
         throw new Error('API MASTER não configurada');
       }
 
@@ -614,10 +619,10 @@ class WooviDriverService {
     try {
       // Criar API client com o appId da conta BaaS
       const accountApi = axios.create({
-        baseURL: WOOVI_CONFIG.baseUrl,
+        baseURL: this.defaultConfig.baseUrl,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': WOOVI_CONFIG.apiToken, // Usar token da conta BaaS quando disponível
+          'Authorization': this.defaultConfig.apiToken, // Usar token da conta BaaS quando disponível
           'X-App-ID': appId
         },
         timeout: 30000
@@ -670,7 +675,9 @@ class WooviDriverService {
    */
   async createCharge(chargeData) {
     try {
-      logStructured('info', 'Criando cobrança', { service: 'woovi-driver-service', value: chargeData.value, correlationID: chargeData.correlationID, comment: chargeData.comment?.substring(0, 50), appId: WOOVI_CONFIG.appId, baseUrl: WOOVI_CONFIG.baseUrl });
+      const wooviConfig = chargeData.wooviConfig || this.defaultConfig;
+      const api = this.createApi(wooviConfig);
+      logStructured('info', 'Criando cobrança', { service: 'woovi-driver-service', value: chargeData.value, correlationID: chargeData.correlationID, comment: chargeData.comment?.substring(0, 50), appId: wooviConfig.appId, baseUrl: wooviConfig.baseUrl, environment: wooviConfig.environment });
       
       // ✅ URL do webhook para receber notificações sobre esta cobrança
       // ✅ Carrega automaticamente do ngrok (arquivo .ngrok-url.json ou variável de ambiente)
@@ -693,26 +700,49 @@ class WooviDriverService {
       // ✅ Garantir que os headers estão corretos a cada requisição
       // ⚠️ NOTA: routes/woovi.js não usa X-App-ID, apenas Authorization
       // Testando sem X-App-ID primeiro, se falhar, adicionar de volta
-      const requestHeaders = getWooviAuthHeaders(WOOVI_CONFIG);
+      const requestHeaders = getWooviAuthHeaders(wooviConfig);
       
       logStructured('debug', 'Headers da requisição', {
         service: 'woovi-driver-service',
-        authorization: WOOVI_CONFIG.apiToken ? `${WOOVI_CONFIG.apiToken.substring(0, 16)}...` : 'ausente',
+        authorization: wooviConfig.apiToken ? `${wooviConfig.apiToken.substring(0, 16)}...` : 'ausente',
         contentType: 'application/json',
-        baseURL: WOOVI_CONFIG.baseUrl,
-        hasAppId: Boolean(WOOVI_CONFIG.appId)
+        baseURL: wooviConfig.baseUrl,
+        hasAppId: Boolean(wooviConfig.appId)
       });
 
       // ✅ Usar a instância do axios já configurada (this.api)
       // Mas garantir que os headers estão atualizados
-      const response = await this.api.post('/charge', chargePayload, {
+      const response = await api.post('/charge', chargePayload, {
         headers: requestHeaders
       });
       
       // ✅ Verificar se a resposta é HTML (erro de URL/redirecionamento)
       const responseData = response.data;
+      if (response.status < 200 || response.status >= 300) {
+        logStructured('warn', 'Woovi recusou criação de cobrança', {
+          service: 'woovi-driver-service',
+          status: response.status,
+          data: responseData,
+          correlationID: chargeData.correlationID
+        });
+        return {
+          success: false,
+          status: response.status,
+          error:
+            responseData?.error ||
+            responseData?.message ||
+            responseData?.errors?.[0]?.message ||
+            'Falha ao criar cobrança PIX',
+          details: {
+            status: response.status,
+            statusText: response.statusText,
+            data: responseData
+          }
+        };
+      }
+
       if (typeof responseData === 'string' && responseData.includes('<!DOCTYPE html>')) {
-        logStructured('error', 'Resposta HTML recebida (URL incorreta ou redirecionamento)', { service: 'woovi-driver-service', url: `${WOOVI_CONFIG.baseUrl}/charge`, status: response.status, headers: response.headers });
+        logStructured('error', 'Resposta HTML recebida (URL incorreta ou redirecionamento)', { service: 'woovi-driver-service', url: `${wooviConfig.baseUrl}/charge`, status: response.status, headers: response.headers });
         throw new Error('URL da API Woovi incorreta ou redirecionamento detectado');
       }
       
@@ -740,8 +770,8 @@ class WooviDriverService {
       
       logError(error, 'Erro ao criar cobrança PIX', { service: 'woovi-driver-service', message: errorMessage, status: error.response?.status, statusText: error.response?.statusText,
         data: errorData,
-        appId: WOOVI_CONFIG.appId,
-        baseUrl: WOOVI_CONFIG.baseUrl,
+        appId: chargeData.wooviConfig?.appId || this.defaultConfig.appId,
+        baseUrl: chargeData.wooviConfig?.baseUrl || this.defaultConfig.baseUrl,
         correlationID: chargeData.correlationID
       });
       
@@ -775,9 +805,11 @@ class WooviDriverService {
    * @param {string} chargeId - ID da cobrança
    * @returns {Promise<Object>} - Status da cobrança
    */
-  async getChargeStatus(chargeId) {
+  async getChargeStatus(chargeId, options = {}) {
     try {
-      const response = await this.api.get(`/charge/${chargeId}`);
+      const wooviConfig = options.wooviConfig || this.defaultConfig;
+      const api = this.createApi(wooviConfig);
+      const response = await api.get(`/charge/${chargeId}`);
       
       if (response.data && response.data.charge) {
         return {

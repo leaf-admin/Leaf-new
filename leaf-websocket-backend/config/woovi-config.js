@@ -31,14 +31,44 @@ function normalizeBaseUrl(rawUrl) {
   return `${noTrailingSlash}/api/v1`;
 }
 
-function getWooviConfig() {
-  const environment = (process.env.WOOVI_ENVIRONMENT || process.env.NODE_ENV || 'sandbox').toLowerCase();
-  const legacyWooviAppId = firstNonEmpty(process.env.WOOVI_APP_ID);
+function envForEnvironment(environment, key) {
+  const normalized = String(environment || '').trim().toUpperCase();
+  if (!normalized) return '';
+  return firstNonEmpty(
+    process.env[`WOOVI_${normalized}_${key}`],
+    normalized === 'PRODUCTION' ? process.env[`WOOVI_PROD_${key}`] : ''
+  );
+}
+
+function shouldUseGenericWooviEnv(environment) {
+  const currentEnvironment = String(process.env.WOOVI_ENVIRONMENT || process.env.NODE_ENV || '').toLowerCase();
+  return !currentEnvironment || currentEnvironment === String(environment || '').toLowerCase();
+}
+
+function getWooviConfig(overrides = {}) {
+  const environment = String(
+    overrides.environment ||
+    process.env.WOOVI_ENVIRONMENT ||
+    process.env.NODE_ENV ||
+    'sandbox'
+  ).toLowerCase();
+  const useGenericEnv = shouldUseGenericWooviEnv(environment);
+  const legacyWooviAppId = firstNonEmpty(
+    overrides.legacyWooviAppId,
+    envForEnvironment(environment, 'APP_ID'),
+    useGenericEnv ? process.env.WOOVI_APP_ID : ''
+  );
   const clientId = firstNonEmpty(
-    process.env.WOOVI_CLIENT_ID,
+    overrides.clientId,
+    envForEnvironment(environment, 'CLIENT_ID'),
+    useGenericEnv ? process.env.WOOVI_CLIENT_ID : '',
     looksLikeClientId(legacyWooviAppId) ? legacyWooviAppId : ''
   );
-  const clientSecret = firstNonEmpty(process.env.WOOVI_CLIENT_SECRET);
+  const clientSecret = firstNonEmpty(
+    overrides.clientSecret,
+    envForEnvironment(environment, 'CLIENT_SECRET'),
+    useGenericEnv ? process.env.WOOVI_CLIENT_SECRET : ''
+  );
   const derivedAuthorizationAppId = clientId && clientSecret
     ? Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
     : '';
@@ -46,15 +76,22 @@ function getWooviConfig() {
   // Na documentação da Woovi/OpenPix, o header Authorization recebe o "AppID".
   // O valor Client_Id_... não deve ser enviado como Authorization.
   const authorizationAppId = firstNonEmpty(
-    process.env.WOOVI_AUTHORIZATION_APP_ID,
-    process.env.WOOVI_APP_ID_TOKEN,
-    process.env.WOOVI_API_TOKEN,
+    overrides.authorizationAppId,
+    overrides.apiToken,
+    envForEnvironment(environment, 'AUTHORIZATION_APP_ID'),
+    envForEnvironment(environment, 'APP_ID_TOKEN'),
+    envForEnvironment(environment, 'API_TOKEN'),
+    useGenericEnv ? process.env.WOOVI_AUTHORIZATION_APP_ID : '',
+    useGenericEnv ? process.env.WOOVI_APP_ID_TOKEN : '',
+    useGenericEnv ? process.env.WOOVI_API_TOKEN : '',
     looksLikeClientId(legacyWooviAppId) ? '' : legacyWooviAppId,
     derivedAuthorizationAppId
   );
 
   const rawBaseUrl = firstNonEmpty(
-    process.env.WOOVI_BASE_URL,
+    overrides.baseUrl,
+    envForEnvironment(environment, 'BASE_URL'),
+    useGenericEnv ? process.env.WOOVI_BASE_URL : '',
     environment === 'production' ? PRODUCTION_BASE_URL : SANDBOX_BASE_URL
   );
   const forcingSandbox = environment !== 'production' && /api\.woovi\.com/i.test(rawBaseUrl);
@@ -72,14 +109,21 @@ function getWooviConfig() {
     // Fallback para reduzir erros operacionais: se não houver chave master dedicada,
     // usa o token principal informado em WOOVI_API_TOKEN.
     masterApiToken: firstNonEmpty(
-      process.env.WOOVI_MASTER_AUTHORIZATION_APP_ID,
-      process.env.WOOVI_MASTER_APP_ID_TOKEN,
-      process.env.WOOVI_MASTER_API_TOKEN,
+      overrides.masterApiToken,
+      envForEnvironment(environment, 'MASTER_AUTHORIZATION_APP_ID'),
+      envForEnvironment(environment, 'MASTER_APP_ID_TOKEN'),
+      envForEnvironment(environment, 'MASTER_API_TOKEN'),
+      useGenericEnv ? process.env.WOOVI_MASTER_AUTHORIZATION_APP_ID : '',
+      useGenericEnv ? process.env.WOOVI_MASTER_APP_ID_TOKEN : '',
+      useGenericEnv ? process.env.WOOVI_MASTER_API_TOKEN : '',
       authorizationAppId
     ) || null,
     masterAppId: firstNonEmpty(
-      process.env.WOOVI_MASTER_CLIENT_ID,
-      process.env.WOOVI_MASTER_APP_ID,
+      overrides.masterAppId,
+      envForEnvironment(environment, 'MASTER_CLIENT_ID'),
+      envForEnvironment(environment, 'MASTER_APP_ID'),
+      useGenericEnv ? process.env.WOOVI_MASTER_CLIENT_ID : '',
+      useGenericEnv ? process.env.WOOVI_MASTER_APP_ID : '',
       clientId
     ) || null,
     leafPixKey: process.env.LEAF_PIX_KEY || ''

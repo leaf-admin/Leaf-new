@@ -2,10 +2,12 @@ const WooviDriverService = require('./woovi-driver-service');
 const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
+const { getWooviConfig } = require('../config/woovi-config');
 const circuitBreakerService = require('./circuit-breaker-service');
 const subscriptionStateService = require('./subscription-state-service');
 const FinancialLedgerService = require('./financial-ledger-service');
 const { buildRideFinancialContract } = require('./ride-financial-contract');
+const paymentRuntimeProfileService = require('./payment-runtime-profile-service');
 const { logStructured, logError } = require('../utils/logger');
 const traceContext = require('../utils/trace-context');
 const redisPool = require('../utils/redis-pool');
@@ -26,6 +28,7 @@ class PaymentService {
     this.LEAF_PIX_KEY = process.env.LEAF_PIX_KEY || 'test@leaf.app.br'; // ⚠️ Valor de teste - configurar em produção
     // Criar instância do WooviDriverService
     this.wooviDriverService = new WooviDriverService();
+    this.paymentRuntimeProfileService = paymentRuntimeProfileService;
     this.financialLedgerService = new FinancialLedgerService();
     // Taxas operacionais por faixa de valor (regra vigente)
     this.OPERATIONAL_FEE_UP_TO_10 = 79; // R$ 0,79 para corridas até R$ 10,00 (em centavos)
@@ -112,6 +115,15 @@ class PaymentService {
     }
 
     return this.isPassengerAllowedForForcedBypass(paymentData.passengerId);
+  }
+
+  buildWooviAdditionalInfo(entries = []) {
+    return entries
+      .map((entry = {}) => ({
+        key: String(entry.key || '').trim(),
+        value: String(entry.value ?? '').trim()
+      }))
+      .filter((entry) => entry.key && entry.value);
   }
 
   buildBypassAdvancePaymentResult(paymentData = {}, bypassReason = 'forced_bypass') {
@@ -241,6 +253,9 @@ class PaymentService {
       discountBenefit: existing.discountBenefit || null,
       paymentIntentId: existing.paymentIntentId || null,
       correlationID: existing.correlationID || null,
+      provider: existing.provider || 'woovi',
+      providerEnvironment: existing.providerEnvironment || existing.wooviEnvironment || null,
+      paymentProfileId: existing.paymentProfileId || null,
       splitApplied: false,
       splitDeferred: true,
       settlementPolicy: 'post_ride_ledger',
@@ -249,7 +264,7 @@ class PaymentService {
     };
   }
 
-  async beginAdvancePaymentIntent(paymentData = {}) {
+  async beginAdvancePaymentIntent(paymentData = {}, paymentProfile = {}) {
     const firestore = firebaseConfig.getFirestore();
     const rideId = String(paymentData.rideId || '').trim();
     const passengerId = String(paymentData.passengerId || '').trim();
@@ -288,6 +303,10 @@ class PaymentService {
         paymentIntentId,
         correlationID,
         amountCents,
+        provider: 'woovi',
+        providerEnvironment: paymentProfile.environment || 'production',
+        paymentProfileId: paymentProfile.profileId || null,
+        paymentProfileSource: paymentProfile.source || null,
         quoteVersion
       };
     }
@@ -302,11 +321,14 @@ class PaymentService {
           const existingAmountCents = this.normalizePaymentAmountCents(existing.amountCents || existing.amount);
           const existingPassengerId = String(existing.passengerId || '').trim();
           const existingRideId = String(existing.rideId || '').trim();
+          const existingProviderEnvironment = String(existing.providerEnvironment || '').trim().toLowerCase();
+          const incomingProviderEnvironment = String(paymentProfile.environment || '').trim().toLowerCase();
 
           if (
             existingRideId !== rideId ||
             existingAmountCents !== amountCents ||
-            (existingPassengerId && existingPassengerId !== passengerId)
+            (existingPassengerId && existingPassengerId !== passengerId) ||
+            (existingProviderEnvironment && incomingProviderEnvironment && existingProviderEnvironment !== incomingProviderEnvironment)
           ) {
             return {
               success: false,
@@ -314,7 +336,9 @@ class PaymentService {
               error: 'Já existe uma cobrança para esta corrida com dados diferentes',
               paymentIntentId,
               existingAmountCents,
-              incomingAmountCents: amountCents
+              incomingAmountCents: amountCents,
+              existingProviderEnvironment: existingProviderEnvironment || null,
+              incomingProviderEnvironment: incomingProviderEnvironment || null
             };
           }
 
@@ -330,6 +354,10 @@ class PaymentService {
               grossAmountInCents: existing.grossAmountInCents || grossAmountInCents,
               payableAmountInCents: existing.payableAmountInCents || payableAmountInCents,
               discountBenefit: existing.discountBenefit || paymentData.discountBenefit || null,
+              provider: existing.provider || 'woovi',
+              providerEnvironment: existing.providerEnvironment || paymentProfile.environment || null,
+              paymentProfileId: existing.paymentProfileId || paymentProfile.profileId || null,
+              paymentProfileSource: existing.paymentProfileSource || paymentProfile.source || null,
               quoteVersion
             };
           }
@@ -361,6 +389,11 @@ class PaymentService {
           quoteVersion,
           correlationID,
           status: 'creating_charge',
+          provider: 'woovi',
+          providerEnvironment: paymentProfile.environment || 'production',
+          paymentProfileId: paymentProfile.profileId || null,
+          paymentProfileSource: paymentProfile.source || null,
+          paymentProfileReason: paymentProfile.reason || null,
           settlementPolicy: 'post_ride_ledger',
           driverSettlement: 'deferred_until_ride_completed',
           lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -385,6 +418,11 @@ class PaymentService {
           grossAmountInCents,
           payableAmountInCents,
           discountBenefit: paymentData.discountBenefit || null,
+          provider: 'woovi',
+          providerEnvironment: paymentProfile.environment || 'production',
+          paymentProfileId: paymentProfile.profileId || null,
+          paymentProfileSource: paymentProfile.source || null,
+          paymentProfileReason: paymentProfile.reason || null,
           quoteVersion
         };
       });
@@ -415,6 +453,11 @@ class PaymentService {
         grossAmountInCents,
         payableAmountInCents,
         discountBenefit: paymentData.discountBenefit || null,
+        provider: 'woovi',
+        providerEnvironment: paymentProfile.environment || 'production',
+        paymentProfileId: paymentProfile.profileId || null,
+        paymentProfileSource: paymentProfile.source || null,
+        paymentProfileReason: paymentProfile.reason || null,
         quoteVersion,
         intentPersistenceError: error.message
       };
@@ -462,6 +505,11 @@ class PaymentService {
             chargeId: chargeData.chargeId || null,
             qrCode: chargeData.qrCode || null,
             paymentLink: chargeData.paymentLink || null,
+            provider: intent.provider || 'woovi',
+            providerEnvironment: intent.providerEnvironment || null,
+            paymentProfileId: intent.paymentProfileId || null,
+            paymentProfileSource: intent.paymentProfileSource || null,
+            paymentProfileReason: intent.paymentProfileReason || null,
             chargeCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
             chargeCreatedAtIso: new Date().toISOString(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -772,6 +820,42 @@ class PaymentService {
     }
   }
 
+  async resolveWooviConfigForCharge(chargeId) {
+    const normalizedChargeId = String(chargeId || '').trim();
+    if (!normalizedChargeId) return null;
+
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) return null;
+
+      const snapshot = await firestore
+        .collection('payment_intents')
+        .where('chargeId', '==', normalizedChargeId)
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) return null;
+
+      const paymentIntent = snapshot.docs[0].data() || {};
+      const providerEnvironment = String(paymentIntent.providerEnvironment || '').trim().toLowerCase();
+      if (!providerEnvironment) return null;
+
+      return {
+        wooviConfig: getWooviConfig({ environment: providerEnvironment }),
+        paymentIntentId: paymentIntent.paymentIntentId || snapshot.docs[0].id,
+        providerEnvironment,
+        paymentProfileId: paymentIntent.paymentProfileId || null
+      };
+    } catch (error) {
+      logStructured('debug', 'Falha ao resolver ambiente Woovi da cobrança', {
+        service: 'payment-service',
+        chargeId: normalizedChargeId,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
   /**
    * Processa pagamento antecipado do passageiro
    * @param {Object} paymentData - Dados do pagamento
@@ -803,7 +887,39 @@ class PaymentService {
         return bypassResult;
       }
 
-      const paymentIntent = await this.beginAdvancePaymentIntent(paymentData);
+      const paymentProfile = await this.paymentRuntimeProfileService.resolveProfile({
+        passengerId: paymentData.passengerId,
+        userId: paymentData.passengerId,
+        phone: paymentData.passengerPhone || paymentData.phone || paymentData.phoneNumber,
+        phoneNumber: paymentData.passengerPhone || paymentData.phone || paymentData.phoneNumber,
+        rideId: paymentData.rideId,
+        actor: paymentData.actor || null,
+        appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+      });
+
+      logStructured('info', 'Perfil de pagamento resolvido', {
+        service: 'PaymentService',
+        rideId: paymentData.rideId,
+        passengerId: paymentData.passengerId,
+        provider: paymentProfile.provider,
+        providerEnvironment: paymentProfile.environment,
+        paymentProfileId: paymentProfile.profileId,
+        paymentProfileSource: paymentProfile.source,
+        paymentProfileReason: paymentProfile.reason
+      });
+
+      if (!paymentProfile.wooviConfig?.apiToken) {
+        return {
+          success: false,
+          error: 'Perfil de pagamento sem credenciais Woovi configuradas',
+          code: 'PAYMENT_PROFILE_CREDENTIALS_MISSING',
+          provider: 'woovi',
+          providerEnvironment: paymentProfile.environment,
+          paymentProfileId: paymentProfile.profileId
+        };
+      }
+
+      const paymentIntent = await this.beginAdvancePaymentIntent(paymentData, paymentProfile);
       if (!paymentIntent.success) {
         logStructured('warn', 'Payment intent recusou criação de cobrança', {
           service: 'PaymentService',
@@ -852,7 +968,7 @@ class PaymentService {
         value: paymentIntent.amountCents || paymentData.amount,
         comment,
         correlationID: uniqueCorrelationID,
-        additionalInfo: [
+        additionalInfo: this.buildWooviAdditionalInfo([
           { key: 'passenger_id', value: paymentData.passengerId },
           { key: 'ride_id', value: paymentData.rideId },
           { key: 'gross_amount_cents', value: String(paymentData.grossAmountInCents || paymentIntent.grossAmountInCents || '') },
@@ -862,10 +978,12 @@ class PaymentService {
           { key: 'payment_intent_id', value: paymentIntent.paymentIntentId || '' },
           { key: 'quote_version', value: paymentIntent.quoteVersion || this.normalizeQuoteVersion(paymentData) },
           { key: 'payment_type', value: 'advance_payment' },
+          { key: 'provider_environment', value: paymentIntent.providerEnvironment || paymentProfile.environment || 'production' },
+          { key: 'payment_profile_id', value: paymentIntent.paymentProfileId || paymentProfile.profileId || '' },
           { key: 'service', value: 'ride_sharing' },
           { key: 'settlement_model', value: 'post_ride_ledger' },
           { key: 'driver_settlement', value: 'deferred_until_ride_completed' }
-        ],
+        ]),
         customer: {
           name: paymentData.passengerName || 'Passageiro Leaf',
           email: paymentData.passengerEmail || 'passenger@leaf.com'
@@ -892,7 +1010,10 @@ class PaymentService {
         splitReason: splitPlan.reason
       });
 
-      const chargeResult = await this.wooviDriverService.createCharge(chargeData);
+      const chargeResult = await this.wooviDriverService.createCharge({
+        ...chargeData,
+        wooviConfig: paymentProfile.wooviConfig
+      });
 
       if (!chargeResult.success) {
         await this.markAdvancePaymentIntentFailed(paymentIntent, chargeResult.error || chargeResult.details || {});
@@ -995,6 +1116,9 @@ class PaymentService {
         discountBenefit: paymentData.discountBenefit || paymentIntent.discountBenefit || null,
         paymentIntentId: paymentIntent.paymentIntentId || null,
         correlationID: chargeData.correlationID,
+        provider: paymentIntent.provider || 'woovi',
+        providerEnvironment: paymentIntent.providerEnvironment || paymentProfile.environment,
+        paymentProfileId: paymentIntent.paymentProfileId || paymentProfile.profileId || null,
         splitApplied: false,
         splitDeferred: true,
         settlementPolicy: 'post_ride_ledger',
@@ -3459,7 +3583,10 @@ class PaymentService {
       // Verificar status diretamente na Woovi (produção)
       // ✅ Se Woovi falhar, não retornar erro se não for crítico
       try {
-        const chargeStatus = await this.wooviDriverService.getChargeStatus(chargeId);
+        const chargeRuntime = await this.resolveWooviConfigForCharge(chargeId);
+        const chargeStatus = await this.wooviDriverService.getChargeStatus(chargeId, {
+          wooviConfig: chargeRuntime?.wooviConfig
+        });
 
         if (chargeStatus.success) {
           return {
@@ -3468,7 +3595,9 @@ class PaymentService {
             amount: chargeStatus.amount,
             amountInReais: chargeStatus.amount ? (chargeStatus.amount / 100) : 0,
             chargeId: chargeId,
-            paidAt: chargeStatus.status === 'COMPLETED' ? chargeStatus.paidAt : null
+            paidAt: chargeStatus.status === 'COMPLETED' ? chargeStatus.paidAt : null,
+            providerEnvironment: chargeRuntime?.providerEnvironment || null,
+            paymentProfileId: chargeRuntime?.paymentProfileId || null
           };
         } else {
           // Se Woovi não encontrou, mas pode ser um bookingId (não chargeId)

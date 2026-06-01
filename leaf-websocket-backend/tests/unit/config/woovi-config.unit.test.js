@@ -15,6 +15,10 @@ const WOOVI_ENV_KEYS = [
   'WOOVI_MASTER_API_TOKEN',
   'WOOVI_MASTER_APP_ID',
   'WOOVI_MASTER_CLIENT_ID',
+  'WOOVI_SANDBOX_API_TOKEN',
+  'WOOVI_SANDBOX_CLIENT_ID',
+  'WOOVI_SANDBOX_CLIENT_SECRET',
+  'WOOVI_SANDBOX_BASE_URL',
   'WOOVI_SEND_APP_ID',
   'LEAF_PIX_KEY'
 ];
@@ -123,5 +127,20 @@ describe('woovi-config', () => {
     const { getWooviConfig } = loadConfig();
 
     expect(getWooviConfig().baseUrl).toBe('https://api.woovi-sandbox.com/api/v1');
+  });
+
+  it('resolves sandbox credentials without reusing production token when profile overrides environment', () => {
+    process.env.WOOVI_ENVIRONMENT = 'production';
+    process.env.WOOVI_API_TOKEN = 'production-token';
+    process.env.WOOVI_SANDBOX_API_TOKEN = 'sandbox-token';
+    process.env.WOOVI_SANDBOX_CLIENT_ID = 'Client_Id_sandbox';
+
+    const { getWooviConfig } = loadConfig();
+    const config = getWooviConfig({ environment: 'sandbox' });
+
+    expect(config.environment).toBe('sandbox');
+    expect(config.apiToken).toBe('sandbox-token');
+    expect(config.clientId).toBe('Client_Id_sandbox');
+    expect(config.baseUrl).toBe('https://api.woovi-sandbox.com/api/v1');
   });
 });

@@ -234,6 +234,44 @@ describe('PaymentService payment status cache', () => {
     });
     expect(mockCreateCharge).toHaveBeenCalledTimes(1);
     expect(mockCreateChargeWithSplit).not.toHaveBeenCalled();
+    expect(mockCreateCharge.mock.calls[0][0].additionalInfo).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ value: '' })
+      ])
+    );
+  });
+
+  it('routes allowlisted canary passengers through the sandbox Woovi profile without a mobile rebuild', async () => {
+    process.env.WOOVI_ENVIRONMENT = 'production';
+    process.env.WOOVI_API_TOKEN = 'production-token';
+    process.env.WOOVI_SANDBOX_API_TOKEN = 'sandbox-token';
+    process.env.PAYMENT_SANDBOX_USER_IDS = 'passenger_sandbox';
+    process.env.PAYMENT_SANDBOX_EXPIRES_AT = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    const service = new PaymentService();
+    const result = await service.processAdvancePayment({
+      passengerId: 'passenger_sandbox',
+      amount: 1900,
+      rideId: 'temp_ride_sandbox',
+      rideDetails: {
+        origin: 'Origem',
+        destination: 'Destino'
+      },
+      passengerName: 'Passageiro',
+      passengerEmail: 'passenger@leaf.app.br'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      chargeId: 'charge_default',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'env-sandbox-allowlist'
+    });
+    expect(mockCreateCharge).toHaveBeenCalledTimes(1);
+    expect(mockCreateCharge.mock.calls[0][0].wooviConfig).toMatchObject({
+      environment: 'sandbox',
+      apiToken: 'sandbox-token'
+    });
   });
 
   it('reuses the same advance payment intent on Pix charge retries', async () => {

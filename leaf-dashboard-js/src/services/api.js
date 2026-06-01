@@ -773,6 +773,33 @@ class LeafApiService {
     });
   }
 
+  async listPaymentRuntimeProfiles({ includeInactive = true } = {}) {
+    const params = new URLSearchParams();
+    params.set("includeInactive", includeInactive ? "true" : "false");
+    return this.request(`/payment/runtime-profiles?${params.toString()}`);
+  }
+
+  async savePaymentRuntimeProfile(profile = {}) {
+    return this.request("/payment/runtime-profiles", {
+      method: "POST",
+      body: JSON.stringify(profile),
+    });
+  }
+
+  async updatePaymentRuntimeProfileStatus(profileId, status) {
+    return this.request(`/payment/runtime-profiles/${encodeURIComponent(profileId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async resolvePaymentRuntimeProfile(payload = {}) {
+    return this.request("/payment/runtime-profiles/resolve", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   async listAuditLogs(params = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {

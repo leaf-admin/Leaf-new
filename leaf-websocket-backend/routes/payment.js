@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const PaymentService = require('../services/payment-service');
+const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
 const kycPolicyService = require('../services/kyc-policy-service');
 const firebaseConfig = require('../firebase-config');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
@@ -223,6 +224,88 @@ function respondWithdrawalsDisabled(res) {
     )
   );
 }
+
+/**
+ * GET /api/payment/runtime-profiles
+ * Lista perfis de roteamento de pagamento (produção/sandbox) usados pelo backend.
+ */
+router.get('/payment/runtime-profiles', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
+  try {
+    const includeInactive = String(req.query.includeInactive || 'true').toLowerCase() !== 'false';
+    const result = await paymentRuntimeProfileService.listProfiles({ includeInactive });
+    return res.status(result.success ? 200 : 503).json(result);
+  } catch (error) {
+    logError(error, 'Erro ao listar perfis de pagamento', { service: 'payment-routes' });
+    return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+  }
+});
+
+/**
+ * POST /api/payment/runtime-profiles
+ * Cria/atualiza um perfil. Sandbox exige expiração e allowlist por segurança.
+ */
+router.post('/payment/runtime-profiles', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
+  try {
+    const result = await paymentRuntimeProfileService.upsertProfile(req.body || {}, req.paymentActor);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    logError(error, 'Erro ao salvar perfil de pagamento', { service: 'payment-routes' });
+    return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+  }
+});
+
+/**
+ * PATCH /api/payment/runtime-profiles/:profileId/status
+ * Pausa/ativa/arquiva um perfil sem rebuild do app.
+ */
+router.patch('/payment/runtime-profiles/:profileId/status', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
+  try {
+    const result = await paymentRuntimeProfileService.updateProfileStatus(
+      req.params.profileId,
+      req.body?.status,
+      req.paymentActor
+    );
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    logError(error, 'Erro ao atualizar status do perfil de pagamento', { service: 'payment-routes' });
+    return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+  }
+});
+
+/**
+ * POST /api/payment/runtime-profiles/resolve
+ * Diagnóstico seguro: mostra qual perfil seria usado para um usuário/canary.
+ */
+router.post('/payment/runtime-profiles/resolve', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
+  try {
+    const profile = await paymentRuntimeProfileService.resolveProfile({
+      passengerId: req.body?.passengerId || req.body?.userId,
+      userId: req.body?.userId || req.body?.passengerId,
+      phone: req.body?.phone || req.body?.phoneNumber,
+      phoneNumber: req.body?.phoneNumber || req.body?.phone,
+      appReview: Boolean(req.body?.appReview),
+      actor: req.paymentActor
+    });
+    return res.json({
+      success: true,
+      profile: {
+        profileId: profile.profileId,
+        name: profile.name,
+        provider: profile.provider,
+        environment: profile.environment,
+        scope: profile.scope,
+        source: profile.source,
+        reason: profile.reason,
+        expiresAtIso: profile.expiresAtIso || null,
+        hasWooviToken: Boolean(profile.wooviConfig?.apiToken),
+        baseUrlMode: String(profile.wooviConfig?.baseUrl || '').includes('sandbox') ? 'sandbox' : 'production'
+      }
+    });
+  } catch (error) {
+    logError(error, 'Erro ao resolver perfil de pagamento', { service: 'payment-routes' });
+    return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+  }
+});
 
 function normalizePaymentAmountCents(value) {
   const parsed = Number(value);
@@ -480,7 +563,10 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       tollFeeCents,
       discountBenefit,
       grossAmountInCents,
-      grossAmount
+      grossAmount,
+      passengerPhone,
+      phone,
+      phoneNumber
     } = req.body;
 
     // Validações básicas
@@ -525,9 +611,11 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       subaccountPixKey,
       tollFee,
       tollFeeCents,
+      passengerPhone: passengerPhone || phone || phoneNumber || req.paymentActor?.phoneNumber || req.paymentActor?.phone || null,
       grossAmountInCents: discountValidation.grossAmountInCents,
       payableAmountInCents: discountValidation.payableAmountInCents,
-      discountBenefit: discountValidation.discountBenefit
+      discountBenefit: discountValidation.discountBenefit,
+      actor: req.paymentActor || null
     };
 
     const result = await paymentService.processAdvancePayment(paymentData);

@@ -48,6 +48,7 @@ const groups = [
       { href: "/reports", label: "Relatórios" },
       { href: "/promotions", label: "Promoções" },
       { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager", "development"] },
       { href: "/financial-simulator", label: "Simulador", blockedRoles: ["support", "development"] },
       { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
     ],
