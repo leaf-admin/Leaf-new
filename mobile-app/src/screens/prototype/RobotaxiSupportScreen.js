@@ -23,7 +23,6 @@ const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
 const SUPPORT_OPTIONS = [
-  { id: 's1', title: 'Alterar ponto de embarque', subtitle: 'Atualize a origem sem cancelar a corrida', icon: 'pin-outline' },
   { id: 's2', title: 'Problema com Pix', subtitle: 'Revisão de cobrança e recibo da viagem', icon: 'card-outline' },
   { id: 's3', title: 'Objetos perdidos', subtitle: 'Abra um chamado rápido para itens esquecidos', icon: 'briefcase-outline' },
 ];
