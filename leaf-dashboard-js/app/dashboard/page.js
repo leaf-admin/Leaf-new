@@ -621,35 +621,6 @@ export default function DashboardPage() {
 
         <section className="grid ops-detail-grid">
           <Panel
-            title="Ações sugeridas"
-            subtitle="Próximo passo operacional calculado no snapshot, sem fan-out no navegador."
-          >
-            <ActionItems items={snapshot?.actionItems || []} />
-          </Panel>
-
-          <Panel
-            title="Canary Pack"
-            subtitle="Roteiro operacional para testar com backend como fonte de verdade, sem trocar build."
-          >
-            <CanaryPackPanel canaryPack={snapshot?.canaryPack} />
-          </Panel>
-
-          <Panel
-            title="Saúde por domínio"
-            subtitle="Leitura consolidada para API, socket, Woovi runtime, Redis, Firebase, suporte, campanhas, cadastro, financeiro e workers."
-          >
-            <DomainHealthRows domains={services.domainHealth || []} />
-          </Panel>
-
-          <Panel
-            title="Fontes do snapshot"
-            subtitle="Tudo consolidado no backend e cacheado para evitar fan-out no navegador."
-            actions={<Link href="/observability">Abrir observabilidade</Link>}
-          >
-            <SourceRows sources={services.sources || []} />
-          </Panel>
-
-          <Panel
             title="Monitor SKU e margem"
             subtitle="Custo por chamada, taxa operacional e saldo líquido projetado sem criar fan-out caro."
           >
@@ -701,6 +672,39 @@ export default function DashboardPage() {
                 <div className="value">separado para evitar custo acidental</div>
               </div>
             </div>
+          </Panel>
+        </section>
+
+        <section className="grid ops-detail-grid">
+          <Panel
+            title="Ações sugeridas"
+            subtitle="Próximo passo operacional calculado no snapshot, sem fan-out no navegador."
+          >
+            <ActionItems items={snapshot?.actionItems || []} />
+          </Panel>
+
+          <Panel
+            title="Canary Pack"
+            subtitle="Roteiro operacional para testar com backend como fonte de verdade, sem trocar build."
+          >
+            <CanaryPackPanel canaryPack={snapshot?.canaryPack} />
+          </Panel>
+        </section>
+
+        <section className="grid ops-detail-grid">
+          <Panel
+            title="Saúde por domínio"
+            subtitle="Leitura consolidada para API, socket, Woovi runtime, Redis, Firebase, suporte, campanhas, cadastro, financeiro e workers."
+          >
+            <DomainHealthRows domains={services.domainHealth || []} />
+          </Panel>
+
+          <Panel
+            title="Fontes do snapshot"
+            subtitle="Tudo consolidado no backend e cacheado para evitar fan-out no navegador."
+            actions={<Link href="/observability">Abrir observabilidade</Link>}
+          >
+            <SourceRows sources={services.sources || []} />
           </Panel>
         </section>
 
