@@ -39,6 +39,13 @@ function brlFromCents(value) {
   })}`;
 }
 
+function brlFromValue(value, maximumFractionDigits = 2) {
+  return `R$ ${toNumber(value).toLocaleString("pt-BR", {
+    minimumFractionDigits: maximumFractionDigits,
+    maximumFractionDigits,
+  })}`;
+}
+
 function formatUsd(value) {
   return `US$ ${toNumber(value).toLocaleString("en-US", {
     minimumFractionDigits: 4,
@@ -92,6 +99,38 @@ function costGuardLabel(status) {
   if (status === "danger") return "Perto do limite";
   if (status === "limit") return "Limite atingido";
   return "Sem leitura";
+}
+
+function runtimeEnvironmentLabel(environment) {
+  if (environment === "sandbox") return "sandbox";
+  if (environment === "production") return "produção";
+  return "não definido";
+}
+
+function readinessClass(status) {
+  if (status === "ready") return "status-ok";
+  if (status === "attention") return "status-warn";
+  return "status-bad";
+}
+
+function readinessLabel(status) {
+  if (status === "ready") return "pronto";
+  if (status === "attention") return "atenção";
+  return "bloqueado";
+}
+
+function skuStatusClass(status) {
+  if (status === "healthy") return "status-ok";
+  if (status === "warning") return "status-warn";
+  if (status === "danger") return "status-bad";
+  return "status-warn";
+}
+
+function skuStatusLabel(status) {
+  if (status === "healthy") return "normal";
+  if (status === "warning") return "acompanhar";
+  if (status === "danger") return "fora da curva";
+  return "sem amostra";
 }
 
 function SourceRows({ sources = [] }) {
@@ -168,6 +207,174 @@ function ActionItems({ items = [] }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function CanaryPackPanel({ canaryPack }) {
+  if (!canaryPack) return <p className="text-muted">Canary Pack ainda não carregado.</p>;
+  return (
+    <div className="canary-pack">
+      <div className="canary-pack-summary">
+        <div>
+          <span>Pagamento</span>
+          <strong>{runtimeEnvironmentLabel(canaryPack.paymentRuntime?.defaultEnvironment)}</strong>
+          <small>
+            {canaryPack.paymentRuntime?.sandboxProfileCount || 0} perfil(is) sandbox ·{" "}
+            {canaryPack.paymentRuntime?.canarySandboxEnabled ? "canary habilitado" : "canary por produção"}
+          </small>
+        </div>
+        <Link href={canaryPack.paymentRuntime?.href || "/payment-runtime"}>Ajustar runtime</Link>
+      </div>
+
+      <div className="canary-readiness-grid">
+        {(canaryPack.readiness || []).map((item) => (
+          <article key={item.id} className="canary-readiness-item">
+            <span className={readinessClass(item.status)}>{readinessLabel(item.status)}</span>
+            <strong>{item.label}</strong>
+            <small>{item.detail}</small>
+          </article>
+        ))}
+      </div>
+
+      <div className="canary-link-row">
+        {(canaryPack.links || []).map((link) => (
+          <Link href={link.href} key={link.href}>{link.label}</Link>
+        ))}
+      </div>
+
+      <details className="support-advanced-drawer">
+        <summary>Checklist do canary</summary>
+        <div className="canary-checklist-grid">
+          <div>
+            <h3>Passos</h3>
+            <ul>
+              {(canaryPack.flowSteps || []).map((step) => <li key={step}>{step}</li>)}
+            </ul>
+          </div>
+          <div>
+            <h3>Sucesso</h3>
+            <ul>
+              {(canaryPack.successCriteria || []).map((criterion) => <li key={criterion}>{criterion}</li>)}
+            </ul>
+          </div>
+          <div>
+            <h3>Falha</h3>
+            <ul>
+              {(canaryPack.failureCriteria || []).map((criterion) => <li key={criterion}>{criterion}</li>)}
+            </ul>
+          </div>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function SkuCostMonitorPanel({ skuMonitor }) {
+  const finance = skuMonitor?.finance || {};
+  const rows = Array.isArray(skuMonitor?.rows) ? skuMonitor.rows : [];
+  const sampledRides = toNumber(skuMonitor?.sampledRides);
+  const completedRidesToday = toNumber(skuMonitor?.completedRidesToday);
+
+  return (
+    <div className="sku-monitor">
+      <div className="sku-monitor-summary">
+        <div className="sku-monitor-card">
+          <span>Status</span>
+          <strong className={skuStatusClass(skuMonitor?.status)}>
+            {skuStatusLabel(skuMonitor?.status)}
+          </strong>
+          <small>{formatCompact(sampledRides)} corrida(s) na janela recente</small>
+        </div>
+        <div className="sku-monitor-card">
+          <span>Taxa operacional média</span>
+          <strong>{brlFromCents(finance.operationalFeeAverageCents)}</strong>
+          <small>{brlFromCents(finance.operationalFeeTotalCents)} acumulados hoje</small>
+        </div>
+        <div className="sku-monitor-card">
+          <span>Custo variável/corrida</span>
+          <strong>{brlFromCents(finance.variableCostWithoutWooviPerRideCents)}</strong>
+          <small>{toNumber(finance.costRatioPercent).toFixed(1)}% da taxa média, sem Woovi</small>
+        </div>
+        <div className="sku-monitor-card">
+          <span>Líquido operacional</span>
+          <strong>{brlFromCents(finance.netAfterInfraCents)}</strong>
+          <small>{toNumber(finance.marginAfterInfraPercent).toFixed(1)}% após infra estimada</small>
+        </div>
+      </div>
+
+      <div className="sku-explainer">
+        <strong>Como ler:</strong> o painel usa a telemetria recente já gravada no Redis, projeta o custo médio
+        para as {formatCompact(completedRidesToday)} corrida(s) finalizadas hoje e separa Woovi da infraestrutura.
+        O dashboard não chama Google, Firebase, Redis externo ou Woovi para montar esta visão.
+      </div>
+
+      <div className="metric-list">
+        <div className="row">
+          <div className="label">
+            <span>Infra projetada hoje</span>
+            <small>Google, Redis, Firebase, backend e infra fixa configurada</small>
+          </div>
+          <div className="value">{brlFromCents(finance.projectedCostWithoutWooviTodayCents)}</div>
+        </div>
+        <div className="row">
+          <div className="label">
+            <span>Woovi separado</span>
+            <small>Visível para reconciliação, sem esconder na margem operacional</small>
+          </div>
+          <div className="value">{brlFromCents(finance.projectedWooviTodayCents)}</div>
+        </div>
+        <div className="row">
+          <div className="label">
+            <span>Líquido após tudo</span>
+            <small>Taxa Leaf menos infra estimada e Woovi quando configurado</small>
+          </div>
+          <div className="value">{brlFromCents(finance.netAfterAllCents)}</div>
+        </div>
+      </div>
+
+      <div className="table-shell sku-table-shell">
+        <table className="table table-compact">
+          <thead>
+            <tr>
+              <th>Fornecedor/SKU</th>
+              <th>Uso</th>
+              <th>Custo unit.</th>
+              <th>Total janela</th>
+              <th>Proj. hoje</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? rows.slice(0, 12).map((row) => (
+              <tr key={row.id}>
+                <td>
+                  <strong>{row.sku}</strong>
+                  <span className="table-muted">{row.provider} · {row.detail}</span>
+                </td>
+                <td>
+                  {formatCompact(row.usage)}
+                  <span className="table-muted">{row.unitLabel}</span>
+                </td>
+                <td>{brlFromValue(row.unitCostBrl, 4)}</td>
+                <td>{brlFromValue(row.totalCostBrl, 4)}</td>
+                <td>{brlFromCents(row.projectedTodayCents)}</td>
+              </tr>
+            )) : (
+              <tr>
+                <td colSpan={5}>Sem telemetria recente de corrida. O painel começa a preencher após novos fluxos.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="ops-mini-bars">
+        {(skuMonitor?.notes || []).slice(0, 4).map((note) => (
+          <div key={note}>
+            <span>{note}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -340,6 +547,7 @@ export default function DashboardPage() {
   const services = snapshot?.services || {};
   const costControls = snapshot?.costControls || {};
   const firestoreReadGuard = costControls.firestoreReadGuard || {};
+  const paymentRuntime = snapshot?.paymentRuntime || {};
 
   return (
     <ProtectedRoute>
@@ -397,6 +605,12 @@ export default function DashboardPage() {
             value={brlFromCents(metrics.grossRevenueCents)}
             detail={`ARPU ${brlFromCents(metrics.arpuBaseCents)}`}
           />
+          <CommandStat
+            label="Woovi"
+            value={runtimeEnvironmentLabel(paymentRuntime.defaultEnvironment)}
+            detail={`${formatCompact(paymentRuntime.sandboxProfileCount)} sandbox · ${formatCompact(metrics.paymentPendingCount)} pendências`}
+            tone={paymentRuntime.globalSandboxEnabled ? "danger" : paymentRuntime.canarySandboxEnabled ? "positive" : "warning"}
+          />
         </section>
 
         <section className="ops-workspace-grid" aria-label="Janelas principais">
@@ -414,8 +628,15 @@ export default function DashboardPage() {
           </Panel>
 
           <Panel
+            title="Canary Pack"
+            subtitle="Roteiro operacional para testar com backend como fonte de verdade, sem trocar build."
+          >
+            <CanaryPackPanel canaryPack={snapshot?.canaryPack} />
+          </Panel>
+
+          <Panel
             title="Saúde por domínio"
-            subtitle="Leitura consolidada para API, socket, suporte, campanhas, cadastro, financeiro e workers."
+            subtitle="Leitura consolidada para API, socket, Woovi runtime, Redis, Firebase, suporte, campanhas, cadastro, financeiro e workers."
           >
             <DomainHealthRows domains={services.domainHealth || []} />
           </Panel>
@@ -426,6 +647,13 @@ export default function DashboardPage() {
             actions={<Link href="/observability">Abrir observabilidade</Link>}
           >
             <SourceRows sources={services.sources || []} />
+          </Panel>
+
+          <Panel
+            title="Monitor SKU e margem"
+            subtitle="Custo por chamada, taxa operacional e saldo líquido projetado sem criar fan-out caro."
+          >
+            <SkuCostMonitorPanel skuMonitor={costControls.skuMonitor} />
           </Panel>
 
           <Panel title="Controle de custo">

@@ -47,6 +47,28 @@ function buildFirestoreCostActionItem(costGuard = {}) {
   };
 }
 
+function attachCostGuardToCanaryPack(canaryPack = {}, costGuard = {}) {
+  if (!canaryPack || typeof canaryPack !== 'object') return canaryPack;
+  const status = ['warning', 'danger', 'limit'].includes(costGuard.budgetStatus)
+    ? 'attention'
+    : 'ready';
+
+  return {
+    ...canaryPack,
+    readiness: (canaryPack.readiness || []).map((item) => {
+      if (item.id !== 'cost-guard') return item;
+      return {
+        ...item,
+        status,
+        detail: `${costGuard.budgetUsagePercent ?? 0}% do teto diario estimado de reads Firestore. Browser segue sem chamada externa paga.`
+      };
+    }),
+    overallStatus: canaryPack.overallStatus === 'ready' && status === 'ready'
+      ? 'ready'
+      : 'attention'
+  };
+}
+
 router.get('/command-center', async (req, res) => {
   try {
     const requestedForceRefresh =
@@ -66,6 +88,7 @@ router.get('/command-center', async (req, res) => {
     res.set('X-Leaf-Command-Center-Cache', snapshot.cache?.status || 'UNKNOWN');
     res.json({
       ...snapshot,
+      canaryPack: attachCostGuardToCanaryPack(snapshot.canaryPack, costGuard),
       actionItems: firestoreActionItem
         ? [firestoreActionItem, ...(snapshot.actionItems || [])].slice(0, 8)
         : snapshot.actionItems,

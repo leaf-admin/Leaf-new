@@ -4,6 +4,8 @@ const opsOverviewService = require('./ops-overview-service');
 const campaignCenterService = require('./campaign-center-service');
 const healthCheckService = require('./health-check-service');
 const driverApplicationService = require('./driver-application-service');
+const paymentRuntimeProfileService = require('./payment-runtime-profile-service');
+const skuCostMonitorService = require('./backoffice-sku-cost-monitor-service');
 const WorkerHealthMonitor = require('../workers/health-monitor');
 const { logStructured } = require('../utils/logger');
 
@@ -62,12 +64,25 @@ function sourceStatus(sources, id, fallback = 'unknown') {
   return sources.find((source) => source.id === id)?.status || fallback;
 }
 
-function buildDomainHealth({ sources, status, campaignStats, driverOnboardingSummary, opsOverview, workerDLQ, workerLag }) {
+function buildDomainHealth({
+  sources,
+  status,
+  campaignStats,
+  driverOnboardingSummary,
+  opsOverview,
+  workerDLQ,
+  workerLag,
+  paymentRuntime
+}) {
   const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
   const lag = toNumber(workerLag?.lag?.lag ?? workerLag?.lag ?? workerLag, 0);
   const supportBreaches = toNumber(opsOverview?.supportQueue?.overdueAckCount, 0)
     + toNumber(opsOverview?.supportQueue?.overdueFirstResponseCount, 0);
   const pendingDocuments = toNumber(driverOnboardingSummary?.byStatus?.pending, 0);
+  const paymentSourceOk = sourceStatus(sources, 'paymentRuntime') === 'ok';
+  const redisSourceOk = sourceStatus(sources, 'redis') === 'ok';
+  const firebaseSourceOk = ['usersStatus', 'ridesToday', 'financialToday', 'driverOnboarding']
+    .every((sourceId) => sourceStatus(sources, sourceId) === 'ok');
 
   const domains = [
     {
@@ -87,6 +102,33 @@ function buildDomainHealth({ sources, status, campaignStats, driverOnboardingSum
       action: lag > 100
         ? 'Checar lag dos workers e consumidores ativos.'
         : 'Conexões em acompanhamento pelo snapshot.'
+    },
+    {
+      id: 'payment-runtime',
+      label: 'Woovi runtime',
+      status: paymentSourceOk ? 'healthy' : 'warning',
+      source: 'paymentRuntime',
+      action: paymentSourceOk
+        ? `Backend controla ${paymentRuntime?.defaultEnvironment || 'ambiente'} e perfis canary.`
+        : 'Revisar perfis de pagamento antes de canary.'
+    },
+    {
+      id: 'redis',
+      label: 'Redis e cache',
+      status: redisSourceOk ? 'healthy' : 'warning',
+      source: 'redis',
+      action: redisSourceOk
+        ? 'Cache e streams respondendo.'
+        : 'Cache indisponível; dashboard pode ficar mais caro/lento.'
+    },
+    {
+      id: 'firebase',
+      label: 'Firebase/Firestore/RTDB',
+      status: firebaseSourceOk ? 'healthy' : 'warning',
+      source: 'metrics',
+      action: firebaseSourceOk
+        ? 'Leituras agregadas responderam.'
+        : 'Validar índices e permissões do backend.'
     },
     {
       id: 'support',
@@ -141,7 +183,17 @@ function buildDomainHealth({ sources, status, campaignStats, driverOnboardingSum
   }));
 }
 
-function buildActionItems({ status, sources, opsOverview, campaignStats, driverOnboardingSummary, workerDLQ, workerLag }) {
+function buildActionItems({
+  status,
+  sources,
+  opsOverview,
+  campaignStats,
+  driverOnboardingSummary,
+  workerDLQ,
+  workerLag,
+  paymentRuntime,
+  skuMonitor
+}) {
   const items = [];
   const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
   const lag = toNumber(workerLag?.lag?.lag ?? workerLag?.lag ?? workerLag, 0);
@@ -201,6 +253,28 @@ function buildActionItems({ status, sources, opsOverview, campaignStats, driverO
     });
   }
 
+  if (paymentRuntime?.globalSandboxEnabled) {
+    items.push({
+      id: 'payment-global-sandbox',
+      priority: 'alta',
+      title: 'Sandbox global ativo',
+      description: 'Perfil sandbox global está ativo. Use somente em janela controlada de teste.',
+      href: '/payment-runtime'
+    });
+  } else if (
+    paymentRuntime &&
+    paymentRuntime.defaultEnvironment === 'production' &&
+    toNumber(paymentRuntime.sandboxProfileCount, 0) === 0
+  ) {
+    items.push({
+      id: 'payment-canary-profile',
+      priority: 'baixa',
+      title: 'Canary usa produção por padrão',
+      description: 'Crie perfil sandbox por usuário/telefone antes de teste pago.',
+      href: '/payment-runtime'
+    });
+  }
+
   if (dlqSize > 0 || lag > 100) {
     items.push({
       id: 'workers-attention',
@@ -208,6 +282,16 @@ function buildActionItems({ status, sources, opsOverview, campaignStats, driverO
       title: 'Workers pedem atenção',
       description: dlqSize > 0 ? `${dlqSize} item(ns) em DLQ.` : `Lag em ${lag}.`,
       href: '/observability'
+    });
+  }
+
+  if (['warning', 'danger'].includes(skuMonitor?.status)) {
+    items.push({
+      id: 'sku-cost-monitor',
+      priority: skuMonitor.status === 'danger' ? 'alta' : 'media',
+      title: 'Custo por corrida subiu',
+      description: `Monitor SKU em ${skuMonitor.finance?.costRatioPercent || 0}% da taxa operacional media.`,
+      href: '/dashboard'
     });
   }
 
@@ -222,6 +306,97 @@ function buildActionItems({ status, sources, opsOverview, campaignStats, driverO
   }
 
   return items.slice(0, 8);
+}
+
+function buildCanaryPack({ status, paymentRuntime, domainHealth, costControls }) {
+  const paymentEnvironment = paymentRuntime?.defaultEnvironment || 'unknown';
+  const sandboxProfileCount = toNumber(paymentRuntime?.sandboxProfileCount, 0);
+  const canarySandboxEnabled = paymentRuntime?.canarySandboxEnabled === true;
+  const globalSandboxEnabled = paymentRuntime?.globalSandboxEnabled === true;
+  const firestoreGuard = costControls?.firestoreReadGuard || {};
+  const domainStatus = (id) => domainHealth.find((domain) => domain.id === id)?.status || 'unknown';
+
+  return {
+    generatedAt: new Date().toISOString(),
+    paymentRuntime: {
+      provider: paymentRuntime?.provider || 'woovi',
+      defaultEnvironment: paymentEnvironment,
+      sandboxProfileCount,
+      canarySandboxEnabled,
+      globalSandboxEnabled,
+      href: '/payment-runtime'
+    },
+    links: [
+      { label: 'Cockpit', href: '/dashboard' },
+      { label: 'Suporte', href: '/support' },
+      { label: 'Campanhas', href: '/campaign-center' },
+      { label: 'Cadastro motorista', href: '/drivers/review-queue' },
+      { label: 'Reconciliação', href: '/financial-reconciliation' },
+      { label: 'Runtime pagamento', href: '/payment-runtime' },
+      { label: 'Convites', href: '/programs' },
+      { label: 'Waitlist motorista', href: '/waitlist' }
+    ],
+    readiness: [
+      {
+        id: 'payment-runtime',
+        label: 'Pagamento por backend',
+        status: globalSandboxEnabled
+          ? 'attention'
+          : (paymentEnvironment === 'production' && !canarySandboxEnabled ? 'attention' : 'ready'),
+        detail: globalSandboxEnabled
+          ? 'Sandbox global ativo. Evitar fora de janela controlada.'
+          : `${paymentEnvironment} padrão; ${sandboxProfileCount} perfil(is) sandbox ativo(s).`
+      },
+      {
+        id: 'support',
+        label: 'Suporte inbox',
+        status: domainStatus('support') === 'healthy' ? 'ready' : 'attention',
+        detail: 'Responder, assumir, escalar, resolver e converter chat em chamado.'
+      },
+      {
+        id: 'driver-onboarding',
+        label: 'Cadastro motorista',
+        status: domainStatus('driver-onboarding') === 'healthy' ? 'ready' : 'attention',
+        detail: 'Aprovar, rejeitar, pedir reenvio e registrar auditoria.'
+      },
+      {
+        id: 'campaigns',
+        label: 'Campanhas',
+        status: domainStatus('campaigns') === 'healthy' ? 'ready' : 'attention',
+        detail: 'Impressões, cliques, CTR, CPM, CPC, conversão e valor contratado.'
+      },
+      {
+        id: 'cost-guard',
+        label: 'Cost guard',
+        status: ['warning', 'danger', 'limit'].includes(firestoreGuard.budgetStatus) ? 'attention' : 'ready',
+        detail: 'Dashboard usa snapshot agregado/cacheado; browser não chama Google/Woovi/Firebase direto.'
+      }
+    ],
+    testUsers: [
+      { role: 'Passageiro canary', instruction: 'Usar usuário de teste cadastrado nas instruções das lojas.' },
+      { role: 'Motorista canary', instruction: 'Usar motorista aprovado ou aprovar pela fila antes do smoke.' }
+    ],
+    flowSteps: [
+      'Entrar como passageiro e motorista.',
+      'Confirmar runtime Woovi no backend antes de gerar PIX.',
+      'Acompanhar cockpit, suporte, campanhas e cadastro durante o fluxo.',
+      'Registrar qualquer falha como ticket e manter evidência do snapshot.'
+    ],
+    successCriteria: [
+      'Sem chamada externa paga disparada pelo browser do dashboard.',
+      'Pagamento usa o perfil de backend esperado.',
+      'Inbox mostra mensagens não lidas e permite resposta humana.',
+      'Cadastro motorista registra decisão e auditoria.',
+      'Campanhas mostram métricas e status sem fan-out caro.'
+    ],
+    failureCriteria: [
+      'Woovi em ambiente inesperado.',
+      'Custo/reads fora do teto.',
+      'Fila de suporte/cadastro parada.',
+      'Serviço API/socket/Redis/Firebase em warning persistente.'
+    ],
+    overallStatus: status === 'healthy' && !globalSandboxEnabled ? 'ready' : 'attention'
+  };
 }
 
 function buildSource(id, label, critical, settled, startedAt) {
@@ -257,6 +432,8 @@ class BackofficeCommandCenterService {
     campaignCenter = campaignCenterService,
     health = healthCheckService,
     driverApplications = driverApplicationService,
+    paymentRuntime = paymentRuntimeProfileService,
+    skuCostMonitor = skuCostMonitorService,
     workerHealthMonitor = new WorkerHealthMonitor()
   } = {}) {
     this.redisPool = redis;
@@ -265,6 +442,8 @@ class BackofficeCommandCenterService {
     this.campaignCenter = campaignCenter;
     this.health = health;
     this.driverApplications = driverApplications;
+    this.paymentRuntime = paymentRuntime;
+    this.skuCostMonitor = skuCostMonitor;
     this.workerHealthMonitor = workerHealthMonitor;
     this.ttlSeconds = clampNumber(
       process.env.BACKOFFICE_COMMAND_CENTER_TTL_SECONDS,
@@ -363,6 +542,35 @@ class BackofficeCommandCenterService {
         run: () => this.campaignCenter.getStats({})
       },
       {
+        id: 'paymentRuntime',
+        label: 'Runtime de pagamento',
+        critical: false,
+        run: () => this.paymentRuntime.getRuntimeSummary({})
+      },
+      {
+        id: 'skuCostMonitor',
+        label: 'Monitor SKU/custos',
+        critical: false,
+        run: () => this.skuCostMonitor.collectUsageSnapshot({})
+      },
+      {
+        id: 'redis',
+        label: 'Redis/cache',
+        critical: false,
+        run: async () => {
+          if (this.redisPool?.ensureConnection) {
+            await this.redisPool.ensureConnection();
+          }
+          const redis = this.getRedis();
+          if (redis?.ping) {
+            const response = await redis.ping();
+            return { status: response || 'PONG' };
+          }
+          if (redis?.get) return { status: 'available' };
+          return { status: 'unavailable' };
+        }
+      },
+      {
         id: 'driverOnboarding',
         label: 'Cadastro de motoristas',
         critical: false,
@@ -407,6 +615,8 @@ class BackofficeCommandCenterService {
     const financialToday = this.sourceValue(sources, 'financialToday', {});
     const operationalRevenue = this.sourceValue(sources, 'operationalRevenue', {});
     const campaignStats = this.sourceValue(sources, 'campaignStats', {});
+    const paymentRuntime = this.sourceValue(sources, 'paymentRuntime', {});
+    const skuCostUsage = this.sourceValue(sources, 'skuCostMonitor', {});
     const driverOnboardingQueue = this.sourceValue(sources, 'driverOnboarding', {});
     const workerHealth = this.sourceValue(sources, 'workerHealth', null);
     const workerLag = this.sourceValue(sources, 'workerLag', null);
@@ -417,6 +627,12 @@ class BackofficeCommandCenterService {
     const totalCustomers = toNumber(usersStatus?.customers?.total, 0);
     const completedRides = toNumber(financialToday.totalRides ?? ridesToday.completedToday, 0);
     const openSupportTickets = toNumber(opsOverview?.supportQueue?.totalOpenTickets, 0);
+    const paymentPendingCount = toNumber(
+      opsOverview?.paymentQueue?.pendingCount ??
+      opsOverview?.payments?.pendingCount ??
+      opsOverview?.disputes?.openCount,
+      0
+    );
     const driverOnboardingSummary = driverOnboardingQueue?.summary || {};
     const driverOnboardingByStatus = driverOnboardingSummary.byStatus || {};
 
@@ -428,6 +644,11 @@ class BackofficeCommandCenterService {
       workerDLQ,
       opsOverview
     });
+    const skuMonitor = this.skuCostMonitor.attachFinancials(skuCostUsage, {
+      financialToday,
+      operationalRevenue,
+      ridesToday
+    });
     const domainHealth = buildDomainHealth({
       sources,
       status,
@@ -435,7 +656,8 @@ class BackofficeCommandCenterService {
       driverOnboardingSummary,
       opsOverview,
       workerDLQ,
-      workerLag
+      workerLag,
+      paymentRuntime
     });
     const actionItems = buildActionItems({
       status,
@@ -444,7 +666,27 @@ class BackofficeCommandCenterService {
       campaignStats,
       driverOnboardingSummary,
       workerDLQ,
-      workerLag
+      workerLag,
+      paymentRuntime,
+      skuMonitor
+    });
+    const baseCostControls = {
+      externalPaidApisCalled: false,
+      paidApiFamilies: [],
+      dashboardFanOutReduced: true,
+      skuMonitor,
+      notes: [
+        'Snapshot agregado no backend com cache Redis.',
+        'Monitor SKU usa somente telemetria recente ja persistida no Redis.',
+        'Nao chama Google Places, Google Routes, Directions, Woovi ou provedores pagos.',
+        'Pagina /maps segue separada porque carregar Google Maps JS pode gerar custo de mapa.'
+      ]
+    };
+    const canaryPack = buildCanaryPack({
+      status,
+      paymentRuntime,
+      domainHealth,
+      costControls: baseCostControls
     });
 
     return {
@@ -476,6 +718,7 @@ class BackofficeCommandCenterService {
         grossRevenueCents,
         arpuBaseCents: totalCustomers > 0 ? Math.round(gmvCents / totalCustomers) : 0,
         averageRideTicketCents: completedRides > 0 ? Math.round(gmvCents / completedRides) : 0,
+        paymentPendingCount,
         totalDrivers: toNumber(usersStatus?.drivers?.total, 0),
         totalPassengers: totalCustomers,
         cancellationRate: toNumber(ridesToday.cancellationRate, 0)
@@ -500,6 +743,17 @@ class BackofficeCommandCenterService {
         effectiveCpmCents: toNumber(campaignStats.effectiveCpmCents, 0),
         effectiveCpcCents: toNumber(campaignStats.effectiveCpcCents, 0)
       },
+      paymentRuntime: {
+        provider: paymentRuntime?.provider || 'woovi',
+        defaultEnvironment: paymentRuntime?.defaultEnvironment || 'unknown',
+        activeProfileCount: toNumber(paymentRuntime?.activeProfileCount, 0),
+        sandboxProfileCount: toNumber(paymentRuntime?.sandboxProfileCount, 0),
+        productionProfileCount: toNumber(paymentRuntime?.productionProfileCount, 0),
+        canarySandboxEnabled: paymentRuntime?.canarySandboxEnabled === true,
+        globalSandboxEnabled: paymentRuntime?.globalSandboxEnabled === true,
+        profiles: Array.isArray(paymentRuntime?.profiles) ? paymentRuntime.profiles.slice(0, 8) : []
+      },
+      canaryPack,
       driverOnboarding: {
         totalDocuments: toNumber(driverOnboardingSummary.total, 0),
         pendingDocuments: toNumber(driverOnboardingByStatus.pending, 0),
@@ -514,16 +768,7 @@ class BackofficeCommandCenterService {
         disputes: opsOverview?.disputes || null,
         activePolicies: opsOverview?.activePolicies || []
       },
-      costControls: {
-        externalPaidApisCalled: false,
-        paidApiFamilies: [],
-        dashboardFanOutReduced: true,
-        notes: [
-          'Snapshot agregado no backend com cache Redis.',
-          'Nao chama Google Places, Google Routes, Directions, Woovi ou provedores pagos.',
-          'Pagina /maps segue separada porque carregar Google Maps JS pode gerar custo de mapa.'
-        ]
-      }
+      costControls: baseCostControls
     };
   }
 
