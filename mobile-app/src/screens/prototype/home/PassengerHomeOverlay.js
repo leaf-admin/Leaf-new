@@ -2,6 +2,7 @@ import React, { memo } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
   Easing,
   Keyboard,
   Platform,
@@ -10,6 +11,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../../theme/runtimeTokens";
@@ -105,6 +107,8 @@ function PassengerHomeOverlay({
   onLeafDelasToggle,
 }) {
   const safeBottom = Math.max(0, Number(insetsBottom) || 0);
+  const { height: windowHeight } = useWindowDimensions();
+  const screenHeight = Dimensions.get("screen").height;
   const resolvedPickupLabel = pickupLabel || pickupAddress || "Local atual";
   const entrance = React.useRef(new Animated.Value(0)).current;
   const inputRef = React.useRef(null);
@@ -112,6 +116,10 @@ function PassengerHomeOverlay({
   const visibleResults = Array.isArray(destinationSearchResults)
     ? destinationSearchResults.slice(0, 3)
     : [];
+  const shouldShowDestinationDropdown = Boolean(
+    destinationSearchActive &&
+      (destinationSearchSearching || visibleResults.length > 0)
+  );
   const visibleCategoryOptions = Array.isArray(categoryOptions)
     ? categoryOptions.slice(0, 3)
     : [];
@@ -121,28 +129,32 @@ function PassengerHomeOverlay({
     null;
   const shouldShowCategoryCard =
     categoryVisible && !destinationSearchActive && Boolean(selectedCategory);
-  const searchDropdownHeight = destinationSearchActive
+  const searchDropdownHeight = shouldShowDestinationDropdown
     ? Math.min(
         HOME_SEARCH_DROPDOWN_MAX_HEIGHT,
-        Math.max(
-          HOME_SEARCH_DROPDOWN_MIN_HEIGHT,
-          destinationSearchSearching || visibleResults.length === 0
-            ? HOME_SEARCH_DROPDOWN_MIN_HEIGHT
-            : visibleResults.length * HOME_SEARCH_DROPDOWN_ROW_HEIGHT +
-                HOME_SEARCH_DROPDOWN_VERTICAL_PADDING,
-        ),
+        destinationSearchSearching
+          ? HOME_SEARCH_DROPDOWN_MIN_HEIGHT
+          : visibleResults.length * HOME_SEARCH_DROPDOWN_ROW_HEIGHT +
+              HOME_SEARCH_DROPDOWN_VERTICAL_PADDING,
       )
     : 0;
-  const activeSearchCardHeight = destinationSearchActive
+  const activeSearchCardHeight = destinationSearchActive && shouldShowDestinationDropdown
     ? HOME_CARD_HEIGHT + HOME_SEARCH_DROPDOWN_TOP_GAP + searchDropdownHeight
     : HOME_CARD_HEIGHT;
   const lowerPanelHeight = shouldShowCategoryCard
-      ? HOME_CATEGORY_CARD_HEIGHT
-      : HOME_PROMO_CARD_HEIGHT;
+    ? HOME_CATEGORY_CARD_HEIGHT
+    : HOME_PROMO_CARD_HEIGHT;
   const activeStackGap = shouldShowCategoryCard ? 16 : HOME_STACK_GAP;
   const stackHeight = destinationSearchActive
     ? activeSearchCardHeight
     : activeSearchCardHeight + activeStackGap + lowerPanelHeight;
+  const androidKeyboardFallbackHeight =
+    Platform.OS === "android" && destinationSearchActive
+      ? Math.max(300, Math.round(Math.max(windowHeight, screenHeight) * 0.42))
+      : 0;
+  const effectiveKeyboardHeight = destinationSearchActive
+    ? Math.max(keyboardHeight, androidKeyboardFallbackHeight)
+    : keyboardHeight;
 
   React.useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -194,7 +206,7 @@ function PassengerHomeOverlay({
           bottom: destinationSearchActive
             ? Math.max(
                 safeBottom + HOME_CARD_BOTTOM_OFFSET,
-                keyboardHeight - safeBottom + HOME_SEARCH_KEYBOARD_CLEARANCE,
+                effectiveKeyboardHeight - safeBottom + HOME_SEARCH_KEYBOARD_CLEARANCE,
               )
             : safeBottom + HOME_CARD_BOTTOM_OFFSET,
         },
@@ -265,7 +277,7 @@ function PassengerHomeOverlay({
                       ref={inputRef}
                       value={destinationSearchQuery}
                       onChangeText={onDestinationSearchChange}
-                      placeholder={destinationLabel || "Para onde vamos?"}
+                      placeholder=""
                       placeholderTextColor={TEXT_MUTED}
                       autoCorrect={false}
                       returnKeyType="search"
@@ -311,7 +323,7 @@ function PassengerHomeOverlay({
             accessibilityLabel="Ditar destino por voz"
           />
 
-          {destinationSearchActive ? (
+          {shouldShowDestinationDropdown ? (
             <View
               style={[styles.dropdownInline, { height: searchDropdownHeight }]}
               testID="passenger-home-destination-dropdown"
@@ -331,23 +343,20 @@ function PassengerHomeOverlay({
                     testID={`passenger-home-destination-result-${index}`}
                     accessibilityLabel={`Escolher ${item?.name || "destino"}`}
                   >
+                    <Ionicons
+                      name="time-outline"
+                      size={15}
+                      color={TEXT_MUTED}
+                      style={styles.destinationResultClockIcon}
+                    />
                     <View style={styles.destinationResultCopyPlain}>
                       <Text numberOfLines={1} style={styles.destinationResultTitle}>
                         {item?.name || "Destino"}
                       </Text>
-                      <Text numberOfLines={1} style={styles.destinationResultAddress}>
-                        {item?.address || item?.description || "Rio de Janeiro"}
-                      </Text>
                     </View>
                   </TouchableOpacity>
                 ))
-              ) : (
-                <Text style={styles.destinationResultEmpty}>
-                  {String(destinationSearchQuery || "").trim().length >= 3
-                    ? "Não encontrei esse destino ainda."
-                    : "Destinos recentes aparecem aqui."}
-                </Text>
-              )}
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -738,8 +747,7 @@ const styles = StyleSheet.create({
     minHeight: HOME_SEARCH_DROPDOWN_ROW_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#E9E2D8",
+    paddingVertical: 4,
   },
   destinationResultIcon: {
     width: 30,
@@ -757,6 +765,11 @@ const styles = StyleSheet.create({
   destinationResultCopyPlain: {
     flex: 1,
     minWidth: 0,
+    marginLeft: 10,
+  },
+  destinationResultClockIcon: {
+    width: 18,
+    textAlign: "center",
   },
   destinationResultTitle: {
     color: TEXT_PRIMARY,
@@ -794,13 +807,8 @@ const styles = StyleSheet.create({
   dropdownInline: {
     marginTop: HOME_SEARCH_DROPDOWN_TOP_GAP,
     marginLeft: 28,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: "#FBFCF8",
-    paddingHorizontal: 14,
-    paddingTop: 6,
-    paddingBottom: 6,
+    paddingTop: 2,
+    paddingBottom: 4,
     overflow: "hidden",
   },
   categoryCard: {

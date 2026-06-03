@@ -95,6 +95,7 @@ const HOME_MAP_READY_FROM_READY_MS = Platform.OS === 'android' ? 2600 : 320;
 const HOME_MAP_READY_FALLBACK_MS = Platform.OS === 'android' ? 9000 : 4500;
 const SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP = true;
 const PLACES_CACHE_LOOKUP_TIMEOUT_MS = 2500;
+let hasPrototypeHomeSurfaceHydratedInSession = IS_TEST_ENV;
 const DEFAULT_USER_COORDINATE = {
   latitude: PROTOTYPE_REGION.latitude,
   longitude: PROTOTYPE_REGION.longitude
@@ -1169,9 +1170,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [nearbyDriverCoordinates, setNearbyDriverCoordinates] = useState([]);
   const [mapFollowingUser, setMapFollowingUser] = useState(true);
   const [visibleMapRegion, setVisibleMapRegion] = useState(PROTOTYPE_REGION);
-  const [homeMapReady, setHomeMapReady] = useState(IS_TEST_ENV);
+  const [homeMapReady, setHomeMapReady] = useState(hasPrototypeHomeSurfaceHydratedInSession);
   const [homeMapLayoutReady, setHomeMapLayoutReady] = useState(IS_TEST_ENV);
-  const [homeSurfaceHydrated, setHomeSurfaceHydrated] = useState(false);
+  const [homeSurfaceHydrated, setHomeSurfaceHydrated] = useState(
+    hasPrototypeHomeSurfaceHydratedInSession
+  );
   const [driverH3Cells, setDriverH3Cells] = useState([]);
   const [driverH3RefreshNonce, setDriverH3RefreshNonce] = useState(0);
   const [showRecoveredConnectionHint, setShowRecoveredConnectionHint] = useState(false);
@@ -2955,6 +2958,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   useEffect(() => {
     if (showHomeChrome && !homeSurfaceHydrated && homeSurfaceReadyForFirstPaint) {
+      hasPrototypeHomeSurfaceHydratedInSession = true;
       setHomeSurfaceHydrated(true);
     }
   }, [homeSurfaceHydrated, homeSurfaceReadyForFirstPaint, showHomeChrome]);
