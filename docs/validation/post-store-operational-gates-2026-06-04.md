@@ -139,7 +139,7 @@ Regra:
 
 ## Gate 4 - Public App Links no dominio
 
-Status local: aprovado; pendente deploy backend e validacao publica.
+Status: backend publicado e validacao publica aprovada; pendente validacao em device real.
 
 Problema encontrado:
 
@@ -184,10 +184,31 @@ Observacao:
 
 - O wrapper `npm --prefix leaf-websocket-backend test -- --runTestsByPath ...` rodou a suite unit completa em vez de respeitar o alvo e expôs uma falha existente em `tests/unit/routes/ops-ride-cost-telemetry.unit.test.js` relacionada a mock de logger/Redis. A rota nova foi validada por Jest focado e nao depende desse teste.
 
-Validacao publica pendente apos deploy:
+Deploy/validacao publica:
 
-- `curl https://leaf.app.br/.well-known/apple-app-site-association`
-- `curl https://leaf.app.br/.well-known/assetlinks.json`
-- `curl https://leaf.app.br/viagem/teste-canary`
-- `curl https://leaf.app.br/convite/teste`
-- `curl https://leaf.app.br/motorista/convite/teste`
+- Deploy backend Contabo executado em `api.leaf.app.br` com runtime modular.
+- `https://leaf.app.br/.well-known/apple-app-site-association`: 200, paths OK.
+- `https://leaf.app.br/.well-known/assetlinks.json`: 200, package `br.com.leaf.ride` OK.
+- `https://leaf.app.br/viagem/teste-canary`: 200 HTML.
+- `https://leaf.app.br/convite/teste`: 200 HTML.
+- `https://leaf.app.br/motorista/convite/teste`: 200 HTML.
+- `https://www.leaf.app.br/.well-known/apple-app-site-association`: 200.
+- `https://www.leaf.app.br/.well-known/assetlinks.json`: 200.
+- `https://www.leaf.app.br/viagem/teste-canary`: 200 HTML.
+- `https://api.leaf.app.br/health`: 200, Redis/WebSocket/System healthy; Firebase warning por latencia Firestore no primeiro health pos-restart.
+- `socket.io-client` em `https://socket.leaf.app.br`: conectado com sucesso via websocket.
+
+Incidente operacional durante deploy:
+
+- O script legado de deploy tentou copiar `.env.production` local incompleto para `/opt/leaf-app/.env`.
+- O primeiro `docker compose up` falhou por `REDIS_PASSWORD` ausente.
+- Correcao aplicada imediatamente: restaurado `/opt/leaf-app/.env` com `.tmp-contabo.env` local e executado `docker compose up -d --build`.
+- Todos os containers principais ficaram healthy apos a correcao.
+- O script executou `docker compose down -v` antes da falha, portanto o Redis local da VPS foi recriado. Como Redis e cache/estado operacional volatil, o servico voltou healthy, mas esta rotina precisa ser endurecida antes do proximo deploy.
+
+Follow-up obrigatorio:
+
+- Corrigir o deploy script para nunca sobrescrever `.env` remoto com template incompleto.
+- Remover `down -v` da rotina padrao de deploy; usar backup/preflight de env e rollback.
+- Revisar containers orfaos `leaf-websocket-gateway-2` e `leaf-websocket-gateway-3` em ticket separado antes de remover.
+- Validar Universal Links/App Links em iOS/Android reais apos nova build nativa quando aplicavel.
