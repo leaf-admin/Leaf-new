@@ -212,3 +212,44 @@ Follow-up obrigatorio:
 - Remover `down -v` da rotina padrao de deploy; usar backup/preflight de env e rollback.
 - Revisar containers orfaos `leaf-websocket-gateway-2` e `leaf-websocket-gateway-3` em ticket separado antes de remover.
 - Validar Universal Links/App Links em iOS/Android reais apos nova build nativa quando aplicavel.
+
+## Gate 5 - Deploy Contabo sem perda de env/volume
+
+Status: patch implementado e validado estaticamente; pendente exercitar no proximo deploy real.
+
+Problema enderecado:
+
+- O script de deploy copiava `.env.production` local para `/opt/leaf-app/.env` sempre que o arquivo existia.
+- Em seguida executava `docker compose down -v`, removendo volumes antes de validar se o runtime subiria novamente.
+- Essa combinacao permitia indisponibilidade operacional se o `.env.production` local estivesse incompleto.
+
+Ajuste aplicado:
+
+- `DEPLOY_COPY_LOCAL_ENV=false` passa a ser o comportamento padrao.
+- O `.env` remoto existente e preservado por padrao.
+- Sobrescrever o `.env` remoto agora exige `DEPLOY_COPY_LOCAL_ENV=true`.
+- Quando houver sobrescrita explicita, o script valida `.env.production` local e cria backup remoto antes do envio.
+- Antes de tocar containers, o script valida no remoto as chaves obrigatorias:
+  - `REDIS_PASSWORD`
+  - `CORS_ORIGIN`
+  - `JWT_SECRET`
+- Removido `docker compose down -v` do fluxo padrao.
+- O restart passa a usar `docker compose up -d` sem apagar volumes.
+
+Validacoes executadas:
+
+- `bash -n leaf-websocket-backend/scripts/deploy-hostinger-docker.sh`
+- `rg` comprovando ausencia de `down -v`.
+- SSH read-only em `api.leaf.app.br` confirmando `.env` remoto com `REDIS_PASSWORD`, `CORS_ORIGIN` e `JWT_SECRET`.
+- `git diff --check`
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`
+
+Proximo passo:
+
+- No proximo deploy Contabo, usar o script endurecido e confirmar que:
+  - o `.env` remoto foi preservado;
+  - Redis nao perdeu volume;
+  - containers subiram sem necessidade de restauracao manual;
+  - health publico e socket continuaram saudaveis.

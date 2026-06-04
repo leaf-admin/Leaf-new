@@ -15,6 +15,8 @@ CHECK_RUNTIME_PARITY="${CHECK_RUNTIME_PARITY:-true}"
 PUBLIC_API_URL="${PUBLIC_API_URL:-https://api.leaf.app.br}"
 PUBLIC_SOCKET_URL="${PUBLIC_SOCKET_URL:-https://socket.leaf.app.br}"
 WOOVI_WEBHOOK_PUBLIC_URL="${WOOVI_WEBHOOK_PUBLIC_URL:-$PUBLIC_API_URL/api/woovi/webhook}"
+DEPLOY_COPY_LOCAL_ENV="${DEPLOY_COPY_LOCAL_ENV:-false}"
+REQUIRED_ENV_KEYS=("REDIS_PASSWORD" "CORS_ORIGIN" "JWT_SECRET")
 
 # Cores
 RED='\033[0;31m'
@@ -28,7 +30,79 @@ echo "=========================================="
 echo -e "📍 Host: ${YELLOW}${VPS_IP:-"não configurado"}${NC}"
 echo -e "🔑 Key: ${YELLOW}${VPS_SSH_KEY:-"None"}${NC}"
 echo -e "📁 Diretório: ${YELLOW}$APP_DIR${NC}"
+echo -e "📝 Copiar .env local: ${YELLOW}$DEPLOY_COPY_LOCAL_ENV${NC}"
 echo ""
+
+validate_local_env_file() {
+    local env_file="$1"
+    local missing=()
+
+    if [ ! -f "$env_file" ]; then
+        echo -e "${RED}❌ Arquivo de env local não encontrado: $env_file${NC}"
+        return 1
+    fi
+
+    for key in "${REQUIRED_ENV_KEYS[@]}"; do
+        local value
+        value="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n1 | cut -d '=' -f2- || true)"
+        if [ -z "$value" ] || [[ "$value" =~ ^(CHANGE_ME|TODO|TEMPLATE|example|placeholder)$ ]]; then
+            missing+=("$key")
+        fi
+    done
+
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo -e "${RED}❌ Env local inválido em $env_file. Variáveis ausentes/vazias: ${missing[*]}${NC}"
+        return 1
+    fi
+
+    return 0
+}
+
+validate_remote_env_file() {
+    echo -e "${BLUE}🧪 Validando .env remoto antes de tocar containers...${NC}"
+    local required_keys="${REQUIRED_ENV_KEYS[*]}"
+
+    ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" << EOF
+        set -e
+        cd $APP_DIR
+        if [ ! -s .env ]; then
+            echo "❌ /opt/leaf-app/.env ausente ou vazio"
+            exit 1
+        fi
+        missing=""
+        for key in $required_keys; do
+            value="\$(grep -E "^\${key}=" .env 2>/dev/null | head -n1 | cut -d '=' -f2- || true)"
+            if [ -z "\$value" ]; then
+                missing="\$missing \$key"
+            fi
+        done
+        if [ -n "\$missing" ]; then
+            echo "❌ Variáveis obrigatórias ausentes/vazias no .env remoto:\$missing"
+            exit 1
+        fi
+        echo "✅ .env remoto válido para: $required_keys"
+EOF
+}
+
+backup_remote_env_if_exists() {
+    echo -e "${BLUE}🧷 Criando backup remoto do .env, se existir...${NC}"
+    ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" << EOF
+        set -e
+        mkdir -p $APP_DIR/env-backups
+        if [ -s $APP_DIR/.env ]; then
+            backup_path="$APP_DIR/env-backups/.env.\$(date +%Y%m%d-%H%M%S).bak"
+            cp $APP_DIR/.env "\$backup_path"
+            chmod 600 "\$backup_path" || true
+            echo "✅ Backup criado em \$backup_path"
+        else
+            echo "ℹ️  Nenhum .env remoto existente para backup"
+        fi
+EOF
+}
+
+remote_env_exists() {
+    ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" "[ -s '$APP_DIR/.env' ]"
+}
 
 # ===== FUNÇÃO: Verificar pré-requisitos =====
 check_prerequisites() {
@@ -143,18 +217,6 @@ EOF
 copy_files() {
     echo -e "${BLUE}📦 Copiando arquivos para VPS...${NC}"
     
-    # Criar arquivo .env de exemplo se não existir
-    if [ ! -f ".env.production" ]; then
-        echo -e "${YELLOW}⚠️  .env.production não encontrado, usando template...${NC}"
-        if [ -f ".env.production.template" ]; then
-            cp .env.production.template .env.production
-            echo -e "${GREEN}✅ .env.production criado a partir do template${NC}"
-        else
-            echo -e "${YELLOW}⚠️  Template não encontrado, continuando sem .env.production${NC}"
-            echo -e "${YELLOW}   Você precisará criar manualmente na VPS${NC}"
-        fi
-    fi
-    
     # Copiar arquivos essenciais
     echo "📤 Copiando arquivos..."
     scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null docker-compose.hostinger.yml "$VPS_USER@$VPS_IP:$APP_DIR/docker-compose.yml"
@@ -163,14 +225,23 @@ copy_files() {
     scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null package-lock.json "$VPS_USER@$VPS_IP:$APP_DIR/" 2>/dev/null || echo "⚠️  package-lock.json não encontrado, continuando..."
     scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null nginx.conf "$VPS_USER@$VPS_IP:$APP_DIR/"
     
-    # Copiar .env se existir
-    if [ -f ".env.production" ]; then
-        echo -e "${BLUE}📝 Copiando .env.production...${NC}"
+    # Preservar .env remoto por padrão. Sobrescrita local exige flag explícita.
+    if [ "$DEPLOY_COPY_LOCAL_ENV" = "true" ]; then
+        validate_local_env_file ".env.production"
+        backup_remote_env_if_exists
+        echo -e "${BLUE}📝 Copiando .env.production validado para a VPS...${NC}"
         scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null .env.production "$VPS_USER@$VPS_IP:$APP_DIR/.env"
-        echo "✅ .env copiado"
+        echo "✅ .env remoto atualizado a partir de .env.production"
+    elif remote_env_exists; then
+        echo -e "${GREEN}✅ Preservando .env remoto existente${NC}"
     else
-        echo -e "${YELLOW}⚠️  .env.production não encontrado, você precisará criar manualmente${NC}"
+        echo -e "${YELLOW}⚠️  .env remoto não existe. Tentando bootstrap com .env.production validado...${NC}"
+        validate_local_env_file ".env.production"
+        scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null .env.production "$VPS_USER@$VPS_IP:$APP_DIR/.env"
+        echo "✅ .env remoto criado a partir de .env.production"
     fi
+
+    validate_remote_env_file
     
     # Copiar firebase-credentials.json se existir
     if [ -f "firebase-credentials.json" ]; then
@@ -245,21 +316,18 @@ EOF
 # ===== FUNÇÃO: Build e iniciar containers =====
 build_and_start() {
     echo -e "${BLUE}🔨 Construindo e iniciando containers...${NC}"
+    validate_remote_env_file
     
     ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" << EOF
         cd $APP_DIR
-        
-        # Parar containers existentes
-        echo "🛑 Parando containers existentes..."
-        docker compose down -v 2>/dev/null || docker-compose down -v 2>/dev/null || true
-        
+
         # Construir imagens
         echo "🔨 Construindo imagens..."
         echo "   ⏳ Isso pode levar alguns minutos..."
         docker compose build --no-cache 2>&1 | while IFS= read -r line; do echo "   $line"; done || docker-compose build --no-cache 2>&1 | while IFS= read -r line; do echo "   $line"; done
         
         # Iniciar containers
-        echo "🚀 Iniciando containers..."
+        echo "🚀 Iniciando containers sem apagar volumes..."
         docker compose up -d 2>&1 || docker-compose up -d 2>&1
         
         # Aguardar inicialização
