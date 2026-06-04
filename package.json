@@ -22,6 +22,7 @@
     "security:scan": "node scripts/maintenance/security/scan-secrets.cjs",
     "prelaunch:copy": "node scripts/prelaunch/assert-onboarding-copy.cjs",
     "prelaunch:testids": "node scripts/prelaunch/assert-mobile-testids.cjs",
+    "prelaunch:app-links": "node scripts/prelaunch/assert-app-links-contract.cjs",
     "prelaunch:audit": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode audit --no-strict",
     "prelaunch:full": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode full",
     "prelaunch:rides": "node scripts/prelaunch/run-prelaunch-suite.cjs --mode rides --rides 10",

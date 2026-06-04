@@ -349,7 +349,7 @@ const appLinking = {
       RobotaxiPrototypeRating: 'robotaxi/rating',
       RobotaxiPrototypeComplain: 'robotaxi/complain',
       RobotaxiPrototypeShareTrip: 'robotaxi/trip/share',
-      RobotaxiPrototypePublicTracking: 'robotaxi/trip/public/:tripId',
+      RobotaxiPrototypePublicTracking: 'viagem/:tripId',
       RobotaxiPrototypeInvites: 'robotaxi/invites',
       Referral: {
         path: 'convite/:inviteCode',

@@ -253,7 +253,9 @@ module.exports = {
                     { scheme: "https", host: "leaf.app.br", pathPrefix: "/convite" },
                     { scheme: "https", host: "www.leaf.app.br", pathPrefix: "/convite" },
                     { scheme: "https", host: "leaf.app.br", pathPrefix: "/motorista/convite" },
-                    { scheme: "https", host: "www.leaf.app.br", pathPrefix: "/motorista/convite" }
+                    { scheme: "https", host: "www.leaf.app.br", pathPrefix: "/motorista/convite" },
+                    { scheme: "https", host: "leaf.app.br", pathPrefix: "/viagem" },
+                    { scheme: "https", host: "www.leaf.app.br", pathPrefix: "/viagem" }
                 ],
                 category: ["BROWSABLE", "DEFAULT"]
             }

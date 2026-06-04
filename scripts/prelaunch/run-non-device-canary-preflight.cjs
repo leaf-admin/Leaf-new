@@ -173,6 +173,11 @@ function buildGates(options) {
       command: 'npm run prelaunch:testids',
     },
     {
+      id: 'app_links_contract',
+      title: 'Universal Links e App Links publicos',
+      command: 'npm run prelaunch:app-links',
+    },
+    {
       id: 'mobile_unit',
       title: 'Mobile unit tests',
       command: 'npm run test:mobile',

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acompanhar viagem | Leaf</title>
+  <meta name="description" content="Abra o link de acompanhamento da sua viagem Leaf.">
+  <meta property="og:title" content="Acompanhar viagem Leaf">
+  <meta property="og:description" content="Veja o status da viagem compartilhada com você.">
+  <meta property="og:url" content="https://leaf.app.br/viagem/">
+  <link rel="canonical" href="https://leaf.app.br/viagem/">
+  <link rel="stylesheet" href="../assets/invite-style.css">
+</head>
+<body>
+  <main class="invite-shell">
+    <section class="invite-card">
+      <p class="eyebrow">Leaf</p>
+      <h1>Acompanhe a viagem com segurança.</h1>
+      <p class="lead">
+        Se a Leaf estiver instalada, o link abre direto no app. Caso contrário, use este endereço quando receber o convite de acompanhamento.
+      </p>
+      <a id="open-app-link" class="primary-link" href="leafapp://viagem/">Abrir no app</a>
+      <p class="helper">
+        O acompanhamento público mostra apenas dados seguros da viagem compartilhada.
+      </p>
+    </section>
+  </main>
+  <script>
+    (function () {
+      var pathParts = window.location.pathname.split('/').filter(Boolean);
+      var tripId = pathParts.length > 1 ? pathParts[pathParts.length - 1] : '';
+      if (tripId) {
+        document.getElementById('open-app-link').setAttribute('href', 'leafapp://viagem/' + encodeURIComponent(tripId));
+      }
+    })();
+  </script>
+</body>
+</html>
