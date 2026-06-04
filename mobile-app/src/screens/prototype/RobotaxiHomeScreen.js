@@ -1159,6 +1159,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [homePickupCoordinate, setHomePickupCoordinate] = useState(null);
   const [homePickupAddress, setHomePickupAddress] = useState('');
   const [cachedHomePickupAddress, setCachedHomePickupAddress] = useState('');
+  const [cachedHomePickupQuery, setCachedHomePickupQuery] = useState('');
   const [homePickupAdjustedOnMap, setHomePickupAdjustedOnMap] = useState(false);
   const homePickupDraftBeforePickerRef = useRef(null);
   const [homePickupPickerCardHeight, setHomePickupPickerCardHeight] = useState(HOME_PICKUP_PICKER_FALLBACK_HEIGHT);
@@ -1239,10 +1240,26 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     return DEFAULT_USER_COORDINATE;
   }, [currentCoordinate, homePickupCoordinate]);
-  const currentPickupAddressCandidate = useMemo(
-    () => resolvePickupAddressCandidate(cachedHomePickupAddress, currentAddress),
-    [cachedHomePickupAddress, currentAddress],
-  );
+  const currentPickupAddressCandidate = useMemo(() => {
+    const query = resolvePickupAddressCandidate(currentAddress);
+    const queryLabel = formatPickupStreetNumberLabel(query, '');
+    if (query && hasStreetNumber(queryLabel)) {
+      return query;
+    }
+
+    const normalizedCachedQuery =
+      normalizeLocalPlacesCacheQuery(cachedHomePickupQuery);
+    const normalizedCurrentQuery = normalizeLocalPlacesCacheQuery(query);
+    const cacheMatchesCurrentQuery =
+      normalizedCachedQuery &&
+      normalizedCurrentQuery &&
+      normalizedCachedQuery === normalizedCurrentQuery;
+
+    return resolvePickupAddressCandidate(
+      cacheMatchesCurrentQuery ? cachedHomePickupAddress : '',
+      query,
+    );
+  }, [cachedHomePickupAddress, cachedHomePickupQuery, currentAddress]);
   const effectiveHomePickupAddress = useMemo(() => {
     if (homePickupAdjustedOnMap && homePickupAddress) {
       return homePickupAddress;
@@ -1386,6 +1403,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const currentLabel = formatPickupStreetNumberLabel(query, '');
     if (!query || hasStreetNumber(currentLabel)) {
       setCachedHomePickupAddress(previous => (previous ? '' : previous));
+      setCachedHomePickupQuery(previous => (previous ? '' : previous));
       return undefined;
     }
 
@@ -1405,13 +1423,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
         const cachedAddress = resolveCachedPickupAddress(place);
         const cachedLabel = formatPickupStreetNumberLabel(cachedAddress, '');
-        setCachedHomePickupAddress(
-          cachedAddress && hasStreetNumber(cachedLabel) ? cachedAddress : ''
-        );
+        const nextCachedAddress =
+          cachedAddress && hasStreetNumber(cachedLabel) ? cachedAddress : '';
+        setCachedHomePickupAddress(nextCachedAddress);
+        setCachedHomePickupQuery(nextCachedAddress ? query : '');
       })
       .catch(() => {
         if (!cancelled) {
           setCachedHomePickupAddress('');
+          setCachedHomePickupQuery('');
         }
       });
 

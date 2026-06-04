@@ -102,6 +102,8 @@ const PASSENGER_LOCATION_STARTED_HEARTBEAT_MS = 3000;
 const PASSENGER_LOCATION_MIN_SEND_GAP_MS = 900;
 const PASSENGER_LOCATION_MIN_MOVEMENT_METERS = 6;
 const PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG = 8;
+const PASSENGER_ADDRESS_REFRESH_MIN_INTERVAL_MS = 45000;
+const PASSENGER_ADDRESS_REFRESH_MIN_MOVEMENT_METERS = 35;
 const MAX_DIRECTIONS_REQUESTS_PER_BOOKING = Math.max(
   1,
   Number.parseInt(
@@ -514,6 +516,9 @@ let runtimeLastPassengerHeartbeatBookingId = null;
 let runtimeLastPassengerHeartbeatStatus = "";
 let runtimeLastPassengerHeartbeatLocation = null;
 let runtimeLastPassengerHeartbeatHeading = 0;
+let runtimeLastPassengerAddressRefreshAt = 0;
+let runtimeLastPassengerAddressRefreshCoordinate = null;
+let runtimePassengerAddressRefreshInFlight = false;
 let runtimeSessionPersistTimer = null;
 let runtimeActivationRemoteSyncTimer = null;
 let runtimeBoardingCountdownTimer = null;
@@ -542,6 +547,16 @@ let runtimeDestinationSearchSessionLastUsedAt = 0;
 let runtimeDestinationSearchLastCacheKey = "";
 let runtimeDestinationSearchLastResults = [];
 let runtimeDestinationSearchLastResultsAt = 0;
+
+function formatReverseGeocodeAddress(firstResult = null) {
+  if (!firstResult || typeof firstResult !== "object") {
+    return "";
+  }
+
+  return [firstResult.name, firstResult.street, firstResult.city]
+    .filter(Boolean)
+    .join(", ");
+}
 
 function notifyRuntimeEffectOwnerChanged() {
   runtimeEffectOwnerListeners.forEach((listener) => {
@@ -2075,6 +2090,7 @@ async function startForegroundLocationWatcher() {
 
           return Object.keys(patch).length > 0 ? patch : null;
         });
+        refreshPassengerCurrentAddressForCoordinate(nextCoordinate);
       },
     );
   } catch (error) {
@@ -2085,6 +2101,108 @@ async function startForegroundLocationWatcher() {
     runtimeForegroundLocationWatcherStarted = false;
     runtimeForegroundLocationSubscription = null;
   }
+}
+
+function shouldRefreshPassengerCurrentAddress(coordinate) {
+  if (!coordinate) {
+    return false;
+  }
+
+  if (runtimePassengerAddressRefreshInFlight) {
+    return false;
+  }
+
+  if (normalizeRuntimeRole(runtimeState.activeRole) !== "customer") {
+    return false;
+  }
+
+  const normalizedStatus = String(runtimeState.bookingStatus || "")
+    .trim()
+    .toLowerCase();
+  if (
+    runtimeState.activeBookingId ||
+    (normalizedStatus && normalizedStatus !== "idle")
+  ) {
+    return false;
+  }
+
+  const hasAddress = Boolean(String(runtimeState.currentAddress || "").trim());
+  const now = Date.now();
+  const movedMeters = calculateDistanceMeters(
+    runtimeLastPassengerAddressRefreshCoordinate,
+    coordinate,
+  );
+  const hasMovedEnough =
+    !runtimeLastPassengerAddressRefreshCoordinate ||
+    !Number.isFinite(movedMeters) ||
+    movedMeters >= PASSENGER_ADDRESS_REFRESH_MIN_MOVEMENT_METERS;
+  const canRefreshByTime =
+    !runtimeLastPassengerAddressRefreshAt ||
+    now - runtimeLastPassengerAddressRefreshAt >=
+      PASSENGER_ADDRESS_REFRESH_MIN_INTERVAL_MS;
+
+  return !hasAddress || (hasMovedEnough && canRefreshByTime);
+}
+
+function refreshPassengerCurrentAddressForCoordinate(coordinate) {
+  if (!shouldRefreshPassengerCurrentAddress(coordinate)) {
+    return;
+  }
+
+  runtimePassengerAddressRefreshInFlight = true;
+  runtimeLastPassengerAddressRefreshAt = Date.now();
+  runtimeLastPassengerAddressRefreshCoordinate = {
+    latitude: coordinate.latitude,
+    longitude: coordinate.longitude,
+  };
+
+  Location.reverseGeocodeAsync({
+    latitude: Number(coordinate.latitude),
+    longitude: Number(coordinate.longitude),
+  })
+    .then((reverse) => {
+      const first =
+        Array.isArray(reverse) && reverse.length > 0 ? reverse[0] : null;
+      const refreshedAddress = formatReverseGeocodeAddress(first);
+      if (!refreshedAddress) {
+        return;
+      }
+
+      setRuntimeState((previous) => {
+        if (normalizeRuntimeRole(previous.activeRole) !== "customer") {
+          return null;
+        }
+
+        const normalizedStatus = String(previous.bookingStatus || "")
+          .trim()
+          .toLowerCase();
+        if (
+          previous.activeBookingId ||
+          (normalizedStatus && normalizedStatus !== "idle")
+        ) {
+          return null;
+        }
+
+        const currentMeters = calculateDistanceMeters(
+          previous.currentCoordinate,
+          coordinate,
+        );
+        if (Number.isFinite(currentMeters) && currentMeters > 120) {
+          return null;
+        }
+
+        return { currentAddress: refreshedAddress };
+      });
+    })
+    .catch((error) => {
+      Logger.warn(
+        "⚠️ [PrototypeRuntime] Falha ao atualizar endereço atual do passageiro:",
+        error?.message || error,
+      );
+    })
+    .finally(() => {
+      runtimePassengerAddressRefreshInFlight = false;
+    });
 }
 
 function stopForegroundLocationWatcher() {
@@ -6327,11 +6445,7 @@ async function ensureCurrentLocation(options = {}) {
         });
         const first =
           Array.isArray(reverse) && reverse.length > 0 ? reverse[0] : null;
-        if (first) {
-          currentAddress = [first.name, first.street, first.city]
-            .filter(Boolean)
-            .join(", ");
-        }
+        currentAddress = formatReverseGeocodeAddress(first) || currentAddress;
       } catch (reverseError) {
         Logger.warn(
           "⚠️ [PrototypeRuntime] Reverse geocode indisponível:",
@@ -10030,7 +10144,8 @@ async function bootstrapRuntime(profile) {
     setRuntimeState({ initializing: true });
     try {
       const bootstrapRole = resolveRuntimeRole(profile);
-      const shouldForceFreshBootstrapLocation = bootstrapRole === "driver";
+      const shouldForceFreshBootstrapLocation =
+        bootstrapRole === "driver" || bootstrapRole === "customer";
       const initialLocationPromise = ensureCurrentLocation({
         allowCurrentPosition:
           shouldForceFreshBootstrapLocation || Platform.OS !== "android",
@@ -15264,9 +15379,7 @@ export function usePrototypeRideRuntime() {
               return;
             }
 
-            const refreshedAddress = [first.name, first.street, first.city]
-              .filter(Boolean)
-              .join(", ");
+            const refreshedAddress = formatReverseGeocodeAddress(first);
 
             if (refreshedAddress) {
               setRuntimeState({
