@@ -64,9 +64,14 @@ O backend ja possui:
 - **Suporte:** falha de OTP precisa aparecer no dashboard para nao virar atendimento cego.
 - **Review:** instrucoes de loja precisam sempre informar o OTP correto dos usuarios de teste.
 
-## Proxima decisao
+## Fechamento operacional
 
-Manter `LEA-7` aberto ate o teste pela Play Internal Testing. Depois disso:
+Esta decisao fecha o escopo de `LEA-9`: a Leaf mantem Firebase Phone Auth como caminho principal, com OTP proprio apenas como fallback controlado para review/testes enquanto nao houver evidencia de reCAPTCHA em instalacao pela Play.
 
-- se nao houver reCAPTCHA, fechar `LEA-9` como Firebase otimizado + fallback controlado;
-- se houver reCAPTCHA, abrir execucao para OTP proprio completo com provedor, rate limit e observabilidade.
+O `LEA-7` permanece separado como validacao pratica pela Play Internal Testing:
+
+- sem reCAPTCHA pela Play: manter o caminho atual;
+- com reCAPTCHA pela Play: revisar SHA-1/SHA-256, Play App Signing, Play Integrity e package `br.com.leaf.ride`;
+- persistindo mesmo com configuracao correta: abrir nova execucao para OTP proprio completo com provedor, rate limit e observabilidade.
+
+Nenhuma mudanca de backend, mobile ou build e necessaria para este fechamento.
