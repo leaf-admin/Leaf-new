@@ -64,7 +64,14 @@ jest.mock('../../../services/daily-earnings-report-service', () => ({
 }));
 
 jest.mock('../../../utils/logger', () => ({
+  logger: {
+    debug: jest.fn(),
+    error: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+  },
   logError: jest.fn(),
+  logRedis: jest.fn(),
 }));
 
 const opsRoutes = require('../../../routes/ops');
