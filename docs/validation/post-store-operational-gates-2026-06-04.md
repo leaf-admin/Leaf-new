@@ -215,7 +215,7 @@ Follow-up obrigatorio:
 
 ## Gate 5 - Deploy Contabo sem perda de env/volume
 
-Status: patch implementado e validado estaticamente; pendente exercitar no proximo deploy real.
+Status: deploy real aprovado na Contabo.
 
 Problema enderecado:
 
@@ -245,11 +245,23 @@ Validacoes executadas:
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`
 - `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`
+- Deploy real via:
+  - `CONTABO_HOST=api.leaf.app.br SSH_KEY_PATH=/Users/izaakdias/.ssh/leaf_contabo_20260412_ed25519 CHECK_RUNTIME_PARITY=true ./scripts/deploy-contabo-docker.sh`
+- O deploy executado com `DEPLOY_COPY_LOCAL_ENV=false` confirmou:
+  - `.env` remoto preservado;
+  - `.env` remoto validado antes de tocar containers;
+  - `docker compose up -d` executado sem `down -v`;
+  - Redis manteve volume/AOF e carregou `10998` chaves no boot observado;
+  - Redis, WebSocket, billing-worker e sideeffects-worker ficaram healthy;
+  - runtime local/remoto em paridade no pos-deploy.
+- Validacao publica pos-deploy:
+  - hash do `.env` remoto permaneceu `f841e30cc58e8c6a0174e7a4fca5b9b1cccb687d78294c2f19f5a41510944332`;
+  - `https://api.leaf.app.br/health` respondeu; Redis, WebSocket e System healthy;
+  - Firebase ficou em warning por latencia momentanea de Firestore pos-restart, com Realtime DB healthy;
+  - `socket.io-client` conectou em `https://socket.leaf.app.br` via websocket.
 
-Proximo passo:
+Observacoes operacionais:
 
-- No proximo deploy Contabo, usar o script endurecido e confirmar que:
-  - o `.env` remoto foi preservado;
-  - Redis nao perdeu volume;
-  - containers subiram sem necessidade de restauracao manual;
-  - health publico e socket continuaram saudaveis.
+- A VPS informa 19 updates pendentes, 2 de seguranca, e `System restart required`; tratar em janela separada.
+- Containers orfaos `leaf-queue-worker`, `leaf-websocket-gateway-2` e `leaf-websocket-gateway-3` continuam rodando e nao foram removidos neste gate.
+- Compose segue emitindo warnings de env AWS liveness vazias; nao bloqueia o deploy atual, mas deve ser tratado na frente de KYC/liveness.

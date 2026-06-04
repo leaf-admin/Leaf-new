@@ -356,10 +356,10 @@ check_health() {
         
         # Verificar Redis
         echo "🔴 Verificando Redis..."
-        REDIS_PASSWORD_VALUE="$(grep -E '^REDIS_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d '=' -f2-)"
-        if [ -z "$REDIS_PASSWORD_VALUE" ]; then
+        REDIS_PASSWORD_VALUE="\$(grep -E '^REDIS_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d '=' -f2-)"
+        if [ -z "\$REDIS_PASSWORD_VALUE" ]; then
             echo "❌ REDIS_PASSWORD não encontrado no .env"
-        elif docker compose exec -T redis env REDISCLI_AUTH="$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG || docker-compose exec -T redis env REDISCLI_AUTH="$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG; then
+        elif docker compose exec -T redis env REDISCLI_AUTH="\$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG || docker-compose exec -T redis env REDISCLI_AUTH="\$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG; then
             echo "✅ Redis está respondendo"
         else
             echo "❌ Redis não está respondendo"
