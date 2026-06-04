@@ -12,6 +12,10 @@ jest.mock('firebase-admin', () => ({
   credential: { cert: jest.fn(() => ({})) }
 }));
 
+jest.mock('fs', () => ({
+  existsSync: jest.fn(() => false)
+}));
+
 jest.mock('../../../utils/logger', () => ({
   logger: {
     info: jest.fn(),
@@ -57,6 +61,26 @@ describe('fcm-service', () => {
     expect(typeof fcmService.saveUserFCMToken).toBe('function');
     expect(typeof fcmService.sendNotificationToUser).toBe('function');
     expect(typeof fcmService.destroy).toBe('function');
+  });
+
+  test('initialize should prefer configured Firebase credentials path', async () => {
+    const fs = require('fs');
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = '/app/firebase-credentials.json';
+    fs.existsSync.mockImplementation((candidate) => candidate === '/app/firebase-credentials.json');
+    admin.apps = [];
+    admin.initializeApp.mockClear();
+    admin.credential.cert.mockClear();
+
+    fcmService.isInitialized = false;
+    await fcmService.initialize();
+
+    expect(admin.credential.cert).toHaveBeenCalledWith('/app/firebase-credentials.json');
+    expect(admin.initializeApp).toHaveBeenCalledWith(expect.objectContaining({
+      credential: expect.any(Object)
+    }));
+    expect(fcmService.isInitialized).toBe(true);
+
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
   });
 
   test('saveUserFCMToken should persist token in redis', async () => {

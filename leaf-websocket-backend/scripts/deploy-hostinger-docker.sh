@@ -247,6 +247,8 @@ copy_files() {
     if [ -f "firebase-credentials.json" ]; then
         echo -e "${BLUE}🔥 Copiando firebase-credentials.json...${NC}"
         scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null firebase-credentials.json "$VPS_USER@$VPS_IP:$APP_DIR/"
+        ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$VPS_USER@$VPS_IP" \
+            "chmod 0644 '$APP_DIR/firebase-credentials.json'"
         echo "✅ firebase-credentials.json copiado"
     else
         echo -e "${YELLOW}⚠️  firebase-credentials.json não encontrado${NC}"

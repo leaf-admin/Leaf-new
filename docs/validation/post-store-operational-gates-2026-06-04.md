@@ -348,6 +348,94 @@ Resultados pagamentos/saldo:
 - `realSandbox.ready=false` porque o runtime publico atual esta em producao.
 - Nenhum bypass ativo no runtime flags.
 - Health publico: API healthy; Redis, Firebase, WebSocket e System healthy.
+
+## Gate 7 - Android device conectado: LEA-7, LEA-16 e LEA-85
+
+Data/hora: 2026-06-04, device Android fisico conectado por USB.
+
+Device/build:
+
+- ADB: `/Users/izaakdias/Android/Sdk/platform-tools/adb`.
+- Device: `24117RN76L`, modelo `24117RN76L`, product `tanzanite_global`.
+- App: `br.com.leaf.ride`.
+- Versao instalada: `1.0.2`, `versionCode=113`.
+- Origem da instalacao: `installerPackageName=null`, `initiatingPackageName=com.android.shell`.
+- Usuario logado observado no backend: `juYe4nF4TyOzFTnIzW91Qo0sXtz1`, phone `+5521102938475`, tipo `customer`.
+
+### LEA-16 - Push FCM Android
+
+Status Android passageiro: validado.
+
+Evidencias:
+
+- Token FCM real encontrado no Redis para `user:juYe4nF4TyOzFTnIzW91Qo0sXtz1`.
+- `fcm_tokens:juYe4nF4TyOzFTnIzW91Qo0sXtz1` tinha `HLEN=4`; token ativo com `deviceInfo.platform=android`, `authenticated=true`, `isActive=true`.
+- Primeiro disparo apos deploy:
+  - Firebase Admin inicializou em `50ms`;
+  - FCM Service inicializou em `50ms`;
+  - resposta Firebase: `success=true`;
+  - `messageId=projects/leaf-reactnative/messages/0:1780597844190179%1569103d1569103d`;
+  - device recebeu `com.google.android.c2dm.intent.RECEIVE`;
+  - `dumpsys notification` mostrou notificacao `Leaf - teste de notificacao` para `br.com.leaf.ride`.
+- Segundo disparo no canal real `ride_status`:
+  - Firebase Admin inicializou em `82ms`;
+  - FCM Service inicializou em `83ms`;
+  - resposta Firebase: `success=true`;
+  - `messageId=projects/leaf-reactnative/messages/0:1780597907633008%1569103d1569103d`;
+  - `dumpsys notification` mostrou `Notification(channel=ride_status)` e `effectiveNotificationChannel=NotificationChannel{mId='ride_status'...}`;
+  - `logcat` mostrou `FirebaseMessaging`, `NotificationProvider` e contador do app Leaf atualizado.
+
+Bug corrigido durante a validacao:
+
+- O backend em producao montava a credencial em `/app/firebase-credentials.json`, mas `services/fcm-service.js` buscava o caminho legado em `mobile-app/config/...`.
+- Apos corrigir a resolucao por `FIREBASE_SERVICE_ACCOUNT_PATH`/`GOOGLE_APPLICATION_CREDENTIALS`, o erro mudou para `EACCES` porque `firebase-credentials.json` estava `700` na VPS.
+- O deploy agora aplica `chmod 0644` no arquivo remoto apos o `scp`, mantendo o mount read-only no container.
+- Deploy Contabo concluido com runtime em paridade e containers healthy.
+
+Pendencias para fechar LEA-16 inteiro:
+
+- Validar push em usuario motorista Android real.
+- Validar push em iOS real quando o iPhone estiver conectado.
+- Validar refresh de token FCM em pelo menos um device real.
+
+### LEA-85 - Android App Links
+
+Status Android: bloqueado/falhou na build instalada no device.
+
+URLs testadas por `adb shell am start -W -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d`:
+
+- `https://leaf.app.br/convite/teste-lea85`
+- `https://leaf.app.br/motorista/convite/teste-lea85`
+- `https://leaf.app.br/viagem/teste-lea85`
+
+Resultado:
+
+- As tres URLs abriram `com.android.chrome/org.chromium.chrome.browser.ChromeTabbedActivity`, nao `br.com.leaf.ride`.
+- `dumpsys package br.com.leaf.ride` na build instalada nao mostrou intent filters HTTPS para `leaf.app.br`/`www.leaf.app.br`; mostrou apenas schemes como `leafapp`, `exp+leafapp-reactnative`, `br.com.leaf.ride` e intents Firebase.
+- A configuracao versionada atual em `mobile-app/app.config.js` contem os filtros de App Links para `leaf.app.br` e `www.leaf.app.br`.
+- A arvore nativa local `mobile-app/android/app/src/main/AndroidManifest.xml` tambem contem os filtros HTTPS gerados.
+
+Conclusao:
+
+- Nao fechar `LEA-85` com este device/build.
+- A evidencia sugere que a build instalada nao contem o Manifest nativo atual ou nao veio pelo canal Play/App Links esperado.
+- Proxima validacao deve usar build instalada via Play Internal Testing ou nova release local confirmando o Manifest final empacotado.
+
+### LEA-7 - OTP Android via Play Internal Testing
+
+Status: bloqueado.
+
+Motivo:
+
+- A build do device foi instalada via `adb/shell`, com `installerPackageName=null` e `initiatingPackageName=com.android.shell`.
+- O criterio de aceite de `LEA-7` exige Android instalado pela Play Internal Testing.
+- APK/adb nao serve como evidencia final para comportamento de Firebase Phone Auth/reCAPTCHA no canal Play.
+
+Proxima acao:
+
+- Instalar a build pela Play Internal Testing quando disponivel.
+- Testar OTP Android com usuario de teste correto.
+- Registrar se reCAPTCHA aparece ou nao no canal Play.
 - Socket liveness publico: `alive`.
 - O app consome API Leaf para saldo/saque e nao chama Woovi direto.
 - Saque abaixo de R$ 500,00 considera taxa de R$ 1,00 nos testes backend/mobile.

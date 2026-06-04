@@ -2,6 +2,7 @@ const admin = require('firebase-admin');
 const Redis = require('ioredis');
 const { logger, logStructured } = require('../utils/logger');
 const path = require('path');
+const fs = require('fs');
 const circuitBreakerService = require('./circuit-breaker-service');
 const traceContext = require('../utils/trace-context');
 
@@ -14,6 +15,19 @@ function getDayKey(date = new Date()) {
 function toNumber(value, fallback = 0) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function resolveServiceAccountPath() {
+    const candidates = [
+        process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
+        process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        path.join(__dirname, '..', 'firebase-credentials.json'),
+        path.join(__dirname, '..', '..', 'mobile-app', 'config', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json')
+    ]
+        .map((candidate) => String(candidate || '').trim())
+        .filter(Boolean);
+
+    return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0] || null;
 }
 
 class FCMService {
@@ -76,12 +90,14 @@ class FCMService {
             // Verificar se Firebase Admin já foi inicializado
             const initializedApps = Array.isArray(admin.apps) ? admin.apps : [];
             if (!initializedApps.length) {
-                // Inicializar Firebase Admin se não estiver
-                const serviceAccountPath = path.join(__dirname, '..', '..', 'mobile-app', 'config', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
+                const serviceAccountPath = resolveServiceAccountPath();
 
                 try {
                     if (typeof admin.initializeApp !== 'function') {
                         throw new Error('Firebase Admin initializeApp indisponível');
+                    }
+                    if (!serviceAccountPath) {
+                        throw new Error('Firebase service account path nao configurado');
                     }
                     admin.initializeApp({
                         credential: admin.credential.cert(serviceAccountPath),
