@@ -6,6 +6,7 @@ const healthCheckService = require('./health-check-service');
 const driverApplicationService = require('./driver-application-service');
 const paymentRuntimeProfileService = require('./payment-runtime-profile-service');
 const skuCostMonitorService = require('./backoffice-sku-cost-monitor-service');
+const FCMService = require('./fcm-service');
 const WorkerHealthMonitor = require('../workers/health-monitor');
 const { logStructured } = require('../utils/logger');
 
@@ -72,7 +73,8 @@ function buildDomainHealth({
   opsOverview,
   workerDLQ,
   workerLag,
-  paymentRuntime
+  paymentRuntime,
+  fcmStats
 }) {
   const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
   const lag = toNumber(workerLag?.lag?.lag ?? workerLag?.lag ?? workerLag, 0);
@@ -81,6 +83,10 @@ function buildDomainHealth({
   const pendingDocuments = toNumber(driverOnboardingSummary?.byStatus?.pending, 0);
   const paymentSourceOk = sourceStatus(sources, 'paymentRuntime') === 'ok';
   const redisSourceOk = sourceStatus(sources, 'redis') === 'ok';
+  const fcmSourceOk = sourceStatus(sources, 'fcmStats') === 'ok';
+  const fcmActiveTokens = toNumber(fcmStats?.activeTokens, 0);
+  const fcmFailures = toNumber(fcmStats?.failed, 0);
+  const fcmServiceAvailable = fcmStats?.isServiceAvailable === true;
   const firebaseSourceOk = ['usersStatus', 'ridesToday', 'financialToday', 'driverOnboarding']
     .every((sourceId) => sourceStatus(sources, sourceId) === 'ok');
 
@@ -129,6 +135,17 @@ function buildDomainHealth({
       action: firebaseSourceOk
         ? 'Leituras agregadas responderam.'
         : 'Validar índices e permissões do backend.'
+    },
+    {
+      id: 'push-fcm',
+      label: 'Push/FCM',
+      status: fcmSourceOk && fcmServiceAvailable && fcmFailures === 0 && fcmActiveTokens > 0
+        ? 'healthy'
+        : 'warning',
+      source: 'fcmStats',
+      action: fcmSourceOk
+        ? `${fcmActiveTokens} token(s) ativo(s), ${fcmFailures} falha(s) hoje.`
+        : 'Stats de push indisponíveis; validar serviço FCM e Redis.'
     },
     {
       id: 'support',
@@ -192,7 +209,8 @@ function buildActionItems({
   workerDLQ,
   workerLag,
   paymentRuntime,
-  skuMonitor
+  skuMonitor,
+  fcmStats
 }) {
   const items = [];
   const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
@@ -201,6 +219,10 @@ function buildActionItems({
     + toNumber(opsOverview?.supportQueue?.overdueFirstResponseCount, 0);
   const ticketsWithoutOwner = toNumber(opsOverview?.supportQueue?.ticketsWithoutOwner, 0);
   const pendingDocuments = toNumber(driverOnboardingSummary?.byStatus?.pending, 0);
+  const fcmActiveTokens = toNumber(fcmStats?.activeTokens, 0);
+  const fcmTotalSent = toNumber(fcmStats?.totalSent, 0);
+  const fcmFailures = toNumber(fcmStats?.failed, 0);
+  const fcmSuccessRate = toNumber(fcmStats?.successRate, 100);
 
   for (const source of sources) {
     if (source.status !== 'error') continue;
@@ -240,6 +262,32 @@ function buildActionItems({
       title: 'Documentos aguardando revisão',
       description: `${pendingDocuments} documento(s) de motorista pendente(s).`,
       href: '/drivers/review-queue'
+    });
+  }
+
+  if (fcmStats && fcmStats.isServiceAvailable !== true) {
+    items.push({
+      id: 'push-fcm-unavailable',
+      priority: 'alta',
+      title: 'Push FCM indisponível',
+      description: 'Serviço de push não está inicializado no snapshot operacional.',
+      href: '/notifications'
+    });
+  } else if (fcmActiveTokens === 0) {
+    items.push({
+      id: 'push-fcm-no-tokens',
+      priority: 'media',
+      title: 'Nenhum token push ativo',
+      description: 'Validar registro de token em device real antes do canary.',
+      href: '/notifications'
+    });
+  } else if (fcmTotalSent > 0 && (fcmFailures > 0 || fcmSuccessRate < 95)) {
+    items.push({
+      id: 'push-fcm-failures',
+      priority: fcmSuccessRate < 80 ? 'alta' : 'media',
+      title: 'Falhas de push hoje',
+      description: `${fcmFailures} falha(s), taxa de sucesso ${fcmSuccessRate}%.`,
+      href: '/notifications'
     });
   }
 
@@ -366,6 +414,12 @@ function buildCanaryPack({ status, paymentRuntime, domainHealth, costControls })
         detail: 'Impressões, cliques, CTR, CPM, CPC, conversão e valor contratado.'
       },
       {
+        id: 'push-fcm',
+        label: 'Push/FCM',
+        status: domainStatus('push-fcm') === 'healthy' ? 'ready' : 'attention',
+        detail: 'Tokens, falhas e fallback operacional acompanhados pelo backend.'
+      },
+      {
         id: 'cost-guard',
         label: 'Cost guard',
         status: ['warning', 'danger', 'limit'].includes(firestoreGuard.budgetStatus) ? 'attention' : 'ready',
@@ -434,6 +488,7 @@ class BackofficeCommandCenterService {
     driverApplications = driverApplicationService,
     paymentRuntime = paymentRuntimeProfileService,
     skuCostMonitor = skuCostMonitorService,
+    fcmService = new FCMService(),
     workerHealthMonitor = new WorkerHealthMonitor()
   } = {}) {
     this.redisPool = redis;
@@ -444,6 +499,7 @@ class BackofficeCommandCenterService {
     this.driverApplications = driverApplications;
     this.paymentRuntime = paymentRuntime;
     this.skuCostMonitor = skuCostMonitor;
+    this.fcmService = fcmService;
     this.workerHealthMonitor = workerHealthMonitor;
     this.ttlSeconds = clampNumber(
       process.env.BACKOFFICE_COMMAND_CENTER_TTL_SECONDS,
@@ -554,6 +610,18 @@ class BackofficeCommandCenterService {
         run: () => this.skuCostMonitor.collectUsageSnapshot({})
       },
       {
+        id: 'fcmStats',
+        label: 'Push/FCM',
+        critical: false,
+        run: async () => {
+          const redis = this.getRedis();
+          if (redis) {
+            this.fcmService.setRedis(redis);
+          }
+          return this.fcmService.getServiceStats();
+        }
+      },
+      {
         id: 'redis',
         label: 'Redis/cache',
         critical: false,
@@ -621,6 +689,7 @@ class BackofficeCommandCenterService {
     const workerHealth = this.sourceValue(sources, 'workerHealth', null);
     const workerLag = this.sourceValue(sources, 'workerLag', null);
     const workerDLQ = this.sourceValue(sources, 'workerDLQ', null);
+    const fcmStats = this.sourceValue(sources, 'fcmStats', {});
 
     const gmvCents = toCents(financialToday.totalValue);
     const grossRevenueCents = toCents(operationalRevenue.totalOperationalFee);
@@ -657,7 +726,8 @@ class BackofficeCommandCenterService {
       opsOverview,
       workerDLQ,
       workerLag,
-      paymentRuntime
+      paymentRuntime,
+      fcmStats
     });
     const actionItems = buildActionItems({
       status,
@@ -668,7 +738,8 @@ class BackofficeCommandCenterService {
       workerDLQ,
       workerLag,
       paymentRuntime,
-      skuMonitor
+      skuMonitor,
+      fcmStats
     });
     const baseCostControls = {
       externalPaidApisCalled: false,
@@ -730,6 +801,18 @@ class BackofficeCommandCenterService {
         overdueFirstResponseCount: toNumber(opsOverview?.supportQueue?.overdueFirstResponseCount, 0),
         ticketsWithoutOwner: toNumber(opsOverview?.supportQueue?.ticketsWithoutOwner, 0),
         medianFirstResponseMinutes: opsOverview?.supportQueue?.medianFirstResponseMinutes ?? null
+      },
+      notifications: {
+        activeTokens: toNumber(fcmStats?.activeTokens, 0),
+        totalUsers: toNumber(fcmStats?.totalUsers, 0),
+        totalSentToday: toNumber(fcmStats?.totalSent, 0),
+        successfulToday: toNumber(fcmStats?.successful, 0),
+        failedToday: toNumber(fcmStats?.failed, 0),
+        successRateToday: fcmStats?.successRate ?? null,
+        tokenRegistrationsToday: toNumber(fcmStats?.delivery?.tokenRegistrations, 0),
+        noTokenUsersToday: toNumber(fcmStats?.delivery?.noTokenUsers, 0),
+        invalidTokensRemovedToday: toNumber(fcmStats?.delivery?.invalidTokensRemoved, 0),
+        serviceAvailable: fcmStats?.isServiceAvailable === true
       },
       campaigns: {
         total: toNumber(campaignStats.total, 0),

@@ -5,6 +5,17 @@ const path = require('path');
 const circuitBreakerService = require('./circuit-breaker-service');
 const traceContext = require('../utils/trace-context');
 
+const FCM_METRICS_TTL_SECONDS = 35 * 24 * 60 * 60;
+
+function getDayKey(date = new Date()) {
+    return date.toISOString().slice(0, 10);
+}
+
+function toNumber(value, fallback = 0) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 class FCMService {
     constructor(redis = null) {
         this.redis = redis;
@@ -63,11 +74,15 @@ class FCMService {
         const startTime = Date.now();
         try {
             // Verificar se Firebase Admin já foi inicializado
-            if (!admin.apps.length) {
+            const initializedApps = Array.isArray(admin.apps) ? admin.apps : [];
+            if (!initializedApps.length) {
                 // Inicializar Firebase Admin se não estiver
                 const serviceAccountPath = path.join(__dirname, '..', '..', 'mobile-app', 'config', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
 
                 try {
+                    if (typeof admin.initializeApp !== 'function') {
+                        throw new Error('Firebase Admin initializeApp indisponível');
+                    }
                     admin.initializeApp({
                         credential: admin.credential.cert(serviceAccountPath),
                         databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
@@ -91,7 +106,8 @@ class FCMService {
 
     // Verificar se o serviço está funcionando
     isServiceAvailable() {
-        return this.isInitialized && admin.apps.length > 0;
+        return (this.isInitialized || (Array.isArray(admin.apps) && admin.apps.length > 0)) &&
+            typeof admin.messaging === 'function';
     }
 
     async scanKeys(redis, pattern, count = 100) {
@@ -120,6 +136,98 @@ class FCMService {
         return [];
     }
 
+    async incrementDailyMetric(metric, increment = 1, operation = 'metric') {
+        const metricName = String(metric || '').trim();
+        if (!metricName) return;
+
+        try {
+            const redis = await this.getRedisClient(operation);
+            if (!redis) return;
+            const key = `fcm_metrics:${getDayKey()}`;
+            const amount = Math.max(1, Math.trunc(Number(increment) || 1));
+
+            if (typeof redis.hincrby === 'function') {
+                await redis.hincrby(key, metricName, amount);
+            } else {
+                const current = typeof redis.hget === 'function'
+                    ? toNumber(await redis.hget(key, metricName), 0)
+                    : 0;
+                await redis.hset(key, metricName, String(current + amount));
+            }
+
+            if (typeof redis.expire === 'function') {
+                await redis.expire(key, FCM_METRICS_TTL_SECONDS);
+            }
+        } catch (error) {
+            logStructured('warn', 'Falha ao registrar metrica FCM', {
+                service: 'fcm',
+                operation,
+                metric: metricName,
+                error: error.message
+            });
+        }
+    }
+
+    async incrementDailyMetrics(metrics = {}, operation = 'metrics') {
+        const entries = Object.entries(metrics)
+            .map(([metric, value]) => [metric, Math.trunc(Number(value) || 0)])
+            .filter(([, value]) => value > 0);
+
+        for (const [metric, value] of entries) {
+            await this.incrementDailyMetric(metric, value, operation);
+        }
+    }
+
+    async getDeliveryMetrics(date = getDayKey()) {
+        try {
+            const redis = await this.getRedisClient('getDeliveryMetrics');
+            if (!redis?.hgetall) {
+                return {
+                    date,
+                    totalSent: 0,
+                    successful: 0,
+                    failed: 0,
+                    successRate: null
+                };
+            }
+
+            const rawMetrics = await redis.hgetall(`fcm_metrics:${date}`);
+            const metrics = Object.fromEntries(
+                Object.entries(rawMetrics || {}).map(([key, value]) => [key, toNumber(value, 0)])
+            );
+            const totalSent = toNumber(metrics.totalSent, 0);
+            const successful = toNumber(metrics.successful, 0);
+            const failed = toNumber(metrics.failed, 0);
+
+            return {
+                date,
+                totalSent,
+                successful,
+                failed,
+                successRate: totalSent > 0 ? Number(((successful / totalSent) * 100).toFixed(1)) : null,
+                tokenRegistrations: toNumber(metrics.tokenRegistrations, 0),
+                temporaryTokenRegistrations: toNumber(metrics.temporaryTokenRegistrations, 0),
+                authenticatedTokenRegistrations: toNumber(metrics.authenticatedTokenRegistrations, 0),
+                tokenRegistrationFailures: toNumber(metrics.tokenRegistrationFailures, 0),
+                noTokenUsers: toNumber(metrics.noTokenUsers, 0),
+                rateLimited: toNumber(metrics.rateLimited, 0),
+                serviceUnavailable: toNumber(metrics.serviceUnavailable, 0),
+                invalidTokensRemoved: toNumber(metrics.invalidTokensRemoved, 0),
+                rideStatusPushes: toNumber(metrics.rideStatusPushes, 0)
+            };
+        } catch (error) {
+            logger.error('❌ Erro ao obter métricas de entrega FCM:', error);
+            return {
+                date,
+                totalSent: 0,
+                successful: 0,
+                failed: 0,
+                successRate: null,
+                error: error.message
+            };
+        }
+    }
+
     // Salvar token FCM de um usuário
     async saveUserFCMToken(userId, userType, fcmToken, deviceInfo = {}) {
         try {
@@ -132,6 +240,7 @@ class FCMService {
                     operation: 'saveUserFCMToken',
                     userId
                 });
+                await this.incrementDailyMetric('tokenRegistrationFailures', 1, 'saveUserFCMToken');
                 return false;
             }
 
@@ -174,6 +283,11 @@ class FCMService {
                 userId,
                 userType
             });
+            await this.incrementDailyMetrics({
+                tokenRegistrations: 1,
+                temporaryTokenRegistrations: deviceInfo.isTemporary ? 1 : 0,
+                authenticatedTokenRegistrations: deviceInfo.authenticated ? 1 : 0
+            }, 'saveUserFCMToken');
             return true;
 
         } catch (error) {
@@ -183,6 +297,7 @@ class FCMService {
                 userId,
                 error: error.message
             });
+            await this.incrementDailyMetric('tokenRegistrationFailures', 1, 'saveUserFCMToken');
             return false;
         }
     }
@@ -315,6 +430,7 @@ class FCMService {
                     operation: 'sendNotificationToUser',
                     userId
                 });
+                await this.incrementDailyMetric('serviceUnavailable', 1, 'sendNotificationToUser');
                 return { success: false, error: 'FCM Service não disponível' };
             }
 
@@ -325,6 +441,7 @@ class FCMService {
                     operation: 'sendNotificationToUser',
                     userId
                 });
+                await this.incrementDailyMetric('rateLimited', 1, 'sendNotificationToUser');
                 return { success: false, error: 'Rate limit excedido' };
             }
 
@@ -337,6 +454,7 @@ class FCMService {
                     operation: 'sendNotificationToUser',
                     userId
                 });
+                await this.incrementDailyMetric('noTokenUsers', 1, 'sendNotificationToUser');
                 return { success: false, error: 'Nenhum token FCM encontrado' };
             }
 
@@ -492,6 +610,10 @@ class FCMService {
             );
 
             logger.info(`✅ Notificação enviada para token ${fcmToken}: ${response}`);
+            await this.incrementDailyMetrics({
+                totalSent: 1,
+                successful: 1
+            }, 'sendToToken');
 
             return {
                 success: true,
@@ -506,6 +628,10 @@ class FCMService {
                 error.code === 'messaging/registration-token-not-registered') {
                 await this.removeInvalidToken(fcmToken);
             }
+            await this.incrementDailyMetrics({
+                totalSent: 1,
+                failed: 1
+            }, 'sendToToken');
 
             return {
                 success: false,
@@ -594,6 +720,10 @@ class FCMService {
             );
 
             logger.info(`✅ Notificação interativa enviada para token ${fcmToken}: ${response}`);
+            await this.incrementDailyMetrics({
+                totalSent: 1,
+                successful: 1
+            }, 'sendInteractiveNotification');
 
             return {
                 success: true,
@@ -607,6 +737,10 @@ class FCMService {
                 error.code === 'messaging/registration-token-not-registered') {
                 await this.removeInvalidToken(fcmToken);
             }
+            await this.incrementDailyMetrics({
+                totalSent: 1,
+                failed: 1
+            }, 'sendInteractiveNotification');
 
             return {
                 success: false,
@@ -708,11 +842,21 @@ class FCMService {
                         { failureThreshold: 5, timeout: 60000 }
                     );
                     successCount++;
+                    await this.incrementDailyMetrics({
+                        totalSent: 1,
+                        successful: 1,
+                        rideStatusPushes: 1
+                    }, 'sendRideStatusUpdate');
                 } catch (err) {
                     logger.warn(`⚠️ Erro push silencioso fcm=${fcmToken.slice(0, 10)}...: ${err.message}`);
                     if (err.code === 'messaging/invalid-registration-token' || err.code === 'messaging/registration-token-not-registered') {
                         await this.removeInvalidToken(fcmToken);
                     }
+                    await this.incrementDailyMetrics({
+                        totalSent: 1,
+                        failed: 1,
+                        rideStatusPushes: 1
+                    }, 'sendRideStatusUpdate');
                 }
             }
             logger.info(`✅ [FCMService] sendRideStatusUpdate enviado para ${userId} (Status: ${rideData.status})`);
@@ -876,6 +1020,7 @@ class FCMService {
             if (typeof redis.del === 'function') {
                 await redis.del(`fcm_token_users:${fcmToken}`);
             }
+            await this.incrementDailyMetric('invalidTokensRemoved', 1, 'removeInvalidToken');
 
             if (indexedUserIds.length > 0) {
                 return;
@@ -913,14 +1058,22 @@ class FCMService {
                 };
             }
 
-            const activeTokensCount = await redis.scard('active_fcm_tokens');
+            const activeTokensCount = typeof redis.scard === 'function'
+                ? await redis.scard('active_fcm_tokens')
+                : 0;
             const totalUsers = (await this.scanKeys(redis, 'fcm_tokens:*')).length;
+            const delivery = await this.getDeliveryMetrics();
 
             return {
                 activeTokens: activeTokensCount,
                 totalUsers,
                 isServiceAvailable: this.isServiceAvailable(),
-                rateLimitCounts: Object.fromEntries(this.rateLimitCounts)
+                rateLimitCounts: Object.fromEntries(this.rateLimitCounts),
+                delivery,
+                totalSent: delivery.totalSent,
+                successful: delivery.successful,
+                failed: delivery.failed,
+                successRate: delivery.successRate
             };
 
         } catch (error) {

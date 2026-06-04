@@ -37,6 +37,7 @@ describe('fcm-service', () => {
     admin = require('firebase-admin');
     mockRedis = {
       hset: jest.fn().mockResolvedValue(1),
+      hincrby: jest.fn().mockResolvedValue(1),
       hgetall: jest.fn().mockResolvedValue({}),
       hdel: jest.fn().mockResolvedValue(1),
       sadd: jest.fn().mockResolvedValue(1),
@@ -113,13 +114,43 @@ describe('fcm-service', () => {
     mockRedis.scan
       .mockResolvedValueOnce(['42', ['fcm_tokens:u1']])
       .mockResolvedValueOnce(['0', ['fcm_tokens:u2']]);
+    mockRedis.hgetall.mockResolvedValueOnce({
+      totalSent: '3',
+      successful: '2',
+      failed: '1',
+      tokenRegistrations: '4'
+    });
     mockRedis.keys = jest.fn();
 
     const result = await fcmService.getServiceStats();
 
     expect(result.totalUsers).toBe(2);
+    expect(result.totalSent).toBe(3);
+    expect(result.successful).toBe(2);
+    expect(result.failed).toBe(1);
+    expect(result.delivery.tokenRegistrations).toBe(4);
     expect(mockRedis.scan).toHaveBeenCalled();
     expect(mockRedis.keys).not.toHaveBeenCalled();
+  });
+
+  test('sendToToken records delivery counters in Redis', async () => {
+    const result = await fcmService.sendToToken('token-5', {
+      title: 'Teste',
+      body: 'Mensagem',
+      data: { type: 'test' }
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockRedis.hincrby).toHaveBeenCalledWith(
+      expect.stringMatching(/^fcm_metrics:\d{4}-\d{2}-\d{2}$/),
+      'totalSent',
+      1
+    );
+    expect(mockRedis.hincrby).toHaveBeenCalledWith(
+      expect.stringMatching(/^fcm_metrics:\d{4}-\d{2}-\d{2}$/),
+      'successful',
+      1
+    );
   });
 
   test('destroy should disconnect redis client', () => {

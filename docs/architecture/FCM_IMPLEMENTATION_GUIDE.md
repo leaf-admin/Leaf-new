@@ -250,6 +250,38 @@ const stats = await fcmService.getServiceStats();
 console.log('Estatísticas FCM:', stats);
 ```
 
+### **3. Hardening de producao - 2026-06-04**
+
+O backend registra metricas agregadas de push no Redis, sem chamar Firebase/Google para montar o dashboard:
+
+- `fcm_metrics:YYYY-MM-DD.totalSent`
+- `fcm_metrics:YYYY-MM-DD.successful`
+- `fcm_metrics:YYYY-MM-DD.failed`
+- `fcm_metrics:YYYY-MM-DD.tokenRegistrations`
+- `fcm_metrics:YYYY-MM-DD.temporaryTokenRegistrations`
+- `fcm_metrics:YYYY-MM-DD.authenticatedTokenRegistrations`
+- `fcm_metrics:YYYY-MM-DD.tokenRegistrationFailures`
+- `fcm_metrics:YYYY-MM-DD.noTokenUsers`
+- `fcm_metrics:YYYY-MM-DD.rateLimited`
+- `fcm_metrics:YYYY-MM-DD.serviceUnavailable`
+- `fcm_metrics:YYYY-MM-DD.invalidTokensRemoved`
+- `fcm_metrics:YYYY-MM-DD.rideStatusPushes`
+
+Esses contadores expiram em 35 dias e aparecem em:
+
+- `GET /api/notifications`
+- `GET /api/notifications/stats`
+- `GET /api/ops/command-center`
+- Dashboard: `/dashboard` e `/notifications`
+
+Fallback operacional quando push falhar:
+
+1. Confirmar se `Push/FCM` aparece como saudavel no cockpit.
+2. Se `activeTokens` for zero, validar registro em device real antes de culpar o envio.
+3. Se houver `noTokenUsers`, usar notificacao persistida/in-app e acompanhamento pelo suporte.
+4. Se houver `serviceUnavailable`, bloquear canary que dependa de push ate o Firebase Admin inicializar.
+5. Para motorista em corrida, eventos de socket/in-app seguem sendo a fonte primaria; push e redundancia para background/lockscreen.
+
 ## 🔮 Próximos Passos
 
 ### **1. Implementações Futuras:**
