@@ -136,3 +136,58 @@ Regra:
 - Saque usa saldo canonico, taxa aplicavel e bloqueio por senha/KYC/ledger antes de Pix Out.
 - Qualquer split real Woovi deve ficar atras de feature flag e runtime profile backend.
 - Mobile deve exibir saldo/saque sem assumir repasse externo se o ledger interno ainda for a fonte de verdade.
+
+## Gate 4 - Public App Links no dominio
+
+Status local: aprovado; pendente deploy backend e validacao publica.
+
+Problema encontrado:
+
+- `https://leaf.app.br/.well-known/apple-app-site-association` respondia 404.
+- `https://leaf.app.br/.well-known/assetlinks.json` respondia 404.
+- `https://leaf.app.br/viagem/teste-canary` respondia 404.
+- `https://leaf.app.br/convite/teste` e `https://leaf.app.br/motorista/convite/teste` tambem respondiam 404.
+
+Diagnostico:
+
+- O dominio `leaf.app.br` esta respondendo via Express/backend na estrutura atual.
+- A configuracao local da landing page ja tinha os arquivos estaticos, mas eles nao estavam publicados/roteados no host publico.
+- Portanto, o ponto seguro de correcao e o backend modular que serve o dominio raiz.
+
+Ajuste aplicado:
+
+- Nova rota publica backend `routes/app-link-association.js`.
+- `/.well-known/apple-app-site-association` retorna AASA com:
+  - `/convite/*`
+  - `/motorista/convite/*`
+  - `/viagem/*`
+- `/.well-known/assetlinks.json` retorna assetlinks para `br.com.leaf.ride`.
+- `/convite/*`, `/motorista/convite/*` e `/viagem/*` retornam fallback HTML leve com deep link para o app.
+- A rota foi registrada antes das rotas de dashboard/catch-all em `bootstrap/register-http-routes.js`.
+
+Validacoes executadas:
+
+- `node -c leaf-websocket-backend/routes/app-link-association.js`
+- `node -c leaf-websocket-backend/bootstrap/register-http-routes.js`
+- `cd leaf-websocket-backend && npx jest --config config/jest.unit.config.js --runTestsByPath tests/unit/routes/app-link-association-routes.unit.test.js --runInBand`
+- `npm run prelaunch:app-links`
+- `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`
+- `npm --prefix leaf-websocket-backend run config:validate`
+
+Resultados:
+
+- App link route unit: 1 suite, 5 tests passando.
+- App links contract: PASS.
+- Runtime config: `ok=true`; warning esperado de biometria estrita desligada.
+
+Observacao:
+
+- O wrapper `npm --prefix leaf-websocket-backend test -- --runTestsByPath ...` rodou a suite unit completa em vez de respeitar o alvo e expôs uma falha existente em `tests/unit/routes/ops-ride-cost-telemetry.unit.test.js` relacionada a mock de logger/Redis. A rota nova foi validada por Jest focado e nao depende desse teste.
+
+Validacao publica pendente apos deploy:
+
+- `curl https://leaf.app.br/.well-known/apple-app-site-association`
+- `curl https://leaf.app.br/.well-known/assetlinks.json`
+- `curl https://leaf.app.br/viagem/teste-canary`
+- `curl https://leaf.app.br/convite/teste`
+- `curl https://leaf.app.br/motorista/convite/teste`
