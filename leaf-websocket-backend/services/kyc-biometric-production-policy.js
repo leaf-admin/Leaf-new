@@ -26,6 +26,10 @@ function isProductionRuntime(env = process.env) {
   return ['production', 'prod'].includes(String(env.NODE_ENV || '').trim().toLowerCase());
 }
 
+function hasExplicitValue(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
 function resolveBiometricPolicy(env = process.env) {
   const productionRuntime = isProductionRuntime(env);
   const productionBiometricsEnabled = readBooleanLike(env.KYC_PRODUCTION_BIOMETRICS_ENABLED, false);
@@ -122,12 +126,22 @@ function evaluateProductionReadiness(env = process.env) {
   const blockers = [];
   const warnings = [];
   const enabled = policy.productionBiometricsEnabled;
+  const disabledIntentionally =
+    hasExplicitValue(env.KYC_PRODUCTION_BIOMETRICS_ENABLED) ||
+    readBooleanLike(env.KYC_PRODUCTION_BIOMETRICS_DISABLED_INTENTIONALLY, false);
+  const disabledReason = String(env.KYC_PRODUCTION_BIOMETRICS_DISABLED_REASON || '').trim();
 
   if (!enabled) {
-    warnings.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.');
+    if (!disabledIntentionally) {
+      warnings.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.');
+    }
+
     return {
       ok: true,
       enabled,
+      state: disabledIntentionally ? 'disabled_intentionally' : 'disabled_by_default',
+      disabledIntentionally,
+      disabledReason: disabledReason || null,
       policy,
       blockers,
       warnings
@@ -182,6 +196,7 @@ module.exports = {
   DEFAULT_TRUSTED_MATCH_PROVIDERS,
   evaluateDeviceVerificationTrust,
   evaluateProductionReadiness,
+  hasExplicitValue,
   isProductionRuntime,
   readBooleanLike,
   resolveBiometricPolicy

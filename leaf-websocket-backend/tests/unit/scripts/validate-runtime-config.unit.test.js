@@ -346,6 +346,28 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     });
   });
 
+  it('marks disabled production biometrics as intentional when the off flag is explicit', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false',
+      KYC_PRODUCTION_BIOMETRICS_DISABLED_INTENTIONALLY: 'true',
+      KYC_PRODUCTION_BIOMETRICS_DISABLED_REASON: 'pilot runtime uses local face embedding plus support escalation'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.ok).toBe(true);
+    expect(result.report.summary.warnings).not.toContain(
+      'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.'
+    );
+    expect(result.report.diagnostics.biometricReadiness).toMatchObject({
+      ok: true,
+      enabled: false,
+      state: 'disabled_intentionally',
+      disabledIntentionally: true,
+      disabledReason: 'pilot runtime uses local face embedding plus support escalation'
+    });
+  });
+
   it('allows strict biometric production when all required controls are configured', () => {
     const result = runValidator({
       ...baseProdEnv,

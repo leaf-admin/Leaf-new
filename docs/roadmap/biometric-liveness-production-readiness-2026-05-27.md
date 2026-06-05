@@ -32,6 +32,7 @@
 ## Guardrails adicionados
 
 - `KYC_PRODUCTION_BIOMETRICS_ENABLED=true` ativa o modo estrito de produção biométrica.
+- `KYC_PRODUCTION_BIOMETRICS_ENABLED=false` com flag explícita ou `KYC_PRODUCTION_BIOMETRICS_DISABLED_INTENTIONALLY=true` marca o runtime como `disabled_intentionally`, sem warning ambíguo de deploy.
 - Em modo estrito:
   - `device_signature_v1` não aprova identidade.
   - AWS liveness sozinho não aprova identidade.
@@ -50,6 +51,14 @@
 - Script operacional adicionado:
   - `leaf-websocket-backend/scripts/kyc/generate-cnh-face-embedding.cjs --driver-id <uid>`
   - `leaf-websocket-backend/scripts/kyc/generate-cnh-face-embedding.cjs --storage-path <path> --dry-run`
+
+## Estado operacional atual - 2026-06-05
+
+- Produção biométrica estrita permanece desligada intencionalmente no runtime de piloto.
+- O estado esperado no validator é `disabled_intentionally`.
+- O compose não deve emitir warnings por ausência de `KYC_AWS_LIVENESS_ASSUME_ROLE_ARN`, `AWS_ACCESS_KEY_ID` ou `AWS_SECRET_ACCESS_KEY` enquanto `KYC_AWS_LIVENESS_ENABLED=false`.
+- O motivo operacional deve ficar explícito em `KYC_PRODUCTION_BIOMETRICS_DISABLED_REASON`.
+- Para ativar AWS liveness em produção assistida, primeiro configurar role/credenciais fora do Git, depois ligar as flags estritas e rodar `config:validate`.
 
 ## Lacunas reais antes de produção biométrica plena
 
