@@ -32,6 +32,7 @@ import {
   PROTOTYPE_ORIGIN_COORDINATE,
   resolveOperationalVehicleType,
 } from "./robotaxiPrototypeData";
+import { isGenericRuntimeAddress } from "./prototypeRuntimeAddress";
 import {
   resolvePrototypeProfileEmail,
   resolvePrototypeProfileName,
@@ -2126,7 +2127,7 @@ function shouldRefreshPassengerCurrentAddress(coordinate) {
     return false;
   }
 
-  const hasAddress = Boolean(String(runtimeState.currentAddress || "").trim());
+  const hasAddress = !isGenericRuntimeAddress(runtimeState.currentAddress);
   const now = Date.now();
   const movedMeters = calculateDistanceMeters(
     runtimeLastPassengerAddressRefreshCoordinate,
