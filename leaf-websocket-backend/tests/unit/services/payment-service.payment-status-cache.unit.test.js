@@ -167,6 +167,32 @@ describe('PaymentService payment status cache', () => {
     expect(new PaymentService().isWooviDirectTransferOnRideCompletionEnabled()).toBe(true);
   });
 
+  it('keeps Woovi subaccount split disabled unless explicitly enabled', () => {
+    delete process.env.WOOVI_SUBACCOUNT_SPLIT_ENABLED;
+    expect(new PaymentService().isWooviSubaccountSplitEnabled()).toBe(false);
+
+    process.env.WOOVI_SUBACCOUNT_SPLIT_ENABLED = 'true';
+    expect(new PaymentService().isWooviSubaccountSplitEnabled()).toBe(true);
+
+    process.env.WOOVI_SUBACCOUNT_SPLIT_ENABLED = 'false';
+    expect(new PaymentService().isWooviSubaccountSplitEnabled()).toBe(false);
+  });
+
+  it('does not build a Woovi split plan without explicit opt-in', async () => {
+    delete process.env.WOOVI_SUBACCOUNT_SPLIT_ENABLED;
+    const service = new PaymentService();
+
+    await expect(
+      service.buildWooviSubaccountSplitPlan({
+        driverId: 'driver_1',
+        driverPixKey: 'driver-pix-key'
+      }, 2500)
+    ).resolves.toMatchObject({
+      success: false,
+      reason: 'split_disabled'
+    });
+  });
+
   it('charges the Woovi withdrawal fee only below R$ 500,00', () => {
     const service = new PaymentService();
 

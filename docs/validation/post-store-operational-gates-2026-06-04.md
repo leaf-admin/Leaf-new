@@ -137,6 +137,22 @@ Regra:
 - Qualquer split real Woovi deve ficar atras de feature flag e runtime profile backend.
 - Mobile deve exibir saldo/saque sem assumir repasse externo se o ledger interno ainda for a fonte de verdade.
 
+Adendo 2026-06-05:
+
+- O helper legado de split por subconta Woovi agora falha fechado por padrao.
+- `WOOVI_SUBACCOUNT_SPLIT_ENABLED` precisa estar explicitamente `true` para construir plano de split de subconta.
+- A cobranca antecipada continua sem split mesmo quando `driverId`/`driverPixKey` aparecem no payload.
+- Saque do motorista permanece atras de `driverWithdrawalsEnabled`, senha do app, KYC step-up quando aplicavel, ledger posted e idempotency key.
+
+Validacoes 2026-06-05:
+
+- `cd leaf-websocket-backend && npx jest --config config/jest.unit.config.js --runTestsByPath tests/unit/services/payment-service.payment-status-cache.unit.test.js tests/unit/services/financial-ledger-service.unit.test.js tests/unit/routes/payment-withdrawal-password.unit.test.js --runInBand` - 3 suites, 45 tests passando.
+- `npm --prefix mobile-app test -- --runTestsByPath __tests__/driver-balance-service-pilot.test.js __tests__/pilot-launch-profile.test.js --runInBand` - 2 suites, 7 tests passando.
+- `npm --prefix leaf-websocket-backend run config:validate` - ok; warning esperado de biometria estrita ainda desligada.
+- `npm --prefix mobile-app run qa:production-guards` - ok.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only` - ok.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh` - ok.
+
 ## Gate 4 - Public App Links no dominio
 
 Status: backend publicado e validacao publica aprovada; pendente validacao em device real.

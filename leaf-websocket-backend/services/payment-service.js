@@ -186,7 +186,7 @@ class PaymentService {
   }
 
   isWooviSubaccountSplitEnabled() {
-    return String(process.env.WOOVI_SUBACCOUNT_SPLIT_ENABLED || 'true').toLowerCase() !== 'false';
+    return String(process.env.WOOVI_SUBACCOUNT_SPLIT_ENABLED || 'false').toLowerCase() === 'true';
   }
 
   shouldRequireWooviSplitForDriverPayment() {
