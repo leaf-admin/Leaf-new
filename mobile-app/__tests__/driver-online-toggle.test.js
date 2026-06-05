@@ -1,5 +1,6 @@
 import React from 'react';
 import { Alert, Linking, Text, TouchableOpacity, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiHomeScreen from '../src/screens/prototype/RobotaxiHomeScreen';
@@ -8,6 +9,8 @@ import {
   resolvePassengerAutoRoute,
   shouldAutoSyncPassengerRoute,
 } from '../src/screens/prototype/passengerFlowRouting';
+
+const BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY = 'has_shown_background_location_modal';
 
 const mockUseNavigationState = jest.fn((selector) =>
   selector({
@@ -274,8 +277,9 @@ function buildPassengerRuntime(overrides = {}) {
 }
 
 describe('driver online toggle', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
+    await AsyncStorage.clear();
     const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
     subscribePrototypeMapRoute.mockImplementation(() => jest.fn());
     mockUseIsFocused.mockReturnValue(true);
@@ -403,6 +407,8 @@ describe('driver online toggle', () => {
   });
 
   it('surfaces a failed online toggle result to the driver', async () => {
+    await AsyncStorage.setItem(BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY, 'true');
+
     const setDriverOnline = jest.fn().mockResolvedValue({
       success: false,
       error: 'Não foi possível finalizar o modo online agora. Tente novamente.',
@@ -436,6 +442,8 @@ describe('driver online toggle', () => {
   });
 
   it('opens the driver KYC modal when recent verification is required to go online', async () => {
+    await AsyncStorage.setItem(BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY, 'true');
+
     const kycServiceMock = require('../src/services/KYCService').default;
     const setDriverOnline = jest
       .fn()
@@ -478,6 +486,8 @@ describe('driver online toggle', () => {
   });
 
   it('shows location guidance and allows opening settings when location permission blocks online mode', async () => {
+    await AsyncStorage.setItem(BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY, 'true');
+
     const setDriverOnline = jest.fn().mockResolvedValue({
       success: false,
       error: 'Localização inicial não disponível para ativar modo online.',

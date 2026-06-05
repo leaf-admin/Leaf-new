@@ -25,6 +25,10 @@ sdk.dir=${ANDROID_SDK_ROOT}
 EOF
 }
 
+sync_android_native_runtime() {
+  (cd "${PROJECT_DIR}" && node scripts/sync-android-native-runtime.cjs)
+}
+
 sync_native_android_version() {
   local build_gradle_path="${PROJECT_DIR}/android/app/build.gradle"
   local expected_version_code
@@ -105,6 +109,7 @@ main() {
 
   ensure_android_native
   ensure_local_properties
+  sync_android_native_runtime
   sync_native_android_version
   sync_android_inter_fonts
 
