@@ -16,7 +16,13 @@ PUBLIC_API_URL="${PUBLIC_API_URL:-https://api.leaf.app.br}"
 PUBLIC_SOCKET_URL="${PUBLIC_SOCKET_URL:-https://socket.leaf.app.br}"
 WOOVI_WEBHOOK_PUBLIC_URL="${WOOVI_WEBHOOK_PUBLIC_URL:-$PUBLIC_API_URL/api/woovi/webhook}"
 DEPLOY_COPY_LOCAL_ENV="${DEPLOY_COPY_LOCAL_ENV:-false}"
+CONTABO_ENABLE_GATEWAY_SCALE="${CONTABO_ENABLE_GATEWAY_SCALE:-true}"
 REQUIRED_ENV_KEYS=("REDIS_PASSWORD" "CORS_ORIGIN" "JWT_SECRET")
+
+REMOTE_COMPOSE_FILE_VALUE="docker-compose.yml"
+if [[ "$CONTABO_ENABLE_GATEWAY_SCALE" == "true" ]]; then
+    REMOTE_COMPOSE_FILE_VALUE="docker-compose.yml:docker-compose.gateway-scale.yml"
+fi
 
 # Cores
 RED='\033[0;31m'
@@ -31,6 +37,8 @@ echo -e "📍 Host: ${YELLOW}${VPS_IP:-"não configurado"}${NC}"
 echo -e "🔑 Key: ${YELLOW}${VPS_SSH_KEY:-"None"}${NC}"
 echo -e "📁 Diretório: ${YELLOW}$APP_DIR${NC}"
 echo -e "📝 Copiar .env local: ${YELLOW}$DEPLOY_COPY_LOCAL_ENV${NC}"
+echo -e "🧩 Multi-gateway gerenciado: ${YELLOW}$CONTABO_ENABLE_GATEWAY_SCALE${NC}"
+echo -e "🐳 COMPOSE_FILE remoto: ${YELLOW}$REMOTE_COMPOSE_FILE_VALUE${NC}"
 echo ""
 
 validate_local_env_file() {
@@ -129,6 +137,18 @@ check_prerequisites() {
         echo -e "${RED}❌ docker-compose.hostinger.yml não encontrado${NC}"
         exit 1
     fi
+
+    if [[ "$CONTABO_ENABLE_GATEWAY_SCALE" == "true" ]]; then
+        if [ ! -f "docker-compose.gateway-scale.yml" ]; then
+            echo -e "${RED}❌ docker-compose.gateway-scale.yml não encontrado${NC}"
+            exit 1
+        fi
+
+        if [ ! -f "nginx.multi-gateway.conf" ]; then
+            echo -e "${RED}❌ nginx.multi-gateway.conf não encontrado${NC}"
+            exit 1
+        fi
+    fi
     
     # Verificar se firebase-credentials.json existe
     if [ ! -f "firebase-credentials.json" ]; then
@@ -224,6 +244,12 @@ copy_files() {
     scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null package.json "$VPS_USER@$VPS_IP:$APP_DIR/"
     scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null package-lock.json "$VPS_USER@$VPS_IP:$APP_DIR/" 2>/dev/null || echo "⚠️  package-lock.json não encontrado, continuando..."
     scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null nginx.conf "$VPS_USER@$VPS_IP:$APP_DIR/"
+
+    if [[ "$CONTABO_ENABLE_GATEWAY_SCALE" == "true" ]]; then
+        scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null docker-compose.gateway-scale.yml "$VPS_USER@$VPS_IP:$APP_DIR/"
+        scp -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null nginx.multi-gateway.conf "$VPS_USER@$VPS_IP:$APP_DIR/"
+        echo "✅ Overlay multi-gateway copiado"
+    fi
     
     # Preservar .env remoto por padrão. Sobrescrita local exige flag explícita.
     if [ "$DEPLOY_COPY_LOCAL_ENV" = "true" ]; then
@@ -287,12 +313,14 @@ DOCKERIGNOREEOF
     
     # Criar tarball do código (excluindo node_modules e outros)
     echo "📦 Criando pacote do código..."
-    tar --exclude='node_modules' \
+    COPYFILE_DISABLE=1 tar --exclude='node_modules' \
         --exclude='.git' \
         --exclude='logs' \
         --exclude='coverage' \
         --exclude='.nyc_output' \
         --exclude='.env*' \
+        --exclude='._*' \
+        --exclude='.DS_Store' \
         --exclude='*.log' \
         -czf /tmp/leaf-app-code.tar.gz .
     
@@ -326,11 +354,11 @@ build_and_start() {
         # Construir imagens
         echo "🔨 Construindo imagens..."
         echo "   ⏳ Isso pode levar alguns minutos..."
-        docker compose build --no-cache 2>&1 | while IFS= read -r line; do echo "   $line"; done || docker-compose build --no-cache 2>&1 | while IFS= read -r line; do echo "   $line"; done
+        COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker compose build --no-cache 2>&1 | while IFS= read -r line; do echo "   $line"; done || COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker-compose build --no-cache 2>&1 | while IFS= read -r line; do echo "   $line"; done
         
         # Iniciar containers
         echo "🚀 Iniciando containers sem apagar volumes..."
-        docker compose up -d 2>&1 || docker-compose up -d 2>&1
+        COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker compose up -d 2>&1 || COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker-compose up -d 2>&1
         
         # Aguardar inicialização
         echo "⏳ Aguardando inicialização..."
@@ -338,11 +366,11 @@ build_and_start() {
         
         # Verificar status
         echo "📊 Status dos containers:"
-        docker compose ps 2>/dev/null || docker-compose ps 2>/dev/null
+        COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker compose ps 2>/dev/null || COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker-compose ps 2>/dev/null
         
         echo ""
         echo "📋 Logs recentes:"
-        docker compose logs --tail=20 2>/dev/null || docker-compose logs --tail=20 2>/dev/null
+        COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker compose logs --tail=20 2>/dev/null || COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker-compose logs --tail=20 2>/dev/null
 EOF
     
     echo -e "${GREEN}✅ Containers iniciados${NC}"
@@ -361,7 +389,7 @@ check_health() {
         REDIS_PASSWORD_VALUE="\$(grep -E '^REDIS_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d '=' -f2-)"
         if [ -z "\$REDIS_PASSWORD_VALUE" ]; then
             echo "❌ REDIS_PASSWORD não encontrado no .env"
-        elif docker compose exec -T redis env REDISCLI_AUTH="\$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG || docker-compose exec -T redis env REDISCLI_AUTH="\$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG; then
+        elif COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker compose exec -T redis env REDISCLI_AUTH="\$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG || COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker-compose exec -T redis env REDISCLI_AUTH="\$REDIS_PASSWORD_VALUE" redis-cli ping 2>/dev/null | grep -q PONG; then
             echo "✅ Redis está respondendo"
         else
             echo "❌ Redis não está respondendo"
@@ -375,7 +403,7 @@ check_health() {
         else
             echo "❌ WebSocket Server não está respondendo"
             echo "📋 Últimos logs:"
-            docker compose logs --tail=30 websocket 2>/dev/null || docker-compose logs --tail=30 websocket 2>/dev/null
+            COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker compose logs --tail=30 websocket 2>/dev/null || COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker-compose logs --tail=30 websocket 2>/dev/null
         fi
         
         # Verificar Nginx
@@ -385,7 +413,7 @@ check_health() {
         else
             echo "❌ Nginx não está respondendo"
             echo "📋 Últimos logs:"
-            docker compose logs --tail=30 nginx 2>/dev/null || docker-compose logs --tail=30 nginx 2>/dev/null
+            COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker compose logs --tail=30 nginx 2>/dev/null || COMPOSE_FILE="$REMOTE_COMPOSE_FILE_VALUE" docker-compose logs --tail=30 nginx 2>/dev/null
         fi
 EOF
     
@@ -421,10 +449,10 @@ show_final_info() {
     echo -e "   💳 Webhook Woovi: ${YELLOW}$WOOVI_WEBHOOK_PUBLIC_URL${NC}"
     echo ""
     echo -e "${BLUE}📋 Comandos úteis:${NC}"
-    echo -e "   Ver logs: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && docker-compose logs -f'${NC}"
-    echo -e "   Status: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && docker-compose ps'${NC}"
-    echo -e "   Reiniciar: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && docker-compose restart'${NC}"
-    echo -e "   Parar: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && docker-compose down'${NC}"
+    echo -e "   Ver logs: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && COMPOSE_FILE=$REMOTE_COMPOSE_FILE_VALUE docker-compose logs -f'${NC}"
+    echo -e "   Status: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && COMPOSE_FILE=$REMOTE_COMPOSE_FILE_VALUE docker-compose ps'${NC}"
+    echo -e "   Reiniciar: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && COMPOSE_FILE=$REMOTE_COMPOSE_FILE_VALUE docker-compose restart'${NC}"
+    echo -e "   Parar: ${YELLOW}ssh $VPS_USER@$VPS_IP 'cd $APP_DIR && COMPOSE_FILE=$REMOTE_COMPOSE_FILE_VALUE docker-compose down'${NC}"
     echo ""
     echo -e "${YELLOW}⚠️  IMPORTANTE:${NC}"
     echo -e "   1. Configure o webhook na Woovi: ${YELLOW}$WOOVI_WEBHOOK_PUBLIC_URL${NC}"

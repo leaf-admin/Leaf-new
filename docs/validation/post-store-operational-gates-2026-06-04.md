@@ -482,6 +482,67 @@ Follow-ups operacionais:
 - `LEA-91`: nao remover containers orfaos sem auditoria de trafego, logs, Nginx e substituicao gerenciada.
 - `LEA-92`: decidir explicitamente se AWS liveness esta ativo ou desabilitado. O warning atual de `KYC_PRODUCTION_BIOMETRICS_ENABLED=false` e esperado, mas precisa virar estado operacional claro no dashboard/config.
 
+### LEA-91 - Auditoria Contabo containers orfaos
+
+Status: concluido.
+
+Evidencias em 2026-06-05:
+
+- `docker compose config --services` no `/opt/leaf-app` remoto retornava apenas `redis`, `websocket`, `sideeffects-worker`, `billing-worker` e `nginx`.
+- `docker compose ps`/`docker ps` ainda mostravam `leaf-websocket-gateway-2`, `leaf-websocket-gateway-3` e `leaf-queue-worker` vivos e healthy.
+- `docker inspect` confirmou que esses tres containers foram criados com `docker-compose.yml,docker-compose.gateway-scale.yml`, enquanto o compose canonico atual estava rodando apenas `docker-compose.yml`.
+- `leaf-nginx` montava `/opt/leaf-app/nginx.conf`, e o `nginx -T` efetivo apontava o upstream `leaf_backend` apenas para `websocket:3001`.
+- Os gateways extras respondiam `health/liveness` e `health/quick`, com Socket.IO Redis adapter `ready`.
+- `leaf-queue-worker` consumia CPU observavel em `docker stats`; portanto nao deve ser removido sem substituicao declarada.
+- Health publico:
+  - `https://api.leaf.app.br/health`: healthy.
+  - `https://socket.leaf.app.br/health/liveness`: alive.
+
+Decisao tecnica:
+
+- Nao remover `leaf-websocket-gateway-2`, `leaf-websocket-gateway-3` ou `leaf-queue-worker` nesta rodada.
+- Reconciliar a Contabo declarando o multi-gateway como overlay gerenciado no deploy canonico, em vez de manter containers vivos como orfaos.
+- O script `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh` passa a usar `COMPOSE_FILE=docker-compose.yml:docker-compose.gateway-scale.yml` por padrao na Contabo, controlado por `CONTABO_ENABLE_GATEWAY_SCALE=true`.
+- O deploy canonico passa a copiar `docker-compose.gateway-scale.yml` e `nginx.multi-gateway.conf` quando a flag esta ativa.
+- Para rollback operacional, usar `CONTABO_ENABLE_GATEWAY_SCALE=false` no deploy, mantendo o runtime single-container anterior.
+
+Deploy/validacao pos-correcao:
+
+- Deploy Contabo executado com:
+  - `CONTABO_ENABLE_GATEWAY_SCALE=true`;
+  - `COMPOSE_FILE=docker-compose.yml:docker-compose.gateway-scale.yml`;
+  - sem `down -v`;
+  - sem reboot.
+- `docker compose ps --format json` confirmou todos os containers Leaf principais com `com.docker.compose.project.config_files=/opt/leaf-app/docker-compose.yml,/opt/leaf-app/docker-compose.gateway-scale.yml`.
+- `nginx -T` confirmou:
+  - `least_conn`;
+  - `server websocket:3001`;
+  - `server websocket-gateway-2:3001`;
+  - `server websocket-gateway-3:3001`;
+  - `keepalive 128`.
+- `https://socket.leaf.app.br/health/liveness`: alive.
+- `https://api.leaf.app.br/health/quick`: healthy.
+- `https://api.leaf.app.br/health`: warning logo apos restart por Firestore `~1777ms`, depois healthy com Firestore `374ms`.
+- Benchmark sem APIs pagas:
+  - comando: `node leaf-websocket-backend/scripts/stress-test/no-paid-api-gateway-benchmark.cjs --url https://socket.leaf.app.br --http-path /health/liveness --socket-url https://socket.leaf.app.br --http-count 30 --http-concurrency 5 --socket-count 24 --socket-concurrency 6 --socket-hold-ms 250 --label lea-91-managed-overlay-postdeploy`;
+  - report: `leaf-websocket-backend/reports/no-paid-api-gateway-benchmark-lea-91-managed-overlay-postdeploy-1780640986881.json`;
+  - HTTP: 30/30, 100%, avg `422.6ms`, p95 `806ms`;
+  - Socket: 24/24, 100%, avg `1040.71ms`, p95 `1101ms`.
+- `docker stats --no-stream` pos-deploy:
+  - `leaf-websocket`: `1.40%`, `132.6MiB / 1.5GiB`;
+  - `leaf-websocket-gateway-2`: `1.21%`, `141.8MiB / 1.5GiB`;
+  - `leaf-websocket-gateway-3`: `1.33%`, `142.6MiB / 1.5GiB`;
+  - `leaf-queue-worker`: `1.63%`, `29.95MiB / 768MiB`;
+  - `leaf-sideeffects-worker`: `1.62%`, `26.15MiB / 1GiB`;
+  - `leaf-billing-worker`: `1.45%`, `23.82MiB / 768MiB`;
+  - `leaf-nginx`: `0.00%`, `26.61MiB / 512MiB`;
+  - `leaf-redis`: `2.23%`, `41.34MiB / 2GiB`.
+
+Resultado:
+
+- `LEA-91` pode ser movido para Done.
+- O script de deploy foi ajustado para empacotar com `COPYFILE_DISABLE=1` e excluir `._*`/`.DS_Store`, reduzindo o ruido de metadados macOS nos proximos deploys.
+
 Comandos finais recomendados antes de commit desta rodada:
 
 - `git diff --check`
