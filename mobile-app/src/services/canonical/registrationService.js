@@ -6,7 +6,7 @@ import Logger from '../../utils/Logger';
 import AccessKey from './functionAccessKey';
 import { firebase } from './sessionService';
 
-export { default as countries } from '../../common-local/other/GetCountries';
+export { default as countries } from './countries';
 
 const EDIT_REFERRAL_ID = 'EDIT_REFERRAL_ID';
 

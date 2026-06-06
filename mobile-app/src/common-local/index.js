@@ -32,7 +32,7 @@ import * as NotificationFunctions from './other/NotificationFunctions';
 import * as caractions from './actions/caractions';
 import * as smtpactions from './actions/smtpactions';
 import * as smsactions from './actions/smsactions';
-import countries from './other/GetCountries';
+import countries from '../services/canonical/countries';
 import * as sosctions from './actions/sosaction';
 import * as complainactions from './actions/complainactions';
 import * as usedreferralaction from "./actions/usedreferralaction";

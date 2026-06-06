@@ -33,7 +33,7 @@ jest.mock('../src/services/canonical/functionAccessKey', () => ({
   default: 'test-access-key',
 }));
 
-jest.mock('../src/common-local/other/GetCountries', () => ({
+jest.mock('../src/services/canonical/countries', () => ({
   __esModule: true,
   default: [{ label: 'Brasil', value: 'BR' }],
 }));
