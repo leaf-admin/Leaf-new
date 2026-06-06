@@ -3,7 +3,7 @@ export { addBooking } from '../../common-local/actions/bookingactions';
 export {
   getEstimate,
   tollData,
-} from '../../common-local/actions/estimateactions';
+} from './rideEstimateActions';
 
 const CLEAR_BOOKING = 'CLEAR_BOOKING';
 const SET_ESTIMATE = 'SET_ESTIMATE';

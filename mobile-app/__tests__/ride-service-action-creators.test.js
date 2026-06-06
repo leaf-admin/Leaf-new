@@ -3,6 +3,7 @@ import {
   clearBooking,
   clearEstimate,
   clearTripPoints,
+  getEstimate,
   setBooking,
   setEstimate,
   updatSelPointType,
@@ -64,6 +65,21 @@ describe('rideService action creators', () => {
     expect(addRating({ tripId: 'trip-1', value: 5 })).toEqual({
       type: 'ADD_RATING',
       payload: { tripId: 'trip-1', value: 5 },
+    });
+  });
+
+  it('emits estimate failure when route details are unavailable', async () => {
+    const dispatch = jest.fn();
+
+    await getEstimate({ pickup: { description: 'A' }, drop: { description: 'B' } })(dispatch);
+
+    expect(dispatch).toHaveBeenNthCalledWith(1, {
+      type: 'FETCH_ESTIMATE',
+      payload: { pickup: { description: 'A' }, drop: { description: 'B' } },
+    });
+    expect(dispatch).toHaveBeenNthCalledWith(2, {
+      type: 'FETCH_ESTIMATE_FAILED',
+      payload: 'No Route Found',
     });
   });
 });
