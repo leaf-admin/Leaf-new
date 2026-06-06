@@ -47,6 +47,9 @@ Atualizacao 2026-06-06 (`LEA-32`):
 - Primeira extracao interna pequena concluida.
 - Busca/cache/normalizacao de destino saiu de `prototypeRideRuntime.js` para `src/screens/prototype/prototypeDestinationSearchRuntime.js`.
 - A extracao preserva comportamento: coordenadas continuam aceitas apenas quando numericas, cache segue curto, token de sessao segue com janela de idle.
+- Segunda extracao interna pequena concluida.
+- Quote lock, normalizacao de coordenadas/rota e budget de Directions por booking sairam de `prototypeRideRuntime.js` para `src/screens/prototype/prototypeQuoteRuntime.js`.
+- A extracao preserva comportamento: quote lock segue com TTL, chave por coordenada arredondada, rota limitada e bloqueio local quando o booking excede o limite de requisicoes de Directions.
 - Nenhuma regra de socket, pagamento, corrida ativa, UI ou lifecycle foi alterada.
 
 Responsabilidades reais identificadas no arquivo:
@@ -54,7 +57,7 @@ Responsabilidades reais identificadas no arquivo:
 - bootstrap e persistencia de sessao runtime.
 - socket/realtime lifecycle.
 - estado passageiro/motorista.
-- busca de destino via helper dedicado e quote lock ainda no runtime.
+- busca de destino e quote lock via helpers dedicados.
 - pagamento e estado de confirmacao.
 - corrida ativa, chegada, embarque, inicio e conclusao.
 - tracking de localizacao passageiro/motorista.
@@ -89,6 +92,7 @@ Resultado: PASS.
 Comandos adicionais executados em 2026-06-06 para `LEA-32`:
 
 - `npm --prefix mobile-app run test:unit -- --runTestsByPath __tests__/prototype-destination-search-runtime.test.js __tests__/prototype-ride-runtime-financial-snapshot.test.js --runInBand`
+- `npm --prefix mobile-app run test:unit -- --runTestsByPath __tests__/prototype-destination-search-runtime.test.js __tests__/prototype-quote-runtime.test.js __tests__/prototype-ride-runtime-financial-snapshot.test.js --runInBand`
 - `npm --prefix mobile-app run qa:production-guards`
 - `git diff --check`
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`
@@ -98,7 +102,7 @@ Resultado 2026-06-06: PASS.
 
 ## Proximas Fatias Seguras
 
-1. Extrair quote lock e telemetria de custo para um service dedicado.
+1. Extrair telemetria de custo/context binding para um service dedicado.
 2. Extrair heartbeat de localizacao por papel para um service dedicado.
 3. Extrair chat/notificacoes persistidas para um service dedicado.
 4. Depois disso, reduzir `common-local` restante dentro das fachadas, uma por dominio.

@@ -56,6 +56,17 @@ import {
   setCachedRuntimeDestinationSearchResults,
 } from "./prototypeDestinationSearchRuntime";
 import {
+  MAX_DIRECTIONS_REQUESTS_PER_BOOKING,
+  buildQuoteLockRouteKey,
+  buildQuoteLockSnapshot,
+  clearDirectionsBudgetForBooking,
+  normalizePersistedQuoteLock,
+  normalizeRuntimeCoordinate,
+  normalizeRuntimeRouteCoordinates,
+  registerDirectionsRequestForBooking,
+  resolveActiveQuoteLock,
+} from "./prototypeQuoteRuntime";
+import {
   shouldFlushRuntimeSessionImmediately,
   shouldFlushRuntimeSessionOnAppState,
   shouldMaintainRealtimeSessionForSnapshot,
@@ -116,13 +127,6 @@ const PASSENGER_LOCATION_MIN_MOVEMENT_METERS = 6;
 const PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG = 8;
 const PASSENGER_ADDRESS_REFRESH_MIN_INTERVAL_MS = 45000;
 const PASSENGER_ADDRESS_REFRESH_MIN_MOVEMENT_METERS = 35;
-const MAX_DIRECTIONS_REQUESTS_PER_BOOKING = Math.max(
-  1,
-  Number.parseInt(
-    process.env.EXPO_PUBLIC_MAX_DIRECTIONS_REQUESTS_PER_BOOKING || "6",
-    10,
-  ) || 6,
-);
 const RUNTIME_ACTIVE_RIDE_RESYNC_INTERVAL_MS = 6000;
 const DRIVER_ROUTE_PLAYBACK_TICK_MS = 2500;
 const PASSENGER_ROUTE_PLAYBACK_TICK_MS = 2500;
@@ -136,25 +140,6 @@ const DRIVER_STATUS_RETRY_ATTEMPTS = 2;
 const DRIVER_ACTIVATION_REMOTE_SYNC_INTERVAL_MS = 12000;
 const DRIVER_ACTIVATION_SYNC_MIN_GAP_MS = 6000;
 const DESTINATION_SEARCH_MIN_QUERY_LENGTH = 3;
-const QUOTE_LOCK_VALIDITY_MS = Math.max(
-  15000,
-  Number.parseInt(process.env.EXPO_PUBLIC_QUOTE_VALIDITY_MS || "120000", 10) ||
-    120000,
-);
-const QUOTE_LOCK_COORDINATE_PRECISION = Math.max(
-  2,
-  Number.parseInt(
-    process.env.EXPO_PUBLIC_QUOTE_LOCK_COORDINATE_PRECISION || "3",
-    10,
-  ) || 3,
-);
-const QUOTE_LOCK_MAX_ROUTE_POINTS = Math.max(
-  2,
-  Number.parseInt(
-    process.env.EXPO_PUBLIC_QUOTE_LOCK_MAX_ROUTE_POINTS || "180",
-    10,
-  ) || 180,
-);
 const SESSION_RESTORE_TEST_OTP_CODES = Object.freeze({
   "21102938475": "992111",
   "5521102938475": "992111",
@@ -373,7 +358,6 @@ const DEFAULT_DRIVER_TRANSIENT_CARD = Object.freeze({
 });
 const runtimeRoutePlanCache = new Map();
 const runtimeRoutePlanInFlight = new Map();
-const runtimeDirectionsRequestsByBooking = new Map();
 
 function createDefaultDriverTripMeta(overrides = {}) {
   return {
@@ -3020,168 +3004,6 @@ function normalizeRemainingDistanceKm(remainingMeters) {
   return Number(remainingKm.toFixed(precision));
 }
 
-function normalizeRuntimeCoordinate(value) {
-  const latitude = Number(value?.latitude ?? value?.lat);
-  const longitude = Number(value?.longitude ?? value?.lng);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-    return null;
-  }
-
-  return { latitude, longitude };
-}
-
-function normalizeRuntimeRouteCoordinates(coordinates = []) {
-  return Array.isArray(coordinates)
-    ? coordinates.map(normalizeRuntimeCoordinate).filter(Boolean)
-    : [];
-}
-
-function normalizeQuoteLockCoordinate(
-  value,
-  precision = QUOTE_LOCK_COORDINATE_PRECISION,
-) {
-  const normalized = normalizeRuntimeCoordinate(value);
-  if (!normalized) {
-    return null;
-  }
-
-  return {
-    latitude: Number(normalized.latitude.toFixed(precision)),
-    longitude: Number(normalized.longitude.toFixed(precision)),
-  };
-}
-
-function buildQuoteLockRouteKey(originCoordinate, destinationCoordinate) {
-  const normalizedOrigin = normalizeQuoteLockCoordinate(originCoordinate);
-  const normalizedDestination = normalizeQuoteLockCoordinate(
-    destinationCoordinate,
-  );
-  if (!normalizedOrigin || !normalizedDestination) {
-    return "";
-  }
-
-  return [
-    normalizedOrigin.latitude.toFixed(QUOTE_LOCK_COORDINATE_PRECISION),
-    normalizedOrigin.longitude.toFixed(QUOTE_LOCK_COORDINATE_PRECISION),
-    normalizedDestination.latitude.toFixed(QUOTE_LOCK_COORDINATE_PRECISION),
-    normalizedDestination.longitude.toFixed(QUOTE_LOCK_COORDINATE_PRECISION),
-  ].join(":");
-}
-
-function normalizeQuoteLockTimestamp(value) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue) || numericValue <= 0) {
-    return null;
-  }
-  return Math.round(numericValue);
-}
-
-function normalizePersistedQuoteLock(lockInput = null) {
-  if (!lockInput || typeof lockInput !== "object") {
-    return null;
-  }
-
-  const routeKey = sanitizeText(lockInput.routeKey, "");
-  if (!routeKey) {
-    return null;
-  }
-
-  const createdAt =
-    normalizeQuoteLockTimestamp(lockInput.createdAt) || Date.now();
-  const fallbackExpiresAt = createdAt + QUOTE_LOCK_VALIDITY_MS;
-  const expiresAt =
-    normalizeQuoteLockTimestamp(lockInput.expiresAt) || fallbackExpiresAt;
-
-  if (expiresAt <= Date.now()) {
-    return null;
-  }
-
-  const distanceKm = Number(lockInput.distanceKm);
-  const durationMinutes = Number(lockInput.durationMinutes);
-  if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
-    return null;
-  }
-  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
-    return null;
-  }
-
-  return {
-    routeKey,
-    distanceKm: Number(distanceKm.toFixed(1)),
-    durationMinutes: Math.max(1, Math.round(durationMinutes)),
-    etaText:
-      sanitizeText(lockInput.etaText, "") ||
-      buildTripEtaText(Math.max(1, Math.round(durationMinutes))),
-    createdAt,
-    expiresAt,
-    coordinates: normalizeRuntimeRouteCoordinates(lockInput.coordinates).slice(
-      0,
-      QUOTE_LOCK_MAX_ROUTE_POINTS,
-    ),
-  };
-}
-
-function resolveActiveQuoteLock(lockInput = null, routeKey = "") {
-  const normalizedRouteKey = sanitizeText(routeKey, "");
-  if (!normalizedRouteKey) {
-    return null;
-  }
-
-  const normalizedLock = normalizePersistedQuoteLock(lockInput);
-  if (!normalizedLock) {
-    return null;
-  }
-
-  if (normalizedLock.routeKey !== normalizedRouteKey) {
-    return null;
-  }
-
-  return normalizedLock;
-}
-
-function buildQuoteLockSnapshot({
-  originCoordinate,
-  destinationCoordinate,
-  distanceKm,
-  durationMinutes,
-  etaText = "",
-  coordinates = [],
-}) {
-  const routeKey = buildQuoteLockRouteKey(originCoordinate, destinationCoordinate);
-  if (!routeKey) {
-    return null;
-  }
-
-  const normalizedDistanceKm = Number(distanceKm);
-  const normalizedDurationMinutes = Number(durationMinutes);
-  if (!Number.isFinite(normalizedDistanceKm) || normalizedDistanceKm <= 0) {
-    return null;
-  }
-  if (
-    !Number.isFinite(normalizedDurationMinutes) ||
-    normalizedDurationMinutes <= 0
-  ) {
-    return null;
-  }
-
-  const createdAt = Date.now();
-
-  return {
-    routeKey,
-    distanceKm: Number(normalizedDistanceKm.toFixed(1)),
-    durationMinutes: Math.max(1, Math.round(normalizedDurationMinutes)),
-    etaText:
-      sanitizeText(etaText, "") ||
-      buildTripEtaText(Math.max(1, Math.round(normalizedDurationMinutes))),
-    createdAt,
-    expiresAt: createdAt + QUOTE_LOCK_VALIDITY_MS,
-    coordinates: normalizeRuntimeRouteCoordinates(coordinates).slice(
-      0,
-      QUOTE_LOCK_MAX_ROUTE_POINTS,
-    ),
-  };
-}
-
 function resolveCompletedReceiptRouteCoordinates(
   routeCoordinates = [],
   pickupCoordinate = null,
@@ -3454,30 +3276,6 @@ function buildLiveRoutePlanInFlightKey({
     Math.round(normalizedDestination.latitude * 10000),
     Math.round(normalizedDestination.longitude * 10000),
   ].join(":");
-}
-
-function registerDirectionsRequestForBooking(bookingIdInput) {
-  const bookingId = String(bookingIdInput || "").trim();
-  if (!bookingId) {
-    return { allowed: true, count: 0 };
-  }
-
-  const currentCount = Number(runtimeDirectionsRequestsByBooking.get(bookingId) || 0);
-  if (currentCount >= MAX_DIRECTIONS_REQUESTS_PER_BOOKING) {
-    return { allowed: false, count: currentCount };
-  }
-
-  const nextCount = currentCount + 1;
-  runtimeDirectionsRequestsByBooking.set(bookingId, nextCount);
-  return { allowed: true, count: nextCount };
-}
-
-function clearDirectionsBudgetForBooking(bookingIdInput) {
-  const bookingId = String(bookingIdInput || "").trim();
-  if (!bookingId) {
-    return;
-  }
-  runtimeDirectionsRequestsByBooking.delete(bookingId);
 }
 
 function getCachedDriverRoutePlan({
