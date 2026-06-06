@@ -42,6 +42,7 @@ describe('fcm-service', () => {
     mockRedis = {
       hset: jest.fn().mockResolvedValue(1),
       hincrby: jest.fn().mockResolvedValue(1),
+      hget: jest.fn().mockResolvedValue(null),
       hgetall: jest.fn().mockResolvedValue({}),
       hdel: jest.fn().mockResolvedValue(1),
       sadd: jest.fn().mockResolvedValue(1),
@@ -50,6 +51,7 @@ describe('fcm-service', () => {
       scard: jest.fn().mockResolvedValue(0),
       scan: jest.fn().mockResolvedValue(['0', []]),
       expire: jest.fn().mockResolvedValue(1),
+      del: jest.fn().mockResolvedValue(1),
       disconnect: jest.fn()
     };
     fcmService = new FCMService(mockRedis);
@@ -114,6 +116,39 @@ describe('fcm-service', () => {
     }));
   });
 
+  test('sendRideStatusUpdate forwards ride timeline metadata for persistent notifications', async () => {
+    const send = jest.fn().mockResolvedValue('msg-id');
+    admin.messaging.mockReturnValue({ send });
+    fcmService.resolveUserTokens = jest.fn().mockResolvedValue([{ fcmToken: 'token-1' }]);
+
+    const result = await fcmService.sendRideStatusUpdate('u1', {
+      bookingId: 'booking-1',
+      status: 'accepted',
+      userType: 'customer',
+      driverName: 'Carlos',
+      pickupEstimatedTime: 4,
+      tripEstimatedTime: 18,
+      phaseStartedAt: '2026-06-05T19:00:00.000Z',
+      pickup: { address: 'Rua de Partida, 100' },
+      destination: { address: 'Leblon' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        type: 'ride_status_update',
+        bookingId: 'booking-1',
+        status: 'accepted',
+        userType: 'customer',
+        pickupEstimatedTime: '4',
+        tripEstimatedTime: '18',
+        phaseStartedAt: '2026-06-05T19:00:00.000Z',
+        pickup: JSON.stringify({ address: 'Rua de Partida, 100' }),
+        destination: JSON.stringify({ address: 'Leblon' }),
+      }),
+    }));
+  });
+
   test('removeUserFCMToken keeps token active when another user still owns it', async () => {
     mockRedis.smembers.mockResolvedValue(['real-user']);
 
@@ -175,6 +210,24 @@ describe('fcm-service', () => {
       'successful',
       1
     );
+  });
+
+  test('removeInvalidToken clears canonical indexes and matching legacy fcmToken fields', async () => {
+    mockRedis.smembers.mockResolvedValue(['u1']);
+    mockRedis.hget.mockImplementation((key, field) => {
+      if (field !== 'fcmToken') return Promise.resolve(null);
+      if (key === 'user:u1') return Promise.resolve('dead-token');
+      if (key === 'driver:u1') return Promise.resolve('other-token');
+      return Promise.resolve(null);
+    });
+
+    await fcmService.removeInvalidToken('dead-token');
+
+    expect(mockRedis.srem).toHaveBeenCalledWith('active_fcm_tokens', 'dead-token');
+    expect(mockRedis.hdel).toHaveBeenCalledWith('fcm_tokens:u1', 'dead-token');
+    expect(mockRedis.hdel).toHaveBeenCalledWith('user:u1', 'fcmToken');
+    expect(mockRedis.hdel).not.toHaveBeenCalledWith('driver:u1', 'fcmToken');
+    expect(mockRedis.del).toHaveBeenCalledWith('fcm_token_users:dead-token');
   });
 
   test('destroy should disconnect redis client', () => {

@@ -17,6 +17,15 @@ function toNumber(value, fallback = 0) {
     return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function isInvalidFcmTokenError(error) {
+    const code = String(error?.code || '');
+    const message = String(error?.message || '');
+    return code === 'messaging/invalid-registration-token'
+        || code === 'messaging/registration-token-not-registered'
+        || /requested entity was not found/i.test(message)
+        || /registration token.*not registered/i.test(message);
+}
+
 function resolveServiceAccountPath() {
     const candidates = [
         process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
@@ -640,8 +649,7 @@ class FCMService {
             logger.error(`❌ Erro ao enviar notificação para token ${fcmToken}:`, error);
 
             // Se o token for inválido, removê-lo
-            if (error.code === 'messaging/invalid-registration-token' ||
-                error.code === 'messaging/registration-token-not-registered') {
+            if (isInvalidFcmTokenError(error)) {
                 await this.removeInvalidToken(fcmToken);
             }
             await this.incrementDailyMetrics({
@@ -749,8 +757,7 @@ class FCMService {
         } catch (error) {
             logger.error(`❌ Erro ao enviar notificação interativa para token ${fcmToken}:`, error);
 
-            if (error.code === 'messaging/invalid-registration-token' ||
-                error.code === 'messaging/registration-token-not-registered') {
+            if (isInvalidFcmTokenError(error)) {
                 await this.removeInvalidToken(fcmToken);
             }
             await this.incrementDailyMetrics({
@@ -825,6 +832,7 @@ class FCMService {
                 return { success: false, error: 'Token FCM não encontrado' };
             }
 
+            const nowIso = new Date().toISOString();
             const dataPayload = {
                 type: 'ride_status_update',
                 bookingId: String(rideData.bookingId || ''),
@@ -835,11 +843,38 @@ class FCMService {
                 estimatedTime: String(rideData.estimatedTime || ''),
                 distance: String(rideData.distance || ''),
                 fare: String(rideData.fare || ''),
-                timestamp: new Date().toISOString()
+                timestamp: String(rideData.timestamp || nowIso),
+                phaseStartedAt: String(
+                    rideData.phaseStartedAt ||
+                    rideData.acceptedAt ||
+                    rideData.arrivedAt ||
+                    rideData.startedAt ||
+                    nowIso
+                )
             };
 
             if (rideData.pickup) dataPayload.pickup = JSON.stringify(rideData.pickup);
             if (rideData.destination) dataPayload.destination = JSON.stringify(rideData.destination);
+
+            [
+                'pickupEstimatedTime',
+                'pickupEtaMinutes',
+                'estimatedPickupTime',
+                'tripEstimatedTime',
+                'tripEstimatedMinutes',
+                'estimatedTripTime',
+                'tripEtaMinutes',
+                'durationMinutes',
+                'estimatedDuration',
+                'duration',
+                'acceptedAt',
+                'arrivedAt',
+                'startedAt'
+            ].forEach((field) => {
+                if (rideData[field] !== null && typeof rideData[field] !== 'undefined') {
+                    dataPayload[field] = String(rideData[field]);
+                }
+            });
 
             let successCount = 0;
             for (const fcmToken of fcmTokens) {
@@ -851,12 +886,7 @@ class FCMService {
                 };
 
                 try {
-                    await circuitBreakerService.execute(
-                        'fcm_send',
-                        async () => admin.messaging().send(message),
-                        async () => { throw new Error('Fallback Timeout'); },
-                        { failureThreshold: 5, timeout: 60000 }
-                    );
+                    await admin.messaging().send(message);
                     successCount++;
                     await this.incrementDailyMetrics({
                         totalSent: 1,
@@ -865,7 +895,7 @@ class FCMService {
                     }, 'sendRideStatusUpdate');
                 } catch (err) {
                     logger.warn(`⚠️ Erro push silencioso fcm=${fcmToken.slice(0, 10)}...: ${err.message}`);
-                    if (err.code === 'messaging/invalid-registration-token' || err.code === 'messaging/registration-token-not-registered') {
+                    if (isInvalidFcmTokenError(err)) {
                         await this.removeInvalidToken(fcmToken);
                     }
                     await this.incrementDailyMetrics({
@@ -1020,6 +1050,15 @@ class FCMService {
         try {
             const redis = await this.getRedisClient('removeInvalidToken');
             if (!redis) return;
+            const removeLegacyTokenForUser = async (userId) => {
+                for (const key of [`user:${userId}`, `driver:${userId}`]) {
+                    const legacyToken = await redis.hget(key, 'fcmToken');
+                    if (legacyToken === fcmToken) {
+                        await redis.hdel(key, 'fcmToken');
+                        logger.info(`Token FCM legado inválido removido de ${key}`);
+                    }
+                }
+            };
 
             // Remover da lista de tokens ativos
             await redis.srem('active_fcm_tokens', fcmToken);
@@ -1030,6 +1069,7 @@ class FCMService {
 
             for (const userId of indexedUserIds) {
                 await redis.hdel(`fcm_tokens:${userId}`, fcmToken);
+                await removeLegacyTokenForUser(userId);
                 logger.info(`Token inválido removido de fcm_tokens:${userId}`);
             }
 
@@ -1050,6 +1090,7 @@ class FCMService {
                 for (const [token, data] of Object.entries(tokens)) {
                     if (token === fcmToken) {
                         await redis.hdel(key, token);
+                        await removeLegacyTokenForUser(key.replace('fcm_tokens:', ''));
                         logger.info(`Token inválido removido de ${key}`);
                         break;
                     }

@@ -59,6 +59,19 @@ const createRedis = () => ({
     bookingId: 'booking_1',
     customerId: 'customer_1',
     driverId: 'driver_1',
+    customerName: 'Leaf Passageiro Teste',
+    driverName: 'Carlos Motorista Teste',
+    pickupLocation: JSON.stringify({
+      address: 'Rua de Partida, 100',
+      lat: -22.9,
+      lng: -43.2,
+    }),
+    destinationLocation: JSON.stringify({
+      address: 'Leblon',
+      lat: -22.98,
+      lng: -43.22,
+    }),
+    estimatedFare: '27.50',
   }),
   hset: jest.fn().mockResolvedValue(1),
   type: jest.fn().mockResolvedValue('hash'),
@@ -69,12 +82,16 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
   let socket;
   let io;
   let redis;
+  let fcmService;
 
   beforeEach(() => {
     jest.clearAllMocks();
     socket = createSocket();
     io = createIo();
     redis = createRedis();
+    fcmService = {
+      sendRideStatusUpdate: jest.fn().mockResolvedValue({ success: true }),
+    };
 
     registerSocketDriverControlHandlers({
       socket,
@@ -83,6 +100,7 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
         getConnection: jest.fn(() => redis),
       },
       logStructured: jest.fn(),
+      fcmService,
     });
   });
 
@@ -106,6 +124,26 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
         action: 'arrived_at_pickup',
         bookingId: 'booking_1',
         rideId: 'booking_1',
+      })
+    );
+    expect(fcmService.sendRideStatusUpdate).toHaveBeenCalledWith(
+      'customer_1',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        status: 'arrived',
+        userType: 'customer',
+        driverName: 'Carlos Motorista Teste',
+        pickup: expect.objectContaining({ address: 'Rua de Partida, 100' }),
+        pickupEstimatedTime: '0',
+      })
+    );
+    expect(fcmService.sendRideStatusUpdate).toHaveBeenCalledWith(
+      'driver_1',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        status: 'arrived',
+        userType: 'driver',
+        customerName: 'Leaf Passageiro Teste',
       })
     );
   });

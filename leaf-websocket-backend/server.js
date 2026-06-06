@@ -1311,7 +1311,8 @@ io.on('connection', async (socket) => {
         redisPool,
         logStructured,
         enforceSubscriptionForOnline,
-        enforceDailyKYCForOnline
+        enforceDailyKYCForOnline,
+        fcmService
     });
 
     if (ENABLE_LEGACY_SOCKET_NOTIFICATIONS) {

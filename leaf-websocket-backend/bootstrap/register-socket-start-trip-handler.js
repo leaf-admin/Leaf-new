@@ -9,6 +9,17 @@ function mapStartTripReason(errorMessage = '') {
     return 'command_error';
 }
 
+function parseLocationSnapshot(value) {
+    if (!value) return {};
+    if (typeof value === 'object') return value;
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_error) {
+        return {};
+    }
+}
+
 function registerSocketStartTripHandler({
     socket,
     io,
@@ -527,7 +538,7 @@ function registerSocketStartTripHandler({
                 // ✅ Buscar customerId do booking no Redis (para notificações adicionais se necessário)
                 const bookingKey = `booking:${bookingId}`;
                 const bookingDataRedis = await redis.hgetall(bookingKey);
-                const customerIdToNotify = customerId || bookingDataRedis?.customerId || bookingDataRedis?.customer;
+                let customerIdToNotify = customerId || bookingDataRedis?.customerId || bookingDataRedis?.customer;
 
                 // ✅ Debug: Log para verificar se customerId foi encontrado
                 if (!customerIdToNotify) {
@@ -540,6 +551,7 @@ function registerSocketStartTripHandler({
                     const activeBooking = io.activeBookings?.get(bookingId);
                     if (activeBooking?.customerId) {
                         const fallbackCustomerId = activeBooking.customerId;
+                        customerIdToNotify = fallbackCustomerId;
                         io.to(`customer_${fallbackCustomerId}`).emit('tripStarted', {
                             ...tripStartedData,
                             message: 'Viagem iniciada'
@@ -565,6 +577,63 @@ function registerSocketStartTripHandler({
                         bookingId,
                         customerId: customerIdToNotify,
                         eventType: 'startTrip'
+                    });
+                }
+
+                try {
+                    if (fcmService && typeof fcmService.sendRideStatusUpdate === 'function') {
+                        const pickupLocation = parseLocationSnapshot(bookingDataRedis.pickupLocation || bookingDataRedis.pickup);
+                        const destinationLocation = parseLocationSnapshot(
+                            bookingDataRedis.destinationLocation ||
+                            bookingDataRedis.destination ||
+                            bookingDataRedis.drop
+                        );
+                        const tripEstimatedTime = String(
+                            bookingDataRedis.tripEstimatedTime ||
+                            bookingDataRedis.estimatedTripTime ||
+                            bookingDataRedis.estimatedTime ||
+                            bookingDataRedis.estimatedDuration ||
+                            bookingDataRedis.duration ||
+                            ''
+                        );
+                        const payloadData = {
+                            bookingId,
+                            status: 'started',
+                            pickup: {
+                                ...pickupLocation,
+                                address: pickupLocation.address || pickupLocation.add || bookingDataRedis.pickupAddress || 'Local de embarque'
+                            },
+                            destination: {
+                                ...destinationLocation,
+                                address: destinationLocation.address || destinationLocation.add || bookingDataRedis.destinationAddress || 'Destino'
+                            },
+                            estimatedTime: tripEstimatedTime,
+                            tripEstimatedTime,
+                            distance: String(bookingDataRedis.distance || bookingDataRedis.estimatedDistance || ''),
+                            fare: String(bookingDataRedis.estimatedFare || bookingDataRedis.finalFare || bookingDataRedis.fare || '')
+                        };
+
+                        if (customerIdToNotify) {
+                            await fcmService.sendRideStatusUpdate(customerIdToNotify, {
+                                ...payloadData,
+                                userType: 'customer',
+                                driverName: bookingDataRedis.driverName || bookingDataRedis.driverDisplayName || ''
+                            });
+                        }
+
+                        await fcmService.sendRideStatusUpdate(driverId, {
+                            ...payloadData,
+                            userType: 'driver',
+                            customerName: bookingDataRedis.customerName || bookingDataRedis.passengerName || 'Passageiro'
+                        });
+                    }
+                } catch (silentPushError) {
+                    logStructured('warn', 'Falha ao enviar silent push de inicio de viagem', {
+                        service: 'startTrip',
+                        bookingId,
+                        driverId,
+                        customerId: customerIdToNotify || null,
+                        error: silentPushError?.message || String(silentPushError)
                     });
                 }
 

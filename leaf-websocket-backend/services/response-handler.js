@@ -699,6 +699,14 @@ class ResponseHandler {
 
             // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
             try {
+                const pickupEstimatedTime = booking.estimatedPickupTime || booking.pickupEstimatedTime || '5';
+                const tripEstimatedTime = booking.tripEstimatedTime ||
+                    booking.estimatedTripTime ||
+                    booking.estimatedTime ||
+                    booking.estimatedDuration ||
+                    booking.duration ||
+                    '';
+
                 // Para o passageiro
                 await this.fcmService.sendRideStatusUpdate(booking.customerId, {
                     bookingId: bookingId,
@@ -707,7 +715,9 @@ class ResponseHandler {
                     driverName: driverName,
                     pickup: { address: pickupAddress, lat: pickupLat, lng: pickupLng },
                     destination: booking.destination || booking.destinationLocation || {},
-                    estimatedTime: booking.estimatedPickupTime || '5',
+                    estimatedTime: pickupEstimatedTime,
+                    pickupEstimatedTime,
+                    tripEstimatedTime,
                     distance: booking.distance || '0',
                     fare: booking.estimatedFare || '0'
                 });
@@ -720,7 +730,9 @@ class ResponseHandler {
                     customerName: passengerName,
                     pickup: { address: pickupAddress, lat: pickupLat, lng: pickupLng },
                     destination: booking.destination || booking.destinationLocation || {},
-                    estimatedTime: booking.estimatedPickupTime || '5',
+                    estimatedTime: pickupEstimatedTime,
+                    pickupEstimatedTime,
+                    tripEstimatedTime,
                     distance: booking.distance || '0',
                     fare: booking.estimatedFare || '0'
                 });
