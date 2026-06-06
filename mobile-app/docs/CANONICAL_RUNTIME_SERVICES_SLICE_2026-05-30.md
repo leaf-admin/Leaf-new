@@ -42,12 +42,19 @@ Tambem foram migradas superficies de pagamento/saldo que ainda chamavam arquivos
 
 `prototypeRideRuntime.js` ainda e um arquivo grande e vivo. Nesta fatia, nao houve extracao agressiva de funcoes internas. A reducao de risco foi feita pela dependencia indireta: o runtime continua usando `services/runtime/locationRouteBridge`, mas esse bridge agora aponta para a fachada canonica `locationService`.
 
+Atualizacao 2026-06-06 (`LEA-32`):
+
+- Primeira extracao interna pequena concluida.
+- Busca/cache/normalizacao de destino saiu de `prototypeRideRuntime.js` para `src/screens/prototype/prototypeDestinationSearchRuntime.js`.
+- A extracao preserva comportamento: coordenadas continuam aceitas apenas quando numericas, cache segue curto, token de sessao segue com janela de idle.
+- Nenhuma regra de socket, pagamento, corrida ativa, UI ou lifecycle foi alterada.
+
 Responsabilidades reais identificadas no arquivo:
 
 - bootstrap e persistencia de sessao runtime.
 - socket/realtime lifecycle.
 - estado passageiro/motorista.
-- busca de destino e quote lock.
+- busca de destino via helper dedicado e quote lock ainda no runtime.
 - pagamento e estado de confirmacao.
 - corrida ativa, chegada, embarque, inicio e conclusao.
 - tracking de localizacao passageiro/motorista.
@@ -79,10 +86,19 @@ Comandos executados nesta fatia:
 
 Resultado: PASS.
 
+Comandos adicionais executados em 2026-06-06 para `LEA-32`:
+
+- `npm --prefix mobile-app run test:unit -- --runTestsByPath __tests__/prototype-destination-search-runtime.test.js __tests__/prototype-ride-runtime-financial-snapshot.test.js --runInBand`
+- `npm --prefix mobile-app run qa:production-guards`
+- `git diff --check`
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`
+
+Resultado 2026-06-06: PASS.
+
 ## Proximas Fatias Seguras
 
-1. Extrair busca de destino/cache de `prototypeRideRuntime` para um service dedicado.
-2. Extrair quote lock e telemetria de custo para um service dedicado.
-3. Extrair heartbeat de localizacao por papel para um service dedicado.
-4. Extrair chat/notificacoes persistidas para um service dedicado.
-5. Depois disso, reduzir `common-local` restante dentro das fachadas, uma por dominio.
+1. Extrair quote lock e telemetria de custo para um service dedicado.
+2. Extrair heartbeat de localizacao por papel para um service dedicado.
+3. Extrair chat/notificacoes persistidas para um service dedicado.
+4. Depois disso, reduzir `common-local` restante dentro das fachadas, uma por dominio.
