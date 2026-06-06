@@ -70,8 +70,11 @@ import { createPrototypeRideTelemetryRuntime } from "./prototypeRideTelemetryRun
 import {
   DRIVER_LOCATION_HEARTBEAT_MS,
   PASSENGER_LOCATION_HEARTBEAT_MS,
+  buildDriverHeartbeatState,
+  buildDriverLocationHeartbeatState,
   buildPassengerHeartbeatStartKey,
   buildDriverLocationPayload,
+  buildPassengerHeartbeatState,
   buildPassengerLocationPayload,
   shouldCoalescePassengerLocationAttempt,
   shouldMonitorPassengerTripulation as shouldMonitorPassengerTripulationHelper,
@@ -12967,10 +12970,7 @@ function stopDriverLocationHeartbeat() {
   runtimeLastSharedDriverRoutePlanAt = 0;
 
   setRuntimeState((previous) => ({
-    driverLocationHeartbeat: {
-      ...previous.driverLocationHeartbeat,
-      running: false,
-    },
+    ...buildDriverHeartbeatState(previous, { running: false }),
   }));
 }
 
@@ -13078,10 +13078,7 @@ function stopPassengerLocationHeartbeat(options = {}) {
   runtimeLastPassengerHeartbeatAttemptAt = 0;
 
   setRuntimeState((previous) => ({
-    passengerLocationHeartbeat: {
-      ...previous.passengerLocationHeartbeat,
-      running: false,
-    },
+    ...buildPassengerHeartbeatState(previous, { running: false }),
   }));
 }
 
@@ -13181,12 +13178,11 @@ async function pushPassengerLocationNow(
     );
 
     setRuntimeState((previous) => ({
-      passengerLocationHeartbeat: {
-        ...previous.passengerLocationHeartbeat,
+      ...buildPassengerHeartbeatState(previous, {
         running: true,
         lastSentAt: new Date().toISOString(),
         lastError: "",
-      },
+      }),
     }));
 
     runtimeLastPassengerHeartbeatSentAt = Date.now();
@@ -13231,11 +13227,10 @@ async function startPassengerLocationHeartbeat(profile, socketInstance = null) {
 
   if (hasMatchingActiveHeartbeat) {
     setRuntimeState((previous) => ({
-      passengerLocationHeartbeat: {
-        ...previous.passengerLocationHeartbeat,
+      ...buildPassengerHeartbeatState(previous, {
         running: true,
         lastError: "",
-      },
+      }),
     }));
     return;
   }
@@ -13259,36 +13254,33 @@ async function startPassengerLocationHeartbeat(profile, socketInstance = null) {
     runtimePassengerHeartbeatInterval = setInterval(() => {
       pushPassengerLocationNow(profile, socketInstance).catch((error) => {
         setRuntimeState((previous) => ({
-          passengerLocationHeartbeat: {
-            ...previous.passengerLocationHeartbeat,
+          ...buildPassengerHeartbeatState(previous, {
             running: true,
             lastError:
               error?.message ||
               "Falha no envio periódico de localização do passageiro.",
-          },
+          }),
         }));
       });
     }, PASSENGER_LOCATION_HEARTBEAT_MS);
 
     setRuntimeState((previous) => ({
-      passengerLocationHeartbeat: {
-        ...previous.passengerLocationHeartbeat,
+      ...buildPassengerHeartbeatState(previous, {
         running: true,
         lastError: "",
-      },
+      }),
     }));
 
     try {
       await pushPassengerLocationNow(profile, socketInstance);
     } catch (error) {
       setRuntimeState((previous) => ({
-        passengerLocationHeartbeat: {
-          ...previous.passengerLocationHeartbeat,
+        ...buildPassengerHeartbeatState(previous, {
           running: true,
           lastError:
             error?.message ||
             "Falha no envio inicial de localização do passageiro.",
-        },
+        }),
       }));
     }
   })();
@@ -13331,20 +13323,11 @@ async function pushDriverLocationNow(profile, socketInstance = null) {
   }
 
   setRuntimeState((previous) => ({
-    currentCoordinate: {
-      latitude: location.lat,
-      longitude: location.lng,
-    },
-    driverCoordinate: {
-      latitude: location.lat,
-      longitude: location.lng,
-    },
-    driverLocationHeartbeat: {
-      ...previous.driverLocationHeartbeat,
+    ...buildDriverLocationHeartbeatState(previous, location, {
       running: true,
       lastSentAt: new Date().toISOString(),
       lastError: "",
-    },
+    }),
   }));
 
   return { success: true, location };
@@ -13359,33 +13342,30 @@ async function startDriverLocationHeartbeat(profile, socketInstance = null) {
   runtimeDriverHeartbeatInterval = setInterval(() => {
     pushDriverLocationNow(profile, socketInstance).catch((error) => {
       setRuntimeState((previous) => ({
-        driverLocationHeartbeat: {
-          ...previous.driverLocationHeartbeat,
+        ...buildDriverHeartbeatState(previous, {
           running: true,
           lastError:
             error?.message || "Falha no envio periódico de localização.",
-        },
+        }),
       }));
     });
   }, DRIVER_LOCATION_HEARTBEAT_MS);
 
   setRuntimeState((previous) => ({
-    driverLocationHeartbeat: {
-      ...previous.driverLocationHeartbeat,
+    ...buildDriverHeartbeatState(previous, {
       running: true,
       lastError: "",
-    },
+    }),
   }));
 
   try {
     await pushDriverLocationNow(profile, socketInstance);
   } catch (error) {
     setRuntimeState((previous) => ({
-      driverLocationHeartbeat: {
-        ...previous.driverLocationHeartbeat,
+      ...buildDriverHeartbeatState(previous, {
         running: true,
         lastError: error?.message || "Falha no envio inicial de localização.",
-      },
+      }),
     }));
   }
 }

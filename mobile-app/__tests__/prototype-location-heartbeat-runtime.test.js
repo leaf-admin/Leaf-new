@@ -1,8 +1,11 @@
 import {
   PASSENGER_LOCATION_STARTED_HEARTBEAT_MS,
   PASSENGER_LOCATION_STATIONARY_HEARTBEAT_MS,
+  buildDriverHeartbeatState,
+  buildDriverLocationHeartbeatState,
   buildPassengerHeartbeatStartKey,
   buildDriverLocationPayload,
+  buildPassengerHeartbeatState,
   buildPassengerLocationPayload,
   calculateHeadingDeltaDegrees,
   normalizeHeadingDegrees,
@@ -116,6 +119,66 @@ describe('prototype location heartbeat runtime helpers', () => {
       pendingStartKey: 'user_1:booking_1',
       startKey: 'user_1:booking_1',
     })).toBe(false);
+  });
+
+  it('builds heartbeat state patches without losing existing metadata', () => {
+    expect(buildPassengerHeartbeatState({
+      passengerLocationHeartbeat: {
+        running: false,
+        lastSentAt: 'old',
+        lastError: 'old error',
+      },
+    }, {
+      running: true,
+      lastError: '',
+    })).toEqual({
+      passengerLocationHeartbeat: {
+        running: true,
+        lastSentAt: 'old',
+        lastError: '',
+      },
+    });
+
+    expect(buildDriverHeartbeatState({
+      driverLocationHeartbeat: {
+        running: false,
+        lastSentAt: 'old',
+      },
+    }, {
+      running: true,
+      lastSentAt: 'new',
+    })).toEqual({
+      driverLocationHeartbeat: {
+        running: true,
+        lastSentAt: 'new',
+      },
+    });
+
+    expect(buildDriverLocationHeartbeatState({
+      driverLocationHeartbeat: {
+        running: false,
+        lastError: 'old error',
+      },
+    }, {
+      lat: -22.98,
+      lng: -43.21,
+    }, {
+      running: true,
+      lastError: '',
+    })).toEqual({
+      currentCoordinate: {
+        latitude: -22.98,
+        longitude: -43.21,
+      },
+      driverCoordinate: {
+        latitude: -22.98,
+        longitude: -43.21,
+      },
+      driverLocationHeartbeat: {
+        running: true,
+        lastError: '',
+      },
+    });
   });
 
   it('coalesces passenger location attempts for the same booking inside the send gap', () => {

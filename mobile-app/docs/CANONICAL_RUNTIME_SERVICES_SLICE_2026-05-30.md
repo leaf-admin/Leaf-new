@@ -59,6 +59,9 @@ Atualizacao 2026-06-06 (`LEA-32`):
 - Quinta extracao interna pequena concluida.
 - Regras de monitoramento do heartbeat do passageiro, start key, reuso de heartbeat ativo/pendente e coalescing de tentativa tambem foram movidas para `prototypeLocationHeartbeatRuntime.js`.
 - A extracao preserva comportamento: `prototypeRideRuntime.js` ainda controla timers, socket e atualizacao de estado; o helper apenas decide quando reutilizar, iniciar ou coalescer.
+- Sexta extracao interna pequena concluida.
+- Builders de patch de estado do heartbeat de passageiro/motorista foram movidos para `prototypeLocationHeartbeatRuntime.js`.
+- A extracao preserva comportamento: `setRuntimeState` segue no runtime, mas a montagem dos objetos `passengerLocationHeartbeat`, `driverLocationHeartbeat`, `currentCoordinate` e `driverCoordinate` agora fica centralizada e testada.
 - Nenhuma regra de socket, pagamento, corrida ativa, UI ou lifecycle foi alterada.
 
 Responsabilidades reais identificadas no arquivo:
@@ -68,7 +71,7 @@ Responsabilidades reais identificadas no arquivo:
 - estado passageiro/motorista.
 - busca de destino e quote lock via helpers dedicados.
 - contexto de telemetria de custo via helper dedicado.
-- payload/throttle/lifecycle guard de heartbeat de localizacao via helper dedicado.
+- payload/throttle/lifecycle guard/state patch de heartbeat de localizacao via helper dedicado.
 - pagamento e estado de confirmacao.
 - corrida ativa, chegada, embarque, inicio e conclusao.
 - tracking de localizacao passageiro/motorista.

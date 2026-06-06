@@ -159,6 +159,51 @@ export function shouldCoalescePassengerLocationAttempt({
   );
 }
 
+export function buildPassengerHeartbeatState(previousState = {}, patch = {}) {
+  return {
+    passengerLocationHeartbeat: {
+      ...(previousState.passengerLocationHeartbeat || {}),
+      ...patch,
+    },
+  };
+}
+
+export function buildDriverHeartbeatState(previousState = {}, patch = {}) {
+  return {
+    driverLocationHeartbeat: {
+      ...(previousState.driverLocationHeartbeat || {}),
+      ...patch,
+    },
+  };
+}
+
+export function buildDriverLocationHeartbeatState(
+  previousState = {},
+  location = null,
+  heartbeatPatch = {},
+) {
+  const latitude = Number(location?.lat ?? location?.latitude);
+  const longitude = Number(location?.lng ?? location?.longitude);
+  const coordinatePatch =
+    Number.isFinite(latitude) && Number.isFinite(longitude)
+      ? {
+          currentCoordinate: {
+            latitude,
+            longitude,
+          },
+          driverCoordinate: {
+            latitude,
+            longitude,
+          },
+        }
+      : {};
+
+  return {
+    ...coordinatePatch,
+    ...buildDriverHeartbeatState(previousState, heartbeatPatch),
+  };
+}
+
 export function shouldThrottlePassengerLocationPush({
   bookingId,
   bookingStatus,
