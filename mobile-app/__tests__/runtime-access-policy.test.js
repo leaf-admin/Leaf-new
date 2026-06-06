@@ -1,5 +1,11 @@
 describe('runtimeAccessPolicy payment bypass gates', () => {
-  const loadPolicy = ({ extra = {}, isDevice = true, dev = false, env = {} } = {}) => {
+  const loadPolicy = ({
+    extra = {},
+    isDevice = true,
+    dev = false,
+    env = {},
+    runtimeAllowsGoogle = false,
+  } = {}) => {
     jest.resetModules();
 
     Object.keys(process.env)
@@ -19,6 +25,14 @@ describe('runtimeAccessPolicy payment bypass gates', () => {
         extra,
       },
     }));
+    jest.doMock('../src/services/RuntimeConfigService', () => ({
+      __esModule: true,
+      default: {
+        getMapsRoutingPolicySync: jest.fn(() => ({
+          clientDirectGoogleFallback: runtimeAllowsGoogle,
+        })),
+      },
+    }));
 
     return require('../src/config/runtimeAccessPolicy');
   };
@@ -26,6 +40,7 @@ describe('runtimeAccessPolicy payment bypass gates', () => {
   afterEach(() => {
     jest.dontMock('expo-device');
     jest.dontMock('expo-constants');
+    jest.dontMock('../src/services/RuntimeConfigService');
     jest.resetModules();
   });
 
@@ -65,10 +80,24 @@ describe('runtimeAccessPolicy payment bypass gates', () => {
     expect(policy.allowClientDirectGoogleFallback()).toBe(false);
   });
 
-  it('allows direct Google fallback only in dev or QA runtime with explicit flag', () => {
+  it('does not allow direct Google fallback when runtime policy keeps it disabled', () => {
+    const devPolicy = loadPolicy({
+      isDevice: true,
+      dev: true,
+      env: {
+        EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK: 'true',
+      },
+    });
+
+    expect(devPolicy.hasExplicitClientDirectGoogleFallbackFlag()).toBe(true);
+    expect(devPolicy.allowClientDirectGoogleFallback()).toBe(false);
+  });
+
+  it('allows direct Google fallback only in dev or QA runtime with explicit flag and runtime opt-in', () => {
     const productionPolicy = loadPolicy({
       isDevice: true,
       dev: false,
+      runtimeAllowsGoogle: true,
       env: {
         EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK: 'true',
       },
@@ -78,6 +107,7 @@ describe('runtimeAccessPolicy payment bypass gates', () => {
     const devPolicy = loadPolicy({
       isDevice: true,
       dev: true,
+      runtimeAllowsGoogle: true,
       env: {
         EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK: 'true',
       },

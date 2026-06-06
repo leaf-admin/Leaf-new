@@ -1,5 +1,6 @@
 import Logger from '../utils/Logger';
 import { getPilotFeatureFlagDefaults } from '../config/pilotLaunchProfile';
+import runtimeConfigService from './RuntimeConfigService';
 /**
  * 🚩 Feature Flag Service
  * 
@@ -15,6 +16,39 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const normalizeFlag = (value) => TRUTHY_VALUES.has(String(value ?? '').trim().toLowerCase());
 const forceLegacyMapUi = () => normalizeFlag(process.env.EXPO_PUBLIC_FORCE_LEGACY_MAP_UI);
+
+const RUNTIME_TO_LOCAL_FLAG_MAP = Object.freeze({
+  driverWithdrawalsEnabled: 'PILOT_DRIVER_WITHDRAWALS_ENABLED',
+  referralProgramsEnabled: 'PILOT_REFERRAL_PROGRAMS_ENABLED',
+  leafDelasEnabled: 'PILOT_LEAF_DELAS_ENABLED',
+  driverDestinationModeEnabled: 'PILOT_DRIVER_DESTINATION_MODE_ENABLED',
+  dynamicPricingEnabled: 'PILOT_DYNAMIC_PRICING_ENABLED',
+  smartPushEnabled: 'PILOT_SMART_PUSH_ENABLED',
+  softBanEnforcementEnabled: 'PILOT_SOFT_BAN_ENFORCEMENT_ENABLED',
+  adminMutationsEnabled: 'PILOT_ADMIN_MUTATIONS_ENABLED',
+  biometricStrictModeEnabled: 'BIOMETRIC_STRICT_MODE_ENABLED',
+});
+
+function mapRuntimeFeatureGates(runtimeFeatureGates = {}) {
+  return Object.entries(RUNTIME_TO_LOCAL_FLAG_MAP).reduce((acc, [runtimeKey, localKey]) => {
+    if (Object.prototype.hasOwnProperty.call(runtimeFeatureGates, runtimeKey)) {
+      acc[localKey] = runtimeFeatureGates[runtimeKey] === true;
+    }
+    return acc;
+  }, {});
+}
+
+function getOperationalRuntimeFeatureGates(config = null) {
+  if (typeof runtimeConfigService.getOperationalFeatureGatesSync === 'function') {
+    return runtimeConfigService.getOperationalFeatureGatesSync();
+  }
+
+  if (!config || config.source === 'mobile_conservative_default') {
+    return {};
+  }
+
+  return config.featureGates || {};
+}
 
 class FeatureFlagService {
   constructor() {
@@ -70,12 +104,24 @@ class FeatureFlagService {
           mergedFlags.PROTOTYPE_ROBOTAXI_UI_ENABLED = true;
         }
 
-        this.flags = new Map(Object.entries(mergedFlags));
+        const runtimeConfig = await runtimeConfigService.initialize();
+        const runtimeFlags = mapRuntimeFeatureGates(getOperationalRuntimeFeatureGates(runtimeConfig));
+        this.logRuntimeDiff(mergedFlags, runtimeFlags);
+        this.flags = new Map(Object.entries({
+          ...mergedFlags,
+          ...runtimeFlags
+        }));
         await this.saveFlags();
         Logger.log('✅ [FeatureFlags] Flags carregadas do cache:', Array.from(this.flags.entries()));
       } else {
         // Usar flags padrão
-        this.flags = new Map(Object.entries(this.defaultFlags));
+        const runtimeConfig = await runtimeConfigService.initialize();
+        const runtimeFlags = mapRuntimeFeatureGates(getOperationalRuntimeFeatureGates(runtimeConfig));
+        this.logRuntimeDiff(this.defaultFlags, runtimeFlags);
+        this.flags = new Map(Object.entries({
+          ...this.defaultFlags,
+          ...runtimeFlags
+        }));
         await this.saveFlags();
         Logger.log('✅ [FeatureFlags] Usando flags padrão');
       }
@@ -91,6 +137,19 @@ class FeatureFlagService {
       this.flags = new Map(Object.entries(this.defaultFlags));
       this.initialized = true;
     }
+  }
+
+  logRuntimeDiff(localFlags = {}, runtimeFlags = {}) {
+    Object.entries(runtimeFlags).forEach(([flagName, runtimeValue]) => {
+      if (
+        Object.prototype.hasOwnProperty.call(localFlags, flagName) &&
+        localFlags[flagName] !== runtimeValue
+      ) {
+        Logger.log(
+          `ℹ️ [FeatureFlags] Runtime config sobrescreveu ${flagName}: ${localFlags[flagName]} → ${runtimeValue}`
+        );
+      }
+    });
   }
 
   /**
@@ -237,8 +296,15 @@ class FeatureFlagService {
    */
   async syncFlags() {
     try {
-      // TODO: Implementar sincronização com backend se necessário
-      Logger.log('ℹ️ [FeatureFlags] Sincronização com servidor não implementada ainda');
+      const runtimeConfig = await runtimeConfigService.refresh({ forceRefresh: true });
+      const runtimeFlags = mapRuntimeFeatureGates(getOperationalRuntimeFeatureGates(runtimeConfig));
+      Object.entries(runtimeFlags).forEach(([flagName, value]) => {
+        const oldValue = this.flags.get(flagName);
+        this.flags.set(flagName, value);
+        this.notifyListeners(flagName, value, oldValue);
+      });
+      await this.saveFlags();
+      Logger.log('✅ [FeatureFlags] Sincronizadas com runtime config do backend');
     } catch (error) {
       Logger.error('❌ [FeatureFlags] Erro ao sincronizar flags:', error);
     }

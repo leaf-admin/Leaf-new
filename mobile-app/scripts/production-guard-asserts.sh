@@ -49,6 +49,8 @@ require_pattern "src/config/runtimeAccessPolicy.js" "hasExplicitTestUserToolsFla
 require_pattern "src/config/runtimeAccessPolicy.js" "allowPaymentBypass" "payment bypass function presence"
 require_pattern "src/config/runtimeAccessPolicy.js" "hasExplicitPaymentBypassFlag" "payment bypass explicit flag gate"
 require_pattern "src/config/runtimeAccessPolicy.js" "hasExplicitClientDirectGoogleFallbackFlag" "direct Google fallback explicit flag gate"
+require_pattern "src/config/runtimeAccessPolicy.js" "getMapsRoutingPolicySync\\(\\)\\.clientDirectGoogleFallback" "direct Google fallback backend runtime policy gate"
+require_pattern "src/common-local/GoogleAPIFunctions.js" "getMapsRoutingPolicySync" "Google route traffic policy backend runtime source"
 require_pattern "src/config/runtimeAccessPolicy.js" "allowTestUserTools\\(\\) && hasExplicitPaymentBypassFlag" "forced payment bypass requires QA tools gate"
 require_pattern "src/services/PaymentBypassService.js" "allowPaymentBypass" "payment bypass service runtime policy gate"
 require_pattern "src/services/DatabaseBypass.js" "allowTestUserTools" "database bypass service test-user runtime policy gate"

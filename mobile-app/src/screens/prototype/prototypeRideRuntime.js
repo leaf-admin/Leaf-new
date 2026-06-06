@@ -75,6 +75,7 @@ import {
   updateDriverOnboardingChecklist,
 } from "../../services/DriverOnboardingService";
 import driverActivationService from "../../services/DriverActivationService";
+import driverOnlinePolicyService from "../../services/DriverOnlinePolicyService";
 import rideCostTelemetryService from "../../services/RideCostTelemetryService";
 import { getApiURL } from "../../config/NetworkConfig";
 import { getPrototypePlaybackConfigSnapshot } from "../../config/prototypePlaybackConfig";
@@ -14449,6 +14450,46 @@ async function setPrototypeDriverOnline(profile, isOnline) {
       success: false,
       blocked: true,
       reason: "Perfil do motorista ainda está sendo restaurado.",
+    };
+  }
+
+  const onlinePolicy = await driverOnlinePolicyService.evaluateOnlineIntent({
+    requestedStatus: "online",
+    metadata: {
+      driverId: resolvedProfile?.uid || null,
+      source: "prototype_ride_runtime",
+    },
+  });
+
+  if (onlinePolicy?.canGoOnline !== true) {
+    const reason =
+      onlinePolicy?.reason ||
+      onlinePolicy?.message ||
+      onlinePolicy?.blockers?.[0]?.message ||
+      "Não foi possível validar seu status online agora.";
+    setRuntimeState({
+      driverOnline: false,
+      driverOnlinePending: false,
+      driverActivationRemote: onlinePolicy?.activationState || null,
+      driverOnlineMutationSource: "enable_online_backend_policy_blocked",
+      lastError: reason,
+    });
+    await writeRuntimeDebugProbe("driver_online_backend_policy_blocked", {
+      driverId: resolvedProfile?.uid || null,
+      code: onlinePolicy?.code || null,
+      blockers: (onlinePolicy?.blockers || []).map((item) => item?.code).filter(Boolean),
+      kycRequired: onlinePolicy?.kycRequired === true,
+      requiresLiveness: onlinePolicy?.requiresLiveness === true,
+    });
+    return {
+      success: false,
+      blocked: onlinePolicy?.kycRequired !== true,
+      kycRequired: onlinePolicy?.kycRequired === true,
+      requiresLiveness: onlinePolicy?.requiresLiveness === true,
+      code: onlinePolicy?.code || onlinePolicy?.blockers?.[0]?.code || "ONLINE_POLICY_BLOCKED",
+      reason,
+      error: reason,
+      payload: onlinePolicy,
     };
   }
 

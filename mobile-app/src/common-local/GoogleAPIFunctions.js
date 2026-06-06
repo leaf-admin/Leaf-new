@@ -5,6 +5,7 @@ import { firebase } from './config/configureFirebase';
 import AccessKey from './AccessKey';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { allowClientDirectGoogleFallback } from '../config/runtimeAccessPolicy';
+import runtimeConfigService from '../services/RuntimeConfigService';
 import rideCostTelemetryService, {
     RIDE_TELEMETRY_GOOGLE_SKUS
 } from '../services/RideCostTelemetryService';
@@ -1004,8 +1005,9 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
         // O caminho preferencial em release é sempre o backend /api/places/directions.
         const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''; // Chave real do projeto (sem restrições)
         
-        const trafficEnabled = String(process.env.EXPO_PUBLIC_ENABLE_TRAFFIC_ROUTE || 'false').toLowerCase() === 'true';
-        const alternativesEnabled = String(process.env.EXPO_PUBLIC_ENABLE_ROUTE_ALTERNATIVES || 'false').toLowerCase() === 'true';
+        const mapsRuntimePolicy = runtimeConfigService.getMapsRoutingPolicySync();
+        const trafficEnabled = mapsRuntimePolicy.routeTrafficEnabled === true;
+        const alternativesEnabled = mapsRuntimePolicy.routeAlternativesEnabled === true;
         let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(startLoc)}&destination=${encodeURIComponent(destLoc)}&key=${apiKey}&language=pt-BR&units=metric`;
         if (trafficEnabled) {
             url += '&departure_time=now';

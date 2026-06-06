@@ -18,6 +18,7 @@ import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import fcmService from './FCMNotificationService';
 import { requestExpoNotificationsPermissionWithDisclosure } from './AndroidPermissionDisclosure';
+import runtimeConfigService from './RuntimeConfigService';
 
 const RIDE_NOTIFICATION_STATE_KEY = '@leaf:persistentRideNotificationState';
 const RIDE_NOTIFICATION_DEDUPE_TTL_MS = 30 * 1000;
@@ -373,6 +374,11 @@ class PersistentRideNotificationService {
         return false;
     }
 
+    isPersistentRideNotificationAllowed() {
+        const policy = runtimeConfigService.getNotificationPolicySync();
+        return policy?.enabled !== false && policy?.persistentRideNotificationsEnabled !== false;
+    }
+
     async dismissNotificationById(notificationId) {
         if (!notificationId) return;
         await Promise.allSettled([
@@ -448,6 +454,12 @@ class PersistentRideNotificationService {
      */
     async showRideNotification(rideData) {
         try {
+            if (!this.isPersistentRideNotificationAllowed()) {
+                Logger.log('ℹ️ [PersistentRideNotification] Notificação persistida desabilitada por runtime policy.');
+                await this.dismissRideNotification(rideData?.bookingId);
+                return;
+            }
+
             const {
                 bookingId,
                 status,
@@ -531,6 +543,12 @@ class PersistentRideNotificationService {
      */
     async updateRideNotification(rideData) {
         try {
+            if (!this.isPersistentRideNotificationAllowed()) {
+                Logger.log('ℹ️ [PersistentRideNotification] Atualização persistida bloqueada por runtime policy.');
+                await this.dismissRideNotification(rideData?.bookingId);
+                return;
+            }
+
             await this.hydrateNotificationState();
             if (!this.isActive || !this.currentNotificationId) {
                 // Se não há notificação ativa, criar uma nova

@@ -1,5 +1,9 @@
 let notificationSequence = 0;
 const mockRegisteredHandlers = new Map();
+let mockNotificationPolicy = {
+  enabled: true,
+  persistentRideNotificationsEnabled: true,
+};
 
 const mockNotifications = {
   AndroidImportance: { HIGH: 'HIGH' },
@@ -33,17 +37,36 @@ jest.mock('../src/services/AndroidPermissionDisclosure', () => ({
     Notifications.requestPermissionsAsync(options)
   ),
 }));
+jest.mock('../src/services/RuntimeConfigService', () => ({
+  __esModule: true,
+  default: {
+    getNotificationPolicySync: jest.fn(() => mockNotificationPolicy),
+  },
+}));
 
-const loadService = () => require('../src/services/PersistentRideNotificationService').default;
+let serviceUnderTest = null;
+const loadService = () => {
+  serviceUnderTest = require('../src/services/PersistentRideNotificationService').default;
+  return serviceUnderTest;
+};
 const AsyncStorage = require('@react-native-async-storage/async-storage');
 
 describe('PersistentRideNotificationService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRegisteredHandlers.clear();
+    mockNotificationPolicy = {
+      enabled: true,
+      persistentRideNotificationsEnabled: true,
+    };
     notificationSequence = 0;
     AsyncStorage.clear();
     jest.resetModules();
+  });
+
+  afterEach(() => {
+    serviceUnderTest?.stopPeriodicUpdate?.();
+    serviceUnderTest = null;
   });
 
   it('initializes the Android persistent ride channel and FCM handler', async () => {
@@ -91,6 +114,25 @@ describe('PersistentRideNotificationService', () => {
       })
     );
     expect(service.isNotificationActive()).toBe(true);
+  });
+
+  it('does not create ride notification when runtime policy disables it', async () => {
+    mockNotificationPolicy = {
+      enabled: true,
+      persistentRideNotificationsEnabled: false,
+    };
+    const service = loadService();
+
+    await service.showRideNotification({
+      bookingId: 'booking-1',
+      status: 'accepted',
+      userType: 'customer',
+      driverName: 'Carlos',
+      estimatedTime: 4,
+    });
+
+    expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(service.isNotificationActive()).toBe(false);
   });
 
   it('updates the persistent notification from a ride_status_update FCM payload', async () => {

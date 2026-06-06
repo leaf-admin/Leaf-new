@@ -1,5 +1,6 @@
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
+import runtimeConfigService from '../services/RuntimeConfigService';
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
 
@@ -61,6 +62,7 @@ export const hasExplicitClientDirectGoogleFallbackFlag = () =>
     normalizeExtraFlag('allowClientDirectGoogleFallback');
 
 export const allowClientDirectGoogleFallback = () =>
+    runtimeConfigService.getMapsRoutingPolicySync().clientDirectGoogleFallback === true &&
     hasExplicitClientDirectGoogleFallbackFlag() &&
     (isDevelopmentBuild() || isE2ETestBuild() || isSimulatorBuild());
 

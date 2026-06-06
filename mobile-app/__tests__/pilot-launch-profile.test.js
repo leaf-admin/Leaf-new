@@ -7,7 +7,17 @@ describe('pilotLaunchProfile', () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
+  const mockRuntimeFeatureGates = (featureGates = {}) => {
+    jest.doMock('../src/services/RuntimeConfigService', () => ({
+      __esModule: true,
+      default: {
+        getOperationalFeatureGatesSync: jest.fn(() => featureGates),
+      },
+    }));
+  };
+
   it('defaults risky pilot features to disabled in pilot_controlled', () => {
+    mockRuntimeFeatureGates();
     jest.doMock('expo-constants', () => ({
       expoConfig: {
         extra: {
@@ -33,6 +43,7 @@ describe('pilotLaunchProfile', () => {
   });
 
   it('accepts explicit feature opt-in overrides for controlled pilot', () => {
+    mockRuntimeFeatureGates();
     jest.doMock('expo-constants', () => ({
       expoConfig: {
         extra: {
@@ -54,5 +65,30 @@ describe('pilotLaunchProfile', () => {
     expect(snapshot.leafDelasEnabled).toBe(true);
     expect(snapshot.dynamicPricingEnabled).toBe(true);
     expect(snapshot.referralProgramsEnabled).toBe(false);
+  });
+
+  it('uses backend runtime feature gates when an operational config is available', () => {
+    mockRuntimeFeatureGates({
+      referralProgramsEnabled: true,
+      smartPushEnabled: true,
+      biometricStrictModeEnabled: true,
+    });
+    jest.doMock('expo-constants', () => ({
+      expoConfig: {
+        extra: {
+          launchProfile: 'pilot_controlled',
+          pilotControlled: true,
+          pilotFeatureFlags: {}
+        }
+      }
+    }));
+
+    const { getPilotLaunchFeatureSnapshot } = require('../src/config/pilotLaunchProfile');
+    const snapshot = getPilotLaunchFeatureSnapshot();
+
+    expect(snapshot.referralProgramsEnabled).toBe(true);
+    expect(snapshot.smartPushEnabled).toBe(true);
+    expect(snapshot.biometricStrictModeEnabled).toBe(true);
+    expect(snapshot.driverWithdrawalsEnabled).toBe(false);
   });
 });
