@@ -1,4 +1,4 @@
-export { firebase } from '../../common-local/config/configureFirebase';
+export { firebase } from './firebaseConfig';
 
 export const USER_SIGN_OUT = 'USER_SIGN_OUT';
 export const FirebaseContext = undefined;
