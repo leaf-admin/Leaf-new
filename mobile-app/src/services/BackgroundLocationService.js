@@ -1,16 +1,19 @@
 import Logger from '../utils/Logger';
 import * as Location from 'expo-location';
-import { Platform, Alert, Linking, AppState } from 'react-native';
+import { Platform, AppState } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+    BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY,
+    requestBackgroundLocationPermissionWithDisclosure,
+    requestForegroundLocationPermissionWithDisclosure
+} from './AndroidPermissionDisclosure';
 
 // Nome da task de background
 const LOCATION_TASK_NAME = 'background-location-task';
 const BACKGROUND_LOCATION_TIME_INTERVAL_MS = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_INTERVAL_MS || '2000', 10);
 const BACKGROUND_LOCATION_DISTANCE_INTERVAL_M = Number.parseInt(process.env.EXPO_PUBLIC_BACKGROUND_LOCATION_DISTANCE_M || '0', 10);
-const BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY = 'has_shown_background_location_modal';
-
 // ✅ Registrar task de background (se ainda não estiver registrada)
 if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
     TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
@@ -77,7 +80,7 @@ class BackgroundLocationService {
     async requestPermissions() {
         try {
             // Solicitar permissão de foreground primeiro
-            const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+            const { status: foregroundStatus } = await requestForegroundLocationPermissionWithDisclosure();
             
             if (foregroundStatus !== 'granted') {
                 Logger.warn('⚠️ Permissão de foreground negada');
@@ -100,14 +103,8 @@ class BackgroundLocationService {
                 };
             }
 
-            if (Platform.OS === 'android') {
-                const { status } = await Location.requestBackgroundPermissionsAsync();
-                backgroundStatus = status;
-            } else {
-                // iOS requer configuração adicional no app.json
-                const { status } = await Location.requestBackgroundPermissionsAsync();
-                backgroundStatus = status;
-            }
+            const { status } = await requestBackgroundLocationPermissionWithDisclosure();
+            backgroundStatus = status;
 
             return {
                 foreground: foregroundStatus === 'granted',

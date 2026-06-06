@@ -16,6 +16,7 @@ import PersistentRideNotificationService from './src/services/PersistentRideNoti
 import { setupAxiosInterceptor } from './src/utils/axiosInterceptor';
 import Logger from './src/utils/Logger';
 import NetworkStatusBanner from './src/components/NetworkStatusBanner';
+import AndroidPermissionDisclosureHost from './src/components/AndroidPermissionDisclosureHost';
 import { toUserFriendlyMessage } from './src/utils/friendlyErrorMessages';
 import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
@@ -335,6 +336,7 @@ export default function App() {
           <AuthProvider>
             {/* ✅ Banner de status de conexão (não bloqueante) */}
             <NetworkStatusBanner />
+            <AndroidPermissionDisclosureHost />
             
             {appIsReady ? (
               <AppNavigator />

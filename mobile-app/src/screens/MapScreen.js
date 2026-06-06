@@ -26,6 +26,7 @@ import i18n from '../i18n';
 import DatePicker from 'react-native-date-picker';
 import { useSelector, useDispatch } from 'react-redux';
 import { FirebaseContext } from '../services/runtime/firebaseCompatBridge';
+import { requestForegroundLocationPermissionWithDisclosure } from '../services/AndroidPermissionDisclosure';
 import {
     fetchAddressfromCoords,
     fetchDrivers,
@@ -1093,7 +1094,7 @@ export default function MapScreen(props) {
     useEffect(() => {
         const loadInitialLocation = async () => {
             try {
-                let { status } = await Location.requestForegroundPermissionsAsync();
+                let { status } = await requestForegroundLocationPermissionWithDisclosure();
                 if (status !== 'granted') {
                     // ✅ CRÍTICO: Se permissão negada, usar região padrão para garantir que o mapa renderize
                     Logger.warn('⚠️ Permissão de localização negada, usando região padrão');
@@ -2046,7 +2047,7 @@ export default function MapScreen(props) {
     }, []);
 
     const changePermission = async () => {
-        let { status } = await Location.requestForegroundPermissionsAsync();
+        let { status } = await requestForegroundLocationPermissionWithDisclosure();
         if (status != 'granted') {
             if (Platform.OS == 'ios') {
                 Linking.openSettings()

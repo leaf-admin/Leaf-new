@@ -1,8 +1,7 @@
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
-import { colors } from '../common/theme';
 import * as Device from 'expo-device';
 import { AppConfig } from '../../config/AppConfig';
+import { requestExpoNotificationsPermissionWithDisclosure } from '../services/AndroidPermissionDisclosure';
 
 export default async function GetPushToken() {
 
@@ -11,7 +10,7 @@ export default async function GetPushToken() {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
+      const { status } = await requestExpoNotificationsPermissionWithDisclosure(Notifications);
       finalStatus = status;
     }
     if (finalStatus !== 'granted') {
