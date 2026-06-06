@@ -1,4 +1,4 @@
-export { updateProfile } from '../../common-local/actions/authactions';
+export { updateProfile } from './profileService';
 export { updateBooking } from '../../common-local/actions/bookinglistactions';
 export { RequestPushMsg } from './pushNotificationFunction';
 export {
