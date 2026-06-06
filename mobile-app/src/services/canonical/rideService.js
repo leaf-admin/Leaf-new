@@ -10,6 +10,7 @@ export {
 
 export {
   clearTripPoints,
+  updatSelPointType,
   updateTripCar,
   updateTripDrop,
   updateTripPickup,

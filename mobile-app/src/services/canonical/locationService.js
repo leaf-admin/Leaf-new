@@ -18,4 +18,5 @@ export {
   getUserTripHistory,
   saveTracking,
   startTripTracking,
+  storeAddresses,
 } from '../../common-local/actions/locationactions';

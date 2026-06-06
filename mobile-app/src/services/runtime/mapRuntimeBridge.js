@@ -1,23 +1,36 @@
-import { api } from '../canonical/legacyApiService';
-
-export const {
+export {
   fetchAddressfromCoords,
+  getDistanceMatrix,
+  GetDistance,
+  storeAddresses,
+} from '../canonical/locationService';
+
+export {
   fetchDrivers,
   fetchNearbyDrivers,
-  updateTripPickup,
-  updateTripDrop,
-  updatSelPointType,
-  getDistanceMatrix,
-  MinutesPassed,
-  updateTripCar,
-  getEstimate,
-  clearEstimate,
+} from '../canonical/driverService';
+
+export {
   addBooking,
   clearBooking,
+  clearEstimate,
   clearTripPoints,
-  GetDistance,
+  getEstimate,
+  updatSelPointType,
+  updateTripCar,
+  updateTripDrop,
+  updateTripPickup,
+} from '../canonical/rideService';
+
+export {
+  checkUserExists,
   updateProfile,
   updateProfileWithEmail,
-  checkUserExists,
-  storeAddresses
-} = api;
+} from '../canonical/profileService';
+
+export const MinutesPassed = (date) => {
+  const date1 = new Date();
+  const date2 = new Date(date);
+  const diffTime = date2 - date1;
+  return diffTime / (1000 * 60);
+};

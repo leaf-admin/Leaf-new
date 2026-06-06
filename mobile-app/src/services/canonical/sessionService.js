@@ -1,2 +1,5 @@
 export { USER_SIGN_OUT } from '../../common-local/types';
-export { FirebaseContext, FirebaseProvider, firebase } from '../../common-local';
+export { firebase } from '../../common-local/config/configureFirebase';
+
+export const FirebaseContext = undefined;
+export const FirebaseProvider = undefined;
