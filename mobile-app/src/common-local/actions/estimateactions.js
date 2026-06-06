@@ -9,7 +9,7 @@ import {
 import Polyline from '@mapbox/polyline';
 import { firebase } from '../config/configureFirebase';
 import { FareCalculator } from '../other/FareCalculator';
-import { calcularPedagiosPorPolyline } from '../other/TollUtils';
+import { calcularPedagiosPorPolyline } from '../../services/canonical/tollUtils';
 
 
 // Estrutura de dados para segmentos de rodovia e pedágios

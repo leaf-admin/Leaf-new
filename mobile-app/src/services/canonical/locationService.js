@@ -8,7 +8,7 @@ export {
   getDistanceMatrix,
 } from '../../common-local/GoogleAPIFunctions';
 
-export { calcularPedagiosPorPolyline } from '../../common-local/other/TollUtils';
+export { calcularPedagiosPorPolyline } from './tollUtils';
 
 export {
   endTripTracking,
