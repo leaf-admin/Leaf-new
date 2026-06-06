@@ -1,6 +1,6 @@
 export { updateProfile } from '../../common-local/actions/authactions';
 export { updateBooking } from '../../common-local/actions/bookinglistactions';
-export { RequestPushMsg } from '../../common-local/other/NotificationFunctions';
+export { RequestPushMsg } from './pushNotificationFunction';
 export {
   acceptTask,
   cancelTask,
