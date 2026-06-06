@@ -319,6 +319,7 @@ DOCKERIGNOREEOF
         --exclude='coverage' \
         --exclude='.nyc_output' \
         --exclude='.env*' \
+        --exclude='firebase-credentials.json' \
         --exclude='._*' \
         --exclude='.DS_Store' \
         --exclude='*.log' \
@@ -333,6 +334,9 @@ DOCKERIGNOREEOF
         cd $APP_DIR
         tar -xzf leaf-app-code.tar.gz
         rm leaf-app-code.tar.gz
+        if [ -f firebase-credentials.json ]; then
+            chmod 0644 firebase-credentials.json
+        fi
         echo "✅ Código extraído"
 EOF
     
