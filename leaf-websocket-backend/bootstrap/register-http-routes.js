@@ -114,11 +114,15 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     const opsRoutes = require('../routes/ops');
     app.use('/api/ops', opsRoutes);
 
+    const runtimeConfigRoutes = require('../routes/runtime-config');
+    app.use('/api', runtimeConfigRoutes);
+
     if (supportFullRoutes.setIOInstance && io) {
         supportFullRoutes.setIOInstance(io);
     }
     logStructured('info', 'Rotas de Support (completo) registradas com WebSocket', { service: 'server' });
     logStructured('info', 'Rotas de Ops registradas', { service: 'server' });
+    logStructured('info', 'Rotas de Runtime Config registradas', { service: 'server' });
 
     // Rotas de Geofence (registradas antes do dashboard para evitar conflitos de matching)
     const geofenceRoutes = require('../routes/geofence-routes');
