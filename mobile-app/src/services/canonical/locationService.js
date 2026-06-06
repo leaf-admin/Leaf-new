@@ -1,3 +1,8 @@
+import { push } from '@react-native-firebase/database';
+
+import Logger from '../../utils/Logger';
+import { firebase } from './sessionService';
+
 export {
   detectInputType,
   fetchAddressfromCoords,
@@ -10,15 +15,38 @@ export {
 
 export { calcularPedagiosPorPolyline } from './tollUtils';
 
-export {
-  endTripTracking,
-  getTripData,
-  getTripStatistics,
-  getUserTripHistory,
-  saveTracking,
-  startTripTracking,
-  storeAddresses,
-} from '../../common-local/actions/locationactions';
+const STORE_ADRESSES = 'STORE_ADRESSES';
+
+export const saveTracking = async (bookingId, location) => {
+  try {
+    const { trackingRef } = firebase;
+    await push(trackingRef(bookingId), location);
+  } catch (error) {
+    Logger.error('Error saving tracking:', error);
+    throw error;
+  }
+};
+
+export const startTripTracking = async () => {
+  // Mantem o contrato legado: recurso preparado, sem persistencia ativa nesse adapter.
+};
+
+export const endTripTracking = async () => {
+  // Mantem o contrato legado: recurso preparado, sem persistencia ativa nesse adapter.
+};
+
+export const getTripData = async () => null;
+
+export const getUserTripHistory = async () => [];
+
+export const getTripStatistics = async () => null;
+
+export const storeAddresses = (data) => (dispatch) => {
+  dispatch({
+    type: STORE_ADRESSES,
+    payload: data,
+  });
+};
 
 export const GetDistance = (lat1, lon1, lat2, lon2) => {
   if (lat1 === lat2 && lon1 === lon2) {
