@@ -76,6 +76,8 @@ import {
   buildDriverLocationPayload,
   buildPassengerHeartbeatState,
   buildPassengerLocationPayload,
+  sendDriverLocationHeartbeat,
+  sendPassengerLocationHeartbeat,
   shouldCoalescePassengerLocationAttempt,
   shouldMonitorPassengerTripulation as shouldMonitorPassengerTripulationHelper,
   shouldReusePassengerHeartbeat,
@@ -13169,30 +13171,36 @@ async function pushPassengerLocationNow(
         profile,
         "Serviço de localização indisponível.",
       ));
-    await socket.updatePassengerLocation(
+    const sendResult = await sendPassengerLocationHeartbeat({
       bookingId,
-      location.lat,
-      location.lng,
-      location.heading,
-      location.speed,
-    );
+      location,
+      socket,
+    });
 
     setRuntimeState((previous) => ({
-      ...buildPassengerHeartbeatState(previous, {
-        running: true,
-        lastSentAt: new Date().toISOString(),
-        lastError: "",
-      }),
+      ...buildPassengerHeartbeatState(
+        previous,
+        sendResult.heartbeatPatch || {
+          running: true,
+          lastSentAt: new Date().toISOString(),
+          lastError: "",
+        },
+      ),
     }));
 
-    runtimeLastPassengerHeartbeatSentAt = Date.now();
-    runtimeLastPassengerHeartbeatBookingId = bookingId;
+    runtimeLastPassengerHeartbeatSentAt = Number(
+      sendResult.sentAtMs || Date.now(),
+    );
+    runtimeLastPassengerHeartbeatBookingId = sendResult.bookingId || bookingId;
     runtimeLastPassengerHeartbeatStatus = normalizedStatus;
-    runtimeLastPassengerHeartbeatLocation = {
-      latitude: location.lat,
-      longitude: location.lng,
-    };
-    runtimeLastPassengerHeartbeatHeading = Number(location.heading || 0);
+    runtimeLastPassengerHeartbeatLocation =
+      sendResult.locationSnapshot || {
+        latitude: location.lat,
+        longitude: location.lng,
+      };
+    runtimeLastPassengerHeartbeatHeading = Number(
+      sendResult.heading ?? location.heading ?? 0,
+    );
 
     return { success: true, location, bookingId };
   } finally {
@@ -13309,25 +13317,29 @@ async function pushDriverLocationNow(profile, socketInstance = null) {
     socketInstance ||
     (await getRealtimeSocket(profile, "Serviço de localização indisponível."));
   const routePlanShare = buildDriverRoutePlanSharePayload();
-  await socket.updateLocation(
-    profile.uid,
-    location.lat,
-    location.lng,
-    location.heading,
-    location.speed,
-    routePlanShare?.payload || {},
-  );
-  if (routePlanShare?.signature) {
-    runtimeLastSharedDriverRoutePlanKey = routePlanShare.signature;
-    runtimeLastSharedDriverRoutePlanAt = Date.now();
+  const sendResult = await sendDriverLocationHeartbeat({
+    profileUid: profile.uid,
+    location,
+    socket,
+    routePlanShare,
+  });
+  if (sendResult.routePlanSignature) {
+    runtimeLastSharedDriverRoutePlanKey = sendResult.routePlanSignature;
+    runtimeLastSharedDriverRoutePlanAt = Number(
+      sendResult.sentAtMs || Date.now(),
+    );
   }
 
   setRuntimeState((previous) => ({
-    ...buildDriverLocationHeartbeatState(previous, location, {
-      running: true,
-      lastSentAt: new Date().toISOString(),
-      lastError: "",
-    }),
+    ...buildDriverLocationHeartbeatState(
+      previous,
+      location,
+      sendResult.heartbeatPatch || {
+        running: true,
+        lastSentAt: new Date().toISOString(),
+        lastError: "",
+      },
+    ),
   }));
 
   return { success: true, location };

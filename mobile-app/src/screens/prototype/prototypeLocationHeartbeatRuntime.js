@@ -83,6 +83,104 @@ export function buildPassengerLocationPayload(runtimeState = {}) {
   };
 }
 
+function assertHeartbeatSocket(socket, methodName) {
+  if (!socket || typeof socket[methodName] !== "function") {
+    throw new Error("Serviço de localização indisponível.");
+  }
+}
+
+function resolveHeartbeatSentAt(nowMs = null) {
+  const numericNowMs = Number(nowMs);
+  const sentAtMs = Number.isFinite(numericNowMs) ? numericNowMs : Date.now();
+  return {
+    sentAtMs,
+    sentAtIso: new Date(sentAtMs).toISOString(),
+  };
+}
+
+export async function sendDriverLocationHeartbeat({
+  profileUid = "",
+  location = null,
+  socket = null,
+  routePlanShare = null,
+  nowMs = null,
+} = {}) {
+  const normalizedProfileUid = String(profileUid || "").trim();
+  if (!normalizedProfileUid) {
+    return { success: false, code: "PROFILE_REQUIRED" };
+  }
+
+  if (!location) {
+    return { success: false, code: "LOCATION_REQUIRED" };
+  }
+
+  assertHeartbeatSocket(socket, "updateLocation");
+  await socket.updateLocation(
+    normalizedProfileUid,
+    location.lat,
+    location.lng,
+    location.heading,
+    location.speed,
+    routePlanShare?.payload || {},
+  );
+
+  const { sentAtMs, sentAtIso } = resolveHeartbeatSentAt(nowMs);
+  return {
+    success: true,
+    location,
+    routePlanSignature: routePlanShare?.signature || "",
+    sentAtMs,
+    heartbeatPatch: {
+      running: true,
+      lastSentAt: sentAtIso,
+      lastError: "",
+    },
+  };
+}
+
+export async function sendPassengerLocationHeartbeat({
+  bookingId = "",
+  location = null,
+  socket = null,
+  nowMs = null,
+} = {}) {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) {
+    return { success: false, code: "BOOKING_REQUIRED" };
+  }
+
+  if (!location) {
+    return { success: false, code: "LOCATION_REQUIRED" };
+  }
+
+  assertHeartbeatSocket(socket, "updatePassengerLocation");
+  await socket.updatePassengerLocation(
+    normalizedBookingId,
+    location.lat,
+    location.lng,
+    location.heading,
+    location.speed,
+  );
+
+  const { sentAtMs, sentAtIso } = resolveHeartbeatSentAt(nowMs);
+  return {
+    success: true,
+    location,
+    bookingId: normalizedBookingId,
+    sentAtMs,
+    heartbeatPatch: {
+      running: true,
+      lastSentAt: sentAtIso,
+      lastError: "",
+    },
+    locationSnapshot: {
+      latitude: location.lat,
+      longitude: location.lng,
+    },
+    heading: Number(location.heading || 0),
+  };
+}
+
 export function normalizeHeadingDegrees(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
