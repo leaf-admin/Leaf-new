@@ -28,7 +28,7 @@ jest.mock('../src/services/canonical/sessionService', () => ({
   },
 }));
 
-jest.mock('../src/common-local/other/AccessKey', () => ({
+jest.mock('../src/services/canonical/functionAccessKey', () => ({
   __esModule: true,
   default: 'test-access-key',
 }));

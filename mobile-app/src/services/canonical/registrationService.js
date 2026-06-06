@@ -1,9 +1,9 @@
 import base64 from 'react-native-base64';
 
 import { FirebaseConfig } from '../../../config/FirebaseConfig';
-import AccessKey from '../../common-local/other/AccessKey';
 import { store } from '../../state/appStore';
 import Logger from '../../utils/Logger';
+import AccessKey from './functionAccessKey';
 import { firebase } from './sessionService';
 
 export { default as countries } from '../../common-local/other/GetCountries';
