@@ -40,9 +40,16 @@ const ANDROID_PHONE_STATE_DISCLOSURE = {
 };
 
 let androidPermissionDisclosurePresenter = null;
+const pendingPresenterResolvers = new Set();
+const FRIENDLY_ALERT_PATCH_BYPASS_OPTION_KEY = '__skipFriendlyAlertPatch';
+const ANDROID_DISCLOSURE_PRESENTER_WAIT_MS = process.env.NODE_ENV === 'test' ? 1 : 1200;
 
 export function setAndroidPermissionDisclosurePresenter(presenter) {
   androidPermissionDisclosurePresenter = typeof presenter === 'function' ? presenter : null;
+  if (androidPermissionDisclosurePresenter) {
+    pendingPresenterResolvers.forEach(resolve => resolve(androidPermissionDisclosurePresenter));
+    pendingPresenterResolvers.clear();
+  }
 
   return () => {
     if (androidPermissionDisclosurePresenter === presenter) {
@@ -61,7 +68,23 @@ function deniedPermissionResponse(permission = {}) {
   };
 }
 
-function showAndroidDisclosure(disclosure) {
+function waitForAndroidPermissionDisclosurePresenter(timeoutMs = ANDROID_DISCLOSURE_PRESENTER_WAIT_MS) {
+  if (typeof androidPermissionDisclosurePresenter === 'function') {
+    return Promise.resolve(androidPermissionDisclosurePresenter);
+  }
+
+  return new Promise(resolve => {
+    const resolver = presenter => {
+      clearTimeout(timeoutId);
+      pendingPresenterResolvers.delete(resolver);
+      resolve(typeof presenter === 'function' ? presenter : null);
+    };
+    const timeoutId = setTimeout(() => resolver(null), timeoutMs);
+    pendingPresenterResolvers.add(resolver);
+  });
+}
+
+async function showAndroidDisclosure(disclosure, options = {}) {
   if (Platform.OS !== 'android') {
     return Promise.resolve(true);
   }
@@ -76,6 +99,21 @@ function showAndroidDisclosure(disclosure) {
       cancelText: 'Agora não',
       kind,
     });
+  }
+
+  if (options.requirePresenter) {
+    const presenter = await waitForAndroidPermissionDisclosurePresenter();
+    if (typeof presenter === 'function') {
+      return presenter({
+        title,
+        message,
+        confirmText,
+        cancelText: 'Agora não',
+        kind,
+      });
+    }
+
+    return false;
   }
 
   return new Promise(resolve => {
@@ -94,7 +132,11 @@ function showAndroidDisclosure(disclosure) {
         { text: 'Agora não', style: 'cancel', onPress: () => settle(false) },
         { text: confirmText, onPress: () => settle(true) },
       ],
-      { cancelable: true, onDismiss: () => settle(false) }
+      {
+        cancelable: true,
+        onDismiss: () => settle(false),
+        [FRIENDLY_ALERT_PATCH_BYPASS_OPTION_KEY]: true,
+      }
     );
   });
 }
@@ -115,7 +157,9 @@ export async function requestForegroundLocationPermissionWithDisclosure() {
     return currentPermission;
   }
 
-  const accepted = await showAndroidDisclosure(ANDROID_FOREGROUND_LOCATION_DISCLOSURE);
+  const accepted = await showAndroidDisclosure(ANDROID_FOREGROUND_LOCATION_DISCLOSURE, {
+    requirePresenter: true,
+  });
   if (!accepted) {
     return deniedPermissionResponse(currentPermission);
   }
@@ -135,7 +179,9 @@ export async function requestBackgroundLocationPermissionWithDisclosure() {
     return currentPermission;
   }
 
-  const accepted = await showAndroidDisclosure(ANDROID_BACKGROUND_LOCATION_DISCLOSURE);
+  const accepted = await showAndroidDisclosure(ANDROID_BACKGROUND_LOCATION_DISCLOSURE, {
+    requirePresenter: true,
+  });
   if (!accepted) {
     return deniedPermissionResponse(currentPermission);
   }

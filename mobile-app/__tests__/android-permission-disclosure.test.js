@@ -57,6 +57,7 @@ const {
   BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY,
   requestBackgroundLocationPermissionWithDisclosure,
   requestForegroundLocationPermissionWithDisclosure,
+  requestPostNotificationsPermissionWithDisclosure,
   setAndroidPermissionDisclosurePresenter,
 } = require('../src/services/AndroidPermissionDisclosure');
 
@@ -111,6 +112,16 @@ describe('AndroidPermissionDisclosure', () => {
     expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
   });
 
+  it('fails closed for foreground location when the Leaf modal presenter is unavailable', async () => {
+    const result = await requestForegroundLocationPermissionWithDisclosure();
+
+    expect(result.status).toBe('denied');
+    expect(result.granted).toBe(false);
+    expect(events).toEqual([]);
+    expect(mockAlert.alert).not.toHaveBeenCalled();
+    expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
   it('shows the Leaf disclosure before requesting background location on Android', async () => {
     unregisterPresenter = setAndroidPermissionDisclosurePresenter(async (config) => {
       events.push(`disclosure-${config.kind}`);
@@ -126,5 +137,15 @@ describe('AndroidPermissionDisclosure', () => {
       'true'
     );
     expect(mockLocation.requestBackgroundPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps non-location Android disclosures exempt from the friendly alert patch fallback', async () => {
+    const result = await requestPostNotificationsPermissionWithDisclosure();
+
+    expect(result).toBe('granted');
+    expect(mockAlert.alert).toHaveBeenCalledTimes(1);
+    const alertOptions = mockAlert.alert.mock.calls[0][3];
+    expect(alertOptions.__skipFriendlyAlertPatch).toBe(true);
+    expect(mockPermissionsAndroid.request).toHaveBeenCalledWith('android.permission.POST_NOTIFICATIONS');
   });
 });
