@@ -13,6 +13,11 @@ export const registerFCMBackgroundMessageHandler = () => {
         messaging().setBackgroundMessageHandler(async (remoteMessage) => {
             try {
                 Logger.log('📱 Mensagem recebida em background:', remoteMessage);
+                if (remoteMessage?.data?.type === 'ride_status_update') {
+                    const PersistentRideNotificationService = require('./PersistentRideNotificationService').default;
+                    await PersistentRideNotificationService.handleRideStatusPayload(remoteMessage.data);
+                    return;
+                }
                 await saveBackgroundNotification(remoteMessage, { logger: Logger });
             } catch (error) {
                 Logger.error('❌ Erro ao salvar mensagem FCM em background:', error);

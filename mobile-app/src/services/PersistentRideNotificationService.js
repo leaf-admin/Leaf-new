@@ -15,8 +15,155 @@ import Logger from '../utils/Logger';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import * as Device from 'expo-device';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import fcmService from './FCMNotificationService';
+import { requestExpoNotificationsPermissionWithDisclosure } from './AndroidPermissionDisclosure';
 
+const RIDE_NOTIFICATION_STATE_KEY = '@leaf:persistentRideNotificationState';
+const RIDE_NOTIFICATION_DEDUPE_TTL_MS = 30 * 1000;
+const RIDE_NOTIFICATION_UPDATE_INTERVAL_MS = 10 * 1000;
+
+const toFiniteNumber = (value, fallback = null) => {
+    if (value === null || typeof value === 'undefined' || value === '') return fallback;
+    const normalized = typeof value === 'string' ? value.replace(',', '.').match(/-?\d+(\.\d+)?/)?.[0] : value;
+    const numeric = Number(normalized);
+    return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const normalizeDurationMinutes = (value, fallback = null) => {
+    const numeric = toFiniteNumber(value, fallback);
+    if (!Number.isFinite(numeric)) return fallback;
+    // Some route payloads still carry duration in seconds.
+    return numeric > 180 ? Math.ceil(numeric / 60) : numeric;
+};
+
+const firstDurationMinutes = (...values) => {
+    for (const value of values) {
+        const duration = normalizeDurationMinutes(value, null);
+        if (Number.isFinite(duration)) return duration;
+    }
+    return null;
+};
+
+const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
+
+const formatMinutes = (value) => {
+    const numeric = normalizeDurationMinutes(value, null);
+    if (!Number.isFinite(numeric)) return null;
+    if (numeric <= 0) return 'agora';
+    const rounded = Math.max(1, Math.ceil(numeric));
+    return `${rounded} min`;
+};
+
+const buildProgressText = (progressRatio) => {
+    if (!Number.isFinite(progressRatio)) return null;
+    const slots = 10;
+    const filled = Math.max(0, Math.min(slots, Math.round(progressRatio * slots)));
+    return `${'█'.repeat(filled)}${'░'.repeat(slots - filled)}`;
+};
+
+const parseTimestampMs = (value) => {
+    if (!value) return null;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getPhaseStartedAtMs = (rideData = {}) => {
+    const candidates = [
+        rideData.phaseStartedAt,
+        rideData.statusStartedAt,
+        rideData.acceptedAt,
+        rideData.arrivedAt,
+        rideData.startedAt,
+        rideData.timestamp,
+        rideData.updatedAt,
+        rideData.createdAt,
+    ];
+    for (const candidate of candidates) {
+        const parsed = parseTimestampMs(candidate);
+        if (parsed) return parsed;
+    }
+    return Date.now();
+};
+
+const getLocationAddress = (location, fallback) => {
+    if (typeof location === 'string') return location;
+    return String(location?.address || location?.add || location?.name || fallback || '').trim();
+};
+
+const getStatusDurationMinutes = (rideData = {}) => {
+    const status = String(rideData.status || '').toLowerCase();
+    if (status === 'accepted') {
+        return firstDurationMinutes(
+            rideData.pickupEstimatedTime,
+            rideData.pickupEtaMinutes,
+            rideData.estimatedPickupTime,
+            rideData.estimatedTime
+        );
+    }
+    if (status === 'started') {
+        return firstDurationMinutes(
+            rideData.tripEstimatedTime,
+            rideData.tripEstimatedMinutes,
+            rideData.estimatedTripTime,
+            rideData.tripEtaMinutes,
+            rideData.durationMinutes,
+            rideData.estimatedDuration,
+            rideData.duration,
+            rideData.estimatedTime
+        );
+    }
+    return firstDurationMinutes(rideData.estimatedTime);
+};
+
+const getTripDurationMinutes = (rideData = {}) => firstDurationMinutes(
+    rideData.tripEstimatedTime,
+    rideData.tripEstimatedMinutes,
+    rideData.estimatedTripTime,
+    rideData.tripEtaMinutes,
+    rideData.durationMinutes,
+    rideData.estimatedDuration,
+    rideData.duration
+);
+
+const buildTimelineDetails = (rideData = {}, nowMs = Date.now()) => {
+    const durationMinutes = getStatusDurationMinutes(rideData);
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+        return {
+            remainingLabel: formatMinutes(rideData.estimatedTime),
+            durationLabel: formatMinutes(durationMinutes),
+            progressLine: null,
+            progressPercent: null,
+        };
+    }
+
+    const phaseStartedAtMs = getPhaseStartedAtMs(rideData);
+    const elapsedMinutes = Math.max(0, (nowMs - phaseStartedAtMs) / 60000);
+    const progressRatio = clamp(elapsedMinutes / durationMinutes, 0, 0.98);
+    const remainingMinutes = Math.max(0, durationMinutes - elapsedMinutes);
+    const progressText = buildProgressText(progressRatio);
+    const progressPercent = Math.round(progressRatio * 100);
+
+    return {
+        remainingLabel: formatMinutes(remainingMinutes),
+        durationLabel: formatMinutes(durationMinutes),
+        progressLine: progressText ? `${progressText} ${progressPercent}%` : null,
+        progressPercent,
+    };
+};
+
+const compactLines = (...lines) => lines.filter(Boolean).join('\n');
+
+const parseRideStatusPayload = (data = {}) => {
+    const processedData = { ...data };
+    if (typeof processedData.pickup === 'string') {
+        try { processedData.pickup = JSON.parse(processedData.pickup); } catch (e) { }
+    }
+    if (typeof processedData.destination === 'string') {
+        try { processedData.destination = JSON.parse(processedData.destination); } catch (e) { }
+    }
+    return processedData;
+};
 
 class PersistentRideNotificationService {
     constructor() {
@@ -24,12 +171,26 @@ class PersistentRideNotificationService {
         this.currentBookingId = null;
         this.updateInterval = null;
         this.isActive = false;
+        this.isInitialized = false;
+        this.initializePromise = null;
+        this.hasRegisteredFcmHandler = false;
+        this.lastRidePayloadFingerprint = null;
+        this.lastRidePayloadHandledAt = 0;
     }
 
     /**
      * Inicializar o serviço
      */
     async initialize() {
+        if (this.isInitialized) {
+            return true;
+        }
+
+        if (this.initializePromise) {
+            return this.initializePromise;
+        }
+
+        this.initializePromise = (async () => {
         try {
             Logger.log('🔔 [PersistentRideNotification] Inicializando serviço...');
 
@@ -50,10 +211,19 @@ class PersistentRideNotificationService {
             // Register handler for FCM messages
             this.setupFCMHandler();
 
+            this.isInitialized = true;
             Logger.log('✅ [PersistentRideNotification] Serviço inicializado');
+            return true;
         } catch (error) {
             Logger.error('❌ [PersistentRideNotification] Erro ao inicializar:', error);
+            this.isInitialized = false;
+            return false;
+        } finally {
+            this.initializePromise = null;
         }
+        })();
+
+        return this.initializePromise;
     }
 
     /**
@@ -73,7 +243,7 @@ class PersistentRideNotificationService {
 
             // Se não tem permissão, solicitar
             if (existingStatus !== 'granted') {
-                const { status } = await Notifications.requestPermissionsAsync({
+                const { status } = await requestExpoNotificationsPermissionWithDisclosure(Notifications, {
                     ios: {
                         allowAlert: true,
                         allowBadge: true,
@@ -101,30 +271,165 @@ class PersistentRideNotificationService {
      * Configurar handler para notificações FCM
      */
     setupFCMHandler() {
+        if (this.hasRegisteredFcmHandler) {
+            return;
+        }
+
         const handleRideStatusNotification = async (remoteMessage) => {
             Logger.log('📱 [PersistentRideNotification] Tratando evento FCM para notificação persistente:', remoteMessage);
             const { data } = remoteMessage;
 
             if (data && data.bookingId && data.status) {
-                // Parse potential JSON strings from FCM data payload
-                const processedData = { ...data };
-                if (typeof processedData.pickup === 'string') {
-                    try { processedData.pickup = JSON.parse(processedData.pickup); } catch (e) { }
-                }
-                if (typeof processedData.destination === 'string') {
-                    try { processedData.destination = JSON.parse(processedData.destination); } catch (e) { }
-                }
-
-                if (processedData.status === 'completed' || processedData.status === 'cancelled') {
-                    await this.dismissRideNotification();
-                } else {
-                    await this.updateRideNotification(processedData);
-                }
+                await this.handleRideStatusPayload(data);
             }
         };
 
         // Escutar por eventos que devam atualizar a notificação persistente
         fcmService.registerNotificationHandler('ride_status_update', handleRideStatusNotification);
+        this.hasRegisteredFcmHandler = true;
+    }
+
+    async persistNotificationState() {
+        if (!this.currentNotificationId || !this.currentBookingId) return;
+        try {
+            await AsyncStorage.setItem(
+                RIDE_NOTIFICATION_STATE_KEY,
+                JSON.stringify({
+                    notificationId: this.currentNotificationId,
+                    bookingId: this.currentBookingId,
+                    payloadFingerprint: this.lastRidePayloadFingerprint,
+                    payloadHandledAt: this.lastRidePayloadHandledAt,
+                })
+            );
+        } catch (error) {
+            Logger.warn('⚠️ [PersistentRideNotification] Falha ao persistir estado:', error?.message || error);
+        }
+    }
+
+    async hydrateNotificationState() {
+        if (this.currentNotificationId && this.currentBookingId) {
+            return;
+        }
+
+        try {
+            const raw = await AsyncStorage.getItem(RIDE_NOTIFICATION_STATE_KEY);
+            if (!raw) return;
+            const stored = JSON.parse(raw);
+            if (stored?.notificationId && stored?.bookingId) {
+                this.currentNotificationId = stored.notificationId;
+                this.currentBookingId = stored.bookingId;
+                this.lastRidePayloadFingerprint = stored.payloadFingerprint || null;
+                this.lastRidePayloadHandledAt = Number(stored.payloadHandledAt || 0);
+                this.isActive = true;
+            }
+        } catch (error) {
+            Logger.warn('⚠️ [PersistentRideNotification] Falha ao hidratar estado:', error?.message || error);
+        }
+    }
+
+    async clearNotificationState() {
+        try {
+            await AsyncStorage.removeItem(RIDE_NOTIFICATION_STATE_KEY);
+        } catch (error) {
+            Logger.warn('⚠️ [PersistentRideNotification] Falha ao limpar estado:', error?.message || error);
+        }
+    }
+
+    getRidePayloadFingerprint(rideData = {}) {
+        const pickupAddress = rideData?.pickup?.address || rideData?.pickupAddress || '';
+        const destinationAddress = rideData?.destination?.address || rideData?.destinationAddress || '';
+        return [
+            rideData.bookingId || '',
+            rideData.status || '',
+            rideData.userType || '',
+            rideData.estimatedTime || '',
+            rideData.pickupEstimatedTime || '',
+            rideData.tripEstimatedTime || '',
+            rideData.phaseStartedAt || '',
+            rideData.distance || '',
+            rideData.fare || '',
+            pickupAddress,
+            destinationAddress,
+            rideData.driverName || '',
+            rideData.customerName || '',
+        ].join('|');
+    }
+
+    shouldSuppressDuplicatePayload(rideData = {}) {
+        const fingerprint = this.getRidePayloadFingerprint(rideData);
+        const now = Date.now();
+        const isDuplicate =
+            fingerprint &&
+            fingerprint === this.lastRidePayloadFingerprint &&
+            now - this.lastRidePayloadHandledAt < RIDE_NOTIFICATION_DEDUPE_TTL_MS;
+
+        if (isDuplicate) {
+            Logger.log('ℹ️ [PersistentRideNotification] Status de corrida duplicado; mantendo notificação atual.');
+            return true;
+        }
+
+        this.lastRidePayloadFingerprint = fingerprint;
+        this.lastRidePayloadHandledAt = now;
+        return false;
+    }
+
+    async dismissNotificationById(notificationId) {
+        if (!notificationId) return;
+        await Promise.allSettled([
+            Notifications.cancelScheduledNotificationAsync(notificationId),
+            typeof Notifications.dismissNotificationAsync === 'function'
+                ? Notifications.dismissNotificationAsync(notificationId)
+                : Promise.resolve(),
+        ]);
+    }
+
+    async dismissPresentedRideNotificationsForBooking(bookingId) {
+        if (!bookingId || typeof Notifications.getPresentedNotificationsAsync !== 'function') {
+            return;
+        }
+
+        try {
+            const presentedNotifications = await Notifications.getPresentedNotificationsAsync();
+            const matchingNotifications = (presentedNotifications || []).filter((notification) => {
+                const data =
+                    notification?.request?.content?.data ||
+                    notification?.content?.data ||
+                    {};
+                return data?.bookingId === bookingId || (
+                    data?.type === 'ride_status' &&
+                    this.currentBookingId === bookingId
+                );
+            });
+
+            await Promise.allSettled(
+                matchingNotifications
+                    .map((notification) => notification?.identifier)
+                    .filter(Boolean)
+                    .map((notificationId) => this.dismissNotificationById(notificationId))
+            );
+        } catch (error) {
+            Logger.warn('⚠️ [PersistentRideNotification] Falha ao limpar notificações apresentadas:', error?.message || error);
+        }
+    }
+
+    async handleRideStatusPayload(data = {}) {
+        const processedData = parseRideStatusPayload(data);
+        if (!processedData.bookingId || !processedData.status) {
+            return;
+        }
+
+        await this.hydrateNotificationState();
+
+        if (processedData.status === 'completed' || processedData.status === 'cancelled') {
+            await this.dismissRideNotification(processedData.bookingId);
+            return;
+        }
+
+        if (this.shouldSuppressDuplicatePayload(processedData)) {
+            return;
+        }
+
+        await this.updateRideNotification(processedData);
     }
 
     /**
@@ -167,9 +472,11 @@ class PersistentRideNotificationService {
 
             this.currentBookingId = bookingId;
             this.isActive = true;
+            this.stopPeriodicUpdate();
 
             // Gerar conteúdo da notificação baseado no status
             const { title, body } = this.generateNotificationContent({
+                ...rideData,
                 status,
                 userType,
                 pickup,
@@ -181,10 +488,8 @@ class PersistentRideNotificationService {
                 fare
             });
 
-            // Cancelar notificação anterior se existir
-            if (this.currentNotificationId) {
-                await Notifications.cancelScheduledNotificationAsync(this.currentNotificationId);
-            }
+            await this.dismissNotificationById(this.currentNotificationId);
+            await this.dismissPresentedRideNotificationsForBooking(bookingId);
 
             // Criar nova notificação persistente
             const notificationId = await Notifications.scheduleNotificationAsync({
@@ -208,6 +513,7 @@ class PersistentRideNotificationService {
             });
 
             this.currentNotificationId = notificationId;
+            await this.persistNotificationState();
             Logger.log(`✅ [PersistentRideNotification] Notificação persistente criada: ${notificationId}`);
 
             // Iniciar atualização periódica se necessário
@@ -225,6 +531,7 @@ class PersistentRideNotificationService {
      */
     async updateRideNotification(rideData) {
         try {
+            await this.hydrateNotificationState();
             if (!this.isActive || !this.currentNotificationId) {
                 // Se não há notificação ativa, criar uma nova
                 await this.showRideNotification(rideData);
@@ -250,6 +557,7 @@ class PersistentRideNotificationService {
             } = rideData;
 
             const { title, body } = this.generateNotificationContent({
+                ...rideData,
                 status,
                 userType,
                 pickup,
@@ -261,8 +569,8 @@ class PersistentRideNotificationService {
                 fare
             });
 
-            // No expo-notifications, precisamos cancelar e recriar para atualizar
-            await Notifications.cancelScheduledNotificationAsync(this.currentNotificationId);
+            await this.dismissNotificationById(this.currentNotificationId);
+            await this.dismissPresentedRideNotificationsForBooking(bookingId);
 
             const notificationId = await Notifications.scheduleNotificationAsync({
                 content: {
@@ -285,7 +593,16 @@ class PersistentRideNotificationService {
             });
 
             this.currentNotificationId = notificationId;
+            this.currentBookingId = bookingId;
+            this.isActive = true;
+            await this.persistNotificationState();
             Logger.log(`🔄 [PersistentRideNotification] Notificação atualizada: ${notificationId}`);
+
+            if (status === 'started' || status === 'accepted') {
+                this.startPeriodicUpdate(rideData);
+            } else {
+                this.stopPeriodicUpdate();
+            }
 
         } catch (error) {
             Logger.error('❌ [PersistentRideNotification] Erro ao atualizar notificação:', error);
@@ -295,71 +612,106 @@ class PersistentRideNotificationService {
     /**
      * Gerar conteúdo da notificação baseado no status
      */
-    generateNotificationContent({ status, userType, pickup, destination, driverName, customerName, estimatedTime, distance, fare }) {
+    generateNotificationContent(rideData = {}) {
+        const {
+            status,
+            userType,
+            pickup,
+            destination,
+            driverName,
+            customerName,
+            estimatedTime,
+            distance,
+            fare
+        } = rideData;
         let title = '';
         let body = '';
+        const statusKey = String(status || '').toLowerCase();
+        const timeline = buildTimelineDetails(rideData);
+        const pickupAddress = getLocationAddress(pickup, 'local de embarque');
+        const destinationAddress = getLocationAddress(destination, 'destino');
+        const tripDurationLabel = formatMinutes(getTripDurationMinutes(rideData));
+        const etaLabel = timeline.remainingLabel || formatMinutes(estimatedTime);
+        const distanceLabel = distance ? `${distance} km` : null;
 
         if (userType === 'driver') {
             // Notificação para motorista
-            switch (status) {
+            switch (statusKey) {
                 case 'searching':
-                    title = '🔍 Procurando corridas...';
+                    title = 'Procurando corridas';
                     body = 'Aguardando solicitações de corrida';
                     break;
                 case 'accepted':
-                    title = '🚗 Corrida aceita';
-                    body = `Navegue até: ${pickup?.address || 'Local de embarque'}`;
+                    title = `Busque ${customerName || 'o passageiro'}`;
+                    body = compactLines(
+                        etaLabel ? `Chegada ao embarque em ${etaLabel}` : 'Siga até o local de embarque',
+                        timeline.progressLine,
+                        `Partida: ${pickupAddress}`,
+                        distanceLabel ? `Distância: ${distanceLabel}` : null
+                    );
                     break;
                 case 'arrived':
-                    title = '📍 Você chegou ao local';
-                    body = `Aguardando ${customerName || 'passageiro'}...`;
+                    title = 'Chegada registrada';
+                    body = compactLines(
+                        `Aguardando ${customerName || 'passageiro'} para iniciar a viagem`,
+                        `Embarque: ${pickupAddress}`
+                    );
                     break;
                 case 'started':
-                    title = '🚀 Corrida em andamento';
-                    body = `A caminho de ${destination?.address || 'destino'}`;
-                    if (estimatedTime) {
-                        body += ` • ${estimatedTime} min`;
-                    }
+                    title = `A caminho de ${destinationAddress}`;
+                    body = compactLines(
+                        etaLabel ? `Chegada prevista em ${etaLabel}` : 'Viagem em andamento',
+                        timeline.progressLine,
+                        tripDurationLabel ? `Tempo estimado da viagem: ${tripDurationLabel}` : null,
+                        customerName ? `Passageiro: ${customerName}` : null
+                    );
                     break;
                 case 'completed':
-                    title = '✅ Corrida finalizada';
+                    title = 'Corrida finalizada';
                     body = `Ganho: ${fare || 'R$ 0,00'}`;
                     break;
                 default:
-                    title = '🚗 Corrida ativa';
+                    title = 'Corrida ativa';
                     body = 'Acompanhe o status da corrida';
             }
         } else {
             // Notificação para passageiro
-            switch (status) {
+            switch (statusKey) {
                 case 'searching':
-                    title = '🔍 Procurando motorista...';
+                    title = 'Procurando motorista';
                     body = 'Aguardando motorista disponível';
                     break;
                 case 'accepted':
-                    title = '🚗 Motorista encontrado!';
-                    body = `${driverName || 'Motorista'} está a caminho`;
-                    if (estimatedTime) {
-                        body += ` • ${estimatedTime} min`;
-                    }
+                    title = `${driverName || 'Motorista'} está a caminho`;
+                    body = compactLines(
+                        etaLabel ? `Chegada ao embarque em ${etaLabel}` : 'Acompanhe a chegada pelo app',
+                        timeline.progressLine,
+                        `Embarque: ${pickupAddress}`,
+                        tripDurationLabel ? `Viagem estimada: ${tripDurationLabel}` : null
+                    );
                     break;
                 case 'arrived':
-                    title = '📍 Motorista chegou!';
-                    body = `${driverName || 'Motorista'} está no local de embarque`;
+                    title = `${driverName || 'Motorista'} chegou`;
+                    body = compactLines(
+                        'Prossiga para o embarque',
+                        `Local: ${pickupAddress}`
+                    );
                     break;
                 case 'started':
-                    title = '🚀 Viagem em andamento';
-                    body = `A caminho de ${destination?.address || 'destino'}`;
-                    if (estimatedTime) {
-                        body += ` • ${estimatedTime} min`;
-                    }
+                    title = `A caminho de ${destinationAddress}`;
+                    body = compactLines(
+                        etaLabel ? `Chegada prevista em ${etaLabel}` : 'Viagem em andamento',
+                        timeline.progressLine,
+                        tripDurationLabel ? `Tempo estimado da viagem: ${tripDurationLabel}` : null,
+                        driverName ? `Motorista: ${driverName}` : null
+                    );
                     break;
                 case 'completed':
-                    title = '✅ Viagem finalizada';
+                    title = 'Viagem finalizada';
                     body = `Valor: ${fare || 'R$ 0,00'}`;
                     break;
                 default:
-                    title = '🚗 Corrida ativa';
+                    title = 'Corrida ativa';
                     body = 'Acompanhe o status da corrida';
             }
         }
@@ -376,17 +728,15 @@ class PersistentRideNotificationService {
             clearInterval(this.updateInterval);
         }
 
-        // Atualizar a cada 10 segundos durante a corrida
+        // Atualizar localmente durante a corrida; não dispara chamada externa.
         this.updateInterval = setInterval(async () => {
             if (!this.isActive) {
                 this.stopPeriodicUpdate();
                 return;
             }
 
-            // Atualizar dados dinâmicos (tempo estimado, distância, etc)
-            // Isso pode vir de um serviço de localização ou WebSocket
             await this.updateRideNotification(rideData);
-        }, 10000); // 10 segundos
+        }, RIDE_NOTIFICATION_UPDATE_INTERVAL_MS);
 
         Logger.log('🔄 [PersistentRideNotification] Atualização periódica iniciada');
     }
@@ -405,17 +755,22 @@ class PersistentRideNotificationService {
     /**
      * Remover notificação persistente
      */
-    async dismissRideNotification() {
+    async dismissRideNotification(bookingId = null) {
         try {
+            await this.hydrateNotificationState();
+            const targetBookingId = bookingId || this.currentBookingId;
             if (this.currentNotificationId) {
-                await Notifications.cancelScheduledNotificationAsync(this.currentNotificationId);
-                await Notifications.dismissNotificationAsync(this.currentNotificationId);
-                this.currentNotificationId = null;
-                this.currentBookingId = null;
-                this.isActive = false;
-                this.stopPeriodicUpdate();
-                Logger.log('✅ [PersistentRideNotification] Notificação removida');
+                await this.dismissNotificationById(this.currentNotificationId);
             }
+            await this.dismissPresentedRideNotificationsForBooking(targetBookingId);
+            this.currentNotificationId = null;
+            this.currentBookingId = null;
+            this.isActive = false;
+            this.lastRidePayloadFingerprint = null;
+            this.lastRidePayloadHandledAt = 0;
+            this.stopPeriodicUpdate();
+            await this.clearNotificationState();
+            Logger.log('✅ [PersistentRideNotification] Notificação removida');
         } catch (error) {
             Logger.error('❌ [PersistentRideNotification] Erro ao remover notificação:', error);
         }

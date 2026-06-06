@@ -12,6 +12,7 @@ const mockPlatform = {
 const mockPermissionsAndroid = {
   PERMISSIONS: {
     POST_NOTIFICATIONS: 'android.permission.POST_NOTIFICATIONS',
+    READ_PHONE_STATE: 'android.permission.READ_PHONE_STATE',
   },
   RESULTS: {
     GRANTED: 'granted',
@@ -19,6 +20,12 @@ const mockPermissionsAndroid = {
   },
   check: jest.fn(() => Promise.resolve(true)),
   request: jest.fn(() => Promise.resolve('granted')),
+};
+const mockAlert = {
+  alert: jest.fn((title, message, buttons = []) => {
+    const confirmButton = buttons.find(button => button.text === 'Concordo e continuar') || buttons[1] || buttons[0];
+    confirmButton?.onPress?.();
+  }),
 };
 let mockAppStateListener;
 const mockAppStateSubscriptionRemove = jest.fn();
@@ -55,11 +62,13 @@ mockMessaging.AuthorizationStatus = {
   PROVISIONAL: 2,
   DENIED: 0,
 };
+const mockHandleRideStatusPayload = jest.fn(() => Promise.resolve());
 
 jest.mock('@react-native-firebase/messaging', () => mockMessaging);
 
 jest.mock('react-native', () => ({
   AppState: mockAppState,
+  Alert: mockAlert,
   Platform: mockPlatform,
   PermissionsAndroid: mockPermissionsAndroid,
 }));
@@ -97,6 +106,11 @@ jest.mock('../src/services/WebSocketManager', () => ({
 }));
 
 jest.mock('../src/services/TestUserService', () => ({}));
+jest.mock('../src/services/PersistentRideNotificationService', () => ({
+  default: {
+    handleRideStatusPayload: mockHandleRideStatusPayload,
+  },
+}));
 
 const FCMNotificationService = require('../src/services/FCMNotificationService').default;
 const {
@@ -127,6 +141,10 @@ describe('FCMNotificationService initialization', () => {
     mockRequestPermission.mockResolvedValue(1);
     mockPermissionsAndroid.check.mockResolvedValue(true);
     mockPermissionsAndroid.request.mockResolvedValue('granted');
+    mockAlert.alert.mockImplementation((title, message, buttons = []) => {
+      const confirmButton = buttons.find(button => button.text === 'Concordo e continuar') || buttons[1] || buttons[0];
+      confirmButton?.onPress?.();
+    });
     AsyncStorage.getItem.mockResolvedValue(null);
     AsyncStorage.setItem.mockResolvedValue();
     AsyncStorage.removeItem.mockResolvedValue();
@@ -290,6 +308,30 @@ describe('FCMNotificationService initialization', () => {
       '❌ Erro ao salvar mensagem FCM em background:',
       expect.any(Error)
     );
+  });
+
+  it('updates the persistent ride notification from a top-level background ride status message', async () => {
+    let backgroundCallback;
+    mockSetBackgroundMessageHandler.mockImplementationOnce((callback) => {
+      backgroundCallback = callback;
+    });
+
+    expect(registerFCMBackgroundMessageHandler()).toBe(true);
+    await backgroundCallback({
+      messageId: 'background_ride_status_1',
+      data: {
+        type: 'ride_status_update',
+        bookingId: 'booking-1',
+        status: 'started',
+      },
+    });
+
+    expect(mockHandleRideStatusPayload).toHaveBeenCalledWith({
+      type: 'ride_status_update',
+      bookingId: 'booking-1',
+      status: 'started',
+    });
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   });
 
   it('processes queued background notifications without saving them again', async () => {
