@@ -1,5 +1,5 @@
 export { updateProfile } from './profileService';
-export { updateBooking } from '../../common-local/actions/bookinglistactions';
+export { updateBooking } from './driverBookingActions';
 export { RequestPushMsg } from './pushNotificationFunction';
 export {
   acceptTask,
