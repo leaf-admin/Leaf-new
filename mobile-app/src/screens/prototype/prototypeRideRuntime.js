@@ -68,6 +68,18 @@ import {
 } from "./prototypeQuoteRuntime";
 import { createPrototypeRideTelemetryRuntime } from "./prototypeRideTelemetryRuntime";
 import {
+  CHAT_MESSAGE_LIMIT,
+  NOTIFICATION_LIMIT,
+  appendRuntimeNotificationState,
+  buildOptimisticChatMessage,
+  buildSupportIncidentRecord,
+  buildSupportTicketRecord,
+  createRuntimeNotification as createRuntimeNotificationEntry,
+  markAllRuntimeNotificationsReadState,
+  markRuntimeNotificationReadState,
+  mergeChatMessages as mergeRuntimeChatMessages,
+} from "./prototypeMessagingRuntime";
+import {
   DRIVER_LOCATION_HEARTBEAT_MS,
   PASSENGER_LOCATION_HEARTBEAT_MS,
   buildDriverHeartbeatState,
@@ -128,9 +140,7 @@ const SEARCH_TIMER_INTERVAL_MS = 1000;
 const BOARDING_COUNTDOWN_INTERVAL_MS = 1000;
 const DRIVER_ACTIVE_LOCATION_REFRESH_MS = 2500;
 const TRIP_HISTORY_LIMIT = 12;
-const CHAT_MESSAGE_LIMIT = 80;
 const MIN_HEADING_DELTA_DEG = 2;
-const NOTIFICATION_LIMIT = 24;
 const DRIVER_ACTIVATION_STORAGE_PREFIX = "@prototype_driver_activation_";
 const RUNTIME_SESSION_STORAGE_PREFIX = "@prototype_runtime_session_";
 const RUNTIME_QA_SEED_STORAGE_PREFIX = "@prototype_runtime_qa_seed_";
@@ -1253,15 +1263,13 @@ function createRuntimeNotification({
   scope = "both",
   read = false,
 }) {
-  return {
-    id: `notif-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-    title: String(title || "Atualização"),
-    message: String(message || ""),
+  return createRuntimeNotificationEntry({
+    title,
+    message,
     kind,
     scope,
-    read: Boolean(read),
-    createdAt: new Date().toISOString(),
-  };
+    read,
+  });
 }
 
 function appendRuntimeNotification(entry) {
@@ -1270,12 +1278,10 @@ function appendRuntimeNotification(entry) {
   }
 
   setRuntimeState((previous) => {
-    const previousNotifications = Array.isArray(previous.notifications)
-      ? previous.notifications
-      : [];
     return {
-      notifications: [entry, ...previousNotifications].slice(
-        0,
+      notifications: appendRuntimeNotificationState(
+        previous.notifications,
+        entry,
         NOTIFICATION_LIMIT,
       ),
     };
@@ -1288,17 +1294,10 @@ function markNotificationReadInState(notificationId) {
   }
 
   setRuntimeState((previous) => {
-    const previousNotifications = Array.isArray(previous.notifications)
-      ? previous.notifications
-      : [];
     return {
-      notifications: previousNotifications.map((item) =>
-        item.id === notificationId && !item.read
-          ? {
-              ...item,
-              read: true,
-            }
-          : item,
+      notifications: markRuntimeNotificationReadState(
+        previous.notifications,
+        notificationId,
       ),
     };
   });
@@ -1306,17 +1305,9 @@ function markNotificationReadInState(notificationId) {
 
 function markAllNotificationsReadInState() {
   setRuntimeState((previous) => {
-    const previousNotifications = Array.isArray(previous.notifications)
-      ? previous.notifications
-      : [];
     return {
-      notifications: previousNotifications.map((item) =>
-        item.read
-          ? item
-          : {
-              ...item,
-              read: true,
-            },
+      notifications: markAllRuntimeNotificationsReadState(
+        previous.notifications,
       ),
     };
   });
@@ -4754,54 +4745,11 @@ function mergeDriverOffers(previousOffers = [], incomingOffer) {
   return mergeDriverOffersWithLockedPricing(previousOffers, incomingOffer);
 }
 
-function normalizeChatMessage(message) {
-  const senderId =
-    message?.senderId || message?.userId || message?.fromUserId || "";
-  const messageText = sanitizeText(message?.message || message?.text, "");
-  const timestampValue =
-    message?.timestamp ||
-    message?.createdAt ||
-    message?.sentAt ||
-    new Date().toISOString();
-  const timestampDate = new Date(timestampValue);
-  const timestamp = Number.isNaN(timestampDate.getTime())
-    ? new Date().toISOString()
-    : timestampDate.toISOString();
-  const messageId =
-    message?.messageId ||
-    message?.id ||
-    `msg-${timestamp}-${Math.random().toString(16).slice(2, 9)}`;
-  const isYou =
-    runtimeState.profileUid && senderId && senderId === runtimeState.profileUid;
-
-  return {
-    id: String(messageId),
-    text: messageText,
-    senderId: senderId || null,
-    author: isYou ? "you" : "driver",
-    timestamp,
-  };
-}
-
 function mergeChatMessages(existing = [], incoming = []) {
-  const map = new Map();
-
-  [...existing, ...incoming].forEach((raw) => {
-    const item = normalizeChatMessage(raw);
-    if (!item.text) {
-      return;
-    }
-
-    map.set(String(item.id), item);
+  return mergeRuntimeChatMessages(existing, incoming, {
+    profileUid: runtimeState.profileUid,
+    limit: CHAT_MESSAGE_LIMIT,
   });
-
-  return Array.from(map.values())
-    .sort((left, right) => {
-      const leftTime = new Date(left.timestamp).getTime();
-      const rightTime = new Date(right.timestamp).getTime();
-      return leftTime - rightTime;
-    })
-    .slice(-CHAT_MESSAGE_LIMIT);
 }
 
 function getOriginCoordinate() {
@@ -12193,14 +12141,10 @@ async function sendPrototypeChatMessage(profile, text) {
     throw new Error("Inicie uma corrida para enviar mensagens.");
   }
 
-  const optimisticId = `local-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-  const optimisticMessage = {
-    id: optimisticId,
-    text: messageText,
+  const optimisticMessage = buildOptimisticChatMessage(messageText, {
     senderId: profile?.uid || runtimeState.profileUid || null,
-    author: "you",
-    timestamp: new Date().toISOString(),
-  };
+  });
+  const optimisticId = optimisticMessage?.id;
 
   setRuntimeState((previous) => ({
     chatSending: true,
@@ -12303,13 +12247,11 @@ async function createPrototypeSupportTicket(profile, payload = {}) {
       description,
       attachments,
     );
-    const ticket = {
-      id: response?.ticketId || response?.id || `ticket-${Date.now()}`,
+    const ticket = buildSupportTicketRecord(response, {
       type,
       priority,
       description,
-      createdAt: new Date().toISOString(),
-    };
+    });
 
     setRuntimeState({
       supportLoading: false,
@@ -12368,12 +12310,10 @@ async function reportPrototypeIncident(profile, payload = {}) {
       [],
       location,
     );
-    const incident = {
-      id: response?.incidentId || response?.id || `incident-${Date.now()}`,
+    const incident = buildSupportIncidentRecord(response, {
       type,
       description,
-      createdAt: new Date().toISOString(),
-    };
+    });
 
     setRuntimeState({
       supportLoading: false,
