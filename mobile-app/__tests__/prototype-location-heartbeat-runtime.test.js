@@ -9,6 +9,8 @@ import {
   buildPassengerLocationPayload,
   calculateHeadingDeltaDegrees,
   normalizeHeadingDegrees,
+  sendDriverLocationHeartbeat,
+  sendPassengerLocationHeartbeat,
   shouldCoalescePassengerLocationAttempt,
   shouldMonitorPassengerTripulation,
   shouldReusePassengerHeartbeat,
@@ -65,6 +67,128 @@ describe('prototype location heartbeat runtime helpers', () => {
     expect(calculateHeadingDeltaDegrees(350, 10)).toBe(20);
     expect(calculateHeadingDeltaDegrees(10, 350)).toBe(20);
     expect(calculateHeadingDeltaDegrees(90, 180)).toBe(90);
+  });
+
+  it('sends driver location heartbeat through the socket and returns state metadata', async () => {
+    const socket = {
+      updateLocation: jest.fn().mockResolvedValue(undefined),
+    };
+    const location = {
+      lat: -22.98,
+      lng: -43.21,
+      heading: 90,
+      speed: 0,
+    };
+
+    await expect(sendDriverLocationHeartbeat({
+      profileUid: '',
+      location,
+      socket,
+    })).resolves.toEqual({
+      success: false,
+      code: 'PROFILE_REQUIRED',
+    });
+
+    await expect(sendDriverLocationHeartbeat({
+      profileUid: 'driver_1',
+      location: null,
+      socket,
+    })).resolves.toEqual({
+      success: false,
+      code: 'LOCATION_REQUIRED',
+    });
+
+    const result = await sendDriverLocationHeartbeat({
+      profileUid: 'driver_1',
+      location,
+      socket,
+      routePlanShare: {
+        signature: 'booking_1:pickup',
+        payload: { bookingId: 'booking_1' },
+      },
+      nowMs: Date.parse('2026-05-30T12:00:00.000Z'),
+    });
+
+    expect(socket.updateLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.98,
+      -43.21,
+      90,
+      0,
+      { bookingId: 'booking_1' },
+    );
+    expect(result).toEqual({
+      success: true,
+      location,
+      routePlanSignature: 'booking_1:pickup',
+      sentAtMs: Date.parse('2026-05-30T12:00:00.000Z'),
+      heartbeatPatch: {
+        running: true,
+        lastSentAt: '2026-05-30T12:00:00.000Z',
+        lastError: '',
+      },
+    });
+  });
+
+  it('sends passenger location heartbeat through the socket and returns state metadata', async () => {
+    const socket = {
+      updatePassengerLocation: jest.fn().mockResolvedValue(undefined),
+    };
+    const location = {
+      lat: -22.99,
+      lng: -43.22,
+      heading: 180,
+      speed: 0,
+    };
+
+    await expect(sendPassengerLocationHeartbeat({
+      bookingId: '',
+      location,
+      socket,
+    })).resolves.toEqual({
+      success: false,
+      code: 'BOOKING_REQUIRED',
+    });
+
+    await expect(sendPassengerLocationHeartbeat({
+      bookingId: 'booking_1',
+      location: null,
+      socket,
+    })).resolves.toEqual({
+      success: false,
+      code: 'LOCATION_REQUIRED',
+    });
+
+    const result = await sendPassengerLocationHeartbeat({
+      bookingId: 'booking_1',
+      location,
+      socket,
+      nowMs: Date.parse('2026-05-30T12:01:00.000Z'),
+    });
+
+    expect(socket.updatePassengerLocation).toHaveBeenCalledWith(
+      'booking_1',
+      -22.99,
+      -43.22,
+      180,
+      0,
+    );
+    expect(result).toEqual({
+      success: true,
+      location,
+      bookingId: 'booking_1',
+      sentAtMs: Date.parse('2026-05-30T12:01:00.000Z'),
+      heartbeatPatch: {
+        running: true,
+        lastSentAt: '2026-05-30T12:01:00.000Z',
+        lastError: '',
+      },
+      locationSnapshot: {
+        latitude: -22.99,
+        longitude: -43.22,
+      },
+      heading: 180,
+    });
   });
 
   it('identifies passenger trip statuses that should be monitored', () => {
