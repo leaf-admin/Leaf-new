@@ -8,6 +8,12 @@ const mockKeys = jest.fn();
 const mockHgetall = jest.fn();
 const mockExists = jest.fn();
 const mockDel = jest.fn();
+const mockOrchestratorSetRedis = jest.fn();
+const mockOrchestratorGetMatrix = jest.fn();
+const mockOrchestratorGetStats = jest.fn();
+const mockOrchestratorGetEventConfig = jest.fn();
+const mockOrchestratorBuildNotification = jest.fn();
+const mockOrchestratorDispatchEvent = jest.fn();
 const mockRedisConnection = {
   status: 'ready',
   connect: jest.fn(),
@@ -49,6 +55,16 @@ jest.mock('../../../services/fcm-service', () => jest.fn(() => ({
   getServiceStats: jest.fn().mockResolvedValue({ activeTokens: 0 })
 })));
 
+jest.mock('../../../services/notification-orchestrator-service', () => jest.fn(() => ({
+  redis: null,
+  setRedis: mockOrchestratorSetRedis,
+  getMatrix: mockOrchestratorGetMatrix,
+  getStats: mockOrchestratorGetStats,
+  getEventConfig: mockOrchestratorGetEventConfig,
+  buildNotification: mockOrchestratorBuildNotification,
+  dispatchEvent: mockOrchestratorDispatchEvent
+})));
+
 jest.mock('../../../utils/redis-scan', () => ({
   scanIds: jest.fn()
 }));
@@ -75,6 +91,32 @@ describe('notification schedule route auth', () => {
     mockExists.mockResolvedValue(1);
     mockDel.mockResolvedValue(1);
     mockHset.mockResolvedValue(1);
+    mockOrchestratorGetMatrix.mockReturnValue({
+      version: 'test-matrix',
+      events: {
+        'ride.accepted': { category: 'ride_lifecycle' }
+      }
+    });
+    mockOrchestratorGetStats.mockResolvedValue({
+      date: '2026-06-06',
+      version: 'test-matrix',
+      metrics: { sent: 2 }
+    });
+    mockOrchestratorGetEventConfig.mockReturnValue({
+      category: 'ride_lifecycle',
+      audience: ['passenger'],
+      channels: ['push', 'persisted']
+    });
+    mockOrchestratorBuildNotification.mockReturnValue({
+      title: 'Corrida aceita',
+      body: 'Carlos esta a caminho.',
+      data: { eventType: 'ride.accepted' }
+    });
+    mockOrchestratorDispatchEvent.mockResolvedValue({
+      success: true,
+      status: 'dry_run',
+      notification: { title: 'Corrida aceita', body: 'Carlos esta a caminho.' }
+    });
   });
 
   it('requires an admin role to create scheduled notifications', async () => {
@@ -142,5 +184,91 @@ describe('notification schedule route auth', () => {
 
     expect(response.status).toBe(200);
     expect(mockDel).toHaveBeenCalledWith('scheduled_notifications:scheduled_1');
+  });
+
+  it('requires auth to read the orchestration matrix', async () => {
+    const response = await request(createApp())
+      .get('/api/notifications/orchestration/matrix');
+
+    expect(response.status).toBe(401);
+    expect(mockOrchestratorGetMatrix).not.toHaveBeenCalled();
+  });
+
+  it('allows authenticated operators to inspect the orchestration matrix', async () => {
+    const response = await request(createApp())
+      .get('/api/notifications/orchestration/matrix')
+      .set('Authorization', 'Bearer manager');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      success: true,
+      data: {
+        version: 'test-matrix',
+        events: {
+          'ride.accepted': { category: 'ride_lifecycle' }
+        }
+      }
+    });
+  });
+
+  it('keeps orchestration preview limited to admin roles', async () => {
+    const response = await request(createApp())
+      .post('/api/notifications/orchestration/preview')
+      .set('Authorization', 'Bearer viewer')
+      .send({
+        eventType: 'ride.accepted',
+        context: { driverName: 'Carlos' }
+      });
+
+    expect(response.status).toBe(403);
+    expect(mockOrchestratorBuildNotification).not.toHaveBeenCalled();
+  });
+
+  it('builds an orchestration preview without dispatching push', async () => {
+    const response = await request(createApp())
+      .post('/api/notifications/orchestration/preview')
+      .set('Authorization', 'Bearer manager')
+      .send({
+        eventType: 'ride.accepted',
+        context: { driverName: 'Carlos' }
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      data: {
+        eventType: 'ride.accepted',
+        mode: 'preview_only',
+        notification: {
+          title: 'Corrida aceita'
+        }
+      }
+    });
+    expect(mockOrchestratorDispatchEvent).not.toHaveBeenCalled();
+  });
+
+  it('forces orchestration dispatch into dry-run unless explicitly enabled by env', async () => {
+    const response = await request(createApp())
+      .post('/api/notifications/orchestration/dispatch')
+      .set('Authorization', 'Bearer manager')
+      .send({
+        eventType: 'ride.accepted',
+        userId: 'user_1',
+        userType: 'passenger',
+        context: { driverName: 'Carlos' },
+        dryRun: false
+      });
+
+    expect(response.status).toBe(200);
+    expect(mockOrchestratorDispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+      eventType: 'ride.accepted',
+      userId: 'user_1',
+      userType: 'passenger',
+      dryRun: true
+    }));
+    expect(response.body.data).toEqual(expect.objectContaining({
+      directSendEnabled: false,
+      effectiveDryRun: true
+    }));
   });
 });

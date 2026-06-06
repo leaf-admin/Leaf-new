@@ -2,14 +2,17 @@
 const express = require('express');
 const router = express.Router();
 const FCMService = require('../services/fcm-service');
+const NotificationOrchestratorService = require('../services/notification-orchestrator-service');
 const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
 const RedisScan = require('../utils/redis-scan');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 const fcmService = new FCMService();
+const notificationOrchestrator = new NotificationOrchestratorService({ fcmService });
 const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const ALLOW_PUBLIC_DIRECT_FCM_SEND = String(process.env.ALLOW_PUBLIC_DIRECT_FCM_SEND || 'false').toLowerCase() === 'true';
+const ALLOW_NOTIFICATION_ORCHESTRATOR_DIRECT_SEND = String(process.env.ALLOW_NOTIFICATION_ORCHESTRATOR_DIRECT_SEND || 'false').toLowerCase() === 'true';
 
 function bindRedisToFcmService() {
     try {
@@ -21,6 +24,23 @@ function bindRedisToFcmService() {
         return redis || null;
     } catch (error) {
         logStructured('warn', 'Nao foi possivel vincular Redis ao FCM Service', {
+            service: 'notifications-routes',
+            error: error.message
+        });
+        return null;
+    }
+}
+
+function bindRedisToNotificationOrchestrator() {
+    try {
+        if (notificationOrchestrator.redis) return notificationOrchestrator.redis;
+        const redis = redisPool.getConnection();
+        if (redis) {
+            notificationOrchestrator.setRedis(redis);
+        }
+        return redis || null;
+    } catch (error) {
+        logStructured('warn', 'Nao foi possivel vincular Redis ao Notification Orchestrator', {
             service: 'notifications-routes',
             error: error.message
         });
@@ -310,6 +330,109 @@ router.get('/', requireAuth, async (req, res) => {
     }
 });
 
+// GET - Matriz de orquestracao do ciclo de vida do app.
+// Esta rota nao chama provedores externos e serve para auditoria/backoffice.
+router.get('/orchestration/matrix', requireAuth, async (_req, res) => {
+    try {
+        const matrix = notificationOrchestrator.getMatrix();
+        res.json({
+            success: true,
+            data: matrix
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// GET - Estatisticas agregadas do orquestrador no Redis.
+router.get('/orchestration/stats', requireAuth, async (req, res) => {
+    try {
+        bindRedisToNotificationOrchestrator();
+        const stats = await notificationOrchestrator.getStats(req.query.date);
+        res.json({
+            success: true,
+            data: stats
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// POST - Preview seguro para o backoffice/copilot.
+// Apenas monta a copy e os metadados; nao persiste, nao envia push e nao chama API paga.
+router.post('/orchestration/preview', requireAdminManager, async (req, res) => {
+    try {
+        const { eventType, context = {} } = req.body || {};
+        if (!eventType) {
+            return res.status(400).json({
+                success: false,
+                error: 'eventType e obrigatorio'
+            });
+        }
+
+        const config = notificationOrchestrator.getEventConfig(eventType);
+        if (!config) {
+            return res.status(404).json({
+                success: false,
+                error: 'Evento de notificacao nao mapeado'
+            });
+        }
+
+        const notification = notificationOrchestrator.buildNotification(eventType, context);
+        res.json({
+            success: true,
+            data: {
+                eventType,
+                config,
+                notification,
+                mode: 'preview_only'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// POST - Dispatch orquestrado.
+// Por seguranca, roda em dry-run por padrao. Envio real exige flag de ambiente explicita.
+router.post('/orchestration/dispatch', requireAdminManager, async (req, res) => {
+    try {
+        bindRedisToNotificationOrchestrator();
+        const {
+            eventType,
+            userId,
+            userType,
+            context = {},
+            preferences = {},
+            idempotencyKey
+        } = req.body || {};
+        const requestedDryRun = req.body?.dryRun !== false;
+        const dryRun = ALLOW_NOTIFICATION_ORCHESTRATOR_DIRECT_SEND ? requestedDryRun : true;
+
+        const result = await notificationOrchestrator.dispatchEvent({
+            eventType,
+            userId,
+            userType,
+            context,
+            preferences,
+            idempotencyKey,
+            dryRun
+        });
+
+        res.status(result.success === false ? 400 : 200).json({
+            success: result.success !== false,
+            data: {
+                ...result,
+                directSendEnabled: ALLOW_NOTIFICATION_ORCHESTRATOR_DIRECT_SEND,
+                effectiveDryRun: dryRun
+            }
+        });
+    } catch (error) {
+        logError(error, '❌ Erro no orquestrador de notificacoes:', { service: 'notifications-routes' });
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // POST - Enviar notificação imediata
 // Requer autenticação administrativa para envios em lote.
 // Envio direto por fcmToken pode ser público apenas quando ALLOW_PUBLIC_DIRECT_FCM_SEND=true.
@@ -566,7 +689,9 @@ router.delete('/scheduled/:id', requireSuperAdmin, async (req, res) => {
 router.get('/stats', requireAuth, async (req, res) => {
     try {
         bindRedisToFcmService();
+        bindRedisToNotificationOrchestrator();
         const stats = await fcmService.getServiceStats();
+        const orchestration = await notificationOrchestrator.getStats(req.query.date);
         const redis = redisPool.getConnection();
         await ensureRedisConnection(redis);
         const scheduledKeys = await redis.keys('scheduled_notifications:*');
@@ -576,6 +701,7 @@ router.get('/stats', requireAuth, async (req, res) => {
             success: true,
             data: {
                 fcm: stats,
+                orchestration,
                 scheduled: scheduledCount,
                 total: stats.activeTokens + scheduledCount
             }
