@@ -1,9 +1,9 @@
-import api from './legacyApiService';
-
-export const {
+export {
   checkUserExists,
-  countries,
-  editreferral,
   mainSignUp,
   validateReferer,
-} = api;
+} from '../../common-local/actions/authactions';
+
+export { editreferral } from '../../common-local/actions/usedreferralaction';
+
+export { default as countries } from '../../common-local/other/GetCountries';
