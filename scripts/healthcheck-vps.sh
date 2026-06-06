@@ -93,6 +93,24 @@ check_auth_endpoint() {
   FAIL=$((FAIL + 1))
 }
 
+check_firebase_user_protected_endpoint() {
+  local path="$1"
+  local url="${BASE_URL}${path}"
+  local code
+
+  code="$(curl_code "${url}")"
+  if [[ "${code}" == "401" || "${code}" == "403" ]]; then
+    echo "✅ ${path} protegido por Firebase user auth (${code})"
+    PASS=$((PASS + 1))
+    return
+  fi
+
+  echo "❌ ${path} Firebase-protegido (esperado 401/403 sem token de usuário, recebido ${code})"
+  head -c 180 /tmp/leaf-health.json 2>/dev/null || true
+  echo
+  FAIL=$((FAIL + 1))
+}
+
 check_contains() {
   local path="$1"
   local pattern="$2"
@@ -158,7 +176,7 @@ check_auth_endpoint "/api/drivers/applications?page=1&limit=5"
 check_auth_endpoint "/api/activity/recent"
 
 # KYC
-check_json_endpoint "/api/kyc/health" "200"
+check_firebase_user_protected_endpoint "/api/kyc/health"
 check_json_endpoint "/api/workers/health" "200"
 
 # WebSocket handshake (socket.io engine)
