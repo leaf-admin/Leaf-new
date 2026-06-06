@@ -800,6 +800,34 @@ class LeafApiService {
     });
   }
 
+  async getRuntimeConfigAdmin({ includeInactive = true, forceRefresh = false } = {}) {
+    const params = new URLSearchParams();
+    params.set("includeInactive", includeInactive ? "true" : "false");
+    if (forceRefresh) params.set("forceRefresh", "true");
+    return this.request(`/admin/runtime-config?${params.toString()}`);
+  }
+
+  async publishRuntimeConfigOverride(payload = {}) {
+    return this.request("/admin/runtime-config/overrides", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateRuntimeConfigOverrideStatus(overrideId, status) {
+    return this.request(`/admin/runtime-config/overrides/${encodeURIComponent(overrideId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async rollbackRuntimeConfigOverride(overrideId, reason = "") {
+    return this.request(`/admin/runtime-config/overrides/${encodeURIComponent(overrideId)}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
   async listAuditLogs(params = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {

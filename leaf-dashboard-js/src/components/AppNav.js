@@ -27,6 +27,7 @@ const groups = [
     href: "/observability",
     items: [
       { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/runtime-flags", label: "Runtime e flags", allowedRoles: ["admin", "super-admin", "manager", "development"] },
       { href: "/metrics", label: "Métricas", blockedRoles: ["support"] },
       { href: "/metrics/history", label: "Histórico", blockedRoles: ["support"] },
       { href: "/metrics/marketplace", label: "Marketplace", blockedRoles: ["support"] },
