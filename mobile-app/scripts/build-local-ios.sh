@@ -185,6 +185,8 @@ assert_ios_app_artifact() {
   local actual_build_number
   local updates_enabled=""
   local updates_channel=""
+  local updates_url=""
+  local updates_disabled_allowed="0"
   local microphone_usage=""
 
   if [[ ! -d "${app_path}" ]]; then
@@ -267,17 +269,40 @@ NODE
   fi
   echo "✅ NSMicrophoneUsageDescription presente."
 
-  if [[ -f "${expo_plist_path}" ]]; then
-    updates_enabled="$(/usr/libexec/PlistBuddy -c "Print :EXUpdatesEnabled" "${expo_plist_path}" 2>/dev/null || true)"
-    if [[ "${updates_enabled}" == "true" || "${updates_enabled}" == "1" ]]; then
-      updates_channel="$(/usr/libexec/PlistBuddy -c "Print :EXUpdatesRequestHeaders:expo-channel-name" "${expo_plist_path}" 2>/dev/null || true)"
-      if [[ "${updates_channel}" != "production" ]]; then
-        echo "❌ Expo Updates ativo sem canal production no artefato iOS (${context})."
-        echo "   Canal encontrado: ${updates_channel:-<vazio>}"
-        exit 1
-      fi
-      echo "✅ Expo Updates usa canal production."
+  if [[ ! -f "${expo_plist_path}" ]]; then
+    echo "❌ Expo.plist ausente no artefato iOS (${context})."
+    echo "   Sem esse arquivo não há garantia de OTA/runtimeVersion."
+    exit 1
+  fi
+
+  updates_enabled="$(/usr/libexec/PlistBuddy -c "Print :EXUpdatesEnabled" "${expo_plist_path}" 2>/dev/null || true)"
+  if [[ "${LEAF_DISABLE_UPDATES_FOR_SIMULATOR:-0}" == "1" && "${context}" == "simulator" ]]; then
+    updates_disabled_allowed="1"
+  fi
+
+  if [[ "${updates_enabled}" != "true" && "${updates_enabled}" != "1" ]]; then
+    if [[ "${updates_disabled_allowed}" == "1" ]]; then
+      echo "⚠️  Expo Updates desativado no simulador por LEAF_DISABLE_UPDATES_FOR_SIMULATOR=1."
+    else
+      echo "❌ Expo Updates desativado no artefato iOS (${context})."
+      echo "   Isso impediria OTA/Expo Update para pequenos patches JS/UI."
+      echo "   Use LEAF_DISABLE_UPDATES_FOR_SIMULATOR=1 apenas para um teste local isolado."
+      exit 1
     fi
+  else
+    updates_channel="$(/usr/libexec/PlistBuddy -c "Print :EXUpdatesRequestHeaders:expo-channel-name" "${expo_plist_path}" 2>/dev/null || true)"
+    updates_url="$(/usr/libexec/PlistBuddy -c "Print :EXUpdatesURL" "${expo_plist_path}" 2>/dev/null || true)"
+    if [[ "${updates_channel}" != "production" ]]; then
+      echo "❌ Expo Updates ativo sem canal production no artefato iOS (${context})."
+      echo "   Canal encontrado: ${updates_channel:-<vazio>}"
+      exit 1
+    fi
+    if [[ "${updates_url}" != https://u.expo.dev/* ]]; then
+      echo "❌ Expo Updates ativo sem URL EAS Update no artefato iOS (${context})."
+      echo "   URL encontrada: ${updates_url:-<vazio>}"
+      exit 1
+    fi
+    echo "✅ Expo Updates ativo no canal production."
   fi
 }
 
@@ -342,10 +367,10 @@ main() {
   fi
   case "${MODE}" in
     simulator)
-      export LEAF_DISABLE_UPDATES_FOR_SIMULATOR=1
       local built_app_path="${PROJECT_DIR}/ios/build/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/${scheme}.app"
       local expo_plist_path="${built_app_path}/Expo.plist"
       mkdir -p "${PROJECT_DIR}/ios/build/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/EXUpdates.bundle"
+      rm -rf "${built_app_path}"
       if [[ -n "${workspace}" ]]; then
         xcodebuild \
           -workspace "${workspace}" \
@@ -367,7 +392,7 @@ main() {
           "${sim_extra_args[@]}" \
           build
       fi
-      if [[ -f "${expo_plist_path}" ]]; then
+      if [[ "${LEAF_DISABLE_UPDATES_FOR_SIMULATOR:-0}" == "1" && -f "${expo_plist_path}" ]]; then
         /usr/libexec/PlistBuddy -c "Set :EXUpdatesEnabled false" "${expo_plist_path}" >/dev/null 2>&1 || true
         /usr/libexec/PlistBuddy -c "Set :EXUpdatesCheckOnLaunch NEVER" "${expo_plist_path}" >/dev/null 2>&1 || true
         /usr/libexec/PlistBuddy -c "Delete :EXUpdatesURL" "${expo_plist_path}" >/dev/null 2>&1 || true
