@@ -68,6 +68,14 @@ import {
 } from "./prototypeQuoteRuntime";
 import { createPrototypeRideTelemetryRuntime } from "./prototypeRideTelemetryRuntime";
 import {
+  DRIVER_LOCATION_HEARTBEAT_MS,
+  PASSENGER_LOCATION_HEARTBEAT_MS,
+  PASSENGER_LOCATION_MIN_SEND_GAP_MS,
+  buildDriverLocationPayload,
+  buildPassengerLocationPayload,
+  shouldThrottlePassengerLocationPush as shouldThrottlePassengerLocationPushHelper,
+} from "./prototypeLocationHeartbeatRuntime";
+import {
   shouldFlushRuntimeSessionImmediately,
   shouldFlushRuntimeSessionOnAppState,
   shouldMaintainRealtimeSessionForSnapshot,
@@ -118,14 +126,7 @@ const DRIVER_ACTIVATION_STORAGE_PREFIX = "@prototype_driver_activation_";
 const RUNTIME_SESSION_STORAGE_PREFIX = "@prototype_runtime_session_";
 const RUNTIME_QA_SEED_STORAGE_PREFIX = "@prototype_runtime_qa_seed_";
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = "confirmedDestinations";
-const DRIVER_LOCATION_HEARTBEAT_MS = 5000;
 const DRIVER_ROUTE_PLAN_SHARE_REFRESH_MS = 15000;
-const PASSENGER_LOCATION_HEARTBEAT_MS = 2000;
-const PASSENGER_LOCATION_STATIONARY_HEARTBEAT_MS = 4500;
-const PASSENGER_LOCATION_STARTED_HEARTBEAT_MS = 3000;
-const PASSENGER_LOCATION_MIN_SEND_GAP_MS = 900;
-const PASSENGER_LOCATION_MIN_MOVEMENT_METERS = 6;
-const PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG = 8;
 const PASSENGER_ADDRESS_REFRESH_MIN_INTERVAL_MS = 45000;
 const PASSENGER_ADDRESS_REFRESH_MIN_MOVEMENT_METERS = 35;
 const RUNTIME_ACTIVE_RIDE_RESYNC_INTERVAL_MS = 6000;
@@ -12909,21 +12910,7 @@ async function submitPrototypeBackgroundCheckConsent(profile, accepted = true) {
 }
 
 function getDriverLocationPayload() {
-  const fallbackCoordinate =
-    runtimeState?.driverCoordinate || runtimeState?.currentCoordinate || null;
-  const latitude = Number(fallbackCoordinate?.latitude);
-  const longitude = Number(fallbackCoordinate?.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-    return null;
-  }
-
-  const heading = Number(runtimeState?.currentHeading || 0);
-  return {
-    lat: latitude,
-    lng: longitude,
-    heading: Number.isFinite(heading) ? heading : 0,
-    speed: 0,
-  };
+  return buildDriverLocationPayload(runtimeState);
 }
 
 async function resolveDriverOnlineLocationSeed() {
@@ -12993,19 +12980,7 @@ function shouldMonitorPassengerTripulation() {
 }
 
 function getPassengerLocationPayload() {
-  const latitude = Number(runtimeState?.currentCoordinate?.latitude);
-  const longitude = Number(runtimeState?.currentCoordinate?.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-    return null;
-  }
-
-  const heading = Number(runtimeState?.currentHeading || 0);
-  return {
-    lat: latitude,
-    lng: longitude,
-    heading: Number.isFinite(heading) ? heading : 0,
-    speed: 0,
-  };
+  return buildPassengerLocationPayload(runtimeState);
 }
 
 function buildDriverRoutePlanSharePayload() {
@@ -13111,72 +13086,23 @@ function stopPassengerLocationHeartbeat(options = {}) {
   }));
 }
 
-function normalizeHeadingDegrees(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return 0;
-  }
-
-  const normalized = numeric % 360;
-  return normalized < 0 ? normalized + 360 : normalized;
-}
-
-function calculateHeadingDeltaDegrees(previousHeading, nextHeading) {
-  const start = normalizeHeadingDegrees(previousHeading);
-  const end = normalizeHeadingDegrees(nextHeading);
-  const rawDelta = Math.abs(end - start);
-  return Math.min(rawDelta, 360 - rawDelta);
-}
-
 function shouldThrottlePassengerLocationPush({
   bookingId,
   bookingStatus,
   location,
   force = false,
 }) {
-  if (force || !runtimeLastPassengerHeartbeatSentAt) {
-    return false;
-  }
-
-  const normalizedStatus = String(bookingStatus || "").trim().toLowerCase();
-  if (
-    String(runtimeLastPassengerHeartbeatBookingId || "") !==
-      String(bookingId || "") ||
-    runtimeLastPassengerHeartbeatStatus !== normalizedStatus
-  ) {
-    return false;
-  }
-
-  const elapsedMs = Date.now() - runtimeLastPassengerHeartbeatSentAt;
-  const minIntervalMs =
-    normalizedStatus === "started"
-      ? PASSENGER_LOCATION_STARTED_HEARTBEAT_MS
-      : PASSENGER_LOCATION_STATIONARY_HEARTBEAT_MS;
-
-  if (elapsedMs >= minIntervalMs) {
-    return false;
-  }
-
-  const movedMeters = calculateDistanceMeters(
-    runtimeLastPassengerHeartbeatLocation,
+  return shouldThrottlePassengerLocationPushHelper({
+    bookingId,
+    bookingStatus,
     location,
-  );
-  if (
-    Number.isFinite(movedMeters) &&
-    movedMeters >= PASSENGER_LOCATION_MIN_MOVEMENT_METERS
-  ) {
-    return false;
-  }
-
-  const headingDelta = calculateHeadingDeltaDegrees(
-    runtimeLastPassengerHeartbeatHeading,
-    location?.heading,
-  );
-  if (headingDelta >= PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG) {
-    return false;
-  }
-
-  return true;
+    force,
+    lastSentAt: runtimeLastPassengerHeartbeatSentAt,
+    lastBookingId: runtimeLastPassengerHeartbeatBookingId,
+    lastBookingStatus: runtimeLastPassengerHeartbeatStatus,
+    lastLocation: runtimeLastPassengerHeartbeatLocation,
+    lastHeading: runtimeLastPassengerHeartbeatHeading,
+  });
 }
 
 async function pushPassengerLocationNow(

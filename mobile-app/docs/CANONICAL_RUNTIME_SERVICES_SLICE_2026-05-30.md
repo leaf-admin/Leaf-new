@@ -53,6 +53,9 @@ Atualizacao 2026-06-06 (`LEA-32`):
 - Terceira extracao interna pequena concluida.
 - Resolucao de source meta, draft context e bind/rotate de telemetria de custo sairam de `prototypeRideRuntime.js` para `src/screens/prototype/prototypeRideTelemetryRuntime.js`.
 - A extracao preserva comportamento: draft context continua existindo antes do booking, booking ativo continua preferencial e o bind limpa o draft apos receber o bookingId.
+- Quarta extracao interna pequena concluida.
+- Payload de localizacao, normalizacao de heading e throttle do heartbeat do passageiro sairam de `prototypeRideRuntime.js` para `src/screens/prototype/prototypeLocationHeartbeatRuntime.js`.
+- A extracao preserva comportamento: timers e envio por socket continuam no runtime, enquanto a regra de coalescing/throttle fica testavel e sem dependencia nativa.
 - Nenhuma regra de socket, pagamento, corrida ativa, UI ou lifecycle foi alterada.
 
 Responsabilidades reais identificadas no arquivo:
@@ -62,6 +65,7 @@ Responsabilidades reais identificadas no arquivo:
 - estado passageiro/motorista.
 - busca de destino e quote lock via helpers dedicados.
 - contexto de telemetria de custo via helper dedicado.
+- payload/throttle de heartbeat de localizacao via helper dedicado.
 - pagamento e estado de confirmacao.
 - corrida ativa, chegada, embarque, inicio e conclusao.
 - tracking de localizacao passageiro/motorista.
@@ -98,6 +102,7 @@ Comandos adicionais executados em 2026-06-06 para `LEA-32`:
 - `npm --prefix mobile-app run test:unit -- --runTestsByPath __tests__/prototype-destination-search-runtime.test.js __tests__/prototype-ride-runtime-financial-snapshot.test.js --runInBand`
 - `npm --prefix mobile-app run test:unit -- --runTestsByPath __tests__/prototype-destination-search-runtime.test.js __tests__/prototype-quote-runtime.test.js __tests__/prototype-ride-runtime-financial-snapshot.test.js --runInBand`
 - `npm --prefix mobile-app run test:unit -- --runTestsByPath __tests__/prototype-ride-telemetry-runtime.test.js __tests__/ride-cost-telemetry-service.test.js __tests__/prototype-quote-runtime.test.js __tests__/prototype-destination-search-runtime.test.js --runInBand`
+- `npm --prefix mobile-app run test:unit -- --runTestsByPath __tests__/prototype-location-heartbeat-runtime.test.js __tests__/prototype-ride-telemetry-runtime.test.js __tests__/prototype-quote-runtime.test.js --runInBand`
 - `npm --prefix mobile-app run qa:production-guards`
 - `git diff --check`
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`
@@ -107,6 +112,6 @@ Resultado 2026-06-06: PASS.
 
 ## Proximas Fatias Seguras
 
-1. Extrair heartbeat de localizacao por papel para um service dedicado.
+1. Extrair start/stop/envio de heartbeat de localizacao por papel para um service dedicado, se a proxima fatia tiver baixo risco.
 2. Extrair chat/notificacoes persistidas para um service dedicado.
 3. Depois disso, reduzir `common-local` restante dentro das fachadas, uma por dominio.
