@@ -86,6 +86,35 @@ describe('KYCService liveness handling', () => {
     expect(result.mode).toBe('aws');
   });
 
+  test('getPreferredLivenessMode should keep local mode when backend strict biometric flag is off', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        provider: 'aws_rekognition_face_liveness',
+        config: {
+          enabled: true,
+          credentialsEnabled: true,
+          hasAssumeRoleArn: true
+        },
+        biometricRuntime: {
+          enabled: false,
+          ready: false,
+          preferredLivenessMode: 'local',
+          featureFlag: {
+            key: 'ENABLE_STRICT_BIOMETRIC_KYC',
+            value: false
+          }
+        }
+      })
+    });
+
+    const result = await kycService.getPreferredLivenessMode();
+    expect(result.success).toBe(true);
+    expect(result.mode).toBe('local');
+    expect(result.biometricRuntime.enabled).toBe(false);
+  });
+
   test('getPreferredLivenessMode should fallback local on connection failure', async () => {
     global.fetch.mockRejectedValueOnce(new Error('Network request failed'));
 

@@ -101,17 +101,21 @@ class KYCService {
 
     const provider = providerResult?.data?.provider || null;
     const config = providerResult?.data?.config || {};
+    const biometricRuntime = providerResult?.data?.biometricRuntime || null;
     const awsReady = (
       config.enabled === true
       && config.credentialsEnabled === true
       && config.hasAssumeRoleArn === true
     );
+    const preferredMode = biometricRuntime?.preferredLivenessMode || (awsReady ? 'aws' : 'local');
+    const shouldUseAws = preferredMode === 'aws' && awsReady;
 
     return {
       success: true,
-      mode: awsReady ? 'aws' : 'local',
+      mode: shouldUseAws ? 'aws' : 'local',
       provider,
-      config
+      config,
+      biometricRuntime
     };
   }
 

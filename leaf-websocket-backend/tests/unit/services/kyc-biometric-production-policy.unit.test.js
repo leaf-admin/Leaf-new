@@ -35,6 +35,35 @@ describe('kyc biometric production policy', () => {
     expect(result.code).toBe('KYC_LEGACY_DEVICE_SIGNATURE_DISABLED');
   });
 
+  test('uses ENABLE_STRICT_BIOMETRIC_KYC as the primary runtime feature flag', () => {
+    const policy = resolveBiometricPolicy({
+      NODE_ENV: 'production',
+      ENABLE_STRICT_BIOMETRIC_KYC: 'true',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false'
+    });
+
+    expect(policy.productionBiometricsEnabled).toBe(true);
+    expect(policy.strictBiometricFeatureFlag).toMatchObject({
+      key: 'ENABLE_STRICT_BIOMETRIC_KYC',
+      source: 'feature_flag',
+      value: true
+    });
+  });
+
+  test('keeps KYC_PRODUCTION_BIOMETRICS_ENABLED as a legacy alias', () => {
+    const policy = resolveBiometricPolicy({
+      NODE_ENV: 'production',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true'
+    });
+
+    expect(policy.productionBiometricsEnabled).toBe(true);
+    expect(policy.strictBiometricFeatureFlag).toMatchObject({
+      legacyKey: 'KYC_PRODUCTION_BIOMETRICS_ENABLED',
+      source: 'legacy_flag',
+      value: true
+    });
+  });
+
   test('blocks AWS liveness only as identity match in strict biometric production', () => {
     const policy = resolveBiometricPolicy({
       NODE_ENV: 'production',

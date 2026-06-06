@@ -64,6 +64,30 @@ function resolveLivenessAttemptScope({ challenge = null, challengeId = null, req
     : normalizeLivenessAttemptScope(requirement || 'general');
 }
 
+function buildBiometricRuntimePayload({ readiness = {}, awsLiveness = {} } = {}) {
+  const awsReady = Boolean(
+    awsLiveness?.enabled === true
+    && awsLiveness?.credentialsEnabled === true
+    && awsLiveness?.hasAssumeRoleArn === true
+  );
+  const strictEnabled = readiness?.enabled === true;
+  const strictReady = strictEnabled && readiness?.ok === true && awsReady;
+
+  return {
+    enabled: strictEnabled,
+    ready: strictReady,
+    state: readiness?.state || (strictEnabled ? 'strict_blocked' : 'disabled_intentionally'),
+    featureFlag: readiness?.policy?.strictBiometricFeatureFlag || null,
+    preferredLivenessMode: strictReady ? 'aws' : 'local',
+    requiresTrustedBiometricMatch: readiness?.policy?.requireTrustedBiometricMatch === true,
+    allowLegacyDeviceSignature: readiness?.policy?.allowLegacyDeviceSignature !== false,
+    allowAwsLivenessOnlyMatch: readiness?.policy?.allowAwsLivenessOnlyMatch !== false,
+    disabledReason: readiness?.disabledReason || null,
+    blockers: Array.isArray(readiness?.blockers) ? readiness.blockers : [],
+    warnings: Array.isArray(readiness?.warnings) ? readiness.warnings : []
+  };
+}
+
 async function softBlockLivenessAttemptsExhausted({ userId, challengeId = null, attemptState = null, source = 'kyc_route', attemptScope = null } = {}) {
   if (!userId) return null;
 
@@ -131,10 +155,13 @@ class KYCRoutes {
 
     this.router.get('/liveness/provider', requireFirebaseUser, async (_req, res) => {
       try {
+        const readiness = evaluateProductionReadiness(process.env);
+        const awsLiveness = this.awsLivenessService.getConfigSummary();
         return res.json({
           success: true,
           provider: this.awsLivenessService.getProviderName(),
-          config: this.awsLivenessService.getConfigSummary()
+          config: awsLiveness,
+          biometricRuntime: buildBiometricRuntimePayload({ readiness, awsLiveness })
         });
       } catch (error) {
         logError(error, 'Erro ao consultar provider de liveness', { service: 'kyc-routes-routes' });
@@ -149,10 +176,12 @@ class KYCRoutes {
     this.router.get('/biometrics/readiness', requireFirebaseUser, async (_req, res) => {
       try {
         const readiness = evaluateProductionReadiness(process.env);
+        const awsLiveness = this.awsLivenessService.getConfigSummary();
         return res.status(readiness.ok ? 200 : 503).json({
           success: readiness.ok,
           ...readiness,
-          awsLiveness: this.awsLivenessService.getConfigSummary(),
+          awsLiveness,
+          biometricRuntime: buildBiometricRuntimePayload({ readiness, awsLiveness }),
           biometricFaceService: {
             configured: Boolean(
               String(process.env.BIOMETRIC_FACE_SERVICE_URL || '').trim()

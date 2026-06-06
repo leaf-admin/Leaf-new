@@ -4,6 +4,8 @@ const DEFAULT_TRUSTED_MATCH_PROVIDERS = Object.freeze([
   'biometric-face-service',
   'leaf_face_compare_service'
 ]);
+const STRICT_BIOMETRIC_KYC_FLAG = 'ENABLE_STRICT_BIOMETRIC_KYC';
+const LEGACY_STRICT_BIOMETRIC_KYC_FLAG = 'KYC_PRODUCTION_BIOMETRICS_ENABLED';
 
 function readBooleanLike(value, fallback = false) {
   if (value == null || value === '') return fallback;
@@ -32,12 +34,23 @@ function hasExplicitValue(value) {
 
 function resolveBiometricPolicy(env = process.env) {
   const productionRuntime = isProductionRuntime(env);
-  const productionBiometricsEnabled = readBooleanLike(env.KYC_PRODUCTION_BIOMETRICS_ENABLED, false);
+  const strictBiometricFlagSource = hasExplicitValue(env[STRICT_BIOMETRIC_KYC_FLAG])
+    ? STRICT_BIOMETRIC_KYC_FLAG
+    : LEGACY_STRICT_BIOMETRIC_KYC_FLAG;
+  const productionBiometricsEnabled = readBooleanLike(env[strictBiometricFlagSource], false);
   const strictDefault = productionBiometricsEnabled;
 
   return {
     productionRuntime,
     productionBiometricsEnabled,
+    strictBiometricFeatureFlag: {
+      key: STRICT_BIOMETRIC_KYC_FLAG,
+      legacyKey: LEGACY_STRICT_BIOMETRIC_KYC_FLAG,
+      source: hasExplicitValue(env[STRICT_BIOMETRIC_KYC_FLAG])
+        ? 'feature_flag'
+        : (hasExplicitValue(env[LEGACY_STRICT_BIOMETRIC_KYC_FLAG]) ? 'legacy_flag' : 'default'),
+      value: productionBiometricsEnabled
+    },
     requireTrustedBiometricMatch: readBooleanLike(
       env.KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH,
       strictDefault
@@ -127,13 +140,14 @@ function evaluateProductionReadiness(env = process.env) {
   const warnings = [];
   const enabled = policy.productionBiometricsEnabled;
   const disabledIntentionally =
-    hasExplicitValue(env.KYC_PRODUCTION_BIOMETRICS_ENABLED) ||
+    hasExplicitValue(env[STRICT_BIOMETRIC_KYC_FLAG]) ||
+    hasExplicitValue(env[LEGACY_STRICT_BIOMETRIC_KYC_FLAG]) ||
     readBooleanLike(env.KYC_PRODUCTION_BIOMETRICS_DISABLED_INTENTIONALLY, false);
   const disabledReason = String(env.KYC_PRODUCTION_BIOMETRICS_DISABLED_REASON || '').trim();
 
   if (!enabled) {
     if (!disabledIntentionally) {
-      warnings.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.');
+      warnings.push('ENABLE_STRICT_BIOMETRIC_KYC=false: produção biométrica ainda não está travada em modo estrito.');
     }
 
     return {
@@ -185,6 +199,7 @@ function evaluateProductionReadiness(env = process.env) {
   return {
     ok: blockers.length === 0,
     enabled,
+    state: blockers.length === 0 ? 'strict_enabled' : 'strict_blocked',
     policy,
     blockers,
     warnings
@@ -194,6 +209,8 @@ function evaluateProductionReadiness(env = process.env) {
 module.exports = {
   AWS_LIVENESS_PROVIDER,
   DEFAULT_TRUSTED_MATCH_PROVIDERS,
+  LEGACY_STRICT_BIOMETRIC_KYC_FLAG,
+  STRICT_BIOMETRIC_KYC_FLAG,
   evaluateDeviceVerificationTrust,
   evaluateProductionReadiness,
   hasExplicitValue,

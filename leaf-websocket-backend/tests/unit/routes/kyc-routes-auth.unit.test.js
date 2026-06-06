@@ -134,6 +134,11 @@ describe('kyc routes auth', () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.provider).toBe('aws_rekognition_face_liveness');
+    expect(response.body.biometricRuntime).toMatchObject({
+      enabled: false,
+      ready: false,
+      preferredLivenessMode: 'local'
+    });
     expect(mockVerifyIdToken).toHaveBeenCalledWith('firebase-token');
   });
 
@@ -154,6 +159,11 @@ describe('kyc routes auth', () => {
     expect(response.body.success).toBe(true);
     expect(response.body).toHaveProperty('policy');
     expect(response.body).toHaveProperty('awsLiveness');
+    expect(response.body.biometricRuntime).toMatchObject({
+      enabled: false,
+      ready: false,
+      preferredLivenessMode: 'local'
+    });
   });
 
   it('rejects AWS session creation for another user id', async () => {

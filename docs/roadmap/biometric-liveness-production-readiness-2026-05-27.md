@@ -31,8 +31,9 @@
 
 ## Guardrails adicionados
 
-- `KYC_PRODUCTION_BIOMETRICS_ENABLED=true` ativa o modo estrito de produção biométrica.
-- `KYC_PRODUCTION_BIOMETRICS_ENABLED=false` com flag explícita ou `KYC_PRODUCTION_BIOMETRICS_DISABLED_INTENTIONALLY=true` marca o runtime como `disabled_intentionally`, sem warning ambíguo de deploy.
+- `ENABLE_STRICT_BIOMETRIC_KYC=true` ativa o modo estrito de produção biométrica no backend, sem nova build mobile.
+- `KYC_PRODUCTION_BIOMETRICS_ENABLED=true` permanece como alias legado para compatibilidade de deploy.
+- `ENABLE_STRICT_BIOMETRIC_KYC=false` com flag explícita ou `KYC_PRODUCTION_BIOMETRICS_DISABLED_INTENTIONALLY=true` marca o runtime como `disabled_intentionally`, sem warning ambíguo de deploy.
 - Em modo estrito:
   - `device_signature_v1` não aprova identidade.
   - AWS liveness sozinho não aprova identidade.
@@ -55,6 +56,7 @@
 ## Estado operacional atual - 2026-06-05
 
 - Produção biométrica estrita permanece desligada intencionalmente no runtime de piloto.
+- O app consulta `/api/kyc/liveness/provider` e respeita `biometricRuntime.preferredLivenessMode`; portanto a troca local -> AWS/strict deve ser feita por flag/env no backend e redeploy do backend, sem recompilar o app.
 - O estado esperado no validator é `disabled_intentionally`.
 - O compose não deve emitir warnings por ausência de `KYC_AWS_LIVENESS_ASSUME_ROLE_ARN`, `AWS_ACCESS_KEY_ID` ou `AWS_SECRET_ACCESS_KEY` enquanto `KYC_AWS_LIVENESS_ENABLED=false`.
 - O motivo operacional deve ficar explícito em `KYC_PRODUCTION_BIOMETRICS_DISABLED_REASON`.
@@ -73,6 +75,7 @@
 
 ```env
 KYC_PRODUCTION_BIOMETRICS_ENABLED=true
+ENABLE_STRICT_BIOMETRIC_KYC=true
 KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH=true
 KYC_ALLOW_LEGACY_DEVICE_SIGNATURE=false
 KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH=false

@@ -329,7 +329,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
-      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true'
+      ENABLE_STRICT_BIOMETRIC_KYC: 'true'
     });
 
     expect(result.status).toBe(1);
@@ -349,7 +349,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
   it('marks disabled production biometrics as intentional when the off flag is explicit', () => {
     const result = runValidator({
       ...baseProdEnv,
-      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false',
+      ENABLE_STRICT_BIOMETRIC_KYC: 'false',
       KYC_PRODUCTION_BIOMETRICS_DISABLED_INTENTIONALLY: 'true',
       KYC_PRODUCTION_BIOMETRICS_DISABLED_REASON: 'pilot runtime uses local face embedding plus support escalation'
     });
@@ -357,7 +357,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     expect(result.status).toBe(0);
     expect(result.report.ok).toBe(true);
     expect(result.report.summary.warnings).not.toContain(
-      'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.'
+      'ENABLE_STRICT_BIOMETRIC_KYC=false: produção biométrica ainda não está travada em modo estrito.'
     );
     expect(result.report.diagnostics.biometricReadiness).toMatchObject({
       ok: true,
@@ -374,7 +374,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
-      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true',
+      ENABLE_STRICT_BIOMETRIC_KYC: 'true',
       KYC_AWS_LIVENESS_ENABLED: 'true',
       KYC_AWS_LIVENESS_ASSUME_ROLE_ARN: 'arn:aws:iam::123456789012:role/leaf-liveness',
       BIOMETRIC_FACE_SERVICE_URL: 'https://face.leaf.internal',
