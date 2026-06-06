@@ -1,1 +1,1 @@
-export { cardTypography } from '../../common-local/typography';
+export { cardTypography } from "../../theme/typography";
