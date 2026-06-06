@@ -70,9 +70,13 @@ import { createPrototypeRideTelemetryRuntime } from "./prototypeRideTelemetryRun
 import {
   DRIVER_LOCATION_HEARTBEAT_MS,
   PASSENGER_LOCATION_HEARTBEAT_MS,
-  PASSENGER_LOCATION_MIN_SEND_GAP_MS,
+  buildPassengerHeartbeatStartKey,
   buildDriverLocationPayload,
   buildPassengerLocationPayload,
+  shouldCoalescePassengerLocationAttempt,
+  shouldMonitorPassengerTripulation as shouldMonitorPassengerTripulationHelper,
+  shouldReusePassengerHeartbeat,
+  shouldReusePendingPassengerHeartbeatStart,
   shouldThrottlePassengerLocationPush as shouldThrottlePassengerLocationPushHelper,
 } from "./prototypeLocationHeartbeatRuntime";
 import {
@@ -12971,12 +12975,7 @@ function stopDriverLocationHeartbeat() {
 }
 
 function shouldMonitorPassengerTripulation() {
-  return (
-    Boolean(runtimeState?.activeBookingId) &&
-    ["accepted", "arrived", "started"].includes(
-      String(runtimeState?.bookingStatus || "").toLowerCase(),
-    )
-  );
+  return shouldMonitorPassengerTripulationHelper(runtimeState);
 }
 
 function getPassengerLocationPayload() {
@@ -13153,12 +13152,13 @@ async function pushPassengerLocationNow(
 
   const now = Date.now();
   if (
-    options?.force !== true &&
-    String(runtimeLastPassengerHeartbeatBookingId || "") ===
-      String(bookingId || "") &&
-    runtimeLastPassengerHeartbeatAttemptAt > 0 &&
-    now - runtimeLastPassengerHeartbeatAttemptAt <
-      PASSENGER_LOCATION_MIN_SEND_GAP_MS
+    shouldCoalescePassengerLocationAttempt({
+      force: options?.force === true,
+      bookingId,
+      lastBookingId: runtimeLastPassengerHeartbeatBookingId,
+      lastAttemptAt: runtimeLastPassengerHeartbeatAttemptAt,
+      nowMs: now,
+    })
   ) {
     return { success: false, code: "COALESCED" };
   }
@@ -13220,11 +13220,14 @@ async function startPassengerLocationHeartbeat(profile, socketInstance = null) {
     return;
   }
 
-  const startKey = `${profile.uid}:${bookingId}`;
-  const hasMatchingActiveHeartbeat =
-    Boolean(runtimePassengerHeartbeatInterval) &&
-    runtimePassengerHeartbeatActiveProfileUid === profile.uid &&
-    runtimePassengerHeartbeatActiveBookingId === bookingId;
+  const startKey = buildPassengerHeartbeatStartKey(profile.uid, bookingId);
+  const hasMatchingActiveHeartbeat = shouldReusePassengerHeartbeat({
+    hasInterval: Boolean(runtimePassengerHeartbeatInterval),
+    activeProfileUid: runtimePassengerHeartbeatActiveProfileUid,
+    activeBookingId: runtimePassengerHeartbeatActiveBookingId,
+    profileUid: profile.uid,
+    bookingId,
+  });
 
   if (hasMatchingActiveHeartbeat) {
     setRuntimeState((previous) => ({
@@ -13238,8 +13241,11 @@ async function startPassengerLocationHeartbeat(profile, socketInstance = null) {
   }
 
   if (
-    runtimePassengerHeartbeatStartPromise &&
-    runtimePassengerHeartbeatStartKey === startKey
+    shouldReusePendingPassengerHeartbeatStart({
+      pendingStartPromise: runtimePassengerHeartbeatStartPromise,
+      pendingStartKey: runtimePassengerHeartbeatStartKey,
+      startKey,
+    })
   ) {
     return runtimePassengerHeartbeatStartPromise;
   }

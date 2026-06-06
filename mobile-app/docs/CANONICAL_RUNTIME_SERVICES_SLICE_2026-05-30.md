@@ -56,6 +56,9 @@ Atualizacao 2026-06-06 (`LEA-32`):
 - Quarta extracao interna pequena concluida.
 - Payload de localizacao, normalizacao de heading e throttle do heartbeat do passageiro sairam de `prototypeRideRuntime.js` para `src/screens/prototype/prototypeLocationHeartbeatRuntime.js`.
 - A extracao preserva comportamento: timers e envio por socket continuam no runtime, enquanto a regra de coalescing/throttle fica testavel e sem dependencia nativa.
+- Quinta extracao interna pequena concluida.
+- Regras de monitoramento do heartbeat do passageiro, start key, reuso de heartbeat ativo/pendente e coalescing de tentativa tambem foram movidas para `prototypeLocationHeartbeatRuntime.js`.
+- A extracao preserva comportamento: `prototypeRideRuntime.js` ainda controla timers, socket e atualizacao de estado; o helper apenas decide quando reutilizar, iniciar ou coalescer.
 - Nenhuma regra de socket, pagamento, corrida ativa, UI ou lifecycle foi alterada.
 
 Responsabilidades reais identificadas no arquivo:
@@ -65,7 +68,7 @@ Responsabilidades reais identificadas no arquivo:
 - estado passageiro/motorista.
 - busca de destino e quote lock via helpers dedicados.
 - contexto de telemetria de custo via helper dedicado.
-- payload/throttle de heartbeat de localizacao via helper dedicado.
+- payload/throttle/lifecycle guard de heartbeat de localizacao via helper dedicado.
 - pagamento e estado de confirmacao.
 - corrida ativa, chegada, embarque, inicio e conclusao.
 - tracking de localizacao passageiro/motorista.
@@ -112,6 +115,6 @@ Resultado 2026-06-06: PASS.
 
 ## Proximas Fatias Seguras
 
-1. Extrair start/stop/envio de heartbeat de localizacao por papel para um service dedicado, se a proxima fatia tiver baixo risco.
+1. Extrair envio de heartbeat de localizacao por papel para um service dedicado, se a proxima fatia tiver baixo risco.
 2. Extrair chat/notificacoes persistidas para um service dedicado.
 3. Depois disso, reduzir `common-local` restante dentro das fachadas, uma por dominio.

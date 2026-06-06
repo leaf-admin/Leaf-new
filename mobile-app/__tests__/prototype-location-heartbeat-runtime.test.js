@@ -1,10 +1,15 @@
 import {
   PASSENGER_LOCATION_STARTED_HEARTBEAT_MS,
   PASSENGER_LOCATION_STATIONARY_HEARTBEAT_MS,
+  buildPassengerHeartbeatStartKey,
   buildDriverLocationPayload,
   buildPassengerLocationPayload,
   calculateHeadingDeltaDegrees,
   normalizeHeadingDegrees,
+  shouldCoalescePassengerLocationAttempt,
+  shouldMonitorPassengerTripulation,
+  shouldReusePassengerHeartbeat,
+  shouldReusePendingPassengerHeartbeatStart,
   shouldThrottlePassengerLocationPush,
 } from '../src/screens/prototype/prototypeLocationHeartbeatRuntime';
 
@@ -57,6 +62,88 @@ describe('prototype location heartbeat runtime helpers', () => {
     expect(calculateHeadingDeltaDegrees(350, 10)).toBe(20);
     expect(calculateHeadingDeltaDegrees(10, 350)).toBe(20);
     expect(calculateHeadingDeltaDegrees(90, 180)).toBe(90);
+  });
+
+  it('identifies passenger trip statuses that should be monitored', () => {
+    expect(shouldMonitorPassengerTripulation({
+      activeBookingId: 'booking_1',
+      bookingStatus: 'accepted',
+    })).toBe(true);
+    expect(shouldMonitorPassengerTripulation({
+      activeBookingId: 'booking_1',
+      bookingStatus: 'arrived',
+    })).toBe(true);
+    expect(shouldMonitorPassengerTripulation({
+      activeBookingId: 'booking_1',
+      bookingStatus: 'started',
+    })).toBe(true);
+    expect(shouldMonitorPassengerTripulation({
+      activeBookingId: 'booking_1',
+      bookingStatus: 'completed',
+    })).toBe(false);
+    expect(shouldMonitorPassengerTripulation({
+      activeBookingId: '',
+      bookingStatus: 'accepted',
+    })).toBe(false);
+  });
+
+  it('builds passenger heartbeat start keys and detects reusable starts', () => {
+    expect(buildPassengerHeartbeatStartKey('user_1', 'booking_1')).toBe('user_1:booking_1');
+    expect(buildPassengerHeartbeatStartKey('', 'booking_1')).toBe('');
+    expect(buildPassengerHeartbeatStartKey('user_1', '')).toBe('');
+
+    expect(shouldReusePassengerHeartbeat({
+      hasInterval: true,
+      activeProfileUid: 'user_1',
+      activeBookingId: 'booking_1',
+      profileUid: 'user_1',
+      bookingId: 'booking_1',
+    })).toBe(true);
+    expect(shouldReusePassengerHeartbeat({
+      hasInterval: false,
+      activeProfileUid: 'user_1',
+      activeBookingId: 'booking_1',
+      profileUid: 'user_1',
+      bookingId: 'booking_1',
+    })).toBe(false);
+    expect(shouldReusePendingPassengerHeartbeatStart({
+      pendingStartPromise: Promise.resolve(),
+      pendingStartKey: 'user_1:booking_1',
+      startKey: 'user_1:booking_1',
+    })).toBe(true);
+    expect(shouldReusePendingPassengerHeartbeatStart({
+      pendingStartPromise: null,
+      pendingStartKey: 'user_1:booking_1',
+      startKey: 'user_1:booking_1',
+    })).toBe(false);
+  });
+
+  it('coalesces passenger location attempts for the same booking inside the send gap', () => {
+    expect(shouldCoalescePassengerLocationAttempt({
+      bookingId: 'booking_1',
+      lastBookingId: 'booking_1',
+      lastAttemptAt: 10000,
+      nowMs: 10899,
+    })).toBe(true);
+    expect(shouldCoalescePassengerLocationAttempt({
+      bookingId: 'booking_1',
+      lastBookingId: 'booking_1',
+      lastAttemptAt: 10000,
+      nowMs: 10900,
+    })).toBe(false);
+    expect(shouldCoalescePassengerLocationAttempt({
+      force: true,
+      bookingId: 'booking_1',
+      lastBookingId: 'booking_1',
+      lastAttemptAt: 10000,
+      nowMs: 10001,
+    })).toBe(false);
+    expect(shouldCoalescePassengerLocationAttempt({
+      bookingId: 'booking_1',
+      lastBookingId: 'booking_2',
+      lastAttemptAt: 10000,
+      nowMs: 10001,
+    })).toBe(false);
   });
 
   it('does not throttle forced, first, changed booking, or changed status updates', () => {

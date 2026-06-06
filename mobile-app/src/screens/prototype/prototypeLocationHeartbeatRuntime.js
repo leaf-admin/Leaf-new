@@ -5,6 +5,11 @@ export const PASSENGER_LOCATION_STARTED_HEARTBEAT_MS = 3000;
 export const PASSENGER_LOCATION_MIN_SEND_GAP_MS = 900;
 export const PASSENGER_LOCATION_MIN_MOVEMENT_METERS = 6;
 export const PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG = 8;
+const PASSENGER_HEARTBEAT_ACTIVE_STATUSES = new Set([
+  "accepted",
+  "arrived",
+  "started",
+]);
 
 function normalizeCoordinate(coordinate) {
   if (!coordinate) {
@@ -93,6 +98,65 @@ export function calculateHeadingDeltaDegrees(previousHeading, nextHeading) {
   const end = normalizeHeadingDegrees(nextHeading);
   const rawDelta = Math.abs(end - start);
   return Math.min(rawDelta, 360 - rawDelta);
+}
+
+export function shouldMonitorPassengerTripulation(runtimeState = {}) {
+  return (
+    Boolean(runtimeState?.activeBookingId) &&
+    PASSENGER_HEARTBEAT_ACTIVE_STATUSES.has(
+      String(runtimeState?.bookingStatus || "").trim().toLowerCase(),
+    )
+  );
+}
+
+export function buildPassengerHeartbeatStartKey(profileUid = "", bookingId = "") {
+  const normalizedProfileUid = String(profileUid || "").trim();
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedProfileUid || !normalizedBookingId) {
+    return "";
+  }
+
+  return `${normalizedProfileUid}:${normalizedBookingId}`;
+}
+
+export function shouldReusePassengerHeartbeat({
+  hasInterval = false,
+  activeProfileUid = "",
+  activeBookingId = "",
+  profileUid = "",
+  bookingId = "",
+}) {
+  return (
+    Boolean(hasInterval) &&
+    String(activeProfileUid || "") === String(profileUid || "") &&
+    String(activeBookingId || "") === String(bookingId || "")
+  );
+}
+
+export function shouldReusePendingPassengerHeartbeatStart({
+  pendingStartPromise = null,
+  pendingStartKey = "",
+  startKey = "",
+}) {
+  return Boolean(pendingStartPromise) && String(pendingStartKey || "") === String(startKey || "");
+}
+
+export function shouldCoalescePassengerLocationAttempt({
+  force = false,
+  bookingId = "",
+  lastBookingId = "",
+  lastAttemptAt = 0,
+  nowMs = Date.now(),
+}) {
+  if (force) {
+    return false;
+  }
+
+  return (
+    String(lastBookingId || "") === String(bookingId || "") &&
+    Number(lastAttemptAt || 0) > 0 &&
+    Number(nowMs) - Number(lastAttemptAt || 0) < PASSENGER_LOCATION_MIN_SEND_GAP_MS
+  );
 }
 
 export function shouldThrottlePassengerLocationPush({
