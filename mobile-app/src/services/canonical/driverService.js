@@ -9,4 +9,4 @@ export {
 export {
   fetchDrivers,
   fetchNearbyDrivers,
-} from '../../common-local/actions/usersactions';
+} from './driverUserActions';
