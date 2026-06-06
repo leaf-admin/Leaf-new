@@ -66,6 +66,7 @@ import {
   registerDirectionsRequestForBooking,
   resolveActiveQuoteLock,
 } from "./prototypeQuoteRuntime";
+import { createPrototypeRideTelemetryRuntime } from "./prototypeRideTelemetryRuntime";
 import {
   shouldFlushRuntimeSessionImmediately,
   shouldFlushRuntimeSessionOnAppState,
@@ -528,7 +529,6 @@ let runtimeLastSharedDriverRoutePlanKey = "";
 let runtimeLastSharedDriverRoutePlanAt = 0;
 let runtimeReceiptRecoveryInFlight = null;
 let runtimeSuppressedBookingIds = new Map();
-let runtimeRideTelemetryDraftContextId = null;
 let runtimeLastLifecycleEventKey = "";
 let runtimeLastLifecycleEventAt = 0;
 const runtimeAppliedLifecycleEventKeysByBooking = new Map();
@@ -536,6 +536,12 @@ let runtimeLastSyncedActiveRideFingerprint = "";
 let runtimeEffectOwnerId = null;
 const runtimeEffectConsumers = new Set();
 const runtimeEffectOwnerListeners = new Set();
+
+const runtimeRideTelemetry = createPrototypeRideTelemetryRuntime({
+  telemetryService: rideCostTelemetryService,
+  platformOS: Platform.OS,
+  getRuntimeState: () => runtimeState,
+});
 
 function formatReverseGeocodeAddress(firstResult = null) {
   if (!firstResult || typeof firstResult !== "object") {
@@ -739,96 +745,19 @@ function shouldSkipSyncedActiveRideSnapshot(snapshot, bookingStatus) {
 }
 
 function resolveRuntimeRideTelemetrySourceMeta(overrides = {}) {
-  const role = String(overrides.role || runtimeState.activeRole || "passenger")
-    .trim()
-    .toLowerCase();
-  const userType =
-    overrides.userType ||
-    (role === "driver" ? "driver" : "customer");
-
-  return {
-    userId: overrides.userId || runtimeState.profileUid || null,
-    userType,
-    platform: Platform.OS,
-    flow: "prototype",
-    scenario: "robotaxi_prototype",
-    surface: overrides.surface || "prototype_runtime",
-  };
+  return runtimeRideTelemetry.resolveSourceMeta(overrides);
 }
 
 function resolveRuntimeRideTelemetryContext(overrides = {}) {
-  const sourceMeta = resolveRuntimeRideTelemetrySourceMeta(overrides);
-  const sourceKey =
-    overrides.sourceKey ||
-    `${sourceMeta.userType || "unknown"}:${sourceMeta.userId || "anonymous"}`;
-  const bookingId =
-    overrides.bookingId ||
-    runtimeState.activeBookingId ||
-    runtimeState.driverActiveRide?.bookingId ||
-    null;
-
-  if (bookingId) {
-    return {
-      ...rideCostTelemetryService.ensureContext({
-        bookingId,
-        sourceMeta,
-        sourceKey,
-      }),
-      ...(overrides.cacheMode ? { cacheMode: overrides.cacheMode } : {}),
-      ...(overrides.routeScope ? { routeScope: overrides.routeScope } : {}),
-      ...(overrides.forceFresh === true ? { forceFresh: true } : {}),
-      ...(overrides.surface ? { surface: overrides.surface } : {}),
-    };
-  }
-
-  if (!runtimeRideTelemetryDraftContextId) {
-    runtimeRideTelemetryDraftContextId = rideCostTelemetryService.ensureContext({
-      sourceMeta,
-      sourceKey,
-    }).contextId;
-  }
-
-  return {
-    ...rideCostTelemetryService.ensureContext({
-      contextId: runtimeRideTelemetryDraftContextId,
-      sourceMeta,
-      sourceKey,
-    }),
-    ...(overrides.cacheMode ? { cacheMode: overrides.cacheMode } : {}),
-    ...(overrides.routeScope ? { routeScope: overrides.routeScope } : {}),
-    ...(overrides.forceFresh === true ? { forceFresh: true } : {}),
-    ...(overrides.surface ? { surface: overrides.surface } : {}),
-  };
+  return runtimeRideTelemetry.resolveContext(overrides);
 }
 
 function bindRuntimeRideTelemetryToBooking(bookingId, overrides = {}) {
-  const normalizedBookingId = String(bookingId || "").trim();
-  if (!normalizedBookingId) {
-    return null;
-  }
-
-  const sourceMeta = resolveRuntimeRideTelemetrySourceMeta(overrides);
-  const boundContext = rideCostTelemetryService.bindContextToBooking({
-    contextId: runtimeRideTelemetryDraftContextId,
-    bookingId: normalizedBookingId,
-    sourceMeta,
-    sourceKey: overrides.sourceKey || null,
-  });
-  runtimeRideTelemetryDraftContextId = null;
-  return boundContext;
+  return runtimeRideTelemetry.bindToBooking(bookingId, overrides);
 }
 
 function rotateRuntimeRideTelemetryDraftContext(overrides = {}) {
-  const sourceMeta = resolveRuntimeRideTelemetrySourceMeta(overrides);
-  const sourceKey =
-    overrides.sourceKey ||
-    `${sourceMeta.userType || "unknown"}:${sourceMeta.userId || "anonymous"}`;
-  const rotatedContext = rideCostTelemetryService.rotateDraftContext({
-    sourceMeta,
-    sourceKey,
-  });
-  runtimeRideTelemetryDraftContextId = rotatedContext?.contextId || null;
-  return rotatedContext;
+  return runtimeRideTelemetry.rotateDraftContext(overrides);
 }
 
 function cleanupSuppressedBookingIds(now = Date.now()) {
