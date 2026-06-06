@@ -5,7 +5,7 @@ export {
   acceptTask,
   cancelTask,
   fetchTasks,
-} from '../../common-local/actions/taskactions';
+} from './driverTaskActions';
 export {
   fetchDrivers,
   fetchNearbyDrivers,
