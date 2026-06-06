@@ -11,7 +11,7 @@ export {
   fetchPlacesAutocomplete,
   getDirectionsApi,
   getDistanceMatrix,
-} from '../../common-local/GoogleAPIFunctions';
+} from './googleApiFunctions';
 
 export { calcularPedagiosPorPolyline } from './tollUtils';
 

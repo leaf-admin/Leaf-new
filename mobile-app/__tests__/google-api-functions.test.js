@@ -5,7 +5,7 @@ import {
   fetchCoordsfromPlace,
   fetchPlacesAutocomplete,
   getDirectionsApi,
-} from '../src/common-local/GoogleAPIFunctions';
+} from '../src/services/canonical/googleApiFunctions';
 import rideCostTelemetryService from '../src/services/RideCostTelemetryService';
 import { allowClientDirectGoogleFallback } from '../src/config/runtimeAccessPolicy';
 
@@ -15,7 +15,7 @@ jest.mock('../src/utils/Logger', () => ({
   error: jest.fn(),
 }));
 
-jest.mock('../src/common-local/config/configureFirebase', () => ({
+jest.mock('../src/services/canonical/sessionService', () => ({
   firebase: {
     config: {
       projectId: 'leaf-reactnative',
@@ -23,7 +23,7 @@ jest.mock('../src/common-local/config/configureFirebase', () => ({
   },
 }));
 
-jest.mock('../src/common-local/AccessKey', () => 'test-access-key');
+jest.mock('../src/services/canonical/functionAccessKey', () => 'test-access-key');
 
 jest.mock('../src/config/ApiConfig', () => ({
   getSelfHostedApiUrl: jest.fn((path) => `https://backend.leaf.test${path}`),
