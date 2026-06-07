@@ -568,6 +568,30 @@ function defaultReadyTextsForScenario(scenario) {
   if (scenario === 'driver-home') {
     return ['Ficar online', 'Meus ganhos'];
   }
+  if (scenario === 'passenger-payment-success') {
+    return ['Pagamento confirmado'];
+  }
+  if (scenario === 'passenger-payment-failed') {
+    return ['Pagamento não confirmado'];
+  }
+  if (scenario === 'passenger-no-drivers') {
+    return ['Nenhum motorista encontrado'];
+  }
+  if (scenario === 'passenger-cancellation') {
+    return ['Cancelar corrida'];
+  }
+  if (scenario === 'passenger-rating') {
+    return ['Avalie a viagem'];
+  }
+  if (scenario === 'passenger-complain') {
+    return ['Relatar problema'];
+  }
+  if (scenario === 'passenger-share-trip') {
+    return ['Acompanhar viagem'];
+  }
+  if (scenario === 'public-tracking') {
+    return ['Viagem em tempo real'];
+  }
   return [];
 }
 
@@ -1014,6 +1038,10 @@ function buildPassengerReceipt() {
   };
 }
 
+function buildFutureIso(secondsFromNow) {
+  return new Date(Date.now() + Number(secondsFromNow || 0) * 1000).toISOString();
+}
+
 function buildPassengerTripBase(status = 'started') {
   const normalizedStatus = String(status || 'started').trim().toLowerCase();
   const isAccepted = normalizedStatus === 'accepted';
@@ -1024,6 +1052,7 @@ function buildPassengerTripBase(status = 'started') {
     : BASE_COORDS.inTransit;
   const tripDistanceKm = isArrived ? 0.1 : isAccepted ? 1.2 : 5.1;
   const tripDurationMin = isArrived ? 2 : isAccepted ? 4 : 16;
+  const boardingDeadlineAt = isArrived ? buildFutureIso(120) : null;
 
   return {
     activeRole: 'customer',
@@ -1040,6 +1069,7 @@ function buildPassengerTripBase(status = 'started') {
       estimatedFare: 27.5,
       paymentMethod: 'pix',
       boardingPin: '4821',
+      boardingDeadlineAt,
       driverPhoto: '',
       vehicleModel: 'Toyota Prius',
       vehiclePlate: 'TES8888',
@@ -1066,6 +1096,8 @@ function buildPassengerTripBase(status = 'started') {
     },
     currentCoordinate: BASE_COORDS.pickup,
     currentAddress: LABELS.pickupAddress,
+    boardingDeadlineAt,
+    boardingRemainingSec: isArrived ? 120 : 0,
   };
 }
 
@@ -1098,6 +1130,65 @@ function buildPassengerQuoteBase() {
 }
 
 function buildScenarioPatch(scenario) {
+  if (
+    [
+      'passenger-payment-success',
+      'passenger-payment-failed',
+      'passenger-no-drivers',
+    ].includes(scenario)
+  ) {
+    return {
+      ...buildPassengerQuoteBase(),
+      bookingStatus: 'idle',
+      activeBookingId: null,
+      activeBooking: null,
+      rideExtension: { status: 'idle' },
+      operationalContinuation: { status: 'idle' },
+      boardingRemainingSec: 0,
+    };
+  }
+
+  if (scenario === 'passenger-cancellation') {
+    const trip = buildPassengerTripBase('accepted');
+    return {
+      ...trip,
+      bookingStatus: 'accepted',
+      activeBookingId: 'booking-proof-cancel-1',
+      activeBooking: {
+        ...trip.activeBooking,
+        bookingId: 'booking-proof-cancel-1',
+        id: 'booking-proof-cancel-1',
+        status: 'accepted',
+      },
+      rideExtension: { status: 'idle' },
+      operationalContinuation: { status: 'idle' },
+      boardingRemainingSec: 0,
+    };
+  }
+
+  if (scenario === 'passenger-rating' || scenario === 'passenger-complain') {
+    return {
+      ...buildPassengerTripBase('completed'),
+      bookingStatus: 'completed',
+      activeBookingId: null,
+      activeBooking: null,
+      tripHistory: [buildPassengerReceipt()],
+      lastReceipt: buildPassengerReceipt(),
+      rideExtension: { status: 'idle' },
+      operationalContinuation: { status: 'idle' },
+      boardingRemainingSec: 0,
+    };
+  }
+
+  if (scenario === 'passenger-share-trip' || scenario === 'public-tracking') {
+    return {
+      ...buildPassengerTripBase('started'),
+      rideExtension: { status: 'idle' },
+      operationalContinuation: { status: 'idle' },
+      boardingRemainingSec: 0,
+    };
+  }
+
   if (scenario === 'passenger-home') {
     return {
       activeRole: 'customer',
@@ -1281,6 +1372,7 @@ function buildScenarioPatch(scenario) {
     driverOffers: [],
     driverActiveRide: buildDriverActiveRide(status),
     driverTripMeta: buildDriverTripMeta(status),
+    boardingDeadlineAt: status === 'arrived' ? buildFutureIso(120) : null,
     boardingRemainingSec: status === 'arrived' ? 120 : 0,
   };
 }
@@ -1326,6 +1418,10 @@ function scenarioRoute(scenario) {
       passengerPaidAmount: '27.5',
       boardingPin: activeBooking.boardingPin || '4821',
     });
+    if (String(status || '').trim().toLowerCase() === 'arrived') {
+      params.set('boardingDeadlineAt', activeBooking.boardingDeadlineAt || buildFutureIso(120));
+      params.set('boardingRemainingSec', '120');
+    }
     return params.toString();
   };
 
@@ -1395,7 +1491,14 @@ function scenarioRoute(scenario) {
       pricingSnapshotLocked: true,
       ...extra
     };
-    return `request=${encodeURIComponent(JSON.stringify(request))}`;
+    const params = new URLSearchParams({
+      request: JSON.stringify(request),
+    });
+    if (String(status || '').trim().toLowerCase() === 'arrived') {
+      params.set('boardingDeadlineAt', buildFutureIso(120));
+      params.set('boardingRemainingSec', '120');
+    }
+    return params.toString();
   };
 
   if (scenario === 'driver-offer') {
@@ -1410,6 +1513,68 @@ function scenarioRoute(scenario) {
   }
   if (scenario === 'passenger-payment') {
     return `leafapp://robotaxi/payment?${passengerQuoteParams()}`;
+  }
+  if (scenario === 'passenger-payment-success') {
+    const params = new URLSearchParams(passengerQuoteParams());
+    params.set('autoAdvance', 'false');
+    return `leafapp://robotaxi/payment/success?${params.toString()}`;
+  }
+  if (scenario === 'passenger-payment-failed') {
+    const params = new URLSearchParams(passengerQuoteParams());
+    params.set('errorMessage', 'Não conseguimos confirmar o pagamento desta vez.');
+    params.set('retryRouteName', 'RobotaxiPrototypePayment');
+    return `leafapp://robotaxi/payment/failed?${params.toString()}`;
+  }
+  if (scenario === 'passenger-no-drivers') {
+    const params = new URLSearchParams(passengerQuoteParams());
+    params.set('reason', 'Ainda não encontramos um motorista disponível perto de você.');
+    params.set('refundStatus', 'REFUND_PENDING');
+    params.set('refundAmount', '24.90');
+    return `leafapp://robotaxi/no-drivers?${params.toString()}`;
+  }
+  if (scenario === 'passenger-cancellation') {
+    const params = new URLSearchParams({
+      bookingId: 'booking-proof-cancel-1',
+      source: 'trip',
+    });
+    return `leafapp://robotaxi/cancellation?${params.toString()}`;
+  }
+  if (scenario === 'passenger-rating') {
+    const params = new URLSearchParams({
+      tripId: 'trip-passenger-proof-1',
+      targetName: 'Carlos Motorista Teste',
+      reviewerType: 'passenger',
+      fromReceipt: 'true',
+    });
+    return `leafapp://robotaxi/rating?${params.toString()}`;
+  }
+  if (scenario === 'passenger-complain') {
+    const params = new URLSearchParams({
+      bookingId: 'booking-proof-passenger-1',
+      subject: 'Relato sobre esta corrida',
+    });
+    return `leafapp://robotaxi/complain?${params.toString()}`;
+  }
+  if (scenario === 'passenger-share-trip') {
+    const params = new URLSearchParams({
+      bookingId: 'booking-proof-passenger-1',
+      tripId: 'booking-proof-passenger-1',
+      driverName: 'Carlos Motorista Teste',
+      destination: 'Leblon',
+      tripArrivalText: 'Chegada prevista às 22:08',
+    });
+    return `leafapp://robotaxi/trip/share?${params.toString()}`;
+  }
+  if (scenario === 'public-tracking') {
+    const params = new URLSearchParams({
+      status: 'started',
+      destination: 'Leblon',
+      driverName: 'Carlos Motorista Teste',
+      vehicleModel: 'Toyota Prius',
+      vehiclePlate: 'TES8888',
+      eta: 'Chega em 16 min',
+    });
+    return `leafapp://viagem/trip-proof-public-1?${params.toString()}`;
   }
   if (scenario === 'passenger-receipt') {
     return `leafapp://robotaxi/receipt?${passengerReceiptParams('customer')}`;

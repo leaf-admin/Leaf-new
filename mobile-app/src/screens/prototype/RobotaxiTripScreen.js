@@ -517,7 +517,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const operationalStatus = String(operationalContinuation?.status || 'idle').trim().toLowerCase();
   const isOperationalDecisionPending = operationalStatus === 'passenger_decision_pending';
   const isOperationalSearching = operationalStatus === 'searching_replacement_driver';
-  const rawBoardingSeconds = Number(boardingRemainingSec);
+  const rawBoardingSeconds = Number(
+    route?.params?.boardingRemainingSec ?? boardingRemainingSec,
+  );
   const boardingTimerSeconds = Number.isFinite(rawBoardingSeconds)
     ? Math.max(0, Math.round(rawBoardingSeconds))
     : isArrived

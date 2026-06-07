@@ -394,10 +394,17 @@ const appLinking = {
 };
 
 const PROTOTYPE_QA_DEEP_LINK_ROUTES = {
+  'robotaxi/payment/success': 'RobotaxiPrototypePaymentSuccess',
+  'robotaxi/payment/failed': 'RobotaxiPrototypePaymentFailed',
+  'robotaxi/no-drivers': 'RobotaxiPrototypeNoDrivers',
+  'robotaxi/cancellation': 'RobotaxiPrototypeCancellation',
+  'robotaxi/rating': 'RobotaxiPrototypeRating',
+  'robotaxi/complain': 'RobotaxiPrototypeComplain',
+  'robotaxi/trip/share': 'RobotaxiPrototypeShareTrip',
   'robotaxi/trip': 'RobotaxiPrototypeTrip',
   'robotaxi/receipt': 'RobotaxiPrototypeReceipt',
   'robotaxi/driver/offer': 'RobotaxiPrototypeDriverOffer',
-  'robotaxi/driver/trip': 'RobotaxiPrototype',
+  'robotaxi/driver/trip': 'RobotaxiPrototypeDriverTrip',
 };
 
 function parsePrototypeQaDeepLink(url) {
@@ -424,15 +431,20 @@ function parsePrototypeQaDeepLink(url) {
     .filter(Boolean)
     .join('/')
     .replace(/\/+$/, '');
-  const routeName = PROTOTYPE_QA_DEEP_LINK_ROUTES[normalizedPath];
-  if (!routeName) {
-    return null;
-  }
-
   const params = {};
   parsedUrl.searchParams.forEach((value, key) => {
     params[key] = value;
   });
+
+  let routeName = PROTOTYPE_QA_DEEP_LINK_ROUTES[normalizedPath];
+  if (!routeName && normalizedPath.startsWith('viagem/')) {
+    routeName = 'RobotaxiPrototypePublicTracking';
+    params.tripId = decodeURIComponent(normalizedPath.slice('viagem/'.length));
+  }
+
+  if (!routeName) {
+    return null;
+  }
 
   return { routeName, params };
 }

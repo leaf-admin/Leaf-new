@@ -9,7 +9,6 @@ export const PASSENGER_RUNTIME_SYNC_ROUTES = new Set([
   'RobotaxiPrototypePaymentSuccess',
   'RobotaxiPrototypePaymentFailed',
   'RobotaxiPrototypeNoDrivers',
-  'RobotaxiPrototypeCancellation',
   'RobotaxiPrototypeDriverSearch',
   'RobotaxiPrototypeTrip'
 ]);

@@ -1101,6 +1101,20 @@ function scenarioPatch(name) {
     case 'passenger-booking':
     case 'passenger-payment':
       return buildPassengerQuoteBase();
+    case 'passenger-payment-success':
+    case 'passenger-payment-failed':
+    case 'passenger-no-drivers':
+      return deepMerge(buildPassengerQuoteBase(), {
+        bookingStatus: 'idle',
+        activeBookingId: null,
+        activeBooking: null,
+      });
+    case 'passenger-cancellation':
+      return deepMerge(buildPassengerQuoteBase(), {
+        bookingStatus: 'accepted',
+        activeBookingId: 'booking-proof-passenger-1',
+        activeBooking: buildPassengerTripBase('accepted').activeBooking,
+      });
     case 'passenger-searching':
     case 'passenger-requesting':
       return deepMerge(buildPassengerQuoteBase(), {
@@ -1168,6 +1182,28 @@ function scenarioPatch(name) {
         rideExtension: { status: 'idle' },
         operationalContinuation: { status: 'idle' }
       };
+    case 'passenger-rating':
+    case 'passenger-complain':
+      return {
+        bookingStatus: 'completed',
+        activeBookingId: null,
+        activeBooking: null,
+        selectedDestination: {
+          name: 'Leblon',
+          address: LABELS.destinationAddress,
+          coordinate: BASE_COORDS.destination
+        },
+        tripHistory: [buildPassengerReceipt()],
+        lastReceipt: buildPassengerReceipt(),
+        rideExtension: { status: 'idle' },
+        operationalContinuation: { status: 'idle' }
+      };
+    case 'passenger-share-trip':
+    case 'public-tracking':
+      return deepMerge(buildPassengerTripBase('started'), {
+        rideExtension: { status: 'idle' },
+        operationalContinuation: { status: 'idle' }
+      });
     case 'passenger-accepted':
       return deepMerge(buildPassengerTripBase('accepted'), {
         rideExtension: { status: 'idle' },
@@ -1404,6 +1440,30 @@ function scenarioRoute(name) {
   }
   if (name === 'passenger-payment') {
     return `leafapp://robotaxi/payment?${passengerQuoteParams()}`;
+  }
+  if (name === 'passenger-payment-success') {
+    return `leafapp://robotaxi/payment/success?${passengerQuoteParams()}&autoAdvance=false`;
+  }
+  if (name === 'passenger-payment-failed') {
+    return `leafapp://robotaxi/payment/failed?${passengerQuoteParams()}&errorReason=PAYMENT_DECLINED`;
+  }
+  if (name === 'passenger-no-drivers') {
+    return `leafapp://robotaxi/no-drivers?${passengerQuoteParams()}&refundStatus=REFUND_PENDING&refundAmount=24.90`;
+  }
+  if (name === 'passenger-cancellation') {
+    return `leafapp://robotaxi/cancellation?${passengerTripParams('accepted')}`;
+  }
+  if (name === 'passenger-rating') {
+    return `leafapp://robotaxi/rating?${passengerReceiptParams('customer')}`;
+  }
+  if (name === 'passenger-complain') {
+    return `leafapp://robotaxi/complain?${passengerReceiptParams('customer')}`;
+  }
+  if (name === 'passenger-share-trip') {
+    return `leafapp://robotaxi/trip/share?${passengerTripParams('started')}&publicTripUrl=https%3A%2F%2Fleaf.app.br%2Fviagem%2Fbooking-proof-passenger-1`;
+  }
+  if (name === 'public-tracking') {
+    return `leafapp://viagem/trip-proof-public-1?${passengerTripParams('started')}&publicTripUrl=https%3A%2F%2Fleaf.app.br%2Fviagem%2Ftrip-proof-public-1`;
   }
   if (
     name === 'passenger-searching' ||

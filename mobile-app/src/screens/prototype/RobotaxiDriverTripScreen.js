@@ -631,7 +631,9 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
         route?.params?.boardingPin ||
         "",
     ).trim() || "4821";
-  const rawBoardingSeconds = Number(boardingRemainingSec);
+  const rawBoardingSeconds = Number(
+    route?.params?.boardingRemainingSec ?? boardingRemainingSec,
+  );
   const boardingTimerSeconds = Number.isFinite(rawBoardingSeconds)
     ? Math.max(0, Math.round(rawBoardingSeconds))
     : normalizedBookingStatus === "arrived"
