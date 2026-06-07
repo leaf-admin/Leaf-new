@@ -1007,6 +1007,7 @@ class FCMService {
                 }
             });
 
+            const ttlSeconds = Number(dataPayload.ttlSeconds) || RIDE_STATUS_PUSH_TTL_SECONDS;
             let successCount = 0;
             for (const fcmToken of fcmTokens) {
                 const message = {
@@ -1014,13 +1015,13 @@ class FCMService {
                     data: dataPayload,
                     android: {
                         priority: 'high',
-                        ttl: `${Number(dataPayload.ttlSeconds) || RIDE_STATUS_PUSH_TTL_SECONDS}s`
+                        ttl: ttlSeconds * 1000
                     },
                     apns: {
                         headers: {
                             'apns-push-type': 'background',
                             'apns-priority': '5',
-                            'apns-expiration': String(Math.floor(Date.now() / 1000) + (Number(dataPayload.ttlSeconds) || RIDE_STATUS_PUSH_TTL_SECONDS))
+                            'apns-expiration': String(Math.floor(Date.now() / 1000) + ttlSeconds)
                         },
                         payload: { aps: { 'content-available': 1 } }
                     }

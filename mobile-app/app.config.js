@@ -366,6 +366,7 @@ module.exports = {
         "./plugins/withNetworkSecurityConfig",
         "./plugins/withLeafAwsLiveness",
         "./plugins/withLeafFaceEmbedding",
+        "./plugins/withLeafRideNotification",
         [
             "expo-notifications",
             {

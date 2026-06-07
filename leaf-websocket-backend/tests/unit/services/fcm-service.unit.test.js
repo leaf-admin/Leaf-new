@@ -239,7 +239,7 @@ describe('fcm-service', () => {
       }),
       android: expect.objectContaining({
         priority: 'high',
-        ttl: '1200s',
+        ttl: 1200000,
       }),
       apns: expect.objectContaining({
         headers: expect.objectContaining({

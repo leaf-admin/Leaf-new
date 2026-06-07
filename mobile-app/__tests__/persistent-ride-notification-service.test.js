@@ -16,11 +16,21 @@ const mockNotifications = {
   dismissNotificationAsync: jest.fn(() => Promise.resolve()),
   getPresentedNotificationsAsync: jest.fn(() => Promise.resolve([])),
 };
+const mockNativeRideNotification = {
+  showOrUpdate: jest.fn(() => Promise.resolve({
+    success: true,
+    notificationId: 'leaf-ride-status-43001',
+    androidNotificationId: 43001,
+  })),
+  dismiss: jest.fn(() => Promise.resolve(true)),
+};
+const mockNativeModules = {};
 
 jest.mock('expo-notifications', () => mockNotifications);
 jest.mock('expo-device', () => ({ isDevice: true }));
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
+  NativeModules: mockNativeModules,
 }));
 jest.mock('../src/utils/Logger', () => ({
   log: jest.fn(),
@@ -60,6 +70,9 @@ describe('PersistentRideNotificationService', () => {
       persistentRideNotificationsEnabled: true,
     };
     notificationSequence = 0;
+    delete mockNativeModules.LeafRideNotification;
+    mockNativeRideNotification.showOrUpdate.mockClear();
+    mockNativeRideNotification.dismiss.mockClear();
     AsyncStorage.clear();
     jest.resetModules();
   });
@@ -171,6 +184,60 @@ describe('PersistentRideNotificationService', () => {
         }),
       })
     );
+  });
+
+  it('uses the native Android notification slot for in-place updates when available', async () => {
+    mockNativeModules.LeafRideNotification = mockNativeRideNotification;
+    const service = loadService();
+
+    await service.showRideNotification({
+      bookingId: 'booking-1',
+      status: 'accepted',
+      userType: 'customer',
+      driverName: 'Carlos',
+      pickupEstimatedTime: 4,
+    });
+
+    await service.updateRideNotification({
+      bookingId: 'booking-1',
+      status: 'started',
+      userType: 'customer',
+      driverName: 'Carlos',
+      destination: { address: 'Barra Shopping' },
+      tripEstimatedTime: 12,
+    });
+
+    expect(mockNativeRideNotification.showOrUpdate).toHaveBeenCalledTimes(2);
+    expect(mockNativeRideNotification.showOrUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        channelId: 'ride_status',
+        notificationId: 'leaf-ride-status-43001',
+        title: 'A caminho de Barra Shopping',
+        bookingId: 'booking-1',
+        status: 'started',
+      })
+    );
+    expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(mockNotifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+    expect(service.getCurrentNotificationId()).toBe('leaf-ride-status-43001');
+  });
+
+  it('dismisses the native Android notification slot without recreating Expo notifications', async () => {
+    mockNativeModules.LeafRideNotification = mockNativeRideNotification;
+    const service = loadService();
+
+    await service.showRideNotification({
+      bookingId: 'booking-1',
+      status: 'accepted',
+      userType: 'customer',
+      driverName: 'Carlos',
+    });
+
+    await service.dismissRideNotification('booking-1');
+
+    expect(mockNativeRideNotification.dismiss).toHaveBeenCalledTimes(1);
+    expect(mockNotifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+    expect(service.isNotificationActive()).toBe(false);
   });
 
   it('suppresses duplicate ride status payloads for the same booking state', async () => {

@@ -31,6 +31,34 @@ fi
 echo -e "${GREEN}✅ Android nativo configurado${NC}"
 echo ""
 
+if [ -z "$JAVA_HOME" ] && [ -x "/opt/homebrew/opt/openjdk@17/bin/java" ]; then
+    export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
+fi
+
+if [ -n "$JAVA_HOME" ]; then
+    export PATH="$JAVA_HOME/bin:$PATH"
+fi
+
+if [ -f ".env.production.local" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source ".env.production.local"
+    set +a
+fi
+
+if [ -n "$LEAF_UPLOAD_STORE_FILE" ] && [ "${LEAF_UPLOAD_STORE_FILE#/}" = "$LEAF_UPLOAD_STORE_FILE" ]; then
+    if [ -f "$LEAF_UPLOAD_STORE_FILE" ]; then
+        export LEAF_UPLOAD_STORE_FILE="$(pwd)/$LEAF_UPLOAD_STORE_FILE"
+    elif [ -f "android/app/$LEAF_UPLOAD_STORE_FILE" ]; then
+        export LEAF_UPLOAD_STORE_FILE="$(pwd)/android/app/$LEAF_UPLOAD_STORE_FILE"
+    fi
+fi
+
+if ! command -v java >/dev/null 2>&1; then
+    echo -e "${RED}❌ Java não encontrado. Instale/aponte JDK 17 em JAVA_HOME.${NC}"
+    exit 1
+fi
+
 # Verificar se node_modules está instalado
 if [ ! -d "node_modules" ]; then
     echo -e "${YELLOW}📦 Instalando dependências...${NC}"
@@ -97,5 +125,4 @@ else
 fi
 
 cd ..
-
 

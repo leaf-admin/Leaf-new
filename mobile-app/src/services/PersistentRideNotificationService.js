@@ -13,7 +13,7 @@ import Logger from '../utils/Logger';
  */
 
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import fcmService from './FCMNotificationService';
@@ -23,6 +23,15 @@ import runtimeConfigService from './RuntimeConfigService';
 const RIDE_NOTIFICATION_STATE_KEY = '@leaf:persistentRideNotificationState';
 const RIDE_NOTIFICATION_DEDUPE_TTL_MS = 30 * 1000;
 const RIDE_NOTIFICATION_UPDATE_INTERVAL_MS = 10 * 1000;
+const ANDROID_NATIVE_RIDE_NOTIFICATION_ID = 'leaf-ride-status-43001';
+
+const getNativeRideNotificationModule = () => {
+    if (Platform.OS !== 'android') return null;
+    const nativeModule = NativeModules?.LeafRideNotification;
+    return nativeModule && typeof nativeModule.showOrUpdate === 'function'
+        ? nativeModule
+        : null;
+};
 
 const toFiniteNumber = (value, fallback = null) => {
     if (value === null || typeof value === 'undefined' || value === '') return fallback;
@@ -379,8 +388,58 @@ class PersistentRideNotificationService {
         return policy?.enabled !== false && policy?.persistentRideNotificationsEnabled !== false;
     }
 
+    isNativeRideNotificationId(notificationId) {
+        return Platform.OS === 'android' && String(notificationId || '') === ANDROID_NATIVE_RIDE_NOTIFICATION_ID;
+    }
+
+    async showOrUpdateNativeRideNotification(rideData = {}, title, body, options = {}) {
+        const nativeModule = getNativeRideNotificationModule();
+        if (!nativeModule) return null;
+
+        try {
+            const result = await nativeModule.showOrUpdate({
+                channelId: 'ride_status',
+                notificationId: ANDROID_NATIVE_RIDE_NOTIFICATION_ID,
+                title,
+                body,
+                bookingId: String(rideData.bookingId || ''),
+                status: String(rideData.status || ''),
+                userType: String(rideData.userType || ''),
+                notificationCategoryId: options.notificationCategoryId || '',
+                notificationDataType: options.notificationDataType || 'ride_status',
+            });
+
+            if (result?.success === false) {
+                Logger.warn('⚠️ [PersistentRideNotification] Módulo nativo recusou atualização:', result?.reason || result);
+                return null;
+            }
+
+            return result?.notificationId || ANDROID_NATIVE_RIDE_NOTIFICATION_ID;
+        } catch (error) {
+            Logger.warn('⚠️ [PersistentRideNotification] Falha no módulo nativo Android; usando fallback Expo:', error?.message || error);
+            return null;
+        }
+    }
+
+    async dismissNativeRideNotification() {
+        const nativeModule = getNativeRideNotificationModule();
+        if (!nativeModule || typeof nativeModule.dismiss !== 'function') return false;
+
+        try {
+            await nativeModule.dismiss();
+            return true;
+        } catch (error) {
+            Logger.warn('⚠️ [PersistentRideNotification] Falha ao remover notificação nativa:', error?.message || error);
+            return false;
+        }
+    }
+
     async dismissNotificationById(notificationId) {
         if (!notificationId) return;
+        if (this.isNativeRideNotificationId(notificationId)) {
+            await this.dismissNativeRideNotification();
+            return;
+        }
         await Promise.allSettled([
             Notifications.cancelScheduledNotificationAsync(notificationId),
             typeof Notifications.dismissNotificationAsync === 'function'
@@ -501,14 +560,34 @@ class PersistentRideNotificationService {
                 fare
             });
 
+            const resolvedTitle = customTitle || title;
+            const resolvedBody = customBody || body;
+            const nativeNotificationId = await this.showOrUpdateNativeRideNotification(
+                { ...rideData, bookingId, status, userType },
+                resolvedTitle,
+                resolvedBody,
+                { notificationCategoryId, notificationDataType }
+            );
+
+            if (nativeNotificationId) {
+                this.currentNotificationId = nativeNotificationId;
+                await this.persistNotificationState();
+                Logger.log(`✅ [PersistentRideNotification] Notificação persistente nativa atualizada: ${nativeNotificationId}`);
+
+                if (status === 'started' || status === 'accepted') {
+                    this.startPeriodicUpdate(rideData);
+                }
+                return;
+            }
+
             await this.dismissNotificationById(this.currentNotificationId);
             await this.dismissPresentedRideNotificationsForBooking(bookingId);
 
             // Criar nova notificação persistente
             const notificationId = await Notifications.scheduleNotificationAsync({
                 content: {
-                    title: customTitle || title,
-                    body: customBody || body,
+                    title: resolvedTitle,
+                    body: resolvedBody,
                     data: {
                         type: notificationDataType || 'ride_status',
                         bookingId,
@@ -588,13 +667,37 @@ class PersistentRideNotificationService {
                 fare
             });
 
+            const resolvedTitle = customTitle || title;
+            const resolvedBody = customBody || body;
+            const nativeNotificationId = await this.showOrUpdateNativeRideNotification(
+                { ...rideData, bookingId, status, userType },
+                resolvedTitle,
+                resolvedBody,
+                { notificationCategoryId, notificationDataType }
+            );
+
+            if (nativeNotificationId) {
+                this.currentNotificationId = nativeNotificationId;
+                this.currentBookingId = bookingId;
+                this.isActive = true;
+                await this.persistNotificationState();
+                Logger.log(`🔄 [PersistentRideNotification] Notificação nativa atualizada no mesmo slot: ${nativeNotificationId}`);
+
+                if (status === 'started' || status === 'accepted') {
+                    this.startPeriodicUpdate(rideData);
+                } else {
+                    this.stopPeriodicUpdate();
+                }
+                return;
+            }
+
             await this.dismissNotificationById(this.currentNotificationId);
             await this.dismissPresentedRideNotificationsForBooking(bookingId);
 
             const notificationId = await Notifications.scheduleNotificationAsync({
                 content: {
-                    title: customTitle || title,
-                    body: customBody || body,
+                    title: resolvedTitle,
+                    body: resolvedBody,
                     data: {
                         type: notificationDataType || 'ride_status',
                         bookingId,
