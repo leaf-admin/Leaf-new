@@ -14,6 +14,7 @@ const mockOrchestratorGetStats = jest.fn();
 const mockOrchestratorGetEventConfig = jest.fn();
 const mockOrchestratorBuildNotification = jest.fn();
 const mockOrchestratorDispatchEvent = jest.fn();
+const mockOrchestratorGetHistory = jest.fn();
 const mockRedisConnection = {
   status: 'ready',
   connect: jest.fn(),
@@ -62,7 +63,8 @@ jest.mock('../../../services/notification-orchestrator-service', () => jest.fn((
   getStats: mockOrchestratorGetStats,
   getEventConfig: mockOrchestratorGetEventConfig,
   buildNotification: mockOrchestratorBuildNotification,
-  dispatchEvent: mockOrchestratorDispatchEvent
+  dispatchEvent: mockOrchestratorDispatchEvent,
+  getHistory: mockOrchestratorGetHistory
 })));
 
 jest.mock('../../../utils/redis-scan', () => ({
@@ -100,8 +102,12 @@ describe('notification schedule route auth', () => {
     mockOrchestratorGetStats.mockResolvedValue({
       date: '2026-06-06',
       version: 'test-matrix',
-      metrics: { sent: 2 }
+      metrics: { sent: 2 },
+      smartPushMode: 'disabled'
     });
+    mockOrchestratorGetHistory.mockResolvedValue([
+      { id: 'orch_1', eventType: 'ride.accepted', status: 'sent' }
+    ]);
     mockOrchestratorGetEventConfig.mockReturnValue({
       category: 'ride_lifecycle',
       audience: ['passenger'],
@@ -207,6 +213,22 @@ describe('notification schedule route auth', () => {
         events: {
           'ride.accepted': { category: 'ride_lifecycle' }
         }
+      }
+    });
+  });
+
+  it('allows authenticated operators to inspect recent orchestration history', async () => {
+    const response = await request(createApp())
+      .get('/api/notifications/orchestration/history?date=2026-06-06&limit=5')
+      .set('Authorization', 'Bearer manager');
+
+    expect(response.status).toBe(200);
+    expect(mockOrchestratorGetHistory).toHaveBeenCalledWith('2026-06-06', '5');
+    expect(response.body).toEqual({
+      success: true,
+      data: {
+        date: '2026-06-06',
+        items: [{ id: 'orch_1', eventType: 'ride.accepted', status: 'sent' }]
       }
     });
   });

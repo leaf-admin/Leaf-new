@@ -268,4 +268,27 @@ describe('PersistentRideNotificationService', () => {
     expect(mockNotifications.dismissNotificationAsync).toHaveBeenCalledWith('notification-1');
     expect(service.isNotificationActive()).toBe(false);
   });
+
+  it('dismisses the notification when backend sends canceled status', async () => {
+    const service = loadService();
+
+    await service.initialize();
+    await service.showRideNotification({
+      bookingId: 'booking-1',
+      status: 'started',
+      userType: 'customer',
+      destination: { address: 'Leblon' },
+    });
+
+    const handler = mockRegisteredHandlers.get('ride_status_update');
+    await handler({
+      data: {
+        bookingId: 'booking-1',
+        status: 'canceled',
+      },
+    });
+
+    expect(mockNotifications.cancelScheduledNotificationAsync).toHaveBeenCalledWith('notification-1');
+    expect(service.isNotificationActive()).toBe(false);
+  });
 });

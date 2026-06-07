@@ -224,11 +224,29 @@ describe('fcm-service', () => {
         bookingId: 'booking-1',
         status: 'accepted',
         userType: 'customer',
+        notificationPolicyVersion: '2026-06-07.ride-status.v2',
+        notificationDataType: 'ride_status',
+        notificationCategoryId: 'RIDE_ACCEPTED',
+        ttlSeconds: '1200',
+        dedupeWindowSeconds: '30',
+        timelineMode: 'eta_progress',
+        etaKind: 'pickup',
         pickupEstimatedTime: '4',
         tripEstimatedTime: '18',
         phaseStartedAt: '2026-06-05T19:00:00.000Z',
         pickup: JSON.stringify({ address: 'Rua de Partida, 100' }),
         destination: JSON.stringify({ address: 'Leblon' }),
+      }),
+      android: expect.objectContaining({
+        priority: 'high',
+        ttl: '1200s',
+      }),
+      apns: expect.objectContaining({
+        headers: expect.objectContaining({
+          'apns-push-type': 'background',
+          'apns-priority': '5',
+        }),
+        payload: { aps: { 'content-available': 1 } },
       }),
     }));
   });

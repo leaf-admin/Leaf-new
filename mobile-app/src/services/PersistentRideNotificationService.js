@@ -426,7 +426,8 @@ class PersistentRideNotificationService {
 
         await this.hydrateNotificationState();
 
-        if (processedData.status === 'completed' || processedData.status === 'cancelled') {
+        const normalizedStatus = String(processedData.status || '').toLowerCase();
+        if (normalizedStatus === 'completed' || normalizedStatus === 'cancelled' || normalizedStatus === 'canceled') {
             await this.dismissRideNotification(processedData.bookingId);
             return;
         }

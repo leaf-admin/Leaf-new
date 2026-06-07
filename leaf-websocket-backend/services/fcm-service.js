@@ -7,6 +7,9 @@ const circuitBreakerService = require('./circuit-breaker-service');
 const traceContext = require('../utils/trace-context');
 
 const FCM_METRICS_TTL_SECONDS = 35 * 24 * 60 * 60;
+const RIDE_STATUS_NOTIFICATION_POLICY_VERSION = '2026-06-07.ride-status.v2';
+const RIDE_STATUS_PUSH_TTL_SECONDS = 20 * 60;
+const RIDE_STATUS_DEDUPE_WINDOW_SECONDS = 30;
 
 function getDayKey(date = new Date()) {
     return date.toISOString().slice(0, 10);
@@ -44,6 +47,25 @@ function redactFcmToken(token) {
 function normalizeTokenTimestamp(value) {
     const timestamp = Date.parse(String(value || ''));
     return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function normalizeRideStatus(value) {
+    const raw = String(value || '').toLowerCase().trim();
+    if (raw === 'cancelled') return 'canceled';
+    return raw;
+}
+
+function getRideStatusCategoryId(status, userType) {
+    const normalizedStatus = normalizeRideStatus(status);
+    const normalizedUserType = String(userType || '').toLowerCase().trim();
+    const isDriver = normalizedUserType === 'driver';
+
+    if (isDriver && normalizedStatus === 'accepted') return 'DRIVER_PICKUP_READY';
+    if (isDriver && normalizedStatus === 'arrived') return 'DRIVER_BOARDING';
+    if (isDriver && normalizedStatus === 'started') return 'DRIVER_TRIP_ACTIVE';
+    if (normalizedStatus === 'accepted') return 'RIDE_ACCEPTED';
+    if (normalizedStatus === 'started') return 'TRIP_IN_PROGRESS';
+    return '';
 }
 
 function resolveServiceAccountPath() {
@@ -930,10 +952,15 @@ class FCMService {
             }
 
             const nowIso = new Date().toISOString();
+            const normalizedStatus = normalizeRideStatus(rideData.status);
+            const notificationCategoryId = String(
+                rideData.notificationCategoryId ||
+                getRideStatusCategoryId(normalizedStatus, rideData.userType)
+            );
             const dataPayload = {
                 type: 'ride_status_update',
                 bookingId: String(rideData.bookingId || ''),
-                status: String(rideData.status || ''),
+                status: normalizedStatus,
                 userType: String(rideData.userType || ''),
                 driverName: String(rideData.driverName || ''),
                 customerName: String(rideData.customerName || ''),
@@ -941,6 +968,13 @@ class FCMService {
                 distance: String(rideData.distance || ''),
                 fare: String(rideData.fare || ''),
                 timestamp: String(rideData.timestamp || nowIso),
+                notificationPolicyVersion: RIDE_STATUS_NOTIFICATION_POLICY_VERSION,
+                notificationDataType: 'ride_status',
+                notificationCategoryId,
+                ttlSeconds: String(rideData.ttlSeconds || RIDE_STATUS_PUSH_TTL_SECONDS),
+                dedupeWindowSeconds: String(rideData.dedupeWindowSeconds || RIDE_STATUS_DEDUPE_WINDOW_SECONDS),
+                timelineMode: 'eta_progress',
+                etaKind: normalizedStatus === 'accepted' ? 'pickup' : normalizedStatus === 'started' ? 'destination' : 'status',
                 phaseStartedAt: String(
                     rideData.phaseStartedAt ||
                     rideData.acceptedAt ||
@@ -978,8 +1012,18 @@ class FCMService {
                 const message = {
                     token: fcmToken,
                     data: dataPayload,
-                    android: { priority: 'high' },
-                    apns: { payload: { aps: { 'content-available': 1 } } }
+                    android: {
+                        priority: 'high',
+                        ttl: `${Number(dataPayload.ttlSeconds) || RIDE_STATUS_PUSH_TTL_SECONDS}s`
+                    },
+                    apns: {
+                        headers: {
+                            'apns-push-type': 'background',
+                            'apns-priority': '5',
+                            'apns-expiration': String(Math.floor(Date.now() / 1000) + (Number(dataPayload.ttlSeconds) || RIDE_STATUS_PUSH_TTL_SECONDS))
+                        },
+                        payload: { aps: { 'content-available': 1 } }
+                    }
                 };
 
                 try {
@@ -988,7 +1032,8 @@ class FCMService {
                     await this.incrementDailyMetrics({
                         totalSent: 1,
                         successful: 1,
-                        rideStatusPushes: 1
+                        rideStatusPushes: 1,
+                        [`rideStatus:${normalizedStatus}:sent`]: 1
                     }, 'sendRideStatusUpdate');
                 } catch (err) {
                     logger.warn(`⚠️ Erro push silencioso fcm=${redactFcmToken(fcmToken)}: ${err.message}`);
@@ -1007,7 +1052,8 @@ class FCMService {
                     await this.incrementDailyMetrics({
                         totalSent: 1,
                         failed: 1,
-                        rideStatusPushes: 1
+                        rideStatusPushes: 1,
+                        [`rideStatus:${normalizedStatus}:failed`]: 1
                     }, 'sendRideStatusUpdate');
                 }
             }
@@ -1233,6 +1279,7 @@ class FCMService {
                 isServiceAvailable: this.isServiceAvailable(),
                 rateLimitCounts: Object.fromEntries(this.rateLimitCounts),
                 delivery,
+                ...delivery,
                 totalSent: delivery.totalSent,
                 successful: delivery.successful,
                 failed: delivery.failed,

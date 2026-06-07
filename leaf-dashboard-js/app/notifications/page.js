@@ -25,9 +25,30 @@ function summarizeSendResponse(response) {
   };
 }
 
+function normalizeStatsPayload(stats) {
+  const data = stats?.data || stats || {};
+  const fcm = data.fcm || data.stats || {};
+  const orchestration = data.orchestration || {};
+  return {
+    fcm,
+    orchestration,
+    scheduled: Number(data.scheduled || 0),
+    policy: data.policy || {},
+  };
+}
+
+function statusClass(status) {
+  if (status === "sent") return "status-ok";
+  if (status === "dry_run" || status === "persisted_only" || status === "suppressed") return "status-warn";
+  if (status === "failed") return "status-bad";
+  return "text-muted";
+}
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState(null);
   const [stats, setStats] = useState(null);
+  const [matrix, setMatrix] = useState(null);
+  const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
   const [sendStatus, setSendStatus] = useState("");
   const [loading, setLoading] = useState(true);
@@ -49,13 +70,17 @@ export default function NotificationsPage() {
           setLoading(true);
           setError("");
         }
-        const [notifData, statsData] = await Promise.all([
+        const [notifData, statsData, matrixData, historyData] = await Promise.all([
           leafAPI.getNotifications(),
           leafAPI.getNotificationStats(),
+          leafAPI.getNotificationOrchestrationMatrix(),
+          leafAPI.getNotificationOrchestrationHistory({ limit: 12 }),
         ]);
         if (!mounted) return;
         setNotifications(notifData);
         setStats(statsData);
+        setMatrix(matrixData?.data || null);
+        setHistory(Array.isArray(historyData?.data?.items) ? historyData.data.items : []);
       } catch (err) {
         if (mounted) setError(err?.message || "Falha ao carregar notificacoes");
       } finally {
@@ -70,12 +95,27 @@ export default function NotificationsPage() {
     };
   }, []);
 
+  const statsPayload = useMemo(() => normalizeStatsPayload(stats), [stats]);
+  const fcmStats = useMemo(() => statsPayload.fcm || {}, [statsPayload]);
+  const fcmDelivery = useMemo(() => fcmStats.delivery || fcmStats || {}, [fcmStats]);
+  const orchestrationStats = useMemo(() => statsPayload.orchestration || {}, [statsPayload]);
+  const orchestrationMetrics = useMemo(() => orchestrationStats.metrics || {}, [orchestrationStats]);
+  const policy = useMemo(
+    () => statsPayload.policy || notifications?.data?.policy || {},
+    [statsPayload.policy, notifications],
+  );
+  const matrixEvents = useMemo(() => Object.entries(matrix?.events || {}), [matrix]);
+  const rideLifecycleMatrixEvents = useMemo(
+    () => matrixEvents.filter(([, config]) => config?.category === "ride_lifecycle"),
+    [matrixEvents],
+  );
+
   const successRate = useMemo(() => {
-    const total = Number(stats?.totalSent || 0);
-    const ok = Number(stats?.successful || 0);
+    const total = Number(fcmDelivery?.totalSent || 0);
+    const ok = Number(fcmDelivery?.successful || 0);
     if (total <= 0) return 0;
     return Number(((ok / total) * 100).toFixed(1));
-  }, [stats]);
+  }, [fcmDelivery]);
 
   const endpoints = useMemo(() => notifications?.data?.endpoints || {}, [notifications]);
   const endpointEntries = useMemo(() => {
@@ -152,14 +192,25 @@ export default function NotificationsPage() {
         {loading ? <LoadingState message="Carregando notificacoes..." /> : null}
 
         <section className="grid grid-kpi">
-          <KpiCard title="Enviadas" value={stats?.totalSent || 0} />
-          <KpiCard title="Sucesso" value={stats?.successful || 0} tone="positive" />
+          <KpiCard title="Enviadas" value={fcmDelivery?.totalSent || 0} />
+          <KpiCard title="Sucesso" value={fcmDelivery?.successful || 0} tone="positive" />
           <KpiCard
             title="Falhas"
-            value={stats?.failed || 0}
-            tone={(stats?.failed || 0) > 0 ? "danger" : "positive"}
+            value={fcmDelivery?.failed || 0}
+            tone={(fcmDelivery?.failed || 0) > 0 ? "danger" : "positive"}
           />
           <KpiCard title="Taxa de sucesso" value={`${successRate}%`} tone={successRate >= 95 ? "positive" : "warning"} />
+        </section>
+
+        <section className="grid grid-kpi">
+          <KpiCard title="Tokens ativos" value={fcmStats?.activeTokens || 0} />
+          <KpiCard title="Status de corrida" value={fcmDelivery?.rideStatusPushes || 0} />
+          <KpiCard title="Orquestradas" value={orchestrationMetrics.sent || 0} />
+          <KpiCard
+            title="Smart push"
+            value={orchestrationStats.smartPushMode || policy.smartPushMode || "disabled"}
+            tone={(orchestrationStats.smartPushMode || policy.smartPushMode) === "enabled" ? "warning" : "positive"}
+          />
         </section>
 
         <section className="grid">
@@ -261,12 +312,16 @@ export default function NotificationsPage() {
           <Panel title="Saúde de entregas">
             <KeyValueGrid
               data={{
-                totalSent: stats?.totalSent || 0,
-                successful: stats?.successful || 0,
-                failed: stats?.failed || 0,
+                totalSent: fcmDelivery?.totalSent || 0,
+                successful: fcmDelivery?.successful || 0,
+                failed: fcmDelivery?.failed || 0,
                 successRate: `${successRate}%`,
                 endpointsConfigured: Object.keys(endpoints).length,
-                queues: notifications?.data?.queues || notifications?.queues || "-",
+                rideStatusPushes: fcmDelivery?.rideStatusPushes || 0,
+                invalidTokensRemoved: fcmDelivery?.invalidTokensRemoved || 0,
+                matrixVersion: policy.matrixVersion || orchestrationStats.version || "-",
+                directSendEnabled: policy.directSendEnabled ? "sim" : "não",
+                smartPushMode: orchestrationStats.smartPushMode || policy.smartPushMode || "disabled",
               }}
               labels={{
                 totalSent: "Envios totais",
@@ -274,13 +329,82 @@ export default function NotificationsPage() {
                 failed: "Falhas",
                 successRate: "Taxa de sucesso",
                 endpointsConfigured: "Canais configurados",
-                queues: "Filas de envio",
+                rideStatusPushes: "Timeline de corrida",
+                invalidTokensRemoved: "Tokens inválidos limpos",
+                matrixVersion: "Versão da matriz",
+                directSendEnabled: "Envio direto real",
+                smartPushMode: "Smart push",
               }}
             />
             <TechnicalDetails
               title="Ver payload técnico de notificações"
-              data={{ stats, notifications }}
+              data={{ stats, notifications, matrix, history }}
             />
+          </Panel>
+
+          <Panel
+            title="Matriz do ciclo da corrida"
+            subtitle="Eventos críticos com TTL, dedupe e persistência. Smart push fica em dry-run até aprovação operacional."
+          >
+            {rideLifecycleMatrixEvents.length === 0 ? (
+              <p className="text-muted">Matriz ainda não carregada.</p>
+            ) : (
+              <div className="table-shell">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Evento</th>
+                      <th>Canais</th>
+                      <th>TTL</th>
+                      <th>Dedupe</th>
+                      <th>Persistente</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rideLifecycleMatrixEvents.map(([eventType, config]) => (
+                      <tr key={eventType}>
+                        <td><code>{eventType}</code></td>
+                        <td>{(config.channels || []).join(", ")}</td>
+                        <td>{config.ttlSeconds ? `${config.ttlSeconds}s` : "-"}</td>
+                        <td>{config.dedupeWindowSeconds ? `${config.dedupeWindowSeconds}s` : "-"}</td>
+                        <td>{config.persistentRideStatus ? "sim" : "não"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+
+          <Panel title="Histórico recente" subtitle="Últimas decisões do orquestrador: enviado, dry-run, persistido ou suprimido.">
+            {history.length === 0 ? (
+              <p className="text-muted">Sem histórico recente para hoje.</p>
+            ) : (
+              <div className="table-shell">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Status</th>
+                      <th>Evento</th>
+                      <th>Usuário</th>
+                      <th>Canal</th>
+                      <th>Atualizado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((item) => (
+                      <tr key={item.id || `${item.eventType}-${item.updatedAt}`}>
+                        <td><span className={statusClass(item.status)}>{item.status || "-"}</span></td>
+                        <td><code>{item.eventType || "-"}</code></td>
+                        <td>{item.userType || "-"} · {item.userId || "-"}</td>
+                        <td>{Array.isArray(item.channels) ? item.channels.join(", ") : "-"}</td>
+                        <td>{item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString("pt-BR") : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Panel>
         </section>
         <ErrorText message={error} />

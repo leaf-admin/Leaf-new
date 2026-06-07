@@ -274,6 +274,16 @@ async function filterUsersByType(redis, userIds = [], userTypes = []) {
     return sanitizeIds(filteredUsers);
 }
 
+async function countRedisKeys(redis, pattern) {
+    if (!redis) return 0;
+    if (typeof redis.scan === 'function') return RedisScan.countKeys(redis, pattern);
+    if (typeof redis.keys === 'function') {
+        const keys = await redis.keys(pattern);
+        return Array.isArray(keys) ? keys.length : 0;
+    }
+    return 0;
+}
+
 async function applyFilters(redis, userIds = [], filters = {}) {
     if (!filters || typeof filters !== 'object' || Object.keys(filters).length === 0) {
         return sanitizeIds(userIds);
@@ -312,16 +322,29 @@ async function applyFilters(redis, userIds = [], filters = {}) {
 // GET - Página principal de notificações
 router.get('/', requireAuth, async (req, res) => {
     try {
+        bindRedisToNotificationOrchestrator();
         const stats = await fcmService.getServiceStats();
+        const orchestration = await notificationOrchestrator.getStats(req.query.date);
         res.json({
             success: true,
             data: {
                 stats,
+                orchestration,
+                policy: {
+                    source: 'backend',
+                    directSendEnabled: ALLOW_NOTIFICATION_ORCHESTRATOR_DIRECT_SEND,
+                    publicDirectTokenSendEnabled: ALLOW_PUBLIC_DIRECT_FCM_SEND,
+                    smartPushMode: orchestration.smartPushMode,
+                    matrixVersion: orchestration.version
+                },
                 endpoints: {
                     sendNotification: '/api/notifications/send',
                     scheduleNotification: '/api/notifications/schedule',
                     getScheduled: '/api/notifications/scheduled',
-                    getStats: '/api/notifications/stats'
+                    getStats: '/api/notifications/stats',
+                    getOrchestrationMatrix: '/api/notifications/orchestration/matrix',
+                    getOrchestrationStats: '/api/notifications/orchestration/stats',
+                    getOrchestrationHistory: '/api/notifications/orchestration/history'
                 }
             }
         });
@@ -352,6 +375,24 @@ router.get('/orchestration/stats', requireAuth, async (req, res) => {
         res.json({
             success: true,
             data: stats
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// GET - Historico recente do orquestrador para auditoria operacional.
+// Le apenas Redis agregado; nao chama provedores externos.
+router.get('/orchestration/history', requireAuth, async (req, res) => {
+    try {
+        bindRedisToNotificationOrchestrator();
+        const history = await notificationOrchestrator.getHistory(req.query.date, req.query.limit);
+        res.json({
+            success: true,
+            data: {
+                date: req.query.date || new Date().toISOString().slice(0, 10),
+                items: history
+            }
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -629,7 +670,9 @@ router.get('/scheduled', requireAdminManager, async (req, res) => {
                 }
             }
         }
-        const keys = await redis.keys('scheduled_notifications:*');
+        const keys = typeof redis.scan === 'function'
+            ? await RedisScan.scanKeys(redis, 'scheduled_notifications:*')
+            : await redis.keys('scheduled_notifications:*');
         const scheduledNotifications = [];
 
         for (const key of keys) {
@@ -694,8 +737,7 @@ router.get('/stats', requireAuth, async (req, res) => {
         const orchestration = await notificationOrchestrator.getStats(req.query.date);
         const redis = redisPool.getConnection();
         await ensureRedisConnection(redis);
-        const scheduledKeys = await redis.keys('scheduled_notifications:*');
-        const scheduledCount = scheduledKeys ? scheduledKeys.length : 0;
+        const scheduledCount = await countRedisKeys(redis, 'scheduled_notifications:*');
         
         res.json({
             success: true,
@@ -703,7 +745,12 @@ router.get('/stats', requireAuth, async (req, res) => {
                 fcm: stats,
                 orchestration,
                 scheduled: scheduledCount,
-                total: stats.activeTokens + scheduledCount
+                total: Number(stats.activeTokens || 0) + scheduledCount,
+                policy: {
+                    directSendEnabled: ALLOW_NOTIFICATION_ORCHESTRATOR_DIRECT_SEND,
+                    smartPushMode: orchestration.smartPushMode,
+                    matrixVersion: orchestration.version
+                }
             }
         });
 

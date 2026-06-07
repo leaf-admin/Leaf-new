@@ -6,6 +6,9 @@ const { logStructured, logError } = require('../utils/logger');
 const MATRIX_VERSION = '2026-06-06.leaf-notification-orchestration.v1';
 const HISTORY_TTL_SECONDS = 35 * 24 * 60 * 60;
 const DEFAULT_DEDUPE_SECONDS = 15 * 60;
+const DEFAULT_NOTIFICATION_TTL_SECONDS = 60 * 60;
+const RIDE_LIFECYCLE_TTL_SECONDS = 20 * 60;
+const PAYMENT_TTL_SECONDS = 60 * 60;
 const DEFAULT_RATE_LIMIT = {
   max: 4,
   windowSeconds: 60 * 60
@@ -20,6 +23,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Tudo certo por aqui. Voce ja pode usar a Leaf.',
     priority: 'normal',
     channelId: 'account',
+    ttlSeconds: DEFAULT_NOTIFICATION_TTL_SECONDS,
     dedupeWindowSeconds: 24 * 60 * 60,
     rateLimit: { max: 1, windowSeconds: 24 * 60 * 60 },
     quietHours: false
@@ -32,6 +36,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Precisamos de um ajuste no seu cadastro para continuar.',
     priority: 'high',
     channelId: 'driver_documents',
+    ttlSeconds: DEFAULT_NOTIFICATION_TTL_SECONDS,
     dedupeWindowSeconds: 12 * 60 * 60,
     rateLimit: { max: 2, windowSeconds: 24 * 60 * 60 },
     quietHours: false
@@ -44,6 +49,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Abra o app para ver o proximo passo do seu cadastro.',
     priority: 'high',
     channelId: 'driver_documents',
+    ttlSeconds: DEFAULT_NOTIFICATION_TTL_SECONDS,
     dedupeWindowSeconds: 12 * 60 * 60,
     rateLimit: { max: 2, windowSeconds: 24 * 60 * 60 },
     quietHours: false
@@ -56,6 +62,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Seu cadastro avancou. Falta pouco para dirigir com a Leaf.',
     priority: 'normal',
     channelId: 'driver_documents',
+    ttlSeconds: DEFAULT_NOTIFICATION_TTL_SECONDS,
     dedupeWindowSeconds: 12 * 60 * 60,
     rateLimit: { max: 2, windowSeconds: 24 * 60 * 60 },
     quietHours: false
@@ -68,6 +75,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Quando quiser, abra o app e fique online.',
     priority: 'high',
     channelId: 'driver_account',
+    ttlSeconds: DEFAULT_NOTIFICATION_TTL_SECONDS,
     dedupeWindowSeconds: 24 * 60 * 60,
     rateLimit: { max: 1, windowSeconds: 24 * 60 * 60 },
     quietHours: false
@@ -80,6 +88,8 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Estamos procurando um motorista para voce.',
     priority: 'normal',
     channelId: 'ride_status',
+    ttlSeconds: RIDE_LIFECYCLE_TTL_SECONDS,
+    persistentRideStatus: true,
     dedupeWindowSeconds: 10 * 60,
     rateLimit: { max: 3, windowSeconds: 60 * 60 },
     quietHours: false
@@ -92,6 +102,7 @@ const EVENT_MATRIX = Object.freeze({
     body: '{{pickupLabel}} para {{destinationLabel}}.',
     priority: 'high',
     channelId: 'driver_offers',
+    ttlSeconds: 90,
     dedupeWindowSeconds: 90,
     rateLimit: { max: 8, windowSeconds: 60 * 60 },
     quietHours: false
@@ -104,6 +115,8 @@ const EVENT_MATRIX = Object.freeze({
     body: '{{driverName}} esta a caminho.',
     priority: 'high',
     channelId: 'ride_status',
+    ttlSeconds: RIDE_LIFECYCLE_TTL_SECONDS,
+    persistentRideStatus: true,
     dedupeWindowSeconds: 10 * 60,
     rateLimit: { max: 4, windowSeconds: 60 * 60 },
     quietHours: false
@@ -116,6 +129,8 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Siga para o ponto de embarque.',
     priority: 'high',
     channelId: 'ride_status',
+    ttlSeconds: RIDE_LIFECYCLE_TTL_SECONDS,
+    persistentRideStatus: true,
     dedupeWindowSeconds: 10 * 60,
     rateLimit: { max: 4, windowSeconds: 60 * 60 },
     quietHours: false
@@ -128,6 +143,8 @@ const EVENT_MATRIX = Object.freeze({
     body: 'A caminho de {{destinationLabel}}.',
     priority: 'normal',
     channelId: 'ride_status',
+    ttlSeconds: RIDE_LIFECYCLE_TTL_SECONDS,
+    persistentRideStatus: true,
     dedupeWindowSeconds: 10 * 60,
     rateLimit: { max: 4, windowSeconds: 60 * 60 },
     quietHours: false
@@ -140,6 +157,8 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Obrigado por viajar com a Leaf.',
     priority: 'normal',
     channelId: 'ride_status',
+    ttlSeconds: RIDE_LIFECYCLE_TTL_SECONDS,
+    persistentRideStatus: true,
     dedupeWindowSeconds: 30 * 60,
     rateLimit: { max: 4, windowSeconds: 60 * 60 },
     quietHours: false
@@ -152,6 +171,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Finalize o pagamento para confirmar sua corrida.',
     priority: 'normal',
     channelId: 'payments',
+    ttlSeconds: PAYMENT_TTL_SECONDS,
     dedupeWindowSeconds: 10 * 60,
     rateLimit: { max: 3, windowSeconds: 60 * 60 },
     quietHours: false
@@ -164,6 +184,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Recebemos seu Pix. Vamos seguir com sua corrida.',
     priority: 'high',
     channelId: 'payments',
+    ttlSeconds: PAYMENT_TTL_SECONDS,
     dedupeWindowSeconds: 30 * 60,
     rateLimit: { max: 3, windowSeconds: 60 * 60 },
     quietHours: false
@@ -176,6 +197,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Nao conseguimos confirmar o Pix. Tente novamente no app.',
     priority: 'high',
     channelId: 'payments',
+    ttlSeconds: PAYMENT_TTL_SECONDS,
     dedupeWindowSeconds: 10 * 60,
     rateLimit: { max: 3, windowSeconds: 60 * 60 },
     quietHours: false
@@ -188,6 +210,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Gere um novo pagamento para continuar.',
     priority: 'normal',
     channelId: 'payments',
+    ttlSeconds: PAYMENT_TTL_SECONDS,
     dedupeWindowSeconds: 10 * 60,
     rateLimit: { max: 3, windowSeconds: 60 * 60 },
     quietHours: false
@@ -200,6 +223,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'O resumo da sua viagem ja esta no app.',
     priority: 'normal',
     channelId: 'receipts',
+    ttlSeconds: 24 * 60 * 60,
     dedupeWindowSeconds: 24 * 60 * 60,
     rateLimit: { max: 2, windowSeconds: 24 * 60 * 60 },
     quietHours: true
@@ -212,6 +236,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Nossa equipe respondeu sua conversa.',
     priority: 'high',
     channelId: 'support',
+    ttlSeconds: DEFAULT_NOTIFICATION_TTL_SECONDS,
     dedupeWindowSeconds: 60,
     rateLimit: { max: 8, windowSeconds: 60 * 60 },
     quietHours: false
@@ -224,6 +249,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Tem novidade no seu atendimento.',
     priority: 'normal',
     channelId: 'support',
+    ttlSeconds: DEFAULT_NOTIFICATION_TTL_SECONDS,
     dedupeWindowSeconds: 5 * 60,
     rateLimit: { max: 6, windowSeconds: 60 * 60 },
     quietHours: true
@@ -236,6 +262,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'Finalizamos seu atendimento. Se precisar, seguimos por aqui.',
     priority: 'normal',
     channelId: 'support',
+    ttlSeconds: DEFAULT_NOTIFICATION_TTL_SECONDS,
     dedupeWindowSeconds: 24 * 60 * 60,
     rateLimit: { max: 2, windowSeconds: 24 * 60 * 60 },
     quietHours: true
@@ -248,6 +275,7 @@ const EVENT_MATRIX = Object.freeze({
     body: '{{campaignBody}}',
     priority: 'normal',
     channelId: 'campaigns',
+    ttlSeconds: 24 * 60 * 60,
     dedupeWindowSeconds: 24 * 60 * 60,
     rateLimit: { max: 2, windowSeconds: 24 * 60 * 60 },
     quietHours: true,
@@ -261,6 +289,7 @@ const EVENT_MATRIX = Object.freeze({
     body: 'A demanda esta subindo perto de voce.',
     priority: 'normal',
     channelId: 'smart_push',
+    ttlSeconds: 2 * 60 * 60,
     dedupeWindowSeconds: 6 * 60 * 60,
     rateLimit: { max: 1, windowSeconds: 24 * 60 * 60 },
     quietHours: true,
@@ -383,7 +412,12 @@ class NotificationOrchestratorService {
           type: 'leaf_orchestrated_notification',
           notificationType: 'leaf_orchestrated_notification',
           eventType,
+          matrixVersion: MATRIX_VERSION,
           category: config.category,
+          channelId: config.channelId || 'default',
+          ttlSeconds: config.ttlSeconds || DEFAULT_NOTIFICATION_TTL_SECONDS,
+          dedupeWindowSeconds: config.dedupeWindowSeconds || DEFAULT_DEDUPE_SECONDS,
+          persistentRideStatus: config.persistentRideStatus === true,
           bookingId: context.bookingId,
           rideId: context.rideId,
           paymentId: context.paymentId,
@@ -540,6 +574,8 @@ class NotificationOrchestratorService {
     if (forcedDryRun || !config.channels.includes('push')) {
       const status = forcedDryRun ? 'dry_run' : 'persisted_only';
       await this.incrementMetric(redis, status, 1);
+      await this.incrementMetric(redis, `category:${config.category}:${status}`, 1);
+      await this.incrementMetric(redis, `channel:${status}`, 1);
       await this.incrementMetric(redis, `event:${normalizedEventType}:${status}`, 1);
       await this.persistHistory(redis, { ...record, status, notification });
       return { success: true, status, notification };
@@ -557,6 +593,8 @@ class NotificationOrchestratorService {
 
     const status = push.success ? 'sent' : 'failed';
     await this.incrementMetric(redis, status, 1);
+    await this.incrementMetric(redis, `category:${config.category}:${status}`, 1);
+    await this.incrementMetric(redis, `channel:push:${status}`, 1);
     await this.incrementMetric(redis, `event:${normalizedEventType}:${status}`, 1);
     await this.persistHistory(redis, { ...record, status, notification, push });
 
@@ -609,8 +647,28 @@ class NotificationOrchestratorService {
       date,
       version: MATRIX_VERSION,
       metrics,
-      smartPushMode: this.smartPushMode
+      smartPushMode: this.smartPushMode,
+      matrix: {
+        totalEvents: Object.keys(this.matrix).length,
+        rideLifecycleEvents: Object.values(this.matrix).filter((event) => event.category === 'ride_lifecycle').length,
+        dryRunEvents: Object.values(this.matrix).filter((event) => event.dryRunOnly === true || event.channels?.includes('dry_run')).length,
+        persistentRideEvents: Object.values(this.matrix).filter((event) => event.persistentRideStatus === true).length
+      }
     };
+  }
+
+  async getHistory(date = getDayKey(this.now()), limit = 50) {
+    const redis = await this.getRedisClient();
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const key = `notification_orchestrator:history:${date}`;
+    const rows = redis?.lrange ? await redis.lrange(key, 0, safeLimit - 1) : [];
+    return (rows || []).map((row) => {
+      try {
+        return JSON.parse(row);
+      } catch (_error) {
+        return { raw: row };
+      }
+    });
   }
 }
 

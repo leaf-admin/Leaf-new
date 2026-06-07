@@ -609,8 +609,25 @@ class LeafApiService {
   }
 
   async getNotificationStats() {
-    const data = await this.request("/notifications");
-    return data?.data?.stats || {};
+    return this.request("/notifications/stats");
+  }
+
+  async getNotificationOrchestrationMatrix() {
+    return this.request("/notifications/orchestration/matrix");
+  }
+
+  async getNotificationOrchestrationStats(date) {
+    const params = new URLSearchParams();
+    if (date) params.set("date", date);
+    const suffix = params.toString();
+    return this.request(`/notifications/orchestration/stats${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async getNotificationOrchestrationHistory({ date, limit = 20 } = {}) {
+    const params = new URLSearchParams();
+    if (date) params.set("date", date);
+    params.set("limit", String(limit));
+    return this.request(`/notifications/orchestration/history?${params.toString()}`);
   }
 
   async sendPushNotification(payload = {}) {

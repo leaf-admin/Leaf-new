@@ -44,6 +44,10 @@ const conservativeDefaults = Object.freeze({
     enabled: true,
     smartPushMode: 'disabled',
     persistentRideNotificationsEnabled: true,
+    dedupeWindowSeconds: 60,
+    defaultTtlSeconds: 3600,
+    androidChannels: ['ride_status', 'driver_actions', 'payments', 'default'],
+    iosCategories: ['ride_status_update', 'payment_update', 'identity_reverification'],
     suppressMarketingDuringActiveRide: true,
   },
   driverOnlinePolicy: {

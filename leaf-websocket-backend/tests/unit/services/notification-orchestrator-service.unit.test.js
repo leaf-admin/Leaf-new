@@ -3,6 +3,7 @@ const NotificationOrchestratorService = require('../../../services/notification-
 function createRedisMock() {
   const values = new Map();
   const hashes = new Map();
+  const lists = new Map();
 
   return {
     status: 'ready',
@@ -29,7 +30,16 @@ function createRedisMock() {
       return 1;
     }),
     hgetall: jest.fn(async (key) => hashes.get(key) || {}),
-    lpush: jest.fn().mockResolvedValue(1),
+    lpush: jest.fn(async (key, value) => {
+      const list = lists.get(key) || [];
+      list.unshift(value);
+      lists.set(key, list);
+      return list.length;
+    }),
+    lrange: jest.fn(async (key, start, stop) => {
+      const list = lists.get(key) || [];
+      return list.slice(start, stop + 1);
+    }),
     ltrim: jest.fn().mockResolvedValue('OK')
   };
 }
@@ -80,7 +90,11 @@ describe('notification-orchestrator-service', () => {
       channelId: 'driver_offers',
       data: expect.objectContaining({
         eventType: 'ride.offer_received',
-        bookingId: 'booking_1'
+        matrixVersion: expect.stringContaining('leaf-notification-orchestration'),
+        bookingId: 'booking_1',
+        channelId: 'driver_offers',
+        ttlSeconds: '90',
+        dedupeWindowSeconds: '90'
       })
     }));
   });
@@ -190,5 +204,35 @@ describe('notification-orchestrator-service', () => {
       status: 'dry_run'
     }));
     expect(fcmService.sendNotificationToUser).not.toHaveBeenCalled();
+  });
+
+  it('returns matrix coverage and recent dispatch history for dashboard observability', async () => {
+    const { service, redis } = createService();
+
+    await service.dispatchEvent({
+      eventType: 'ride.accepted',
+      userId: 'user_1',
+      userType: 'passenger',
+      context: { driverName: 'Carlos', bookingId: 'booking_1' },
+      idempotencyKey: 'booking_1'
+    });
+
+    const stats = await service.getStats('2026-06-06');
+    const history = await service.getHistory('2026-06-06', 5);
+
+    expect(stats.matrix).toEqual(expect.objectContaining({
+      totalEvents: expect.any(Number),
+      rideLifecycleEvents: expect.any(Number),
+      persistentRideEvents: expect.any(Number),
+      dryRunEvents: expect.any(Number)
+    }));
+    expect(redis.lpush).toHaveBeenCalledWith(
+      'notification_orchestrator:history:2026-06-06',
+      expect.any(String)
+    );
+    expect(history[0]).toEqual(expect.objectContaining({
+      eventType: 'ride.accepted',
+      status: 'sent'
+    }));
   });
 });
