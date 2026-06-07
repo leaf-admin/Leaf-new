@@ -26,6 +26,26 @@ function isInvalidFcmTokenError(error) {
         || /registration token.*not registered/i.test(message);
 }
 
+function isThirdPartyAuthError(error) {
+    const code = String(error?.code || '');
+    const message = String(error?.message || '');
+    return code === 'messaging/third-party-auth-error'
+        || /missing required authentication credential/i.test(message)
+        || /APNS_AUTH_ERROR|THIRD_PARTY_AUTH_ERROR/i.test(message);
+}
+
+function redactFcmToken(token) {
+    const value = String(token || '').trim();
+    if (!value) return '<empty>';
+    if (value.length <= 16) return `${value.slice(0, 4)}...`;
+    return `${value.slice(0, 10)}...${value.slice(-6)}`;
+}
+
+function normalizeTokenTimestamp(value) {
+    const timestamp = Date.parse(String(value || ''));
+    return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function resolveServiceAccountPath() {
     const candidates = [
         process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
@@ -357,49 +377,110 @@ class FCMService {
 
     /**
      * Resolve tokens FCM ativos para um usuário.
-     * 1) Fonte primária: fcm_tokens:{userId}
-     * 2) Fallback legado: user:{userId}/driver:{userId} -> campo fcmToken
+     * 1) Fonte canônica atual: user:{userId}/driver:{userId} -> fcmToken
+     * 2) Índice multi-device: fcm_tokens:{userId}
+     *
+     * A fonte canônica vem primeiro porque o app atual atualiza esse campo no
+     * handshake. O índice pode conter aparelhos antigos e não deve esconder o
+     * token mais recente do device logado.
      */
     async resolveUserTokens(userId) {
         const normalizedUserId = String(userId || '').trim();
         if (!normalizedUserId) return [];
 
+        const redis = await this.getRedisClient('resolveUserTokens');
         const activeTokens = await this.getUserFCMTokens(normalizedUserId);
+        if (!redis) return activeTokens;
+
+        const activeTokenSet = new Set(
+            activeTokens
+                .map((tokenData) => String(tokenData?.fcmToken || '').trim())
+                .filter(Boolean)
+        );
+
+        const candidates = [];
+        const addCandidate = (tokenData, sourcePriority, source) => {
+            const token = String(tokenData?.fcmToken || '').trim();
+            if (!token) return;
+            const timestamp = normalizeTokenTimestamp(
+                tokenData.fcmTokenUpdated ||
+                tokenData.lastUpdated ||
+                tokenData.authenticatedAt
+            );
+            candidates.push({
+                ...tokenData,
+                fcmToken: token,
+                isActive: tokenData.isActive !== false,
+                source,
+                sourcePriority,
+                sortTimestamp: timestamp
+            });
+        };
+
+        const canonicalSources = [
+            { key: `driver:${normalizedUserId}`, userType: 'driver' },
+            { key: `user:${normalizedUserId}`, userType: 'customer' }
+        ];
+
+        for (const source of canonicalSources) {
+            let data = {};
+            if (typeof redis.hgetall === 'function') {
+                data = await redis.hgetall(source.key) || {};
+            }
+
+            let canonicalToken = String(data.fcmToken || '').trim();
+            if (!canonicalToken && typeof redis.hget === 'function') {
+                canonicalToken = String(await redis.hget(source.key, 'fcmToken') || '').trim();
+            }
+            if (!canonicalToken) continue;
+
+            addCandidate({
+                userId: normalizedUserId,
+                userType: source.userType,
+                fcmToken: canonicalToken,
+                platform: data.fcmPlatform || null,
+                socketId: data.socketId || null,
+                isTemporary: data.isTemporary === 'true' || data.isTemporary === true,
+                fcmTokenUpdated: data.fcmTokenUpdated || null,
+                lastUpdated: data.fcmTokenUpdated || null,
+                isActive: true,
+                migratedFromCanonical: !activeTokenSet.has(canonicalToken),
+                needsBackfill: !activeTokenSet.has(canonicalToken)
+            }, 0, source.key);
+        }
+
+        for (const tokenData of activeTokens) {
+            addCandidate(tokenData, 1, 'fcm_tokens');
+        }
+
+        candidates.sort((a, b) => {
+            if (a.sourcePriority !== b.sourcePriority) return a.sourcePriority - b.sourcePriority;
+            return b.sortTimestamp - a.sortTimestamp;
+        });
+
         const dedupe = new Set();
         const resolved = [];
 
-        for (const tokenData of activeTokens) {
+        for (const tokenData of candidates) {
             const token = String(tokenData?.fcmToken || '').trim();
-            if (!token || dedupe.has(token)) continue;
+            if (!token || dedupe.has(token) || tokenData.isActive === false) continue;
+
             dedupe.add(token);
-            resolved.push(tokenData);
-        }
-
-        const redis = await this.getRedisClient('resolveUserTokens');
-        if (!redis) return resolved;
-
-        const legacySources = [
-            { key: `user:${normalizedUserId}`, userType: 'customer' },
-            { key: `driver:${normalizedUserId}`, userType: 'driver' }
-        ];
-
-        for (const source of legacySources) {
-            const legacyToken = String(await redis.hget(source.key, 'fcmToken') || '').trim();
-            if (!legacyToken || dedupe.has(legacyToken)) continue;
-
-            dedupe.add(legacyToken);
             resolved.push({
-                userId: normalizedUserId,
-                userType: source.userType,
-                fcmToken: legacyToken,
-                isActive: true,
-                migratedFromLegacy: true
+                ...tokenData,
+                sortTimestamp: undefined,
+                sourcePriority: undefined,
+                needsBackfill: undefined
             });
 
-            // Backfill no hash canônico para evitar misses recorrentes.
-            await this.saveUserFCMToken(normalizedUserId, source.userType, legacyToken, {
-                migratedFromLegacy: true
-            });
+            if (tokenData.needsBackfill) {
+                await this.saveUserFCMToken(normalizedUserId, tokenData.userType, token, {
+                    migratedFromCanonical: true,
+                    platform: tokenData.platform,
+                    socketId: tokenData.socketId,
+                    isTemporary: tokenData.isTemporary
+                });
+            }
         }
 
         return resolved;
@@ -489,7 +570,8 @@ class FCMService {
                 try {
                     const result = await this.sendToToken(tokenData.fcmToken, notification);
                     results.push({
-                        token: tokenData.fcmToken,
+                        tokenPreview: redactFcmToken(tokenData.fcmToken),
+                        tokenSource: tokenData.source || 'unknown',
                         success: result.success,
                         messageId: result.messageId,
                         error: result.error
@@ -502,7 +584,8 @@ class FCMService {
                         error: error.message
                     });
                     results.push({
-                        token: tokenData.fcmToken,
+                        tokenPreview: redactFcmToken(tokenData.fcmToken),
+                        tokenSource: tokenData.source || 'unknown',
                         success: false,
                         error: error.message
                     });
@@ -624,17 +707,14 @@ class FCMService {
                 async () => {
                     return await admin.messaging().send(message);
                 },
-                async () => {
-                    // Fallback: retornar erro se circuit breaker aberto
-                    throw new Error('Serviço de notificações temporariamente indisponível');
-                },
+                null,
                 {
                     failureThreshold: 5,
                     timeout: 60000
                 }
             );
 
-            logger.info(`✅ Notificação enviada para token ${fcmToken}: ${response}`);
+            logger.info(`✅ Notificação enviada para token ${redactFcmToken(fcmToken)}: ${response}`);
             await this.incrementDailyMetrics({
                 totalSent: 1,
                 successful: 1
@@ -646,7 +726,17 @@ class FCMService {
             };
 
         } catch (error) {
-            logger.error(`❌ Erro ao enviar notificação para token ${fcmToken}:`, error);
+            logger.error(`❌ Erro ao enviar notificação para token ${redactFcmToken(fcmToken)}:`, error);
+
+            if (isThirdPartyAuthError(error)) {
+                logStructured('error', 'Erro de autenticacao third-party no FCM/APNs', {
+                    service: 'fcm',
+                    operation: 'sendToToken',
+                    tokenPreview: redactFcmToken(fcmToken),
+                    code: error.code || null,
+                    hint: 'Configurar APNs Authentication Key no Firebase para o bundle iOS correto'
+                });
+            }
 
             // Se o token for inválido, removê-lo
             if (isInvalidFcmTokenError(error)) {
@@ -733,17 +823,14 @@ class FCMService {
                 async () => {
                     return await admin.messaging().send(message);
                 },
-                async () => {
-                    // Fallback: retornar erro se circuit breaker aberto
-                    throw new Error('Serviço de notificações temporariamente indisponível');
-                },
+                null,
                 {
                     failureThreshold: 5,
                     timeout: 60000
                 }
             );
 
-            logger.info(`✅ Notificação interativa enviada para token ${fcmToken}: ${response}`);
+            logger.info(`✅ Notificação interativa enviada para token ${redactFcmToken(fcmToken)}: ${response}`);
             await this.incrementDailyMetrics({
                 totalSent: 1,
                 successful: 1
@@ -755,7 +842,17 @@ class FCMService {
             };
 
         } catch (error) {
-            logger.error(`❌ Erro ao enviar notificação interativa para token ${fcmToken}:`, error);
+            logger.error(`❌ Erro ao enviar notificação interativa para token ${redactFcmToken(fcmToken)}:`, error);
+
+            if (isThirdPartyAuthError(error)) {
+                logStructured('error', 'Erro de autenticacao third-party no FCM/APNs', {
+                    service: 'fcm',
+                    operation: 'sendInteractiveNotification',
+                    tokenPreview: redactFcmToken(fcmToken),
+                    code: error.code || null,
+                    hint: 'Configurar APNs Authentication Key no Firebase para o bundle iOS correto'
+                });
+            }
 
             if (isInvalidFcmTokenError(error)) {
                 await this.removeInvalidToken(fcmToken);
@@ -894,7 +991,16 @@ class FCMService {
                         rideStatusPushes: 1
                     }, 'sendRideStatusUpdate');
                 } catch (err) {
-                    logger.warn(`⚠️ Erro push silencioso fcm=${fcmToken.slice(0, 10)}...: ${err.message}`);
+                    logger.warn(`⚠️ Erro push silencioso fcm=${redactFcmToken(fcmToken)}: ${err.message}`);
+                    if (isThirdPartyAuthError(err)) {
+                        logStructured('error', 'Erro de autenticacao third-party no FCM/APNs', {
+                            service: 'fcm',
+                            operation: 'sendRideStatusUpdate',
+                            tokenPreview: redactFcmToken(fcmToken),
+                            code: err.code || null,
+                            hint: 'Configurar APNs Authentication Key no Firebase para o bundle iOS correto'
+                        });
+                    }
                     if (isInvalidFcmTokenError(err)) {
                         await this.removeInvalidToken(fcmToken);
                     }

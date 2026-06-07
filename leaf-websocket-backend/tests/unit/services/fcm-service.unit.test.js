@@ -34,11 +34,13 @@ describe('fcm-service', () => {
   let fcmService;
   let mockRedis;
   let admin;
+  let circuitBreakerService;
 
   beforeEach(() => {
     jest.resetModules();
     FCMService = require('../../../services/fcm-service');
     admin = require('firebase-admin');
+    circuitBreakerService = require('../../../services/circuit-breaker-service');
     mockRedis = {
       hset: jest.fn().mockResolvedValue(1),
       hincrby: jest.fn().mockResolvedValue(1),
@@ -91,6 +93,88 @@ describe('fcm-service', () => {
     expect(mockRedis.hset).toHaveBeenCalled();
     expect(mockRedis.sadd).toHaveBeenCalledWith('active_fcm_tokens', 'token-1');
     expect(mockRedis.sadd).toHaveBeenCalledWith('fcm_token_users:token-1', 'u1');
+  });
+
+  test('resolveUserTokens should prefer current canonical driver token over stale indexed tokens', async () => {
+    mockRedis.hgetall.mockImplementation((key) => {
+      if (key === 'fcm_tokens:driver-1') {
+        return Promise.resolve({
+          'old-android-token': JSON.stringify({
+            userId: 'driver-1',
+            userType: 'driver',
+            fcmToken: 'old-android-token',
+            platform: 'android',
+            lastUpdated: '2026-06-01T10:00:00.000Z',
+            isActive: true
+          })
+        });
+      }
+      if (key === 'driver:driver-1') {
+        return Promise.resolve({
+          fcmToken: 'fresh-ios-token',
+          fcmPlatform: 'ios',
+          fcmTokenUpdated: '2026-06-07T04:33:03.866Z'
+        });
+      }
+      if (key === 'user:driver-1') {
+        return Promise.resolve({});
+      }
+      return Promise.resolve({});
+    });
+
+    const tokens = await fcmService.resolveUserTokens('driver-1');
+
+    expect(tokens.map((tokenData) => tokenData.fcmToken)).toEqual([
+      'fresh-ios-token',
+      'old-android-token'
+    ]);
+    expect(tokens[0]).toEqual(expect.objectContaining({
+      source: 'driver:driver-1',
+      platform: 'ios',
+      migratedFromCanonical: true
+    }));
+    expect(mockRedis.hset).toHaveBeenCalledWith(
+      'fcm_tokens:driver-1',
+      'fresh-ios-token',
+      expect.any(String)
+    );
+  });
+
+  test('resolveUserTokens should dedupe canonical token already present in multi-device index', async () => {
+    mockRedis.hgetall.mockImplementation((key) => {
+      if (key === 'fcm_tokens:driver-1') {
+        return Promise.resolve({
+          'fresh-ios-token': JSON.stringify({
+            userId: 'driver-1',
+            userType: 'driver',
+            fcmToken: 'fresh-ios-token',
+            platform: 'ios',
+            lastUpdated: '2026-06-07T04:33:03.866Z',
+            isActive: true
+          })
+        });
+      }
+      if (key === 'driver:driver-1') {
+        return Promise.resolve({
+          fcmToken: 'fresh-ios-token',
+          fcmPlatform: 'ios',
+          fcmTokenUpdated: '2026-06-07T04:33:03.866Z'
+        });
+      }
+      if (key === 'user:driver-1') {
+        return Promise.resolve({});
+      }
+      return Promise.resolve({});
+    });
+
+    const tokens = await fcmService.resolveUserTokens('driver-1');
+
+    expect(tokens.map((tokenData) => tokenData.fcmToken)).toEqual(['fresh-ios-token']);
+    expect(mockRedis.hset).not.toHaveBeenCalledWith(
+      'fcm_tokens:driver-1',
+      'fresh-ios-token',
+      expect.any(String)
+    );
   });
 
   test('sendNotificationToUser should return unavailable when service is down', async () => {
@@ -210,6 +294,37 @@ describe('fcm-service', () => {
       'successful',
       1
     );
+    expect(circuitBreakerService.execute).toHaveBeenCalledWith(
+      'fcm_send',
+      expect.any(Function),
+      null,
+      expect.objectContaining({ failureThreshold: 5 })
+    );
+  });
+
+  test('sendToToken should remove invalid FCM token from original Firebase error', async () => {
+    admin.messaging.mockReturnValue({
+      send: jest.fn().mockRejectedValue(Object.assign(new Error('Requested entity was not found.'), {
+        code: 'messaging/registration-token-not-registered'
+      }))
+    });
+    mockRedis.smembers.mockResolvedValue(['u1']);
+    mockRedis.hget.mockImplementation((key, field) => {
+      if (field !== 'fcmToken') return Promise.resolve(null);
+      if (key === 'user:u1') return Promise.resolve('dead-token');
+      return Promise.resolve(null);
+    });
+
+    const result = await fcmService.sendToToken('dead-token', {
+      title: 'Teste',
+      body: 'Mensagem',
+      data: { type: 'test' }
+    });
+
+    expect(result.success).toBe(false);
+    expect(mockRedis.srem).toHaveBeenCalledWith('active_fcm_tokens', 'dead-token');
+    expect(mockRedis.hdel).toHaveBeenCalledWith('fcm_tokens:u1', 'dead-token');
+    expect(mockRedis.hdel).toHaveBeenCalledWith('user:u1', 'fcmToken');
   });
 
   test('removeInvalidToken clears canonical indexes and matching legacy fcmToken fields', async () => {
