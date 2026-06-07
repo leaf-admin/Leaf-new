@@ -152,6 +152,20 @@ const iosTransportSecurity = allowInsecureHttp
         NSAllowsLocalNetworking: false
     };
 
+const resolveIosFirebaseUrlScheme = () => {
+    const googleServicesPath = process.env.GOOGLE_SERVICES_INFO_PLIST || './GoogleService-Info.plist';
+    try {
+        const plist = fs.readFileSync(googleServicesPath, 'utf8');
+        const match = plist.match(/<key>GOOGLE_APP_ID<\/key>\s*<string>([^<]+)<\/string>/);
+        const googleAppId = match?.[1]?.trim();
+        return googleAppId ? `app-${googleAppId.replace(/:/g, '-')}` : 'app-1-106504629884-ios-a1a7afe5fbe33c4aa1a3f9';
+    } catch (_error) {
+        return 'app-1-106504629884-ios-a1a7afe5fbe33c4aa1a3f9';
+    }
+};
+
+const iosFirebaseUrlScheme = resolveIosFirebaseUrlScheme();
+
 module.exports = {
     name: AppConfig.app_name,
     description: AppConfig.app_description,
@@ -282,6 +296,20 @@ module.exports = {
         deploymentTarget: "17.0",
         infoPlist: {
             ITSAppUsesNonExemptEncryption: false,
+            CFBundleURLTypes: [
+                {
+                    CFBundleURLSchemes: ["leafapp", "br.com.leaf.ride"]
+                },
+                {
+                    CFBundleURLSchemes: ["com.googleusercontent.apps.106504629884-laja6e1vn4utkn93ftd99p42mu8qus9s"]
+                },
+                {
+                    CFBundleURLSchemes: ["exp+leafapp-reactnative"]
+                },
+                {
+                    CFBundleURLSchemes: [iosFirebaseUrlScheme]
+                }
+            ],
             UIRequiresFullScreen: true,
             UISupportedInterfaceOrientations: ["UIInterfaceOrientationPortrait"],
             "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationPortrait"],
