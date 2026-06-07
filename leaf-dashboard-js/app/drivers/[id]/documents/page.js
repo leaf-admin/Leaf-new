@@ -120,6 +120,9 @@ export default function DriverDocumentsPage({ params }) {
   const [uploadingBackgroundDoc, setUploadingBackgroundDoc] = useState(false);
   const [backgroundDocFile, setBackgroundDocFile] = useState(null);
   const [selectedRejectionReasons, setSelectedRejectionReasons] = useState({});
+  const [customRejectionReasons, setCustomRejectionReasons] = useState({});
+  const [applicationDecisionModal, setApplicationDecisionModal] = useState(null);
+  const [applicationDecisionReason, setApplicationDecisionReason] = useState("");
   const [showRatingReviews, setShowRatingReviews] = useState(false);
   const [docSearch, setDocSearch] = useState("");
   const [docStatusFilter, setDocStatusFilter] = useState("all");
@@ -173,13 +176,12 @@ export default function DriverDocumentsPage({ params }) {
     }));
   }, [documents]);
 
-  const approveAll = async () => {
-    if (!window.confirm("Aprovar motorista e todos os documentos?")) return;
+  const approveAll = async (notes = "Aprovado pelo dashboard Leaf") => {
     try {
       setBusy(true);
       setError("");
       setActionMessage("");
-      await leafAPI.approveDriverApplication(id);
+      await leafAPI.approveDriverApplication(id, notes);
       setActionMessage("Motorista aprovado com sucesso.");
       await load();
     } catch (err) {
@@ -189,14 +191,14 @@ export default function DriverDocumentsPage({ params }) {
     }
   };
 
-  const rejectAll = async () => {
-    const reason = window.prompt("Motivo da rejeição:");
-    if (!reason) return;
+  const rejectAll = async (reason) => {
+    const safeReason = String(reason || "").trim();
+    if (!safeReason) return;
     try {
       setBusy(true);
       setError("");
       setActionMessage("");
-      await leafAPI.rejectDriverApplication(id, [reason]);
+      await leafAPI.rejectDriverApplication(id, [safeReason]);
       setActionMessage("Motorista rejeitado com sucesso.");
       await load();
     } catch (err) {
@@ -204,6 +206,35 @@ export default function DriverDocumentsPage({ params }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const openApplicationDecisionModal = (action) => {
+    setApplicationDecisionModal({ action });
+    setApplicationDecisionReason(action === "approve" ? "Aprovado pelo dashboard Leaf" : "");
+    setError("");
+    setActionMessage("");
+  };
+
+  const closeApplicationDecisionModal = () => {
+    if (busy) return;
+    setApplicationDecisionModal(null);
+    setApplicationDecisionReason("");
+  };
+
+  const submitApplicationDecisionModal = async () => {
+    if (!applicationDecisionModal?.action) return;
+    const reason = String(applicationDecisionReason || "").trim();
+    if (!reason) {
+      setError("Informe o motivo antes de concluir a ação.");
+      return;
+    }
+    if (applicationDecisionModal.action === "approve") {
+      await approveAll(reason);
+    } else {
+      await rejectAll(reason);
+    }
+    setApplicationDecisionModal(null);
+    setApplicationDecisionReason("");
   };
 
   const resolveRejectionReason = (documentType) => {
@@ -217,8 +248,7 @@ export default function DriverDocumentsPage({ params }) {
       return "";
     }
 
-    const customReason = window.prompt("Motivo da rejeição:");
-    return String(customReason || "").trim();
+    return String(customRejectionReasons?.[documentType] || "").trim();
   };
 
   const reviewSingle = async (documentType, action) => {
@@ -346,10 +376,10 @@ export default function DriverDocumentsPage({ params }) {
         <header className="header">
           <h1>Documentos do Motorista</h1>
           <div className="filters">
-            <button onClick={approveAll} disabled={busy}>
+            <button onClick={() => openApplicationDecisionModal("approve")} disabled={busy}>
               Aprovar
             </button>
-            <button onClick={rejectAll} disabled={busy}>
+            <button onClick={() => openApplicationDecisionModal("reject")} disabled={busy}>
               Rejeitar
             </button>
             <Link href="/drivers">Voltar</Link>
@@ -662,6 +692,23 @@ export default function DriverDocumentsPage({ params }) {
                           <option value="__custom__">Outro motivo (digitar)</option>
                         </select>
                       </label>
+                      {currentReasonSelection === "__custom__" ? (
+                        <label className="field-stack" style={{ marginTop: 10 }}>
+                          Motivo personalizado
+                          <textarea
+                            rows={3}
+                            value={customRejectionReasons[normalizedType] || ""}
+                            onChange={(e) => {
+                              const nextValue = e.target.value;
+                              setCustomRejectionReasons((prev) => ({
+                                ...prev,
+                                [normalizedType]: nextValue,
+                              }));
+                            }}
+                            placeholder="Descreva o motivo para auditoria."
+                          />
+                        </label>
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -694,6 +741,51 @@ export default function DriverDocumentsPage({ params }) {
             })
           )}
         </section>
+
+        {applicationDecisionModal ? (
+          <div className="admin-modal-backdrop" role="presentation">
+            <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="driver-decision-title">
+              <div className="admin-modal-head">
+                <div>
+                  <h2 id="driver-decision-title">
+                    {applicationDecisionModal.action === "approve" ? "Aprovar motorista" : "Rejeitar motorista"}
+                  </h2>
+                  <p>
+                    {applicationDecisionModal.action === "approve"
+                      ? "Registre a nota operacional antes de liberar o cadastro."
+                      : "Informe o motivo de rejeição para auditoria e histórico do cadastro."}
+                  </p>
+                </div>
+                <button type="button" onClick={closeApplicationDecisionModal} disabled={busy}>
+                  Fechar
+                </button>
+              </div>
+              <div className="admin-modal-body">
+                <label className="field-stack">
+                  {applicationDecisionModal.action === "approve" ? "Nota de aprovação" : "Motivo da rejeição"}
+                  <textarea
+                    rows={4}
+                    value={applicationDecisionReason}
+                    onChange={(event) => setApplicationDecisionReason(event.target.value)}
+                    placeholder={
+                      applicationDecisionModal.action === "approve"
+                        ? "Ex.: aprovado pelo dashboard Leaf após revisão de documentos."
+                        : "Ex.: documento incompatível com o cadastro enviado."
+                    }
+                  />
+                </label>
+              </div>
+              <div className="admin-modal-actions">
+                <button type="button" onClick={closeApplicationDecisionModal} disabled={busy}>
+                  Cancelar
+                </button>
+                <button type="button" onClick={submitApplicationDecisionModal} disabled={busy || !applicationDecisionReason.trim()}>
+                  {busy ? "Salvando..." : applicationDecisionModal.action === "approve" ? "Confirmar aprovação" : "Confirmar rejeição"}
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
 
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         {error ? <p className="error">{error}</p> : null}

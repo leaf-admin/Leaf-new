@@ -29,6 +29,7 @@
     "prelaunch:rides:concurrent": "node leaf-websocket-backend/scripts/tests/run-real-core-concurrent-rides.cjs",
     "canary:preflight:non-device": "node scripts/prelaunch/run-non-device-canary-preflight.cjs",
     "smoke:woovi-sandbox": "npm run -w leaf-websocket-backend smoke:woovi-sandbox --",
+    "smoke:backoffice": "node scripts/validation/smoke-backoffice-panels.cjs",
     "branch:task": "bash scripts/workflow/new-task-branch.sh"
   },
   "dependencies": {

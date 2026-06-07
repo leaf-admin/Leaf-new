@@ -1707,6 +1707,65 @@ label {
   margin: 2px 0;
 }
 
+.admin-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.admin-modal {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: #ffffff;
+  box-shadow: 0 22px 70px rgba(15, 23, 42, 0.2);
+  padding: 18px;
+}
+
+.admin-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-modal-head h2 {
+  margin: 2px 0 0;
+  font-size: 1rem;
+  line-height: 1.18;
+  font-weight: 700;
+}
+
+.admin-modal-head p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.admin-modal-body {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-modal-body textarea {
+  min-height: 116px;
+}
+
+.admin-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+}
+
 .pager {
   display: flex;
   align-items: center;

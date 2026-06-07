@@ -46,6 +46,8 @@ export default function WaitlistPage() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionDriverId, setActionDriverId] = useState("");
+  const [decisionModal, setDecisionModal] = useState(null);
+  const [decisionReason, setDecisionReason] = useState("");
   const allowedRoles = useMemo(() => ["admin", "super-admin", "manager"], []);
   const roleMessage = roleBlockedMessage(user, allowedRoles);
   const mutationMessage = mutationBlockedMessage(runtimeFlags);
@@ -119,7 +121,7 @@ export default function WaitlistPage() {
     };
   }, [loadWaitlist]);
 
-  const runDriverAction = async (driverId, action) => {
+  const runDriverAction = async (driverId, action, reasonOverride = "") => {
     const safeDriverId = String(driverId || "").trim();
     if (!safeDriverId) return;
     if (!canMutateWaitlist) {
@@ -135,8 +137,7 @@ export default function WaitlistPage() {
         await leafAPI.approveWaitlistDriver(safeDriverId, "Aprovado pelo dashboard Leaf");
         setNotice("Motorista aprovado e liberado para ativação.");
       } else if (action === "reject") {
-        const reason = window.prompt("Motivo da rejeição", "Perfil fora dos critérios atuais");
-        if (reason === null) return;
+        const reason = String(reasonOverride || "Perfil fora dos critérios atuais").trim();
         await leafAPI.rejectWaitlistDriver(safeDriverId, reason);
         setNotice("Motorista rejeitado e removido da fila ativa.");
       }
@@ -146,6 +147,33 @@ export default function WaitlistPage() {
     } finally {
       setActionDriverId("");
     }
+  };
+
+  const openRejectModal = (item) => {
+    const driverId = item?.driverId || item?.id;
+    if (!driverId) return;
+    setDecisionModal({ item, driverId });
+    setDecisionReason("Perfil fora dos critérios atuais");
+    setError("");
+    setNotice("");
+  };
+
+  const closeRejectModal = () => {
+    if (actionDriverId) return;
+    setDecisionModal(null);
+    setDecisionReason("");
+  };
+
+  const submitRejectModal = async () => {
+    if (!decisionModal?.driverId) return;
+    const reason = String(decisionReason || "").trim();
+    if (!reason) {
+      setError("Informe o motivo antes de rejeitar o motorista.");
+      return;
+    }
+    await runDriverAction(decisionModal.driverId, "reject", reason);
+    setDecisionModal(null);
+    setDecisionReason("");
   };
 
   const updateLandingLead = async (leadId, nextStatus) => {
@@ -340,7 +368,7 @@ export default function WaitlistPage() {
                               <button
                                 type="button"
                                 className="button-secondary"
-                                onClick={() => runDriverAction(item.driverId || item.id, "reject")}
+                                onClick={() => openRejectModal(item)}
                                 disabled={!canMutateWaitlist || actionDriverId === (item.driverId || item.id)}
                                 title={!canMutateWaitlist ? actionBlockedMessage : undefined}
                               >
@@ -435,6 +463,49 @@ export default function WaitlistPage() {
         </section>
         {notice ? <p className="success-text">{notice}</p> : null}
         <ErrorText message={error} />
+        {decisionModal ? (
+          <div className="admin-modal-backdrop" role="presentation">
+            <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="waitlist-decision-title">
+              <header className="admin-modal-head">
+                <div>
+                  <p className="eyebrow">Decisão auditável</p>
+                  <h2 id="waitlist-decision-title">Rejeitar motorista na waitlist</h2>
+                  <p>
+                    {`${decisionModal.item?.driver?.firstName || ""} ${decisionModal.item?.driver?.lastName || ""}`.trim() ||
+                      decisionModal.driverId}
+                  </p>
+                </div>
+                <button type="button" className="button-secondary" onClick={closeRejectModal} disabled={!!actionDriverId}>
+                  Fechar
+                </button>
+              </header>
+              <div className="admin-modal-body">
+                <label className="form-field">
+                  Motivo da rejeição
+                  <textarea
+                    value={decisionReason}
+                    onChange={(event) => setDecisionReason(event.target.value)}
+                    placeholder="Explique o motivo da rejeição para auditoria."
+                  />
+                </label>
+                <p className="muted">Esta decisão fica registrada no backend e pode gerar comunicação ao motorista.</p>
+              </div>
+              <footer className="admin-modal-actions">
+                <button type="button" className="button-secondary" onClick={closeRejectModal} disabled={!!actionDriverId}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="button-danger"
+                  onClick={submitRejectModal}
+                  disabled={!!actionDriverId || !decisionReason.trim()}
+                >
+                  Rejeitar
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
       </main>
     </ProtectedRoute>
   );

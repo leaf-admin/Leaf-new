@@ -28,6 +28,8 @@ export default function DriversPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [decisionModal, setDecisionModal] = useState(null);
+  const [decisionReason, setDecisionReason] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -68,11 +70,10 @@ export default function DriversPage() {
     return base;
   }, [applications]);
 
-  const approve = async (driverId) => {
-    if (!window.confirm("Aprovar motorista e todos os documentos?")) return;
+  const approve = async (driverId, notes = "Aprovado pelo dashboard Leaf") => {
     try {
       setBusyId(driverId);
-      await leafAPI.approveDriverApplication(driverId);
+      await leafAPI.approveDriverApplication(driverId, notes);
       await load();
     } catch (err) {
       setError(err?.message || "Falha ao aprovar motorista");
@@ -81,18 +82,48 @@ export default function DriversPage() {
     }
   };
 
-  const reject = async (driverId) => {
-    const reason = window.prompt("Motivo da rejeicao:");
-    if (!reason) return;
+  const reject = async (driverId, reason) => {
+    const safeReason = String(reason || "").trim();
+    if (!safeReason) return;
     try {
       setBusyId(driverId);
-      await leafAPI.rejectDriverApplication(driverId, [reason]);
+      await leafAPI.rejectDriverApplication(driverId, [safeReason]);
       await load();
     } catch (err) {
       setError(err?.message || "Falha ao rejeitar motorista");
     } finally {
       setBusyId(null);
     }
+  };
+
+  const openDecisionModal = (item, action) => {
+    const driverId = item?.id || item?.driver?.id;
+    if (!driverId) return;
+    setDecisionModal({ item, action, driverId });
+    setDecisionReason(action === "approve" ? "Aprovado pelo dashboard Leaf" : "");
+    setError("");
+  };
+
+  const closeDecisionModal = () => {
+    if (busyId) return;
+    setDecisionModal(null);
+    setDecisionReason("");
+  };
+
+  const submitDecisionModal = async () => {
+    if (!decisionModal?.driverId) return;
+    const reason = String(decisionReason || "").trim();
+    if (!reason) {
+      setError("Informe o motivo antes de concluir a ação.");
+      return;
+    }
+    if (decisionModal.action === "approve") {
+      await approve(decisionModal.driverId, reason);
+    } else {
+      await reject(decisionModal.driverId, reason);
+    }
+    setDecisionModal(null);
+    setDecisionReason("");
   };
 
   return (
@@ -198,10 +229,10 @@ export default function DriversPage() {
                           <td>
                             <div className="actions-cell">
                               {itemId ? <Link href={`/drivers/${itemId}/documents`}>Documentos</Link> : null}
-                              <button disabled={!itemId || isBusy} onClick={() => approve(itemId)}>
+                              <button disabled={!itemId || isBusy} onClick={() => openDecisionModal(item, "approve")}>
                                 Aprovar
                               </button>
-                              <button disabled={!itemId || isBusy} onClick={() => reject(itemId)}>
+                              <button disabled={!itemId || isBusy} onClick={() => openDecisionModal(item, "reject")}>
                                 Rejeitar
                               </button>
                             </div>
@@ -220,6 +251,53 @@ export default function DriversPage() {
             </div>
           </Panel>
         </section>
+
+        {decisionModal ? (
+          <div className="admin-modal-backdrop" role="presentation">
+            <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="driver-decision-title">
+              <header className="admin-modal-head">
+                <div>
+                  <p className="eyebrow">Decisão auditável</p>
+                  <h2 id="driver-decision-title">
+                    {decisionModal.action === "approve" ? "Aprovar motorista" : "Rejeitar motorista"}
+                  </h2>
+                  <p>{decisionModal.item?.driver?.name || decisionModal.driverId}</p>
+                </div>
+                <button type="button" className="button-secondary" onClick={closeDecisionModal} disabled={!!busyId}>
+                  Fechar
+                </button>
+              </header>
+              <div className="admin-modal-body">
+                <label className="form-field">
+                  {decisionModal.action === "approve" ? "Nota de aprovação" : "Motivo da rejeição"}
+                  <textarea
+                    value={decisionReason}
+                    onChange={(event) => setDecisionReason(event.target.value)}
+                    placeholder={
+                      decisionModal.action === "approve"
+                        ? "Registre o motivo ou contexto da aprovação."
+                        : "Explique o motivo da rejeição para auditoria."
+                    }
+                  />
+                </label>
+                <p className="muted">Esta ação será enviada ao backend com operador, motorista e motivo registrado.</p>
+              </div>
+              <footer className="admin-modal-actions">
+                <button type="button" className="button-secondary" onClick={closeDecisionModal} disabled={!!busyId}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className={decisionModal.action === "reject" ? "button-danger" : undefined}
+                  onClick={submitDecisionModal}
+                  disabled={!!busyId || !decisionReason.trim()}
+                >
+                  {decisionModal.action === "approve" ? "Aprovar" : "Rejeitar"}
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
 
         <ErrorText message={error} />
       </main>

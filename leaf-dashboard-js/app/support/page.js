@@ -373,6 +373,7 @@ export default function SupportPage() {
   const [copilotNoteDraft, setCopilotNoteDraft] = useState("");
   const [copilotEscalationReason, setCopilotEscalationReason] = useState("");
   const [n0TicketForm, setN0TicketForm] = useState(DEFAULT_N0_TICKET_FORM);
+  const [closeChatModal, setCloseChatModal] = useState(null);
 
   const selectedUserId = selectedTicket?.userId || selectedTicket?.user?.id || null;
   const activeContextUserId = selectedN0Chat?.userId || selectedUserId || null;
@@ -1101,13 +1102,20 @@ export default function SupportPage() {
     }
   };
 
-  const closeChat = async () => {
+  const closeChat = async (confirmed = false) => {
     if (!selectedUserId) return;
     if (!canRunSupportAction(supportPolicy, "close_chat", selectedTicketTier)) {
       setError(supportActionBlockReason(supportPolicy, "close_chat", selectedTicketTier));
       return;
     }
-    if (!window.confirm("Encerrar chat deste usuario?")) return;
+    if (confirmed !== true) {
+      setCloseChatModal({
+        kind: "ticket",
+        title: "Encerrar chat",
+        description: "O histórico será preservado e o atendimento ficará arquivado para auditoria.",
+      });
+      return;
+    }
     try {
       setActionBusy("close-chat");
       setError("");
@@ -1115,6 +1123,7 @@ export default function SupportPage() {
       await leafAPI.closeChat(selectedUserId, "agent");
       const status = await leafAPI.getChatStatus(selectedUserId);
       setChatStatus(status?.status || null);
+      setCloseChatModal(null);
       setActionMessage("Chat encerrado com sucesso.");
     } catch (err) {
       setError(err?.message || "Falha ao encerrar chat");
@@ -1189,19 +1198,27 @@ export default function SupportPage() {
     }
   };
 
-  const closeN0Chat = async () => {
+  const closeN0Chat = async (confirmed = false) => {
     if (!selectedN0Chat?.userId) return;
     if (!canRunSupportAction(supportPolicy, "close_chat", "N3")) {
       setError(supportActionBlockReason(supportPolicy, "close_chat", "N3"));
       return;
     }
-    if (!window.confirm("Encerrar este atendimento simples?")) return;
+    if (confirmed !== true) {
+      setCloseChatModal({
+        kind: "n0",
+        title: "Encerrar atendimento simples",
+        description: "O chat N0 será arquivado e poderá ser consultado depois no histórico.",
+      });
+      return;
+    }
     try {
       setActionBusy("n0-close");
       setError("");
       setActionMessage("");
       await leafAPI.closeChat(selectedN0Chat.userId, "agent");
       await loadChatInbox();
+      setCloseChatModal(null);
       setActionMessage("Chat N0 encerrado e historico arquivado.");
     } catch (err) {
       setError(err?.message || "Falha ao encerrar chat N0");
@@ -2447,6 +2464,45 @@ export default function SupportPage() {
           </Panel>
         </section>
         </details>
+        {closeChatModal ? (
+          <div className="admin-modal-backdrop" role="presentation">
+            <section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="support-close-chat-title">
+              <div className="admin-modal-head">
+                <div>
+                  <h2 id="support-close-chat-title">{closeChatModal.title}</h2>
+                  <p>{closeChatModal.description}</p>
+                </div>
+                <button type="button" onClick={() => setCloseChatModal(null)} disabled={!!actionBusy}>
+                  Fechar
+                </button>
+              </div>
+              <div className="admin-modal-body">
+                <p className="text-muted">
+                  Confirme apenas se não houver pendência imediata com o usuário. O registro permanece disponível para
+                  auditoria do suporte.
+                </p>
+              </div>
+              <div className="admin-modal-actions">
+                <button type="button" onClick={() => setCloseChatModal(null)} disabled={!!actionBusy}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (closeChatModal.kind === "n0") {
+                      closeN0Chat(true);
+                      return;
+                    }
+                    closeChat(true);
+                  }}
+                  disabled={!!actionBusy}
+                >
+                  {actionBusy === "close-chat" || actionBusy === "n0-close" ? "Encerrando..." : "Encerrar chat"}
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         <ErrorText message={error} />
       </main>

@@ -69,27 +69,6 @@ function resolveDocumentLabel(type) {
   return normalized || "-";
 }
 
-function resolveRejectionReason(documentType) {
-  const options = REJECTION_REASON_OPTIONS[String(documentType || "").toLowerCase()] || [];
-  if (options.length === 0) {
-    return String(window.prompt("Motivo da rejeição:") || "").trim();
-  }
-
-  const typed = String(
-    window.prompt(
-      `Motivo da rejeição:\n${options.map((item, index) => `${index + 1}. ${item}`).join("\n")}\n\nDigite o número ou escreva o motivo:`,
-    ) || "",
-  ).trim();
-  if (!typed) return "";
-
-  const parsedIndex = Number.parseInt(typed, 10);
-  if (Number.isFinite(parsedIndex) && parsedIndex >= 1 && parsedIndex <= options.length) {
-    return options[parsedIndex - 1];
-  }
-
-  return typed;
-}
-
 function formatDocumentRequestMessage(result) {
   if (result?.push?.success) return "Ajuste solicitado e push enviado ao motorista.";
   if (result?.push?.skipped) return "Ajuste solicitado sem envio de push.";
@@ -114,6 +93,9 @@ export default function DriversReviewQueuePage() {
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [busyKey, setBusyKey] = useState("");
+  const [decisionModal, setDecisionModal] = useState(null);
+  const [decisionPreset, setDecisionPreset] = useState("");
+  const [decisionReason, setDecisionReason] = useState("");
   const [filters, setFilters] = useState({
     documentType: "all",
     status: "pending",
@@ -199,12 +181,12 @@ export default function DriversReviewQueuePage() {
     ];
   }, [items]);
 
-  const reviewDocument = async (item, action) => {
+  const reviewDocument = async (item, action, reason = "") => {
     const driverId = String(item?.driverId || "").trim();
     const documentType = String(item?.documentType || "").trim().toLowerCase();
     if (!driverId || !documentType) return;
 
-    const rejectionReason = action === "reject" ? resolveRejectionReason(documentType) : "";
+    const rejectionReason = action === "reject" ? String(reason || "").trim() : "";
     if (action === "reject" && !rejectionReason) return;
 
     try {
@@ -223,21 +205,20 @@ export default function DriversReviewQueuePage() {
     }
   };
 
-  const requestDocumentUpdate = async (item) => {
+  const requestDocumentUpdate = async (item, reason) => {
     const driverId = String(item?.driverId || "").trim();
     const documentType = String(item?.documentType || "").trim().toLowerCase();
     if (!driverId || !documentType) return;
 
-    const defaultReason = item?.rejectionReason || "Precisamos que você envie uma versão atualizada deste documento no app.";
-    const reason = String(window.prompt("Mensagem para o motorista:", defaultReason) || "").trim();
-    if (!reason) return;
+    const requestReason = String(reason || "").trim();
+    if (!requestReason) return;
 
     try {
       setBusyKey(`${driverId}:${documentType}:request`);
       setError("");
       setActionMessage("");
       const result = await leafAPI.requestDriverDocument(driverId, documentType, {
-        reason,
+        reason: requestReason,
         sendPush: true,
       });
       setActionMessage(formatDocumentRequestMessage(result));
@@ -247,6 +228,53 @@ export default function DriversReviewQueuePage() {
     } finally {
       setBusyKey("");
     }
+  };
+
+  const openDecisionModal = (item, mode) => {
+    const documentType = String(item?.documentType || "").trim().toLowerCase();
+    const defaultReason =
+      mode === "request"
+        ? item?.rejectionReason || item?.requestReason || "Precisamos que você envie uma versão atualizada deste documento no app."
+        : "";
+    setDecisionModal({ item, mode, documentType });
+    setDecisionPreset("");
+    setDecisionReason(defaultReason);
+    setError("");
+    setActionMessage("");
+  };
+
+  const closeDecisionModal = () => {
+    if (busyKey) return;
+    setDecisionModal(null);
+    setDecisionPreset("");
+    setDecisionReason("");
+  };
+
+  const handleDecisionPresetChange = (event) => {
+    const value = event.target.value;
+    setDecisionPreset(value);
+    if (value) {
+      setDecisionReason(value);
+    }
+  };
+
+  const submitDecisionModal = async () => {
+    if (!decisionModal?.item) return;
+    const reason = String(decisionReason || "").trim();
+    if (!reason) {
+      setError("Informe o motivo antes de concluir a ação.");
+      return;
+    }
+
+    if (decisionModal.mode === "reject") {
+      await reviewDocument(decisionModal.item, "reject", reason);
+    } else if (decisionModal.mode === "request") {
+      await requestDocumentUpdate(decisionModal.item, reason);
+    }
+
+    setDecisionModal(null);
+    setDecisionPreset("");
+    setDecisionReason("");
   };
 
   return (
@@ -456,14 +484,14 @@ export default function DriversReviewQueuePage() {
                               <button
                                 type="button"
                                 disabled={isBusy}
-                                onClick={() => reviewDocument(item, "reject")}
+                                onClick={() => openDecisionModal(item, "reject")}
                               >
                                 Rejeitar
                               </button>
                               <button
                                 type="button"
                                 disabled={isBusy}
-                                onClick={() => requestDocumentUpdate(item)}
+                                onClick={() => openDecisionModal(item, "request")}
                               >
                                 Solicitar ajuste
                               </button>
@@ -503,6 +531,80 @@ export default function DriversReviewQueuePage() {
             </div>
           </Panel>
         </section>
+
+        {decisionModal ? (
+          <div className="admin-modal-backdrop" role="presentation">
+            <section
+              aria-modal="true"
+              className="admin-modal"
+              role="dialog"
+              aria-labelledby="driver-review-decision-title"
+            >
+              <header className="admin-modal-head">
+                <div>
+                  <p className="eyebrow">Decisão auditável</p>
+                  <h2 id="driver-review-decision-title">
+                    {decisionModal.mode === "reject" ? "Rejeitar documento" : "Solicitar ajuste"}
+                  </h2>
+                  <p>
+                    {resolveDocumentLabel(decisionModal.documentType)} de{" "}
+                    {decisionModal.item?.driver?.name || decisionModal.item?.driverId || "motorista"}
+                  </p>
+                </div>
+                <button type="button" className="button-secondary" onClick={closeDecisionModal} disabled={!!busyKey}>
+                  Fechar
+                </button>
+              </header>
+
+              <div className="admin-modal-body">
+                {decisionModal.mode === "reject" ? (
+                  <label className="form-field">
+                    Motivo padrão
+                    <select value={decisionPreset} onChange={handleDecisionPresetChange}>
+                      <option value="">Selecionar motivo</option>
+                      {(REJECTION_REASON_OPTIONS[decisionModal.documentType] || []).map((reason) => (
+                        <option key={reason} value={reason}>
+                          {reason}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
+                <label className="form-field">
+                  {decisionModal.mode === "reject" ? "Motivo registrado" : "Mensagem para o motorista"}
+                  <textarea
+                    value={decisionReason}
+                    onChange={(event) => setDecisionReason(event.target.value)}
+                    placeholder={
+                      decisionModal.mode === "reject"
+                        ? "Explique o motivo da rejeição."
+                        : "Explique de forma simples o que precisa ser reenviado."
+                    }
+                  />
+                </label>
+
+                <p className="muted">
+                  Esta ação será enviada ao backend com operador, documento, decisão e motivo para auditoria.
+                </p>
+              </div>
+
+              <footer className="admin-modal-actions">
+                <button type="button" className="button-secondary" onClick={closeDecisionModal} disabled={!!busyKey}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className={decisionModal.mode === "reject" ? "button-danger" : undefined}
+                  onClick={submitDecisionModal}
+                  disabled={!!busyKey || !decisionReason.trim()}
+                >
+                  {decisionModal.mode === "reject" ? "Rejeitar documento" : "Solicitar ajuste"}
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
 
         <ErrorText message={error} />
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}

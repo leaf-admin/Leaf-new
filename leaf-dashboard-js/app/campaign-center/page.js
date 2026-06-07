@@ -204,6 +204,10 @@ function formatPercent(value) {
   return `${((Number(value || 0) || 0) * 100).toFixed(2)}%`;
 }
 
+function formatOptionalMetric(value, formatter, available) {
+  return available ? formatter(value) : "Indisponível";
+}
+
 function formatNumber(value) {
   return new Intl.NumberFormat("pt-BR").format(Number(value || 0) || 0);
 }
@@ -285,6 +289,7 @@ export default function CampaignCenterPage() {
   const [rows, setRows] = useState([]);
   const [stats, setStats] = useState(null);
   const [commercialReport, setCommercialReport] = useState(null);
+  const [dataWarnings, setDataWarnings] = useState([]);
   const [slots, setSlots] = useState(fallbackCampaignSlots);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -312,19 +317,30 @@ export default function CampaignCenterPage() {
     setLoading(true);
     setError("");
     setNotice("");
+    setDataWarnings([]);
     try {
-      const flags = await leafAPI.getRuntimeFlags().catch(() => null);
+      const warnings = [];
+      const flags = await leafAPI.getRuntimeFlags().catch((err) => {
+        warnings.push({
+          id: "runtime-flags",
+          title: "Runtime flags indisponíveis",
+          detail: err?.message || "Não foi possível confirmar permissões e flags do Campaign Center.",
+        });
+        return null;
+      });
       setRuntimeFlags(flags);
 
       if (!hasAnyRole(user, allowedRoles)) {
         setRows([]);
         setStats(null);
+        setDataWarnings(warnings);
         return;
       }
 
       if (flags && !isLaunchFeatureEnabled(flags, "campaignCenterEnabled")) {
         setRows([]);
         setStats(null);
+        setDataWarnings(warnings);
         return;
       }
 
@@ -337,13 +353,48 @@ export default function CampaignCenterPage() {
       const response = await leafAPI.listInAppCampaigns(params);
       setRows(response?.campaigns || []);
       setStats(response?.stats || null);
-      const reportResponse = await leafAPI.getInAppCampaignCommercialReport(params).catch(() => null);
+
+      const reportResponse = await leafAPI.getInAppCampaignCommercialReport(params).catch((err) => {
+        warnings.push({
+          id: "commercial-report",
+          title: "Relatório comercial indisponível",
+          detail: err?.message || "CTR, CPM, CPC e valor contratado não devem ser lidos como zero.",
+        });
+        return null;
+      });
       setCommercialReport(reportResponse?.report || null);
-      const slotResponse = await leafAPI.listInAppCampaignSlots().catch(() => null);
-      setSlots(slotResponse?.slots?.length ? slotResponse.slots : fallbackCampaignSlots);
+
+      const slotResponse = await leafAPI.listInAppCampaignSlots().catch((err) => {
+        warnings.push({
+          id: "campaign-slots",
+          title: "Slots vindos do backend indisponíveis",
+          detail: err?.message || "A tela está usando a especificação local como fallback seguro.",
+        });
+        return null;
+      });
+      if (slotResponse?.slots?.length) {
+        setSlots(slotResponse.slots);
+      } else {
+        if (!warnings.some((warning) => warning.id === "campaign-slots")) {
+          warnings.push({
+            id: "campaign-slots-empty",
+            title: "Slots não retornaram do backend",
+            detail: "A tela está usando a especificação local como fallback seguro.",
+          });
+        }
+        setSlots(fallbackCampaignSlots);
+      }
+      setDataWarnings(warnings);
     } catch (err) {
       setError(err?.message || "Falha ao carregar campanhas in-app");
       setCommercialReport(null);
+      setDataWarnings([
+        {
+          id: "campaign-center-load",
+          title: "Campaign Center não carregou completamente",
+          detail: err?.message || "Revise a API antes de tomar decisão operacional.",
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -533,6 +584,7 @@ export default function CampaignCenterPage() {
   const homeBannerSlot = slots.find((slot) => slot.id === "passenger_home_banner_stack") || fallbackHomeBannerSlot;
   const homeBannerDimensions = homeBannerSlot.dimensions || fallbackHomeBannerSlot.dimensions;
   const campaignAlerts = useMemo(() => buildCampaignAlerts(rows, commercialReport), [commercialReport, rows]);
+  const commercialReportAvailable = Boolean(commercialReport) && !dataWarnings.some((warning) => warning.id === "commercial-report");
   const surfaceOverview = useMemo(() => {
     return surfaceOptions.map((surface) => {
       const surfaceRows = rows.filter((row) => campaignUsesSurface(row, surface));
@@ -608,6 +660,25 @@ export default function CampaignCenterPage() {
           <ErrorText message={actionBlockedMessage} />
         ) : null}
         {notice ? <p className="success-text">{notice}</p> : null}
+        {dataWarnings.length > 0 ? (
+          <Panel
+            className="panel-span-full"
+            title="Dados parciais"
+            subtitle="A tela continua operacional, mas estes blocos não devem ser interpretados como zero real."
+          >
+            <div className="metric-list">
+              {dataWarnings.map((warning) => (
+                <div className="row" key={warning.id}>
+                  <div className="label">
+                    <span className="status-warn">{warning.title}</span>
+                    <small>{warning.detail}</small>
+                  </div>
+                  <div className="value">atenção</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        ) : null}
 
         <section className="grid grid-kpi">
           <Panel title="Total">
@@ -630,19 +701,19 @@ export default function CampaignCenterPage() {
 
         <section className="grid grid-kpi">
           <Panel title="Valor contratado">
-            <strong>{formatCurrencyCents(commercialReport?.totals?.campaignValueCents)}</strong>
+            <strong>{formatOptionalMetric(commercialReport?.totals?.campaignValueCents, formatCurrencyCents, commercialReportAvailable)}</strong>
             <p className="text-muted">receita potencial do inventário</p>
           </Panel>
           <Panel title="CTR">
-            <strong>{formatPercent(commercialReport?.totals?.ctr)}</strong>
+            <strong>{formatOptionalMetric(commercialReport?.totals?.ctr, formatPercent, commercialReportAvailable)}</strong>
             <p className="text-muted">cliques / visualizações</p>
           </Panel>
           <Panel title="CPM efetivo">
-            <strong>{formatCurrencyCents(commercialReport?.totals?.effectiveCpmCents)}</strong>
+            <strong>{formatOptionalMetric(commercialReport?.totals?.effectiveCpmCents, formatCurrencyCents, commercialReportAvailable)}</strong>
             <p className="text-muted">valor a cada mil visualizações</p>
           </Panel>
           <Panel title="CPC efetivo">
-            <strong>{formatCurrencyCents(commercialReport?.totals?.effectiveCpcCents)}</strong>
+            <strong>{formatOptionalMetric(commercialReport?.totals?.effectiveCpcCents, formatCurrencyCents, commercialReportAvailable)}</strong>
             <p className="text-muted">valor por clique</p>
           </Panel>
         </section>
@@ -1112,7 +1183,11 @@ export default function CampaignCenterPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(commercialReport?.rows || []).length === 0 ? (
+                  {!commercialReportAvailable ? (
+                    <tr>
+                      <td colSpan={9}>Relatório comercial indisponível. Os KPIs comerciais acima não representam zero real.</td>
+                    </tr>
+                  ) : (commercialReport?.rows || []).length === 0 ? (
                     <tr>
                       <td colSpan={9}>Nenhuma campanha para o relatório atual.</td>
                     </tr>
