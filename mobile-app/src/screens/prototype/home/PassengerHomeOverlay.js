@@ -591,7 +591,7 @@ const styles = StyleSheet.create({
   },
   searchCardReviewMode: {
     borderColor: "rgba(236,229,220,0.72)",
-    backgroundColor: "rgba(255,255,255,0.94)",
+    backgroundColor: CARD_SURFACE,
     shadowOpacity: 0.05,
     shadowRadius: 12,
   },
