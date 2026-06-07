@@ -3,6 +3,7 @@ const pricingH3ReadModelService = require('../services/pricing-h3-read-model-ser
 const { resolveAcceptRidePayload, toFiniteNumber } = require('../utils/accept-ride-payload');
 const { metrics } = require('../utils/prometheus-metrics');
 const { recordDispatchWaveAcceptance } = require('../services/dispatch-wave-trace-service');
+const rideNotificationLifecycleOrchestrator = require('../services/ride-notification-lifecycle-orchestrator-service');
 
 const paymentService = new PaymentService();
 
@@ -38,7 +39,8 @@ function registerSocketAcceptRideHandler({
     endSpanSuccess,
     logEvent,
     metricsCollector,
-    logError
+    logError,
+    fcmService = null
 }) {
     socket.on('acceptRide', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
@@ -493,6 +495,8 @@ function registerSocketAcceptRideHandler({
                     });
                 }
 
+                let activeBookingForNotification = null;
+
                 // ✅ NOVO: Ativar corrida em bookings:active
                 try {
                     if (!redisPool) {
@@ -509,8 +513,12 @@ function registerSocketAcceptRideHandler({
                         const activeBookingData = {
                             ...bookingData,
                             status: 'ACCEPTED',
-                            driverId
+                            driverId,
+                            driverName: driverNamePayload,
+                            vehicleModel: driverVehicleModel,
+                            vehiclePlate: driverVehiclePlate
                         };
+                        activeBookingForNotification = activeBookingData;
 
                         // Mapeamento para compatibilidade com handlers antigos (changeDestination, etc)
                         try {
@@ -586,6 +594,49 @@ function registerSocketAcceptRideHandler({
                 } catch (e) {
                     logError(e, { context: 'Erro ao ativar corrida em bookings:active (hset)', bookingId: bookingIdToUse });
                 }
+
+                setImmediate(async () => {
+                    try {
+                        await rideNotificationLifecycleOrchestrator.dispatchRideStatusUpdate({
+                            fcmService,
+                            redis: redisPool?.getConnection?.() || null,
+                            bookingId: bookingIdToUse,
+                            status: 'accepted',
+                            passengerId: customerId,
+                            driverId,
+                            bookingData: {
+                                ...(activeBookingForNotification || {}),
+                                pickupLocation,
+                                destinationLocation,
+                                estimatedFare: Number.isFinite(estimatedFare) ? estimatedFare : undefined,
+                                driverDistanceToPickupKm,
+                                estimatedArrivalToPickupMin,
+                                driverName: driverNamePayload,
+                                vehicleModel: driverVehicleModel,
+                                vehiclePlate: driverVehiclePlate
+                            },
+                            passengerPayload: {
+                                driverName: driverNamePayload,
+                                vehicleModel: driverVehicleModel,
+                                vehiclePlate: driverVehiclePlate
+                            },
+                            driverPayload: {
+                                customerName: activeBookingForNotification?.customerName ||
+                                    activeBookingForNotification?.passengerName ||
+                                    'Passageiro'
+                            },
+                            logStructured
+                        });
+                    } catch (silentPushError) {
+                        logStructured('warn', 'acceptRide: falha ao enviar notificacao persistente de aceite', {
+                            service: 'acceptRide',
+                            bookingId: bookingIdToUse,
+                            driverId,
+                            customerId,
+                            error: silentPushError?.message || String(silentPushError)
+                        });
+                    }
+                });
 
                 // ✅ Cachear resultado para idempotency
                 await idempotencyService.cacheResult(idempotencyKey, acceptRideResponse);

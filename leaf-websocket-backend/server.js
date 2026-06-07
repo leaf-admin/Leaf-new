@@ -1124,7 +1124,8 @@ io.on('connection', async (socket) => {
         endSpanSuccess,
         logEvent,
         metricsCollector,
-        logError
+        logError,
+        fcmService
     });
 
     registerSocketRejectRideHandler({

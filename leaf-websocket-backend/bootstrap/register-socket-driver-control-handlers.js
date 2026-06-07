@@ -7,6 +7,7 @@ const { writeVisibleBookingSnapshot } = require('../services/booking-visibility-
 const {
     resolveDriverActivationState
 } = require('../services/driver-activation-state-service');
+const rideNotificationLifecycleOrchestrator = require('../services/ride-notification-lifecycle-orchestrator-service');
 
 const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
     30,
@@ -15,17 +16,6 @@ const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
 
 function normalizeBooleanFlag(value) {
     return value === true || value === 'true' || value === '1' || value === 1;
-}
-
-function parseLocationSnapshot(value) {
-    if (!value) return {};
-    if (typeof value === 'object') return value;
-    try {
-        const parsed = JSON.parse(value);
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (_error) {
-        return {};
-    }
 }
 
 function normalizeDriverDestinationModePayload(data = {}) {
@@ -238,52 +228,26 @@ function registerSocketDriverControlHandlers({
             }
 
             try {
-                if (fcmService && typeof fcmService.sendRideStatusUpdate === 'function') {
-                    const pickup = parseLocationSnapshot(activeBookingData.pickupLocation || activeBookingData.pickup);
-                    const destination = parseLocationSnapshot(
-                        activeBookingData.destinationLocation ||
-                        activeBookingData.destination ||
-                        activeBookingData.drop
-                    );
-                    const tripEstimatedTime = String(
-                        activeBookingData.tripEstimatedTime ||
-                        activeBookingData.estimatedTripTime ||
-                        activeBookingData.estimatedTime ||
-                        activeBookingData.estimatedDuration ||
-                        activeBookingData.duration ||
-                        ''
-                    );
-                    const payloadData = {
-                        bookingId: rideId,
-                        status: 'arrived',
-                        pickup: {
-                            ...pickup,
-                            address: pickup.address || pickup.add || activeBookingData.pickupAddress || 'Local de embarque'
-                        },
-                        destination,
+                await rideNotificationLifecycleOrchestrator.dispatchRideStatusUpdate({
+                    fcmService,
+                    redis,
+                    bookingId: rideId,
+                    status: 'arrived',
+                    passengerId: customerId,
+                    driverId: socket.userId || activeBookingData.driverId || null,
+                    bookingData: activeBookingData,
+                    passengerPayload: {
+                        driverName: activeBookingData.driverName || activeBookingData.driverDisplayName || '',
                         estimatedTime: '0',
-                        pickupEstimatedTime: '0',
-                        tripEstimatedTime,
-                        distance: String(arrivalAssessment.distanceMeters ?? ''),
-                        fare: String(activeBookingData.estimatedFare || activeBookingData.fare || '')
-                    };
-
-                    if (customerId) {
-                        await fcmService.sendRideStatusUpdate(customerId, {
-                            ...payloadData,
-                            userType: 'customer',
-                            driverName: activeBookingData.driverName || activeBookingData.driverDisplayName || ''
-                        });
-                    }
-
-                    if (socket.userId) {
-                        await fcmService.sendRideStatusUpdate(socket.userId, {
-                            ...payloadData,
-                            userType: 'driver',
-                            customerName: activeBookingData.customerName || activeBookingData.passengerName || 'Passageiro'
-                        });
-                    }
-                }
+                        pickupEstimatedTime: '0'
+                    },
+                    driverPayload: {
+                        customerName: activeBookingData.customerName || activeBookingData.passengerName || 'Passageiro',
+                        estimatedTime: '0',
+                        pickupEstimatedTime: '0'
+                    },
+                    logStructured
+                });
             } catch (silentPushError) {
                 logStructured('warn', 'Falha ao enviar silent push de chegada no embarque', {
                     service: 'driver-control-handlers',

@@ -22,6 +22,7 @@ function registerSocketCompleteTripHandler({
 }) {
     const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+    const rideNotificationLifecycleOrchestrator = require('../services/ride-notification-lifecycle-orchestrator-service');
 
     socket.on('completeTrip', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
@@ -361,17 +362,21 @@ function registerSocketCompleteTripHandler({
                         }
 
                         try {
-                            const payloadData = {
-                                bookingId: bookingId,
+                            await rideNotificationLifecycleOrchestrator.dispatchRideStatusUpdate({
+                                fcmService,
+                                redis,
+                                bookingId,
                                 status: 'completed',
-                                distance: String(resultDistance || distance || '0'),
-                                fare: String(finalFare || fare || '0')
-                            };
-
-                            if (customerIdToNotify) {
-                                await fcmService.sendRideStatusUpdate(customerIdToNotify, { ...payloadData, userType: 'customer' });
-                            }
-                            await fcmService.sendRideStatusUpdate(driverId, { ...payloadData, userType: 'driver' });
+                                passengerId: customerIdToNotify,
+                                driverId,
+                                bookingData: {
+                                    ...(bookingSnapshot || {}),
+                                    finalFare: finalFare || fare || 0,
+                                    distance: resultDistance || distance || 0,
+                                    duration: resultDuration || duration || null
+                                },
+                                logStructured
+                            });
                         } catch (silentPushError) {
                             logStructured('error', 'Erro ao enviar silent push em completeTrip', { error: silentPushError.message });
                         }

@@ -23,6 +23,7 @@ function registerSocketCancelRideHandler({
     fcmService
 }) {
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+    const rideNotificationLifecycleOrchestrator = require('../services/ride-notification-lifecycle-orchestrator-service');
     socket.on('cancelRide', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
@@ -401,16 +402,20 @@ function registerSocketCancelRideHandler({
 
                 // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
                 try {
-                    const payloadData = {
-                        bookingId: bookingId,
-                        status: 'cancelled',
-                        distance: '0',
-                        fare: String(refundSummary?.refundAmountInReais || '0')
-                    };
-
                     const drvIdToNotify = bookingData.driverId || (initiatorType === 'driver' ? initiatorId : null);
-                    if (passengerId) await fcmService.sendRideStatusUpdate(passengerId, { ...payloadData, userType: 'customer' });
-                    if (drvIdToNotify) await fcmService.sendRideStatusUpdate(drvIdToNotify, { ...payloadData, userType: 'driver' });
+                    await rideNotificationLifecycleOrchestrator.dispatchRideStatusUpdate({
+                        fcmService,
+                        redis,
+                        bookingId,
+                        status: 'canceled',
+                        passengerId,
+                        driverId: drvIdToNotify,
+                        bookingData: {
+                            ...bookingData,
+                            fare: String(refundSummary?.refundAmountInReais || '0')
+                        },
+                        logStructured
+                    });
                 } catch (silentPushError) {
                     logStructured('error', 'Erro ao enviar silent push em cancelRide', { error: silentPushError.message });
                 }
