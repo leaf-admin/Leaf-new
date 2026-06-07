@@ -215,6 +215,9 @@ describe('PersistentRideNotificationService', () => {
       status: 'started',
       userType: 'customer',
       driverName: 'Carlos',
+      vehicleModel: 'Toyota Corolla',
+      vehicleColor: 'Prata',
+      vehiclePlate: 'ABC1D23',
       destination: { address: 'Barra Shopping' },
       tripEstimatedTime: 12,
     });
@@ -269,6 +272,9 @@ describe('PersistentRideNotificationService', () => {
       status: 'accepted',
       userType: 'customer',
       driverName: 'Carlos',
+      vehicleModel: 'Toyota Corolla',
+      vehicleColor: 'Prata',
+      vehiclePlate: 'ABC1D23',
       pickupEstimatedTime: 4,
       pickup: { address: 'Rua de Partida, 100' },
     });
@@ -278,6 +284,9 @@ describe('PersistentRideNotificationService', () => {
       status: 'started',
       userType: 'customer',
       driverName: 'Carlos',
+      vehicleModel: 'Toyota Corolla',
+      vehicleColor: 'Prata',
+      vehiclePlate: 'ABC1D23',
       destination: { address: 'Barra Shopping' },
       tripEstimatedTime: 12,
     });
@@ -290,6 +299,9 @@ describe('PersistentRideNotificationService', () => {
         bookingId: 'booking-1',
         status: 'started',
         destinationAddress: 'Barra Shopping',
+        vehicleModel: 'Toyota Corolla',
+        vehicleColor: 'Prata',
+        vehiclePlate: 'ABC1D23',
       })
     );
     expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();

@@ -1,9 +1,10 @@
-const { withDangerousMod } = require('@expo/config-plugins');
+const { withDangerousMod, withXcodeProject } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
 const TEMPLATES_ROOT = path.join(__dirname, '..', 'native', 'ride-notification');
 const ANDROID_PACKAGE_PATH = path.join('app', 'src', 'main', 'java', 'br', 'com', 'leaf', 'ride');
+const IOS_APP_GROUP = 'Leaf';
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -68,26 +69,71 @@ function patchAndroidAppBuildGradle(appBuildGradlePath) {
   });
 }
 
-const withLeafRideNotification = (config) => withDangerousMod(config, [
-  'android',
-  async (config) => {
-    const projectRoot = config.modRequest.platformProjectRoot;
-    const androidTargetDir = path.join(projectRoot, ANDROID_PACKAGE_PATH);
+function addXcodeSource(project, filePath, groupKey, target) {
+  if (project.hasFile(filePath)) {
+    return;
+  }
+  project.addSourceFile(filePath, { target }, groupKey);
+}
 
-    copyFile(
-      path.join(TEMPLATES_ROOT, 'android', 'LeafRideNotificationModule.kt'),
-      path.join(androidTargetDir, 'LeafRideNotificationModule.kt')
-    );
-    copyFile(
-      path.join(TEMPLATES_ROOT, 'android', 'LeafRideNotificationPackage.kt'),
-      path.join(androidTargetDir, 'LeafRideNotificationPackage.kt')
-    );
+const withLeafRideNotification = (config) => {
+  config = withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const projectRoot = config.modRequest.platformProjectRoot;
+      const androidTargetDir = path.join(projectRoot, ANDROID_PACKAGE_PATH);
 
-    patchAndroidMainApplication(path.join(androidTargetDir, 'MainApplication.kt'));
-    patchAndroidAppBuildGradle(path.join(projectRoot, 'app', 'build.gradle'));
+      copyFile(
+        path.join(TEMPLATES_ROOT, 'android', 'LeafRideNotificationModule.kt'),
+        path.join(androidTargetDir, 'LeafRideNotificationModule.kt')
+      );
+      copyFile(
+        path.join(TEMPLATES_ROOT, 'android', 'LeafRideNotificationPackage.kt'),
+        path.join(androidTargetDir, 'LeafRideNotificationPackage.kt')
+      );
+
+      patchAndroidMainApplication(path.join(androidTargetDir, 'MainApplication.kt'));
+      patchAndroidAppBuildGradle(path.join(projectRoot, 'app', 'build.gradle'));
+
+      return config;
+    },
+  ]);
+
+  config = withDangerousMod(config, [
+    'ios',
+    async (config) => {
+      const projectRoot = config.modRequest.platformProjectRoot;
+
+      copyFile(
+        path.join(TEMPLATES_ROOT, 'ios', 'LeafRideActivityModule.swift'),
+        path.join(projectRoot, IOS_APP_GROUP, 'LeafRideActivityModule.swift')
+      );
+      copyFile(
+        path.join(TEMPLATES_ROOT, 'ios', 'LeafRideActivityModule.m'),
+        path.join(projectRoot, IOS_APP_GROUP, 'LeafRideActivityModule.m')
+      );
+
+      return config;
+    },
+  ]);
+
+  config = withXcodeProject(config, (config) => {
+    const project = config.modResults;
+    const target = project.getFirstTarget()?.uuid;
+    const leafGroupKey = project.findPBXGroupKey({ name: IOS_APP_GROUP });
+
+    if (!leafGroupKey) {
+      console.warn('[withLeafRideNotification] Leaf PBXGroup not found');
+      return config;
+    }
+
+    addXcodeSource(project, 'Leaf/LeafRideActivityModule.swift', leafGroupKey, target);
+    addXcodeSource(project, 'Leaf/LeafRideActivityModule.m', leafGroupKey, target);
 
     return config;
-  },
-]);
+  });
+
+  return config;
+};
 
 module.exports = withLeafRideNotification;

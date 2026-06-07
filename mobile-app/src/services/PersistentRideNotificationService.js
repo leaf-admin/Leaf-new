@@ -110,6 +110,15 @@ const getLocationAddress = (location, fallback) => {
     return String(location?.address || location?.add || location?.name || fallback || '').trim();
 };
 
+const firstText = (...values) => {
+    for (const value of values) {
+        if (value === null || typeof value === 'undefined') continue;
+        const normalized = String(value).trim();
+        if (normalized) return normalized;
+    }
+    return '';
+};
+
 const getStatusDurationMinutes = (rideData = {}) => {
     const status = String(rideData.status || '').toLowerCase();
     if (status === 'accepted') {
@@ -430,6 +439,31 @@ class PersistentRideNotificationService {
         const timeline = buildTimelineDetails(rideData);
         const pickupAddress = getLocationAddress(rideData.pickup, rideData.pickupAddress || 'local de embarque');
         const destinationAddress = getLocationAddress(rideData.destination, rideData.destinationAddress || 'destino');
+        const vehicleModel = firstText(
+            rideData.vehicleModel,
+            rideData.driverVehicleModel,
+            rideData.carModel,
+            rideData.driverCarModel,
+            rideData.car?.model,
+            rideData.vehicle?.model
+        );
+        const vehicleColor = firstText(
+            rideData.vehicleColor,
+            rideData.driverVehicleColor,
+            rideData.carColor,
+            rideData.driverCarColor,
+            rideData.car?.color,
+            rideData.vehicle?.color
+        );
+        const vehiclePlate = firstText(
+            rideData.vehiclePlate,
+            rideData.driverVehiclePlate,
+            rideData.carPlate,
+            rideData.driverCarPlate,
+            rideData.licensePlate,
+            rideData.car?.plate,
+            rideData.vehicle?.plate
+        );
 
         return {
             title,
@@ -443,6 +477,9 @@ class PersistentRideNotificationService {
             customerName: String(rideData.customerName || ''),
             fare: String(rideData.fare || ''),
             distance: String(rideData.distance || ''),
+            vehicleModel,
+            vehicleColor,
+            vehiclePlate,
             remainingLabel: String(timeline.remainingLabel || ''),
             durationLabel: String(timeline.durationLabel || ''),
             progressPercent: Number.isFinite(timeline.progressPercent) ? timeline.progressPercent : null,
