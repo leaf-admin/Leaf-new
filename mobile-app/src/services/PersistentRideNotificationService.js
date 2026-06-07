@@ -24,11 +24,20 @@ const RIDE_NOTIFICATION_STATE_KEY = '@leaf:persistentRideNotificationState';
 const RIDE_NOTIFICATION_DEDUPE_TTL_MS = 30 * 1000;
 const RIDE_NOTIFICATION_UPDATE_INTERVAL_MS = 10 * 1000;
 const ANDROID_NATIVE_RIDE_NOTIFICATION_ID = 'leaf-ride-status-43001';
+const IOS_LIVE_ACTIVITY_NOTIFICATION_ID = 'leaf-ios-live-activity';
 
 const getNativeRideNotificationModule = () => {
     if (Platform.OS !== 'android') return null;
     const nativeModule = NativeModules?.LeafRideNotification;
     return nativeModule && typeof nativeModule.showOrUpdate === 'function'
+        ? nativeModule
+        : null;
+};
+
+const getNativeRideActivityModule = () => {
+    if (Platform.OS !== 'ios') return null;
+    const nativeModule = NativeModules?.LeafRideActivity;
+    return nativeModule && typeof nativeModule.startOrUpdate === 'function'
         ? nativeModule
         : null;
 };
@@ -186,6 +195,7 @@ class PersistentRideNotificationService {
         this.hasRegisteredFcmHandler = false;
         this.lastRidePayloadFingerprint = null;
         this.lastRidePayloadHandledAt = 0;
+        this.hasLoggedIosLiveActivityUnavailable = false;
     }
 
     /**
@@ -388,25 +398,70 @@ class PersistentRideNotificationService {
         return policy?.enabled !== false && policy?.persistentRideNotificationsEnabled !== false;
     }
 
+    isAndroidNativeRideNotificationAllowed() {
+        const policy = runtimeConfigService.getNotificationPolicySync();
+        return Platform.OS === 'android' && policy?.androidNativePersistentSlotEnabled !== false;
+    }
+
+    isIosLiveActivityAllowed() {
+        const policy = runtimeConfigService.getNotificationPolicySync();
+        const mode = String(policy?.iosLiveActivityMode || '').toLowerCase();
+        return (
+            Platform.OS === 'ios' &&
+            policy?.iosLiveActivityEnabled === true &&
+            (mode === 'live_activity' || mode === 'activitykit')
+        );
+    }
+
+    isIosNotificationFallbackAllowed() {
+        const policy = runtimeConfigService.getNotificationPolicySync();
+        return policy?.iosNotificationFallbackEnabled !== false;
+    }
+
     isNativeRideNotificationId(notificationId) {
-        return Platform.OS === 'android' && String(notificationId || '') === ANDROID_NATIVE_RIDE_NOTIFICATION_ID;
+        const normalized = String(notificationId || '');
+        return (
+            (Platform.OS === 'android' && normalized === ANDROID_NATIVE_RIDE_NOTIFICATION_ID) ||
+            (Platform.OS === 'ios' && normalized === IOS_LIVE_ACTIVITY_NOTIFICATION_ID)
+        );
+    }
+
+    buildNativeRideSurfacePayload(rideData = {}, title, body, options = {}) {
+        const timeline = buildTimelineDetails(rideData);
+        const pickupAddress = getLocationAddress(rideData.pickup, rideData.pickupAddress || 'local de embarque');
+        const destinationAddress = getLocationAddress(rideData.destination, rideData.destinationAddress || 'destino');
+
+        return {
+            title,
+            body,
+            bookingId: String(rideData.bookingId || ''),
+            status: String(rideData.status || ''),
+            userType: String(rideData.userType || ''),
+            pickupAddress,
+            destinationAddress,
+            driverName: String(rideData.driverName || ''),
+            customerName: String(rideData.customerName || ''),
+            fare: String(rideData.fare || ''),
+            distance: String(rideData.distance || ''),
+            remainingLabel: String(timeline.remainingLabel || ''),
+            durationLabel: String(timeline.durationLabel || ''),
+            progressPercent: Number.isFinite(timeline.progressPercent) ? timeline.progressPercent : null,
+            phaseStartedAt: String(rideData.phaseStartedAt || rideData.statusStartedAt || rideData.timestamp || ''),
+            notificationCategoryId: options.notificationCategoryId || '',
+            notificationDataType: options.notificationDataType || 'ride_status',
+        };
     }
 
     async showOrUpdateNativeRideNotification(rideData = {}, title, body, options = {}) {
+        if (!this.isAndroidNativeRideNotificationAllowed()) return null;
         const nativeModule = getNativeRideNotificationModule();
         if (!nativeModule) return null;
 
         try {
             const result = await nativeModule.showOrUpdate({
+                ...this.buildNativeRideSurfacePayload(rideData, title, body, options),
                 channelId: 'ride_status',
                 notificationId: ANDROID_NATIVE_RIDE_NOTIFICATION_ID,
-                title,
-                body,
-                bookingId: String(rideData.bookingId || ''),
-                status: String(rideData.status || ''),
-                userType: String(rideData.userType || ''),
-                notificationCategoryId: options.notificationCategoryId || '',
-                notificationDataType: options.notificationDataType || 'ride_status',
             });
 
             if (result?.success === false) {
@@ -421,12 +476,63 @@ class PersistentRideNotificationService {
         }
     }
 
-    async dismissNativeRideNotification() {
-        const nativeModule = getNativeRideNotificationModule();
-        if (!nativeModule || typeof nativeModule.dismiss !== 'function') return false;
+    async showOrUpdateIosLiveActivity(rideData = {}, title, body, options = {}) {
+        if (!this.isIosLiveActivityAllowed()) return null;
+
+        const nativeModule = getNativeRideActivityModule();
+        if (!nativeModule) {
+            if (!this.hasLoggedIosLiveActivityUnavailable) {
+                Logger.warn('⚠️ [PersistentRideNotification] Live Activity iOS habilitada, mas módulo LeafRideActivity não está disponível. Usando fallback.');
+                this.hasLoggedIosLiveActivityUnavailable = true;
+            }
+            return null;
+        }
 
         try {
-            await nativeModule.dismiss();
+            const result = await nativeModule.startOrUpdate({
+                ...this.buildNativeRideSurfacePayload(rideData, title, body, options),
+                activityId: IOS_LIVE_ACTIVITY_NOTIFICATION_ID,
+            });
+
+            if (result?.success === false) {
+                Logger.warn('⚠️ [PersistentRideNotification] Live Activity iOS recusou atualização:', result?.reason || result);
+                return null;
+            }
+
+            return result?.activityId || result?.notificationId || IOS_LIVE_ACTIVITY_NOTIFICATION_ID;
+        } catch (error) {
+            Logger.warn('⚠️ [PersistentRideNotification] Falha na Live Activity iOS; usando fallback:', error?.message || error);
+            return null;
+        }
+    }
+
+    async showOrUpdatePlatformNativeRideSurface(rideData = {}, title, body, options = {}) {
+        if (Platform.OS === 'android') {
+            return this.showOrUpdateNativeRideNotification(rideData, title, body, options);
+        }
+        if (Platform.OS === 'ios') {
+            return this.showOrUpdateIosLiveActivity(rideData, title, body, options);
+        }
+        return null;
+    }
+
+    async dismissNativeRideNotification() {
+        const nativeModule = Platform.OS === 'ios'
+            ? getNativeRideActivityModule()
+            : getNativeRideNotificationModule();
+        if (!nativeModule) return false;
+
+        const dismissMethod = Platform.OS === 'ios'
+            ? nativeModule.end || nativeModule.dismiss
+            : nativeModule.dismiss;
+        if (typeof dismissMethod !== 'function') return false;
+
+        try {
+            if (Platform.OS === 'ios') {
+                await dismissMethod.call(nativeModule, { activityId: IOS_LIVE_ACTIVITY_NOTIFICATION_ID });
+            } else {
+                await dismissMethod.call(nativeModule);
+            }
             return true;
         } catch (error) {
             Logger.warn('⚠️ [PersistentRideNotification] Falha ao remover notificação nativa:', error?.message || error);
@@ -562,7 +668,7 @@ class PersistentRideNotificationService {
 
             const resolvedTitle = customTitle || title;
             const resolvedBody = customBody || body;
-            const nativeNotificationId = await this.showOrUpdateNativeRideNotification(
+            const nativeNotificationId = await this.showOrUpdatePlatformNativeRideSurface(
                 { ...rideData, bookingId, status, userType },
                 resolvedTitle,
                 resolvedBody,
@@ -577,6 +683,11 @@ class PersistentRideNotificationService {
                 if (status === 'started' || status === 'accepted') {
                     this.startPeriodicUpdate(rideData);
                 }
+                return;
+            }
+
+            if (Platform.OS === 'ios' && !this.isIosNotificationFallbackAllowed()) {
+                Logger.log('ℹ️ [PersistentRideNotification] Fallback de notificação iOS desabilitado por runtime policy.');
                 return;
             }
 
@@ -669,7 +780,7 @@ class PersistentRideNotificationService {
 
             const resolvedTitle = customTitle || title;
             const resolvedBody = customBody || body;
-            const nativeNotificationId = await this.showOrUpdateNativeRideNotification(
+            const nativeNotificationId = await this.showOrUpdatePlatformNativeRideSurface(
                 { ...rideData, bookingId, status, userType },
                 resolvedTitle,
                 resolvedBody,
@@ -688,6 +799,11 @@ class PersistentRideNotificationService {
                 } else {
                     this.stopPeriodicUpdate();
                 }
+                return;
+            }
+
+            if (Platform.OS === 'ios' && !this.isIosNotificationFallbackAllowed()) {
+                Logger.log('ℹ️ [PersistentRideNotification] Fallback de atualização iOS desabilitado por runtime policy.');
                 return;
             }
 

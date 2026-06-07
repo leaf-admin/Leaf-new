@@ -53,6 +53,14 @@ Payloads de ride status incluem:
 
 Estados `completed`, `cancelled` e `canceled` devem limpar a notificacao ativa da corrida.
 
+### Plataformas
+
+- Android: usa slot nativo estavel `43001` quando `notificationPolicy.androidNativePersistentSlotEnabled=true`. O fallback Expo so entra se o modulo nativo nao estiver disponivel.
+- iOS: o contrato de runtime ja esta preparado para `notificationPolicy.iosLiveActivityMode=live_activity`, usando o adapter nativo esperado `LeafRideActivity.startOrUpdate/end`.
+- iOS permanece com `iosLiveActivityEnabled=false` por padrao. Enquanto o modulo nativo/Widget Extension nao existir, o app cai no fallback `expo-notifications` quando `iosNotificationFallbackEnabled=true`.
+
+Esse desenho evita tentar simular notificacao persistente Android no iOS com remove/recreate. A experiencia premium no iOS deve ser implementada com Live Activity / ActivityKit.
+
 ## Criterios de smoke
 
 Backend:
@@ -86,6 +94,6 @@ Device:
 
 ## Pendencias conhecidas
 
-- Live Activity / Dynamic Island ainda exige frente nativa separada.
+- UI nativa da Live Activity / Dynamic Island ainda exige frente iOS separada: criar Widget Extension, ActivityKit attributes/state, layout compacto/expandido e, se necessario, token de update remoto.
 - Smart push/ML deve continuar `disabled` ou `dryRun` ate termos base real e aprovacao operacional.
 - Smoke iOS final depende de device fisico com build que contenha o plist correto.

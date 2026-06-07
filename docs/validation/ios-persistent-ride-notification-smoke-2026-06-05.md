@@ -13,14 +13,15 @@ O que esta validado/esperado:
 - Sem chamada a Google, Woovi, Maps, Routes ou Places durante a atualizacao da notificacao.
 - Idempotencia visual basica: duplicar `accepted` nao deve criar varias notificacoes ativas da mesma corrida.
 - `completed` deve limpar a notificacao de corrida ativa.
+- Contrato mobile pronto para Live Activity via `LeafRideActivity.startOrUpdate/end`, controlado por runtime config.
 
 O que nao faz parte desta v1:
 
-- Live Activity / Dynamic Island.
+- UI nativa de Live Activity / Dynamic Island.
 - Notificacao realmente fixa/nao dispensavel no iOS.
 - Remote push nativo com UI customizada fora do controle do sistema.
 
-Esses itens ficam no ticket nativo `LEA-96`.
+Esses itens ficam no ticket nativo `LEA-96`. O runtime ja deixa `iosLiveActivityEnabled=false`, `iosLiveActivityMode=disabled` e `iosNotificationFallbackEnabled=true`; quando a extensao nativa estiver pronta, a ativacao deve ser feita pelo backend sem mudar o fluxo JS.
 
 ## Pre-requisitos
 
@@ -101,3 +102,4 @@ Pasta sugerida:
 - Se o iOS nao receber data-only push em app fechado, isso e comportamento esperado do sistema e deve virar ajuste nativo/servidor no `LEA-96`.
 - Se o token FCM nao existir para o usuario iOS, a build precisa validar o `GoogleService-Info.plist` correto e o fluxo de registro/refresh de token.
 - Se a notificacao aparece somente com app aberto, registrar como limitacao da v1 e priorizar payload APNs visivel ou Live Activity na frente nativa.
+- Para Live Activity de producao, ainda falta criar Widget Extension/ActivityKit UI e decidir se as atualizacoes remotas usarao push token proprio da ActivityKit ou apenas atualizacao local enquanto app esta ativo.

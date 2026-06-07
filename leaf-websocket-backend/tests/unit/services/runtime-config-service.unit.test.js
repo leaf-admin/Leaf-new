@@ -78,6 +78,13 @@ describe('RuntimeConfigService', () => {
       backendOnly: true,
       clientDirectGoogleFallback: false
     });
+    expect(config.notificationPolicy).toMatchObject({
+      androidNativePersistentSlotEnabled: true,
+      androidPersistentNotificationId: 43001,
+      iosLiveActivityEnabled: false,
+      iosLiveActivityMode: 'disabled',
+      iosNotificationFallbackEnabled: true
+    });
     expect(config.supportPolicy.autoReplyEnabled).toBe(false);
   });
 

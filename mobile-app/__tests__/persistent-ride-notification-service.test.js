@@ -4,6 +4,7 @@ let mockNotificationPolicy = {
   enabled: true,
   persistentRideNotificationsEnabled: true,
 };
+const mockPlatform = { OS: 'android' };
 
 const mockNotifications = {
   AndroidImportance: { HIGH: 'HIGH' },
@@ -24,12 +25,19 @@ const mockNativeRideNotification = {
   })),
   dismiss: jest.fn(() => Promise.resolve(true)),
 };
+const mockIosLiveActivity = {
+  startOrUpdate: jest.fn(() => Promise.resolve({
+    success: true,
+    activityId: 'leaf-ios-live-activity',
+  })),
+  end: jest.fn(() => Promise.resolve(true)),
+};
 const mockNativeModules = {};
 
 jest.mock('expo-notifications', () => mockNotifications);
 jest.mock('expo-device', () => ({ isDevice: true }));
 jest.mock('react-native', () => ({
-  Platform: { OS: 'android' },
+  Platform: mockPlatform,
   NativeModules: mockNativeModules,
 }));
 jest.mock('../src/utils/Logger', () => ({
@@ -70,9 +78,13 @@ describe('PersistentRideNotificationService', () => {
       persistentRideNotificationsEnabled: true,
     };
     notificationSequence = 0;
+    mockPlatform.OS = 'android';
     delete mockNativeModules.LeafRideNotification;
+    delete mockNativeModules.LeafRideActivity;
     mockNativeRideNotification.showOrUpdate.mockClear();
     mockNativeRideNotification.dismiss.mockClear();
+    mockIosLiveActivity.startOrUpdate.mockClear();
+    mockIosLiveActivity.end.mockClear();
     AsyncStorage.clear();
     jest.resetModules();
   });
@@ -238,6 +250,111 @@ describe('PersistentRideNotificationService', () => {
     expect(mockNativeRideNotification.dismiss).toHaveBeenCalledTimes(1);
     expect(mockNotifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
     expect(service.isNotificationActive()).toBe(false);
+  });
+
+  it('uses the iOS live activity adapter when runtime policy enables it and the native module exists', async () => {
+    mockPlatform.OS = 'ios';
+    mockNotificationPolicy = {
+      enabled: true,
+      persistentRideNotificationsEnabled: true,
+      iosLiveActivityEnabled: true,
+      iosLiveActivityMode: 'live_activity',
+      iosNotificationFallbackEnabled: true,
+    };
+    mockNativeModules.LeafRideActivity = mockIosLiveActivity;
+    const service = loadService();
+
+    await service.showRideNotification({
+      bookingId: 'booking-1',
+      status: 'accepted',
+      userType: 'customer',
+      driverName: 'Carlos',
+      pickupEstimatedTime: 4,
+      pickup: { address: 'Rua de Partida, 100' },
+    });
+
+    await service.updateRideNotification({
+      bookingId: 'booking-1',
+      status: 'started',
+      userType: 'customer',
+      driverName: 'Carlos',
+      destination: { address: 'Barra Shopping' },
+      tripEstimatedTime: 12,
+    });
+
+    expect(mockIosLiveActivity.startOrUpdate).toHaveBeenCalledTimes(2);
+    expect(mockIosLiveActivity.startOrUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        activityId: 'leaf-ios-live-activity',
+        title: 'A caminho de Barra Shopping',
+        bookingId: 'booking-1',
+        status: 'started',
+        destinationAddress: 'Barra Shopping',
+      })
+    );
+    expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(mockNotifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+    expect(service.getCurrentNotificationId()).toBe('leaf-ios-live-activity');
+  });
+
+  it('dismisses the iOS live activity adapter when the ride finishes', async () => {
+    mockPlatform.OS = 'ios';
+    mockNotificationPolicy = {
+      enabled: true,
+      persistentRideNotificationsEnabled: true,
+      iosLiveActivityEnabled: true,
+      iosLiveActivityMode: 'live_activity',
+      iosNotificationFallbackEnabled: true,
+    };
+    mockNativeModules.LeafRideActivity = mockIosLiveActivity;
+    const service = loadService();
+
+    await service.showRideNotification({
+      bookingId: 'booking-1',
+      status: 'accepted',
+      userType: 'customer',
+      driverName: 'Carlos',
+    });
+
+    await service.dismissRideNotification('booking-1');
+
+    expect(mockIosLiveActivity.end).toHaveBeenCalledWith({
+      activityId: 'leaf-ios-live-activity',
+    });
+    expect(mockNotifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+    expect(service.isNotificationActive()).toBe(false);
+  });
+
+  it('falls back to regular iOS notification when live activity is enabled but native module is unavailable', async () => {
+    mockPlatform.OS = 'ios';
+    mockNotificationPolicy = {
+      enabled: true,
+      persistentRideNotificationsEnabled: true,
+      iosLiveActivityEnabled: true,
+      iosLiveActivityMode: 'live_activity',
+      iosNotificationFallbackEnabled: true,
+    };
+    const service = loadService();
+
+    await service.showRideNotification({
+      bookingId: 'booking-1',
+      status: 'accepted',
+      userType: 'customer',
+      driverName: 'Carlos',
+      pickupEstimatedTime: 4,
+    });
+
+    expect(mockIosLiveActivity.startOrUpdate).not.toHaveBeenCalled();
+    expect(mockNotifications.scheduleNotificationAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          title: 'Carlos está a caminho',
+          sticky: false,
+          autoDismiss: undefined,
+        }),
+        trigger: null,
+      })
+    );
   });
 
   it('suppresses duplicate ride status payloads for the same booking state', async () => {
