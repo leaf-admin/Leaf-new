@@ -59,6 +59,7 @@ Necessario para submissao ou mudanca de fluxo principal:
 
 - Android: emulador/dispositivo com `adb`.
 - iOS: Xcode completo com `xcrun simctl`.
-- Maestro: fluxos em `mobile-app/.maestro/flows`.
+- Fluxo atual: `npm run smoke:mobile:current-flow -- --json`, seguido de interação por simulador/device/Computer Use.
+- Maestro: apenas inventário legado ou comparação histórica. Não usar como evidência principal do ciclo atual de corrida.
 
 Se o ambiente local nao permitir, registrar a limitacao no PR e rodar em outra maquina antes de release.

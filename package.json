@@ -30,6 +30,7 @@
     "canary:preflight:non-device": "node scripts/prelaunch/run-non-device-canary-preflight.cjs",
     "smoke:woovi-sandbox": "npm run -w leaf-websocket-backend smoke:woovi-sandbox --",
     "smoke:backoffice": "node scripts/validation/smoke-backoffice-panels.cjs",
+    "smoke:mobile:current-flow": "node mobile-app/scripts/qa/current-flow-e2e-lab.cjs",
     "branch:task": "bash scripts/workflow/new-task-branch.sh"
   },
   "dependencies": {

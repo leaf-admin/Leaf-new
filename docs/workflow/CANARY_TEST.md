@@ -48,6 +48,19 @@ Para IPA/archive, usar os scripts locais iOS conforme a necessidade da submissã
 
 ## 3. Canary em app
 
+Antes de interagir visualmente, rode o doctor do fluxo atual. Ele não usa Maestro e registra
+estado de ambiente, artefatos instaláveis, rotas atuais, deep links e `testID`s canônicos:
+
+```bash
+npm run smoke:mobile:current-flow -- --json
+# ou
+npm --prefix mobile-app run qa:current-flow:doctor -- --json
+```
+
+O relatório fica em `mobile-app/test-results/current-flow-e2e/<timestamp>/`.
+Use essa saída para confirmar que o ambiente não está usando tela/rota legada antes
+de capturar evidências com simulador, device físico ou Computer Use.
+
 Executar pelo menos um ciclo completo passageiro + motorista:
 
 - abrir app sem tela transitória desidratada;
@@ -77,6 +90,14 @@ GO:
 - iOS release abre e completa canary;
 - dashboard mostra a corrida canary sem divergência financeira;
 - logs sem erro crítico em auth, pagamento, dispatch, push, socket e ledger.
+
+## 5. Maestro
+
+Maestro não é mais a trilha principal para validar o ciclo atual de corrida. Os fluxos
+antigos continuam úteis como inventário histórico, mas qualquer evidência de release/canary
+deve partir de build release/debug atual, `testID`s atuais, app state, simulador/device e
+capturas em `test-results/`. Se um fluxo Maestro abrir tela que não existe mais no produto
+atual, a evidência é inválida para GO/NO-GO.
 
 NO-GO:
 

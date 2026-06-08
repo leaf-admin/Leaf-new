@@ -72,6 +72,7 @@
     "qa:runtime:endpoints": "bash scripts/check-runtime-endpoints.sh",
     "qa:backend:real-sandbox": "bash scripts/qa/assert-backend-real-sandbox.sh",
     "qa:core:audit": "bash scripts/qa/run-core-audit-suite.sh",
+    "qa:current-flow:doctor": "node scripts/qa/current-flow-e2e-lab.cjs",
     "qa:permissions": "bash scripts/check-permissions-hardening.sh",
     "qa:phase6:manual": "bash scripts/phase6-manual-evidence.sh",
     "qa:phase6:cross": "bash scripts/phase6-cross-platform-evidence.sh",
