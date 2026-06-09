@@ -183,6 +183,12 @@
         "track": "internal",
         "releaseStatus": "completed"
       }
+    },
+    "google-play-review": {
+      "android": {
+        "track": "production",
+        "releaseStatus": "completed"
+      }
     }
   }
 }

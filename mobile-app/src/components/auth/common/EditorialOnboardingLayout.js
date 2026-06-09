@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -98,25 +99,52 @@ export default function EditorialOnboardingScreen({
   const insets = React.useContext(SafeAreaInsetsContext || FallbackSafeAreaInsetsContext) || defaultInsets;
   const meta = progressMeta || resolveEditorialProgressMeta(0, null);
   const Root = keyboard ? KeyboardAvoidingView : View;
+  const keyboardBehavior = keyboard
+    ? (Platform.OS === 'ios' ? 'padding' : 'height')
+    : undefined;
+  const [isKeyboardVisible, setIsKeyboardVisible] = React.useState(false);
+  const shouldInlineFooter = Boolean(
+    footer && keyboard && Platform.OS === 'android' && isKeyboardVisible
+  );
+  const effectiveScrollEnabled = scrollEnabled || shouldInlineFooter;
   const stepNumber = String(meta.stepNumber || meta.activeStep || 1).padStart(2, '0');
+
+  React.useEffect(() => {
+    if (!keyboard || Platform.OS !== 'android') {
+      return undefined;
+    }
+
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [keyboard]);
 
   return (
     <Root
       style={styles.root}
-      behavior={keyboard && Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={keyboardBehavior}
       keyboardVerticalOffset={keyboard && Platform.OS === 'ios' ? 10 : 0}
       testID={testID}
     >
       <ScrollView
         style={styles.scroll}
-        scrollEnabled={scrollEnabled}
+        scrollEnabled={effectiveScrollEnabled}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: Math.max(insets.top + 18, 54) },
-          footer ? styles.scrollContentWithFooter : null,
+          footer && !shouldInlineFooter ? styles.scrollContentWithFooter : null,
+          shouldInlineFooter ? styles.scrollContentWithInlineFooter : null,
           contentStyle
         ]}
       >
@@ -143,9 +171,20 @@ export default function EditorialOnboardingScreen({
         <Text style={styles.title}>{title}</Text>
         {description ? <Text style={styles.description}>{description}</Text> : null}
         <View style={[styles.childrenWrap, childrenStyle]}>{children}</View>
+        {shouldInlineFooter ? (
+          <View
+            style={[
+              styles.inlineFooter,
+              { paddingBottom: Math.max(insets.bottom + 12, 18) },
+              footerStyle
+            ]}
+          >
+            {footer}
+          </View>
+        ) : null}
       </ScrollView>
 
-      {footer ? (
+      {footer && !shouldInlineFooter ? (
         <View
           style={[
             styles.footer,
@@ -176,6 +215,9 @@ const styles = StyleSheet.create({
   },
   scrollContentWithFooter: {
     paddingBottom: 128
+  },
+  scrollContentWithInlineFooter: {
+    paddingBottom: 24
   },
   topRow: {
     minHeight: 38,
@@ -252,6 +294,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: 28,
     paddingTop: 12,
+    backgroundColor: color.background
+  },
+  inlineFooter: {
+    paddingTop: 18,
     backgroundColor: color.background
   }
 });
