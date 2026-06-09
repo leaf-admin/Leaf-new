@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "smoke:backoffice": "node scripts/tests/smoke-backoffice.cjs",
+    "qa:backoffice": "npm run lint && npm run build && npm run smoke:backoffice"
   },
   "dependencies": {
     "@react-google-maps/api": "^2.20.7",
@@ -19,6 +21,7 @@
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "16.1.0",
+    "playwright": "^1.60.0",
     "tailwindcss": "^4",
     "typescript": "^5.9.3"
   }
