@@ -40,9 +40,20 @@ const requiredFiles = [
     file: "docs/tasks/README.md",
     snippets: [
       "# LEAF Agent Task Workflow",
+      "## GitHub Automation",
       "## Codex Task Breakdown Prompt",
       "## OpenCode Execution Prompt",
       "## Codex Review Prompt",
+    ],
+  },
+  {
+    file: "docs/tasks/OPENCODE_GITHUB_AUTOMATION.md",
+    snippets: [
+      "# OpenCode GitHub Automation",
+      "## Required GitHub Configuration",
+      "## Daily Flow",
+      "## Guard Rails",
+      "## Stop Conditions",
     ],
   },
   {
@@ -63,6 +74,20 @@ const requiredFiles = [
       "## Criterios de aceite",
       "## Testes obrigatorios",
       "## Prompt para OpenCode",
+    ],
+  },
+  {
+    file: ".github/workflows/opencode.yml",
+    snippets: [
+      "name: opencode",
+      "issue_comment:",
+      "pull_request_review_comment:",
+      "contains(github.event.comment.body, '/oc')",
+      "github.event.comment.author_association == 'OWNER'",
+      "anomalyco/opencode/github@latest",
+      "use_github_token: true",
+      "share: false",
+      "npm run governance:check",
     ],
   },
 ];
@@ -104,4 +129,3 @@ console.log(JSON.stringify(result, null, 2));
 if (findings.length > 0) {
   process.exitCode = 1;
 }
-

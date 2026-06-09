@@ -15,6 +15,12 @@ Feature idea
   -> Human approves merge
 ```
 
+## GitHub Automation
+
+OpenCode can be triggered from GitHub with `/oc` or `/opencode` after repository secrets and variables are configured.
+
+See `docs/tasks/OPENCODE_GITHUB_AUTOMATION.md` for the workflow setup, required GitHub variables, safe slash-command prompts, and stop conditions.
+
 ## Codex Task Breakdown Prompt
 
 ```text
@@ -81,4 +87,3 @@ Do not change business rules.
 Run tests again.
 Update PR summary with evidence.
 ```
-
