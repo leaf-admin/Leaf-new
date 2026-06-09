@@ -297,23 +297,23 @@ function RideCostAnomalyBanner({ anomaly }) {
           {anomaly.status === "danger" ? "ALERTA CRÍTICO" : "ATENÇÃO"}
         </span>
         <strong>
-          R$ {anomaly.averageBrl.toFixed(4)} / corrida
+            R$ {toNumber(anomaly.averageBrl).toFixed(4)} / corrida
         </strong>
         <span className="meta-badge">
-          {anomaly.aboveWarningCount} de {anomaly.completedRides} acima do aviso (R$ {anomaly.warningThreshold.toFixed(2)})
+          {anomaly.aboveWarningCount} de {anomaly.completedRides} acima do aviso (R$ {toNumber(anomaly.warningThreshold).toFixed(2)})
         </span>
         {anomaly.aboveCriticalCount > 0 ? (
           <span className="status-bad">
-            {anomaly.aboveCriticalCount} acima do crítico (R$ {anomaly.criticalThreshold.toFixed(2)})
+            {anomaly.aboveCriticalCount} acima do crítico (R$ {toNumber(anomaly.criticalThreshold).toFixed(2)})
           </span>
         ) : null}
       </div>
       <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginTop: "0.25rem" }}>
         <small>
-          Google médio: R$ {anomaly.averageGoogleBrl.toFixed(4)}
+          Google médio: R$ {toNumber(anomaly.averageGoogleBrl).toFixed(4)}
         </small>
         <small>
-          Directions: {anomaly.directionsPerRide.toFixed(2)} / corrida
+          Directions: {toNumber(anomaly.directionsPerRide).toFixed(2)} / corrida
           {anomaly.directionsPerRide >= anomaly.directionsCriticalPerRide
             ? " (acima do crítico)"
             : anomaly.directionsPerRide >= anomaly.directionsWarningPerRide
@@ -321,10 +321,10 @@ function RideCostAnomalyBanner({ anomaly }) {
               : ""}
         </small>
         <small>
-          Máxima: R$ {anomaly.maxBrl.toFixed(4)}
+          Máxima: R$ {toNumber(anomaly.maxBrl).toFixed(4)}
         </small>
         <span className="meta-badge">
-          Limites configurados no backend: aviso R$ {anomaly.warningThreshold.toFixed(2)} · crítico R$ {anomaly.criticalThreshold.toFixed(2)}
+          Limites configurados no backend: aviso R$ {toNumber(anomaly.warningThreshold).toFixed(2)} · crítico R$ {toNumber(anomaly.criticalThreshold).toFixed(2)}
         </span>
       </div>
     </div>
@@ -783,7 +783,7 @@ export default function DashboardPage() {
                       </span>
                       <small>
                         {costControls.rideCostAnomaly.status !== "no_data"
-                          ? `R$ ${costControls.rideCostAnomaly.averageBrl.toFixed(4)} médio · ${costControls.rideCostAnomaly.completedRides} corrida(s)`
+                          ? `R$ ${toNumber(costControls.rideCostAnomaly.averageBrl).toFixed(4)} médio · ${costControls.rideCostAnomaly.completedRides} corrida(s)`
                           : "Aguardando telemetria de corridas concluídas"}
                       </small>
                     </>

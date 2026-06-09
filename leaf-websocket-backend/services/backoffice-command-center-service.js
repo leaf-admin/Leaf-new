@@ -305,7 +305,7 @@ function buildActionItems({
       title: isCritical
         ? 'Custo medio por corrida acima do critico'
         : 'Custo medio por corrida acima do limite de aviso',
-      description: `R$ ${rideCostAnomaly.averageBrl.toFixed(4)} medio / R$ ${rideCostAnomaly.warningThreshold.toFixed(2)} aviso / R$ ${rideCostAnomaly.criticalThreshold.toFixed(2)} critico; ${rideCostAnomaly.aboveWarningCount}/${rideCostAnomaly.completedRides} acima do aviso.`,
+      description: `R$ ${toNumber(rideCostAnomaly.averageBrl).toFixed(4)} medio / R$ ${toNumber(rideCostAnomaly.warningThreshold).toFixed(2)} aviso / R$ ${toNumber(rideCostAnomaly.criticalThreshold).toFixed(2)} critico; ${rideCostAnomaly.aboveWarningCount}/${rideCostAnomaly.completedRides} acima do aviso.`,
       href: '/dashboard'
     });
   }
@@ -316,7 +316,7 @@ function buildActionItems({
       id: 'directions-anomaly',
       priority: isCritical ? 'alta' : 'media',
       title: 'Directions por corrida elevado',
-      description: `${rideCostAnomaly.directionsPerRide.toFixed(2)} directions/corrida (limite aviso: ${rideCostAnomaly.directionsWarningPerRide}, critico: ${rideCostAnomaly.directionsCriticalPerRide}).`,
+      description: `${toNumber(rideCostAnomaly.directionsPerRide).toFixed(2)} directions/corrida (limite aviso: ${rideCostAnomaly.directionsWarningPerRide}, critico: ${rideCostAnomaly.directionsCriticalPerRide}).`,
       href: '/dashboard'
     });
   }
@@ -692,15 +692,16 @@ class BackofficeCommandCenterService {
       workerLag,
       paymentRuntime
     });
+    const rideCostCompleted = toNumber(rideCostAlertSummary?.completedRides, 0);
     const rideCostAnomaly = rideCostAlertSummary
       ? {
-          status: rideCostAlertSummary.aboveCriticalCount > 0
-            ? 'danger'
-            : rideCostAlertSummary.aboveWarningCount > 0 || rideCostAlertSummary.averageBrl >= rideCostAlertSummary.warningBrl
-              ? 'warning'
-              : rideCostAlertSummary.completedRides > 0
-                ? 'healthy'
-                : 'no_data',
+          status: rideCostCompleted <= 0
+            ? 'no_data'
+            : rideCostAlertSummary.aboveCriticalCount > 0
+              ? 'danger'
+              : rideCostAlertSummary.aboveWarningCount > 0 || rideCostAlertSummary.averageBrl >= rideCostAlertSummary.warningBrl
+                ? 'warning'
+                : 'healthy',
           averageBrl: rideCostAlertSummary.averageBrl || 0,
           averageGoogleBrl: rideCostAlertSummary.averageGoogleBrl || 0,
           directionsPerRide: rideCostAlertSummary.directionsPerRide || 0,
