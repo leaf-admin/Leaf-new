@@ -7,8 +7,13 @@
  *   - Redis adapter ativo (health endpoint)
  *   - Handshake latency p95/p99
  *   - Reconexao
- *   - Room join/leave
+ *   - Adapter isolation / cross-instance room broadcast (local mode only)
  *   - Deteccao de Session ID unknown
+ *
+ * Room join/leave via events emitidos pelo cliente nao possui contrato
+ * publico no gateway Leaf. A cobertura de join de sala ocorre via teste
+ * de adapter isolation, que usa socket.join() diretamente e verifica
+ * broadcast cross-instance via Redis adapter.
  *
  * Uso local (inicia runtime proprio):
  *   node scripts/tests/smoke-socket-health.cjs
@@ -21,7 +26,7 @@
  *   1. Redis adapter state=ready em /health/quick
  *   2. Latencia handshake p95 < 500ms, p99 < 1000ms
  *   3. Reconexao bem-sucedida com novo socket ID
- *   4. Room join/leave sem erros
+ *   4. Adapter isolation / cross-instance broadcast via Redis adapter
  *   5. Nenhuma ocorrencia de Session ID unknown
  */
 
@@ -334,36 +339,11 @@ async function testReconnection(url) {
   return { steps, reconnectedWithNewId: differentId };
 }
 
-async function testRoomJoinLeave(url) {
-  const roomName = `health-smoke-room:${Date.now()}`;
-  const socket = createClient(url, {
-    transports: ['websocket'],
-    reconnection: false,
-    timeout: 10000
-  });
-  await new Promise((resolve, reject) => {
-    socket.once('connect', resolve);
-    socket.once('connect_error', (err) => reject(new Error(err.message)));
-  });
-
-  const joinResult = await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Timeout aguardando join response')), 5000);
-    socket.emit('join', roomName, (response) => {
-      clearTimeout(timeout);
-      resolve(response);
-    });
-  });
-
-  const leaveResult = await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Timeout aguardando leave response')), 5000);
-    socket.emit('leave', roomName, (response) => {
-      clearTimeout(timeout);
-      resolve(response);
-    });
-  });
-
-  socket.close();
-  return { roomName, joinResult, leaveResult };
+async function testRoomJoinLeave(_url) {
+  return {
+    skipped: true,
+    reason: 'No public join/leave event contract on Leaf socket gateway. Room operations are validated via the adapterIsolation test which exercises socket.join() directly with cross-instance Redis broadcast.'
+  };
 }
 
 async function testSessionIdUnknown(url) {
@@ -494,7 +474,7 @@ async function main() {
     adapterHealth: null,
     handshakeLatency: null,
     reconnection: null,
-    roomJoinLeave: null,
+    roomJoinLeave: null, // skipped — no public join/leave event contract; coberto via adapterIsolation
     sessionIdUnknown: null,
     adapterIsolation: null,
     artifactsDir: ARTIFACT_ROOT,
