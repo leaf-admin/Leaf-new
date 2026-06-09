@@ -17,7 +17,7 @@ Feature idea
 
 ## GitHub Automation
 
-OpenCode can be triggered from GitHub with `/oc` or `/opencode` after repository secrets and variables are configured.
+OpenCode can be triggered from GitHub when an authorized comment starts with `/oc` or `/opencode` after repository secrets and variables are configured.
 
 See `docs/tasks/OPENCODE_GITHUB_AUTOMATION.md` for the workflow setup, required GitHub variables, safe slash-command prompts, and stop conditions.
 
@@ -55,6 +55,7 @@ Nao mude regra de negocio sem aprovacao explicita.
 Nao adicione chamada paga externa.
 Use rg antes de editar.
 Rode lint/test/build relevantes se existirem.
+Se validacao/smoke nao estabilizar apos uma tentativa focada de correcao, pare e comente diagnostico curto em vez de continuar depurando indefinidamente.
 Ao final, entregue resumo, arquivos alterados, riscos, rollback e testes executados.
 
 TASK:
@@ -86,5 +87,6 @@ Use the current GitHub Actions branch. Do not create or switch branches.
 Do not refactor unrelated code.
 Do not change business rules.
 Run tests again.
+If validation still fails after one focused fix attempt, stop and comment the blocker instead of continuing broad debugging.
 Update PR summary with evidence.
 ```

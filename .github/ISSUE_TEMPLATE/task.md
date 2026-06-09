@@ -51,5 +51,6 @@ Nao mude regra de negocio sem aprovacao explicita.
 Nao adicione chamada paga externa.
 Use rg antes de editar.
 Rode lint/test/build relevantes.
+Se validacao/smoke nao estabilizar apos uma tentativa focada de correcao, pare e comente diagnostico curto em vez de continuar depurando indefinidamente.
 Abra PR com resumo, arquivos alterados, riscos, rollback e testes executados.
 ```

@@ -4,7 +4,7 @@ This runbook explains how LEAF automates the Codex -> OpenCode -> GitHub flow wi
 
 ## What Is Automated
 
-- `/oc` and `/opencode` comments on GitHub issues or PR review comments can start OpenCode.
+- Comments that start with `/oc` or `/opencode` on GitHub issues or PR review comments can start OpenCode.
 - OpenCode runs inside GitHub Actions.
 - OpenCode reads `AGENTS.md` and `PROJECT_RULES.md` from the repository.
 - The GitHub Action creates the working branch for OpenCode.
@@ -15,7 +15,7 @@ This runbook explains how LEAF automates the Codex -> OpenCode -> GitHub flow wi
 
 - OpenCode does not run on every new issue.
 - OpenCode does not run on every new PR.
-- OpenCode does not run for outside contributors unless an authorized LEAF collaborator explicitly comments `/oc` or `/opencode`.
+- OpenCode does not run for outside contributors unless an authorized LEAF collaborator explicitly starts a comment with `/oc` or `/opencode`.
 - Codex review is still requested intentionally with `@codex review`.
 - Human approval remains required before merge.
 
@@ -73,7 +73,7 @@ If LEAF later wants commits and PRs to appear as the OpenCode GitHub App instead
 
 1. Create a GitHub issue from `.github/ISSUE_TEMPLATE/task.md`.
 2. Keep the task small: one issue, one branch, one PR.
-3. Add a comment:
+3. Add a comment that starts with the slash command:
 
 ```text
 /oc implement this issue.
@@ -85,6 +85,7 @@ Do not change business rules.
 Do not add external paid API calls.
 Run available lint, tests and build.
 Open a pull request.
+If validation does not stabilize after one focused fix attempt, stop and comment a concise diagnostic instead of continuing to debug.
 ```
 
 4. When OpenCode opens a PR, request Codex review:
@@ -103,14 +104,16 @@ Do not refactor unrelated code.
 Do not change business rules.
 Run tests again.
 Update the PR summary with evidence.
+If validation does not stabilize after one focused fix attempt, stop and comment a concise diagnostic instead of continuing to debug.
 ```
 
 6. Merge only after tests, evidence, and human review are complete.
 
 ## Guard Rails
 
-- Trigger requires `/oc` or `/opencode` in the comment.
+- Trigger requires the comment to start with `/oc` or `/opencode`. Mentioning the command later in a diagnostic or runbook comment must not trigger automation.
 - Trigger requires `OWNER`, `MEMBER`, or `COLLABORATOR` author association.
+- The OpenCode job has a 25 minute timeout to prevent runaway debug loops.
 - `share: false` prevents public OpenCode session sharing.
 - Checkout credentials are persisted for this workflow so OpenCode can push the action-created branch and open a PR. The token is the ephemeral `GITHUB_TOKEN` with workflow-scoped permissions.
 - `governance:check` must pass before OpenCode runs.
@@ -123,6 +126,7 @@ Update the PR summary with evidence.
 - `GITHUB_TOKEN` setup is simpler than GitHub App setup, but PR authorship appears as GitHub Actions. If authorship separation becomes important, move to the OpenCode app path.
 - Provider secrets in GitHub Actions are operationally simple, but access should stay limited to maintainers.
 - `AGENTS.md` is the shared source of truth. If a future model ignores it, the PR must be rejected.
+- A hard timeout can stop genuinely useful debugging, but LEAF favors a short diagnostic and a smaller follow-up issue over long autonomous loops.
 
 ## Recommended Branch Protection
 
@@ -142,3 +146,4 @@ Stop and do not merge when:
 - A paid external API path is added or made more frequent.
 - Payment, ledger, KYC, safety, or driver-online behavior changes without focused tests.
 - The PR lacks test evidence.
+- OpenCode has already made one focused fix attempt and validation still fails. In that case it should stop, comment the exact blocker, and avoid more broad debugging.
