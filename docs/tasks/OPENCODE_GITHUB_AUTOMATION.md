@@ -7,7 +7,8 @@ This runbook explains how LEAF automates the Codex -> OpenCode -> GitHub flow wi
 - `/oc` and `/opencode` comments on GitHub issues or PR review comments can start OpenCode.
 - OpenCode runs inside GitHub Actions.
 - OpenCode reads `AGENTS.md` and `PROJECT_RULES.md` from the repository.
-- OpenCode can create branches, push commits, comment, and open pull requests through the workflow token.
+- The GitHub Action creates the working branch for OpenCode.
+- OpenCode can push commits, comment, and open pull requests through the workflow token.
 - Governance checks run before OpenCode starts.
 
 ## What Is Not Automated
@@ -78,7 +79,7 @@ If LEAF later wants commits and PRs to appear as the OpenCode GitHub App instead
 /oc implement this issue.
 
 Follow AGENTS.md and PROJECT_RULES.md strictly.
-Create a new branch.
+Use the current GitHub Actions branch. Do not create or switch branches.
 Keep the scope limited.
 Do not change business rules.
 Do not add external paid API calls.
@@ -97,6 +98,7 @@ Open a pull request.
 ```text
 /oc apply Codex review comments.
 
+Use the current GitHub Actions branch. Do not create or switch branches.
 Do not refactor unrelated code.
 Do not change business rules.
 Run tests again.
