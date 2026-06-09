@@ -1,3 +1,9 @@
+/**
+ * @deprecated Legacy Woovi driver service calling Woovi API directly.
+ * Active Pix payment path uses Leaf backend API (`/api/payment/advance`),
+ * not direct Woovi provider calls. This file is NOT imported by the
+ * active payment flow.
+ */
 import Logger from '../utils/Logger';
 import { WooviConfig } from '../../config/WooviConfig';
 import { createAxiosInstance } from '../utils/axiosInterceptor';

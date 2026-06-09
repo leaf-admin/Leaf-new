@@ -1,4 +1,9 @@
 /**
+ * @test-only Legacy WhatsApp OTP test script using only mock classes.
+ * Contains mock Firebase Auth, mock WhatsApp service, and mock hybrid OTP
+ * service. No production credentials or real API calls. For local dev
+ * testing only.
+ *
  * Teste do WhatsApp OTP - Leaf App
  * 
  * Este script testa a implementação do WhatsApp OTP sem usar APIs reais

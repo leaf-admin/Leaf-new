@@ -1,3 +1,8 @@
+/**
+ * @deprecated Legacy Woovi webhook route inside mobile-app (not Leaf backend).
+ * Active Pix processing happens on the Leaf backend, not via this Express route.
+ * This file is NOT wired into the active Expo/RN runtime.
+ */
 const express = require('express');
 const router = express.Router();
 

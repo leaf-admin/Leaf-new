@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
 /**
+ * @test-only Legacy FCM test script with placeholder credentials.
+ * Uses hardcoded service account placeholders and projectId.
+ * Never executed in production. For local dev testing only.
+ *
  * 🧪 TESTE FCM - FIREBASE CLOUD MESSAGING
  * 
  * Este script testa o sistema de notificações FCM do Leaf App
