@@ -392,6 +392,209 @@ describe('FinancialLedgerService', () => {
     });
   });
 
+  it('records a withdrawal requested with fee when amount is below R$ 500', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    const result = await service.recordWithdrawalRequested({
+      withdrawalId: 'withdrawal_fee_1',
+      driverId: 'driver_1',
+      amountCents: 2500,
+      withdrawFeeCents: 100,
+      requestId: 'req_fee_1'
+    });
+
+    const event = firestore.docs.get(`financial_ledger_events/${result.eventId}`);
+
+    expect(result).toMatchObject({
+      success: true,
+      totalDebitCents: 2600,
+      totalCreditCents: 2600
+    });
+    expect(event.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        account: 'liability:driver_balance_payable',
+        direction: 'debit',
+        amountCents: 2600
+      }),
+      expect.objectContaining({
+        account: 'liability:driver_withdrawal_pending',
+        direction: 'credit',
+        amountCents: 2500
+      }),
+      expect.objectContaining({
+        account: 'revenue:withdrawal_fee',
+        direction: 'credit',
+        amountCents: 100
+      })
+    ]));
+  });
+
+  it('records a withdrawal requested without fee when amount is above R$ 500', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    const result = await service.recordWithdrawalRequested({
+      withdrawalId: 'withdrawal_no_fee_1',
+      driverId: 'driver_1',
+      amountCents: 50000,
+      withdrawFeeCents: 0,
+      requestId: 'req_no_fee_1'
+    });
+
+    const event = firestore.docs.get(`financial_ledger_events/${result.eventId}`);
+
+    expect(result).toMatchObject({
+      success: true,
+      totalDebitCents: 50000,
+      totalCreditCents: 50000
+    });
+    expect(event.lines).toHaveLength(2);
+    expect(event.lines).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ account: 'revenue:withdrawal_fee' })
+    ]));
+  });
+
+  it('protects idempotent replay of ride settlement by rideId/driverId', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    const first = await service.recordRideSettlement({
+      rideId: 'ride_idem_1',
+      driverId: 'driver_1',
+      totalAmountCents: 3000,
+      netAmountCents: 2500,
+      operationalFeeCents: 300,
+      wooviFeeCents: 200
+    });
+
+    const second = await service.recordRideSettlement({
+      rideId: 'ride_idem_1',
+      driverId: 'driver_1',
+      totalAmountCents: 3000,
+      netAmountCents: 2500,
+      operationalFeeCents: 300,
+      wooviFeeCents: 200
+    });
+
+    expect(first.success).toBe(true);
+    expect(second).toMatchObject({
+      success: true,
+      idempotentReplay: true,
+      eventId: first.eventId
+    });
+  });
+
+  it('records a balanced cancellation settlement', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    const result = await service.recordCancellationSettlement({
+      rideId: 'ride_cancel_1',
+      driverId: 'driver_1',
+      cancellationFeeCents: 2000,
+      netAmountCents: 1500,
+      wooviFeeCents: 500
+    });
+
+    const event = firestore.docs.get(`financial_ledger_events/${result.eventId}`);
+
+    expect(result).toMatchObject({
+      success: true,
+      totalDebitCents: 2000,
+      totalCreditCents: 2000
+    });
+    expect(event.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        account: 'liability:ride_payment_holding',
+        direction: 'debit',
+        amountCents: 2000
+      }),
+      expect.objectContaining({
+        account: 'liability:driver_balance_payable',
+        direction: 'credit',
+        amountCents: 1500
+      }),
+      expect.objectContaining({
+        account: 'contra_revenue:payment_intermediation_fee',
+        direction: 'credit',
+        amountCents: 500
+      })
+    ]));
+  });
+
+  it('records a balanced refund with asset and liability lines', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    const result = await service.recordRefund({
+      rideId: 'ride_refund_1',
+      chargeId: 'charge_refund_1',
+      refundId: 'refund_1',
+      amountCents: 2500,
+      passengerId: 'passenger_1',
+      reason: 'cancelamento'
+    });
+
+    const event = firestore.docs.get(`financial_ledger_events/${result.eventId}`);
+
+    expect(result).toMatchObject({
+      success: true,
+      totalDebitCents: 2500,
+      totalCreditCents: 2500
+    });
+    expect(event.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        account: 'liability:ride_payment_holding',
+        direction: 'debit',
+        amountCents: 2500
+      }),
+      expect.objectContaining({
+        account: 'asset:leaf_cash_pix',
+        direction: 'credit',
+        amountCents: 2500
+      })
+    ]));
+  });
+
+  it('records a withdrawal processed event with driver_pending debit and cash credit', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    const result = await service.recordWithdrawalProcessed({
+      withdrawalId: 'withdrawal_proc_1',
+      driverId: 'driver_1',
+      amountCents: 2500,
+      transferId: 'transfer_1'
+    });
+
+    const event = firestore.docs.get(`financial_ledger_events/${result.eventId}`);
+
+    expect(result).toMatchObject({
+      success: true,
+      totalDebitCents: 2500,
+      totalCreditCents: 2500
+    });
+    expect(event.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        account: 'liability:driver_withdrawal_pending',
+        direction: 'debit',
+        amountCents: 2500
+      }),
+      expect.objectContaining({
+        account: 'asset:leaf_cash_pix',
+        direction: 'credit',
+        amountCents: 2500
+      })
+    ]));
+  });
+
   it('flags processed withdrawals whose Pix Out ledger is pending', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
