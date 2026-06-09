@@ -70,9 +70,15 @@ function buildKycSection() {
 }
 
 function buildMapsSection() {
+  const keyConfigured = presence('GOOGLE_MAPS_API_KEY');
+  const clientDirectGoogleFallbackAllowed =
+    envBool('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false) ||
+    envBool('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false);
   return {
-    configured: presence('GOOGLE_MAPS_API_KEY'),
-    keyConfigured: presence('GOOGLE_MAPS_API_KEY'),
+    configured: keyConfigured,
+    keyConfigured,
+    clientDirectGoogleFallbackAllowed,
+    backendOnly: keyConfigured && !clientDirectGoogleFallbackAllowed,
     placesCacheEnabled: envBool('ENABLE_PLACES_CACHE', false),
     receiptMapImagesConfigured: presence('GEO_KEY')
   };

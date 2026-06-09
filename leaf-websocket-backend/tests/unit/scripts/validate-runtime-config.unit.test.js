@@ -395,7 +395,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     );
   });
 
-  it('reports maps diagnostics with key configured', () => {
+  it('reports maps diagnostics with key configured and masks secrets', () => {
     const result = runValidator({
       ...baseProdEnv,
       WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
@@ -408,9 +408,31 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
 
     expect(result.report.diagnostics.maps).toMatchObject({
       keyConfigured: true,
+      clientDirectGoogleFallbackAllowed: false,
       placesCacheEnabled: { value: true, source: 'env' },
       receiptMapImagesConfigured: true
     });
+    expect(result.stdout).not.toContain('maps-key');
+    expect(result.stdout).not.toContain('geo-key');
+  });
+
+  it('blocks production when EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK is true', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      GOOGLE_MAPS_API_KEY: 'maps-key',
+      EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK: 'true'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.ok).toBe(false);
+    expect(result.report.summary.blockers).toContain(
+      'EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK=true bloqueado em produção: client-side Google fallback expõe chave de API'
+    );
+    expect(result.report.diagnostics.maps.clientDirectGoogleFallbackAllowed).toBe(true);
+    expect(result.stdout).not.toContain('maps-key');
   });
 
   it('reports push diagnostics with FCM configured', () => {

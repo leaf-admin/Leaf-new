@@ -362,6 +362,12 @@ function main() {
     if (!String(process.env.GOOGLE_MAPS_API_KEY || '').trim()) {
       warnings.push('GOOGLE_MAPS_API_KEY ausente: Places/receipt mapas podem falhar em produção');
     }
+    if (
+      boolEnv('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK') ||
+      boolEnv('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK')
+    ) {
+      blockers.push('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK=true bloqueado em produção: client-side Google fallback expõe chave de API');
+    }
 
     blockers.push(...biometricReadiness.blockers);
     warnings.push(...biometricReadiness.warnings);
@@ -440,6 +446,9 @@ function main() {
       },
       maps: {
         keyConfigured: Boolean(String(process.env.GOOGLE_MAPS_API_KEY || '').trim()),
+        clientDirectGoogleFallbackAllowed:
+          boolEnv('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false) ||
+          boolEnv('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false),
         placesCacheEnabled: booleanDiagnostic('ENABLE_PLACES_CACHE', false),
         receiptMapImagesConfigured: Boolean(String(process.env.GEO_KEY || '').trim())
       },

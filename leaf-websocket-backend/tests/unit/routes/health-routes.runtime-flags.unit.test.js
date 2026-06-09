@@ -172,6 +172,35 @@ describe('health runtime flags route', () => {
     expect(response.body.maps.receiptMapImagesConfigured).toBe(true);
   });
 
+  it('reports maps.googleFallbackAllowed and backendOnly', async () => {
+    process.env.GOOGLE_MAPS_API_KEY = 'maps-key';
+    process.env.WOOVI_ENVIRONMENT = 'sandbox';
+    process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
+
+    const appWithoutFallback = createApp();
+    const resNoFallback = await request(appWithoutFallback).get('/health/runtime-flags');
+    expect(resNoFallback.body.maps.clientDirectGoogleFallbackAllowed).toBe(false);
+    expect(resNoFallback.body.maps.backendOnly).toBe(true);
+
+    process.env.EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK = 'true';
+    const appWithFallback = createApp();
+    const resWithFallback = await request(appWithFallback).get('/health/runtime-flags');
+    expect(resWithFallback.body.maps.clientDirectGoogleFallbackAllowed).toBe(true);
+    expect(resWithFallback.body.maps.backendOnly).toBe(false);
+  });
+
+  it('reports maps.backendOnly=false when maps key is absent', async () => {
+    delete process.env.GOOGLE_MAPS_API_KEY;
+    process.env.WOOVI_ENVIRONMENT = 'sandbox';
+    process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
+
+    const app = createApp();
+    const response = await request(app).get('/health/runtime-flags');
+
+    expect(response.body.maps.configured).toBe(false);
+    expect(response.body.maps.backendOnly).toBe(false);
+  });
+
   it('reports socket section with booleans', async () => {
     process.env.ENABLE_SOCKETIO_REDIS_ADAPTER = 'true';
     process.env.REQUIRE_SOCKETIO_REDIS_ADAPTER = 'true';
