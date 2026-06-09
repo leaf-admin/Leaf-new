@@ -175,9 +175,12 @@ class LeafApiService {
     });
   }
 
+  /**
+   * @returns {Promise<{drivers: import('../types/api').DriverApplicationsResponse, users: import('../types/api').UsersResponse, rides: import('../types/api').MetricsOverview}>}
+   */
   async getDashboardSnapshot() {
     const [drivers, users, rides] = await Promise.all([
-      this.request("/drivers/applications?page=1&limit=5").catch(() => ({ drivers: [] })),
+      this.request("/drivers/applications?page=1&limit=5").catch(() => ({ drivers: [], summary: { totalApplications: 0, pending: 0, approved: 0, rejected: 0, inReview: 0 } })),
       this.request("/users?page=1&limit=5").catch(() => ({ users: [] })),
       this.request("/metrics/overview").catch(() => ({})),
     ]);
@@ -277,6 +280,9 @@ class LeafApiService {
     return this.request(`/ops/alerts?hours=${encodeURIComponent(hours)}`);
   }
 
+  /**
+   * @returns {Promise<import('../types/api').CommandCenterSnapshot>}
+   */
   async getCommandCenterSnapshot({ hours = 1, period = "today", forceRefresh = false } = {}) {
     const params = new URLSearchParams({
       hours: String(hours),
@@ -321,6 +327,9 @@ class LeafApiService {
     return this.request("/alerts/stats");
   }
 
+  /**
+   * @returns {Promise<import('../types/api').DriverApplicationsResponse>}
+   */
   async getDrivers(page = 1, limit = 20, status = "all", search = "") {
     const params = new URLSearchParams({
       page: String(page),
@@ -530,6 +539,9 @@ class LeafApiService {
     });
   }
 
+  /**
+   * @returns {Promise<import('../types/api').CampaignListResponse>}
+   */
   async listInAppCampaigns(params = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -571,6 +583,9 @@ class LeafApiService {
     });
   }
 
+  /**
+   * @returns {Promise<import('../types/api').CampaignListResponse['stats']>}
+   */
   async getInAppCampaignStats(params = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -745,6 +760,9 @@ class LeafApiService {
     return this.request(`/metrics/simulation/run?${params.toString()}`);
   }
 
+  /**
+   * @returns {Promise<import('../types/api').ReconciliationReportsResponse>}
+   */
   async listFinancialReconciliationReports(params = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -756,6 +774,9 @@ class LeafApiService {
     return this.request(`/financial/reconciliation/reports${suffix ? `?${suffix}` : ""}`);
   }
 
+  /**
+   * @returns {Promise<import('../types/api').ReconciliationRideDetail>}
+   */
   async getFinancialReconciliationRide(rideId) {
     return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}`);
   }
@@ -822,6 +843,10 @@ class LeafApiService {
     return this.request(`/audit/stats${suffix ? `?${suffix}` : ""}`);
   }
 
+  /**
+   * @param {{ status?: string, userId?: string, page?: number, limit?: number, priority?: string, category?: string }} params
+   * @returns {Promise<import('../types/api').SupportTicketsResponse>}
+   */
   async getSupportTickets(params = {}) {
     const query = new URLSearchParams();
     if (params.status) query.append("status", params.status);
@@ -844,6 +869,9 @@ class LeafApiService {
     }
   }
 
+  /**
+   * @returns {Promise<import('../types/api').SupportQueueSummary>}
+   */
   async getSupportQueueSummary() {
     return this.request("/support/queue/summary");
   }
