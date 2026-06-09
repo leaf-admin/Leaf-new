@@ -35,6 +35,7 @@ jobs:
       - name: Validate OpenCode runtime config
         env:
           OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
+          VERBOO_API_KEY: ${{ secrets.VERBOO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
@@ -46,7 +47,7 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$DEEPSEEK_API_KEY$MOONSHOT_API_KEY$KIMI_API_KEY$ANTHROPIC_API_KEY$OPENAI_API_KEY" ]; then
+          if [ -z "$VERBOO_API_KEY$DEEPSEEK_API_KEY$MOONSHOT_API_KEY$KIMI_API_KEY$ANTHROPIC_API_KEY$OPENAI_API_KEY" ]; then
             echo "Missing at least one supported model provider secret."
             exit 1
           fi
@@ -58,6 +59,7 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          VERBOO_API_KEY: ${{ secrets.VERBOO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}

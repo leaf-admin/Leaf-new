@@ -28,17 +28,39 @@ Set these in GitHub repository settings under `Settings -> Secrets and variables
 
 Examples depend on the provider configured for the project. Keep the final value in GitHub variables, not in the repo.
 
+For LEAF's current Verboo Code provider, recommended examples are:
+
+- `verboo/deepseek-v4-flash`
+- `verboo/mimo-v2.5`
+- `verboo/minimax-m2.7`
+
 ### Repository Secrets
 
 Configure at least one supported provider key:
 
+- `VERBOO_API_KEY`
 - `DEEPSEEK_API_KEY`
 - `MOONSHOT_API_KEY`
 - `KIMI_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 
+For the current LEAF setup, prefer `VERBOO_API_KEY`.
+
 The workflow fails closed when `OPENCODE_MODEL` is missing or no supported provider secret is present.
+
+## Verboo Code Provider
+
+The repo includes `opencode.json` with a `verboo` provider that uses OpenCode's OpenAI-compatible adapter.
+
+The config contains only non-secret provider metadata:
+
+- provider id: `verboo`;
+- base URL: `https://code.verboo.ai/router/v1`;
+- available models copied from the local OpenCode Desktop config;
+- API key reference: `{env:VERBOO_API_KEY}`.
+
+Do not commit the local OpenCode auth file. Desktop credentials are local-only and GitHub Actions cannot use them unless the API key is explicitly provided as a GitHub secret.
 
 ## Optional GitHub App Setup
 

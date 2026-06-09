@@ -51,6 +51,7 @@ const requiredFiles = [
     snippets: [
       "# OpenCode GitHub Automation",
       "## Required GitHub Configuration",
+      "## Verboo Code Provider",
       "## Daily Flow",
       "## Guard Rails",
       "## Stop Conditions",
@@ -84,10 +85,22 @@ const requiredFiles = [
       "pull_request_review_comment:",
       "contains(github.event.comment.body, '/oc')",
       "github.event.comment.author_association == 'OWNER'",
+      "VERBOO_API_KEY",
       "anomalyco/opencode/github@latest",
       "use_github_token: true",
       "share: false",
       "npm run governance:check",
+    ],
+  },
+  {
+    file: "opencode.json",
+    snippets: [
+      "\"$schema\": \"https://opencode.ai/config.json\"",
+      "\"verboo\"",
+      "\"@ai-sdk/openai-compatible\"",
+      "\"https://code.verboo.ai/router/v1\"",
+      "\"apiKey\": \"{env:VERBOO_API_KEY}\"",
+      "\"deepseek-v4-flash\"",
     ],
   },
 ];
