@@ -346,6 +346,92 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     });
   });
 
+  it('reports firebase diagnostics with all vars configured', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      FIREBASE_DATABASE_URL: 'https://leaf-test.firebaseio.com',
+      FIREBASE_SERVICE_ACCOUNT_JSON: '{"dummy":true}'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.diagnostics.firebase).toMatchObject({
+      databaseUrlConfigured: 'present',
+      serviceAccountConfigured: true,
+      configured: true
+    });
+  });
+
+  it('reports firebase diagnostics as unconfigured when all vars absent', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false'
+    });
+
+    expect(result.report.diagnostics.firebase).toMatchObject({
+      configured: false,
+      serviceAccountConfigured: false
+    });
+  });
+
+  it('warns about missing firebase and maps config in production', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false'
+    });
+
+    expect(result.report.summary.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('FIREBASE_DATABASE_URL ausente'),
+        expect.stringContaining('Credenciais Firebase ausentes'),
+        expect.stringContaining('GOOGLE_MAPS_API_KEY ausente')
+      ])
+    );
+  });
+
+  it('reports maps diagnostics with key configured', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      GOOGLE_MAPS_API_KEY: 'maps-key',
+      ENABLE_PLACES_CACHE: 'true',
+      GEO_KEY: 'geo-key'
+    });
+
+    expect(result.report.diagnostics.maps).toMatchObject({
+      keyConfigured: true,
+      placesCacheEnabled: { value: true, source: 'env' },
+      receiptMapImagesConfigured: true
+    });
+  });
+
+  it('reports push diagnostics with FCM configured', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      FCM_SERVER_KEY: 'fcm-key',
+      ALLOW_PUBLIC_DIRECT_FCM_SEND: 'true',
+      ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE: 'true'
+    });
+
+    expect(result.report.diagnostics.push).toMatchObject({
+      fcmConfigured: true,
+      allowPublicDirectFcmSend: { value: true, source: 'env' },
+      demandNotificationServiceEnabled: { value: true, source: 'env' }
+    });
+    expect(result.stdout).not.toContain('fcm-key');
+  });
+
   it('allows strict biometric production when all required controls are configured', () => {
     const result = runValidator({
       ...baseProdEnv,
