@@ -274,7 +274,7 @@ function buildPassengerRuntime(overrides = {}) {
 }
 
 describe('driver online toggle', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
     const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
     subscribePrototypeMapRoute.mockImplementation(() => jest.fn());
@@ -293,6 +293,9 @@ describe('driver online toggle', () => {
     kycServiceMock.verifyDriver.mockResolvedValue({ success: true, data: { isMatch: true } });
     kycServiceMock.getAwsProviderName.mockReturnValue('aws_rekognition_face_liveness');
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    const { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } = require('../src/services/BackgroundLocationService');
+    await AsyncStorage.setItem(BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY, 'true');
   });
 
   afterEach(() => {

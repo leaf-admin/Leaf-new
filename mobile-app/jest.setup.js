@@ -53,6 +53,11 @@ jest.mock('expo-font', () => ({
     loadAsync: jest.fn(() => Promise.resolve()),
 }));
 
+jest.mock('expo-task-manager', () => ({
+    isTaskDefined: jest.fn(() => false),
+    defineTask: jest.fn(),
+}));
+
 jest.mock('@expo/vector-icons', () => {
     const React = require('react');
     const MockIcon = (props) => React.createElement('Icon', props, props.children);
