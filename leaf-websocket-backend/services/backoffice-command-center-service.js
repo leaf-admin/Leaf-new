@@ -6,6 +6,7 @@ const healthCheckService = require('./health-check-service');
 const driverApplicationService = require('./driver-application-service');
 const paymentRuntimeProfileService = require('./payment-runtime-profile-service');
 const skuCostMonitorService = require('./backoffice-sku-cost-monitor-service');
+const rideCostAlertService = require('./ride-cost-alert-service');
 const WorkerHealthMonitor = require('../workers/health-monitor');
 const { logStructured } = require('../utils/logger');
 
@@ -192,7 +193,8 @@ function buildActionItems({
   workerDLQ,
   workerLag,
   paymentRuntime,
-  skuMonitor
+  skuMonitor,
+  rideCostAnomaly
 }) {
   const items = [];
   const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
@@ -291,6 +293,38 @@ function buildActionItems({
       priority: skuMonitor.status === 'danger' ? 'alta' : 'media',
       title: 'Custo por corrida subiu',
       description: `Monitor SKU em ${skuMonitor.finance?.costRatioPercent || 0}% da taxa operacional media.`,
+      href: '/dashboard'
+    });
+  }
+
+  if (rideCostAnomaly && ['warning', 'danger'].includes(rideCostAnomaly.status)) {
+    const isCritical = rideCostAnomaly.status === 'danger';
+    items.push({
+      id: 'ride-cost-anomaly',
+      priority: isCritical ? 'alta' : 'media',
+      title: isCritical
+        ? 'Custo medio por corrida acima do critico'
+        : 'Custo medio por corrida acima do limite de aviso',
+      description: `R$ ${toNumber(rideCostAnomaly.averageBrl).toFixed(4)} medio / R$ ${toNumber(rideCostAnomaly.warningThreshold).toFixed(2)} aviso / R$ ${toNumber(rideCostAnomaly.criticalThreshold).toFixed(2)} critico; ${rideCostAnomaly.aboveWarningCount}/${rideCostAnomaly.completedRides} acima do aviso.`,
+      href: '/dashboard'
+    });
+  }
+
+  if (
+    rideCostAnomaly &&
+    toNumber(rideCostAnomaly.completedRides, 0) > 0 &&
+    rideCostAnomaly.status !== 'no_data' &&
+    toNumber(rideCostAnomaly.directionsPerRide, 0) >= toNumber(rideCostAnomaly.directionsWarningPerRide, 0)
+  ) {
+    const directionsPerRide = toNumber(rideCostAnomaly.directionsPerRide, 0);
+    const directionsWarningPerRide = toNumber(rideCostAnomaly.directionsWarningPerRide, 0);
+    const directionsCriticalPerRide = toNumber(rideCostAnomaly.directionsCriticalPerRide, 0);
+    const isCritical = directionsPerRide >= directionsCriticalPerRide;
+    items.push({
+      id: 'directions-anomaly',
+      priority: isCritical ? 'alta' : 'media',
+      title: 'Directions por corrida elevado',
+      description: `${directionsPerRide.toFixed(2)} directions/corrida (limite aviso: ${directionsWarningPerRide}, critico: ${directionsCriticalPerRide}).`,
       href: '/dashboard'
     });
   }
@@ -593,6 +627,12 @@ class BackofficeCommandCenterService {
         label: 'DLQ dos workers',
         critical: true,
         run: () => this.workerHealthMonitor.getDLQSize().then((dlqSize) => ({ dlqSize }))
+      },
+      {
+        id: 'rideCostAlertSummary',
+        label: 'Monitor de custo por corrida',
+        critical: false,
+        run: () => rideCostAlertService.collectRecentCostSummary({})
       }
     ];
 
@@ -621,6 +661,7 @@ class BackofficeCommandCenterService {
     const workerHealth = this.sourceValue(sources, 'workerHealth', null);
     const workerLag = this.sourceValue(sources, 'workerLag', null);
     const workerDLQ = this.sourceValue(sources, 'workerDLQ', null);
+    const rideCostAlertSummary = this.sourceValue(sources, 'rideCostAlertSummary', null);
 
     const gmvCents = toCents(financialToday.totalValue);
     const grossRevenueCents = toCents(operationalRevenue.totalOperationalFee);
@@ -659,6 +700,30 @@ class BackofficeCommandCenterService {
       workerLag,
       paymentRuntime
     });
+    const rideCostCompleted = toNumber(rideCostAlertSummary?.completedRides, 0);
+    const rideCostAnomaly = rideCostAlertSummary
+      ? {
+          status: rideCostCompleted <= 0
+            ? 'no_data'
+            : rideCostAlertSummary.aboveCriticalCount > 0
+              ? 'danger'
+              : rideCostAlertSummary.aboveWarningCount > 0 || rideCostAlertSummary.averageBrl >= rideCostAlertSummary.warningBrl
+                ? 'warning'
+                : 'healthy',
+          averageBrl: rideCostAlertSummary.averageBrl || 0,
+          averageGoogleBrl: rideCostAlertSummary.averageGoogleBrl || 0,
+          directionsPerRide: rideCostAlertSummary.directionsPerRide || 0,
+          maxBrl: rideCostAlertSummary.maxBrl || 0,
+          aboveWarningCount: rideCostAlertSummary.aboveWarningCount || 0,
+          aboveCriticalCount: rideCostAlertSummary.aboveCriticalCount || 0,
+          completedRides: rideCostAlertSummary.completedRides || 0,
+          warningThreshold: rideCostAlertSummary.warningBrl || 0,
+          criticalThreshold: rideCostAlertSummary.criticalBrl || 0,
+          directionsWarningPerRide: rideCostAlertSummary.directionsWarningPerRide || 0,
+          directionsCriticalPerRide: rideCostAlertSummary.directionsCriticalPerRide || 0,
+          generatedAt: rideCostAlertSummary.generatedAt || null
+        }
+      : null;
     const actionItems = buildActionItems({
       status,
       sources,
@@ -668,16 +733,20 @@ class BackofficeCommandCenterService {
       workerDLQ,
       workerLag,
       paymentRuntime,
-      skuMonitor
+      skuMonitor,
+      rideCostAnomaly
     });
+
     const baseCostControls = {
       externalPaidApisCalled: false,
       paidApiFamilies: [],
       dashboardFanOutReduced: true,
       skuMonitor,
+      rideCostAnomaly,
       notes: [
         'Snapshot agregado no backend com cache Redis.',
         'Monitor SKU usa somente telemetria recente ja persistida no Redis.',
+        'Alerta de custo por corrida avalia media contra limites configurados no backend (RIDE_COST_WARNING_BRL, RIDE_COST_CRITICAL_BRL).',
         'Nao chama Google Places, Google Routes, Directions, Woovi ou provedores pagos.',
         'Pagina /maps segue separada porque carregar Google Maps JS pode gerar custo de mapa.'
       ]

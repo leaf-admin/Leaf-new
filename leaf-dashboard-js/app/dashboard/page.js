@@ -270,7 +270,68 @@ function CanaryPackPanel({ canaryPack }) {
   );
 }
 
-function SkuCostMonitorPanel({ skuMonitor }) {
+function RideCostAnomalyBanner({ anomaly }) {
+  if (!anomaly) return null;
+  const tone = anomaly.status === "danger"
+    ? "status-bad"
+    : anomaly.status === "warning"
+      ? "status-warn"
+      : "status-ok";
+
+  if (anomaly.status === "no_data" || anomaly.status === "healthy") {
+    return (
+      <div className="ops-mini-bars" style={{ marginBottom: "0.5rem" }}>
+        <div>
+          <span className={tone}>
+            {anomaly.status === "healthy" ? "Custo dentro do esperado" : "Sem corridas suficientes para avaliar"}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ops-incident" style={{ marginBottom: "0.5rem", padding: "0.5rem", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)" }}>
+      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}>
+        <span className={tone}>
+          {anomaly.status === "danger" ? "ALERTA CRÍTICO" : "ATENÇÃO"}
+        </span>
+        <strong>
+            R$ {toNumber(anomaly.averageBrl).toFixed(4)} / corrida
+        </strong>
+        <span className="meta-badge">
+          {anomaly.aboveWarningCount} de {anomaly.completedRides} acima do aviso (R$ {toNumber(anomaly.warningThreshold).toFixed(2)})
+        </span>
+        {anomaly.aboveCriticalCount > 0 ? (
+          <span className="status-bad">
+            {anomaly.aboveCriticalCount} acima do crítico (R$ {toNumber(anomaly.criticalThreshold).toFixed(2)})
+          </span>
+        ) : null}
+      </div>
+      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginTop: "0.25rem" }}>
+        <small>
+          Google médio: R$ {toNumber(anomaly.averageGoogleBrl).toFixed(4)}
+        </small>
+        <small>
+          Directions: {toNumber(anomaly.directionsPerRide).toFixed(2)} / corrida
+          {anomaly.directionsPerRide >= anomaly.directionsCriticalPerRide
+            ? " (acima do crítico)"
+            : anomaly.directionsPerRide >= anomaly.directionsWarningPerRide
+              ? " (acima do aviso)"
+              : ""}
+        </small>
+        <small>
+          Máxima: R$ {toNumber(anomaly.maxBrl).toFixed(4)}
+        </small>
+        <span className="meta-badge">
+          Limites configurados no backend: aviso R$ {toNumber(anomaly.warningThreshold).toFixed(2)} · crítico R$ {toNumber(anomaly.criticalThreshold).toFixed(2)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SkuCostMonitorPanel({ skuMonitor, rideCostAnomaly }) {
   const finance = skuMonitor?.finance || {};
   const rows = Array.isArray(skuMonitor?.rows) ? skuMonitor.rows : [];
   const sampledRides = toNumber(skuMonitor?.sampledRides);
@@ -278,6 +339,7 @@ function SkuCostMonitorPanel({ skuMonitor }) {
 
   return (
     <div className="sku-monitor">
+      <RideCostAnomalyBanner anomaly={rideCostAnomaly} />
       <div className="sku-monitor-summary">
         <div className="sku-monitor-card">
           <span>Status</span>
@@ -624,7 +686,7 @@ export default function DashboardPage() {
             title="Monitor SKU e margem"
             subtitle="Custo por chamada, taxa operacional e saldo líquido projetado sem criar fan-out caro."
           >
-            <SkuCostMonitorPanel skuMonitor={costControls.skuMonitor} />
+            <SkuCostMonitorPanel skuMonitor={costControls.skuMonitor} rideCostAnomaly={costControls.rideCostAnomaly} />
           </Panel>
 
           <Panel title="Controle de custo">
@@ -655,23 +717,107 @@ export default function DashboardPage() {
               </div>
               <div className="row">
                 <div className="label">APIs pagas neste snapshot</div>
-                <div className="value">{costControls.externalPaidApisCalled ? "sim" : "não"}</div>
+                <div className="value">
+                  <span className={costControls.externalPaidApisCalled ? "status-bad" : "status-ok"}>
+                    {costControls.externalPaidApisCalled ? "sim — verificar" : "não"}
+                  </span>
+                </div>
               </div>
               <div className="row">
                 <div className="label">Fan-out do dashboard</div>
-                <div className="value">{costControls.dashboardFanOutReduced ? "reduzido" : "não reduzido"}</div>
+                <div className="value">
+                  <span className={costControls.dashboardFanOutReduced ? "status-ok" : "status-warn"}>
+                    {costControls.dashboardFanOutReduced ? "reduzido (backend agrega)" : "não reduzido"}
+                  </span>
+                  <small>Dashboard consome só endpoint agregado /ops/command-center</small>
+                </div>
               </div>
               <div className="row">
-                <div className="label">Cache</div>
+                <div className="label">Cache do snapshot</div>
                 <div className="value">
-                  {snapshot?.cache?.status || "-"} · idade {snapshot?.cache?.ageSeconds ?? "-"}s
+                  <span className={snapshot?.cache?.status === "HIT" ? "status-ok" : "meta-badge"}>
+                    {snapshot?.cache?.status || "-"}
+                  </span>
+                  <small>idade {snapshot?.cache?.ageSeconds ?? "-"}s · TTL {snapshot?.scope?.ttlSeconds || 20}s</small>
+                </div>
+              </div>
+              <div className="row">
+                <div className="label">Preço do reads Firestore</div>
+                <div className="value">
+                  US$ {firestoreReadGuard.readPriceUsdPer100k ?? 0.06}/100k reads
+                  <small>Usado para estimar custo dos reads do dashboard</small>
                 </div>
               </div>
               <div className="row">
                 <div className="label">Mapa operacional</div>
                 <div className="value">separado para evitar custo acidental</div>
               </div>
+              <div className="row">
+                <div className="label">Monitor SKU</div>
+                <div className="value">
+                  <span className={skuStatusClass(costControls.skuMonitor?.status)}>
+                    {skuStatusLabel(costControls.skuMonitor?.status)}
+                  </span>
+                  <small>Baseado em {formatCompact(costControls.skuMonitor?.sampledRides)} corrida(s) da telemetria recente</small>
+                </div>
+              </div>
+              <div className="row">
+                <div className="label">Alerta de custo por corrida</div>
+                <div className="value">
+                  {costControls.rideCostAnomaly ? (
+                    <>
+                      <span className={
+                        costControls.rideCostAnomaly.status === "danger"
+                          ? "status-bad"
+                          : costControls.rideCostAnomaly.status === "warning"
+                            ? "status-warn"
+                            : "status-ok"
+                      }>
+                        {costControls.rideCostAnomaly.status === "danger"
+                          ? "crítico"
+                          : costControls.rideCostAnomaly.status === "warning"
+                            ? "atenção"
+                            : costControls.rideCostAnomaly.status === "healthy"
+                              ? "normal"
+                              : "sem dados"}
+                      </span>
+                      <small>
+                        {costControls.rideCostAnomaly.status !== "no_data"
+                          ? `R$ ${toNumber(costControls.rideCostAnomaly.averageBrl).toFixed(4)} médio · ${costControls.rideCostAnomaly.completedRides} corrida(s)`
+                          : "Aguardando telemetria de corridas concluídas"}
+                      </small>
+                    </>
+                  ) : (
+                    <span className="meta-badge">não avaliado</span>
+                  )}
+                </div>
+              </div>
             </div>
+            <details className="support-advanced-drawer" style={{ marginTop: "0.5rem" }}>
+              <summary>Origem dos dados</summary>
+              <div className="metric-list" style={{ fontSize: "var(--font-size-sm)" }}>
+                <div className="row">
+                  <div className="label">Firestore reads</div>
+                  <div className="value">Contador Redis via backoffice-cost-guard-service.js a cada request</div>
+                </div>
+                <div className="row">
+                  <div className="label">SKU monitor</div>
+                  <div className="value">Redis ride_cost_telemetry:recent via backoffice-sku-cost-monitor-service.js</div>
+                </div>
+                <div className="row">
+                  <div className="label">Alerta de custo</div>
+                  <div className="value">Redis via ride-cost-alert-service.js — limites RIDE_COST_WARNING_BRL / RIDE_COST_CRITICAL_BRL</div>
+                </div>
+                <div className="row">
+                  <div className="label">Cache</div>
+                  <div className="value">Redis TTL={snapshot?.scope?.ttlSeconds || 20}s configurado por BACKOFFICE_COMMAND_CENTER_TTL_SECONDS</div>
+                </div>
+                <div className="row">
+                  <div className="label">Browser → provedores pagos</div>
+                  <div className="value">Bloqueado: dashboard proxy para api.leaf.app.br, nunca chama Google/Woovi/Firebase direto</div>
+                </div>
+              </div>
+            </details>
           </Panel>
         </section>
 
