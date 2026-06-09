@@ -20,10 +20,13 @@ import { toUserFriendlyMessage } from './src/utils/friendlyErrorMessages';
 import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
 
+// LogBox allowlist — only known non-critical warnings are ignored
+// All other warnings remain visible so QA and dev can catch regressions early
 if (__DEV__) {
-  LogBox.ignoreAllLogs(true);
   LogBox.ignoreLogs([
+    // Deprecated Firebase namespaced API — pending migration to modular API
     'This method is deprecated (as well as all React Native Firebase namespaced API)',
+    // Socket QA token expiry — expected in dev with short-lived tokens
     'Token QA do socket expirado ou próximo de expirar',
   ]);
 }
