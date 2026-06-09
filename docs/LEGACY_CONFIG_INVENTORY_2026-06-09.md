@@ -98,7 +98,7 @@ find . -name "docker-compose*" -not -path "*/node_modules/*" -not -path "*/.git/
 
 ## Recommended slice plan for LEA-8 (slices 2+)
 
-### Slice 2: Encapsulate safe targets (low risk)
+### Slice 2: Documentation/comment-only (low risk)
 - Add `@deprecated` JSDoc headers to:
   - `mobile-app/config/WooviConfig.js`
   - `mobile-app/src/services/WooviDriverService.js`
@@ -110,8 +110,6 @@ find . -name "docker-compose*" -not -path "*/node_modules/*" -not -path "*/.git/
   - `mobile-app/get-real-fcm-tokens.js`
   - `mobile-app/test-fcm.js`
   - `mobile-app/test-whatsapp-otp.js`
-- Archive these test-only files into `docs/archive/legacy-test-scripts-<date>/`
-- Move `scripts/deploy-hostinger-completo.sh` to `scripts/archive/` (it already self-identifies as deprecated)
 
 ### Slice 3: Config centralization (medium risk)
 - Move `CORS_ORIGIN` from `.github/workflows/eas-build.yml` to a GitHub Actions secret
