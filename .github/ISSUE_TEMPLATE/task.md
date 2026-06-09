@@ -45,7 +45,7 @@ labels: task
 
 ```text
 Implemente esta issue seguindo AGENTS.md e PROJECT_RULES.md.
-Crie uma branch nova.
+Se estiver rodando via GitHub Actions `/oc`, use a branch atual criada pela action. Nao crie nem troque branch.
 Nao altere nada fora do escopo.
 Nao mude regra de negocio sem aprovacao explicita.
 Nao adicione chamada paga externa.
@@ -53,4 +53,3 @@ Use rg antes de editar.
 Rode lint/test/build relevantes.
 Abra PR com resumo, arquivos alterados, riscos, rollback e testes executados.
 ```
-

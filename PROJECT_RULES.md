@@ -109,6 +109,7 @@ Stop immediately and ask when:
 
 - Branch format for agent work: `codex/<short-task>` or the explicit branch requested by the human.
 - OpenCode branches may use `feature/<short-task>`, `fix/<short-task>`, or `chore/<short-task>`.
+- When OpenCode runs through GitHub Actions from `/oc` or `/opencode`, the action creates the working branch. The agent must not run `git checkout`, `git switch`, or create a different branch.
 - One branch per issue.
 - One PR per branch.
 - PRs must link the issue and include tests/evidence.

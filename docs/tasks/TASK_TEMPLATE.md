@@ -38,7 +38,7 @@
 
 ```text
 Implement this task following AGENTS.md and PROJECT_RULES.md.
-Create a new branch.
+When running through GitHub Actions `/oc`, use the current action branch. Do not create or switch branches.
 Keep the diff limited to scope.
 Run the required tests.
 Return summary, files changed, risks, rollback, and evidence.
@@ -46,4 +46,3 @@ Return summary, files changed, risks, rollback, and evidence.
 TASK:
 [paste this task]
 ```
-

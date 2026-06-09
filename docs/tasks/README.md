@@ -49,7 +49,7 @@ Feature:
 ```text
 Implemente a task abaixo seguindo AGENTS.md e PROJECT_RULES.md.
 
-Crie uma branch nova.
+Se estiver rodando via GitHub Actions `/oc`, use a branch atual criada pela action. Nao crie nem troque branch.
 Nao altere nada fora do escopo.
 Nao mude regra de negocio sem aprovacao explicita.
 Nao adicione chamada paga externa.
@@ -82,6 +82,7 @@ Priorize:
 /oc apply Codex review comments.
 
 Follow AGENTS.md strictly.
+Use the current GitHub Actions branch. Do not create or switch branches.
 Do not refactor unrelated code.
 Do not change business rules.
 Run tests again.
