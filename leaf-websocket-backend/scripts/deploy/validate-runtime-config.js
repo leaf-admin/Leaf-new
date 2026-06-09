@@ -349,6 +349,26 @@ function main() {
       blockers.push(`CORS_ORIGIN inseguro para produção: ${corsOrigin || '(vazio)'}`);
     }
 
+    if (!String(process.env.FIREBASE_DATABASE_URL || '').trim()) {
+      warnings.push('FIREBASE_DATABASE_URL ausente: Realtime Database pode falhar em produção');
+    }
+    if (
+      !String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim() &&
+      !String(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '').trim() &&
+      !String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim()
+    ) {
+      warnings.push('Credenciais Firebase ausentes (FIREBASE_SERVICE_ACCOUNT_JSON ou GOOGLE_APPLICATION_CREDENTIALS): admin SDK pode falhar');
+    }
+    if (!String(process.env.GOOGLE_MAPS_API_KEY || '').trim()) {
+      warnings.push('GOOGLE_MAPS_API_KEY ausente: Places/receipt mapas podem falhar em produção');
+    }
+    if (
+      boolEnv('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK') ||
+      boolEnv('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK')
+    ) {
+      blockers.push('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK=true bloqueado em produção: client-side Google fallback expõe chave de API');
+    }
+
     blockers.push(...biometricReadiness.blockers);
     warnings.push(...biometricReadiness.warnings);
 
@@ -413,6 +433,30 @@ function main() {
       },
       paymentBypass: paymentBypassDiagnostics,
       legacyRuntime: legacyRuntimeDiagnostics,
+      firebase: {
+        databaseUrlConfigured: presence(process.env.FIREBASE_DATABASE_URL),
+        serviceAccountConfigured:
+          presence(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) === 'present' ||
+          presence(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) === 'present' ||
+          presence(process.env.GOOGLE_APPLICATION_CREDENTIALS) === 'present',
+        configured: Boolean(String(process.env.FIREBASE_DATABASE_URL || '').trim()) ||
+          Boolean(String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim()) ||
+          Boolean(String(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '').trim()) ||
+          Boolean(String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim())
+      },
+      maps: {
+        keyConfigured: Boolean(String(process.env.GOOGLE_MAPS_API_KEY || '').trim()),
+        clientDirectGoogleFallbackAllowed:
+          boolEnv('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false) ||
+          boolEnv('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false),
+        placesCacheEnabled: booleanDiagnostic('ENABLE_PLACES_CACHE', false),
+        receiptMapImagesConfigured: Boolean(String(process.env.GEO_KEY || '').trim())
+      },
+      push: {
+        fcmConfigured: Boolean(String(process.env.FCM_SERVER_KEY || '').trim()),
+        allowPublicDirectFcmSend: booleanDiagnostic('ALLOW_PUBLIC_DIRECT_FCM_SEND', false),
+        demandNotificationServiceEnabled: booleanDiagnostic('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', false)
+      },
       runtime: {
         runtimeRole,
         paymentProviderConfigRequired,

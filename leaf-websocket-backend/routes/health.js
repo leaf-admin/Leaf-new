@@ -32,6 +32,66 @@ function classifyWooviBaseUrl(baseUrl) {
   return 'custom';
 }
 
+function presence(envVar) {
+  const raw = String(process.env[envVar] || '').trim();
+  return raw.length > 0;
+}
+
+function buildFirebaseSection() {
+  const databaseUrlConfigured = presence('FIREBASE_DATABASE_URL');
+  const serviceAccountConfigured =
+    presence('FIREBASE_SERVICE_ACCOUNT_JSON') ||
+    presence('GOOGLE_APPLICATION_CREDENTIALS_JSON') ||
+    presence('GOOGLE_APPLICATION_CREDENTIALS');
+  return {
+    configured: databaseUrlConfigured || serviceAccountConfigured,
+    serviceAccountConfigured,
+    databaseUrlConfigured
+  };
+}
+
+function buildPushSection() {
+  return {
+    configured: envBool('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', false),
+    fcmConfigured: presence('FCM_SERVER_KEY'),
+    allowPublicDirectFcmSend: envBool('ALLOW_PUBLIC_DIRECT_FCM_SEND', false)
+  };
+}
+
+function buildKycSection() {
+  return {
+    configured: presence('KYC_PRODUCTION_BIOMETRICS_ENABLED') || presence('KYC_AWS_LIVENESS_ENABLED'),
+    productionBiometricsEnabled: envBool('KYC_PRODUCTION_BIOMETRICS_ENABLED', false),
+    awsLivenessConfigured: envBool('KYC_AWS_LIVENESS_ENABLED', false) || envBool('AWS_LIVENESS_ENABLED', false),
+    faceServiceConfigured: presence('BIOMETRIC_FACE_SERVICE_URL'),
+    cnhFaceBiometricsConfigured: envBool('ENABLE_CNH_FACE_BIOMETRICS', false),
+    requireTrustedBiometricMatch: envBool('KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH', false)
+  };
+}
+
+function buildMapsSection() {
+  const keyConfigured = presence('GOOGLE_MAPS_API_KEY');
+  const clientDirectGoogleFallbackAllowed =
+    envBool('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false) ||
+    envBool('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false);
+  return {
+    configured: keyConfigured,
+    keyConfigured,
+    clientDirectGoogleFallbackAllowed,
+    backendOnly: keyConfigured && !clientDirectGoogleFallbackAllowed,
+    placesCacheEnabled: envBool('ENABLE_PLACES_CACHE', false),
+    receiptMapImagesConfigured: presence('GEO_KEY')
+  };
+}
+
+function buildSocketSection() {
+  return {
+    configured: presence('REDIS_HOST') || presence('REDIS_URL'),
+    redisAdapterEnabled: envBool('ENABLE_SOCKETIO_REDIS_ADAPTER', false),
+    redisAdapterRequired: envBool('REQUIRE_SOCKETIO_REDIS_ADAPTER', false)
+  };
+}
+
 function buildRuntimeFlagsPayload() {
   const appReview = envBool('APP_REVIEW', false);
   const wooviEnvironment = String(process.env.WOOVI_ENVIRONMENT || '').trim().toLowerCase();
@@ -68,13 +128,20 @@ function buildRuntimeFlagsPayload() {
     runtime: {
       nodeEnv: String(process.env.NODE_ENV || '').trim().toLowerCase() || 'unknown',
       appEnv: String(process.env.APP_ENV || '').trim().toLowerCase() || null,
-      leafEnv: String(process.env.LEAF_ENV || '').trim().toLowerCase() || null
+      leafEnv: String(process.env.LEAF_ENV || '').trim().toLowerCase() || null,
+      runtimeRole: String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase(),
+      appVersion: String(process.env.APP_VERSION || '').trim() || null
     },
     woovi: {
       environment: wooviEnvironment || 'unknown',
       baseUrlConfigured: Boolean(wooviBaseUrl),
       baseUrlMode: wooviBaseUrlMode
     },
+    firebase: buildFirebaseSection(),
+    push: buildPushSection(),
+    kyc: buildKycSection(),
+    maps: buildMapsSection(),
+    socket: buildSocketSection(),
     guards: {
       appReview,
       requirePaymentBeforeBooking,
