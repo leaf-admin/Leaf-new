@@ -286,6 +286,10 @@ class LeafApiService {
     return this.request(`/ops/command-center?${params.toString()}`);
   }
 
+  async getRideCostTelemetrySummary() {
+    return this.request("/ops/ride-cost-telemetry/summary");
+  }
+
   async getWorkerHealth() {
     return this.request("/workers/health");
   }
