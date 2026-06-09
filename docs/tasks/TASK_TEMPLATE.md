@@ -41,6 +41,7 @@ Implement this task following AGENTS.md and PROJECT_RULES.md.
 When running through GitHub Actions `/oc`, use the current action branch. Do not create or switch branches.
 Keep the diff limited to scope.
 Run the required tests.
+If validation still fails after one focused fix attempt, stop and report the blocker instead of continuing broad debugging.
 Return summary, files changed, risks, rollback, and evidence.
 
 TASK:
