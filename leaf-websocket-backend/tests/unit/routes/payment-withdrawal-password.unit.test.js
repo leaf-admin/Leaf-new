@@ -222,4 +222,70 @@ describe('payment withdrawal password guard', () => {
       requestId: 'withdraw-request-3'
     });
   });
+
+  it('bloqueia saque quando o saldo é insuficiente para o valor + taxa de R$ 1', async () => {
+    const app = createApp();
+    await seedAppPassword();
+
+    mockRequestDriverWithdrawal.mockResolvedValue({
+      success: false,
+      code: 'WITHDRAWAL_INSUFFICIENT_BALANCE',
+      error: 'Saldo insuficiente para saque + taxa',
+      details: {
+        currentBalanceCents: 2000,
+        amountCents: 2500,
+        withdrawFeeCents: 100,
+        totalDebitCents: 2600,
+        shortfallCents: 600,
+        maxWithdrawableCents: 1900
+      }
+    });
+
+    const response = await request(app)
+      .post('/api/payment/driver-balance/driver-1/withdraw')
+      .set('Authorization', 'Bearer firebase-id-token')
+      .send({
+        amount: 25,
+        pixKey: 'driver@pix.test',
+        appPassword: 'Leaf1234',
+        requestId: 'withdraw-insufficient-1'
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'WITHDRAWAL_INSUFFICIENT_BALANCE',
+      details: expect.objectContaining({
+        currentBalanceCents: 2000,
+        shortfallCents: 600
+      })
+    });
+    expect(mockRecordDriverWithdrawalDenial).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'insufficient_balance'
+      })
+    );
+  });
+
+  it('rejeita saque sem requestId/idempotency-key', async () => {
+    const app = createApp();
+    await seedAppPassword();
+
+    const response = await request(app)
+      .post('/api/payment/driver-balance/driver-1/withdraw')
+      .set('Authorization', 'Bearer firebase-id-token')
+      .send({
+        amount: 25,
+        pixKey: 'driver@pix.test',
+        appPassword: 'Leaf1234'
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'WITHDRAWAL_IDEMPOTENCY_KEY_REQUIRED'
+    });
+    expect(mockEvaluateWithdrawalStepUp).not.toHaveBeenCalled();
+    expect(mockRequestDriverWithdrawal).not.toHaveBeenCalled();
+  });
 });

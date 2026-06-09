@@ -1,7 +1,8 @@
 const {
   buildRideFinancialContract,
   resolveOperationalFee,
-  resolvePaymentIntermediationFee
+  resolvePaymentIntermediationFee,
+  toCents
 } = require('../../../services/ride-financial-contract');
 
 describe('ride-financial-contract', () => {
@@ -60,6 +61,61 @@ describe('ride-financial-contract', () => {
       balanced: true
     });
     expect(contract.feePolicy.paymentIntermediationFeeClamped).toBe(true);
+  });
+
+  it('exports toCents helper that returns non-negative integer', () => {
+    expect(toCents(1000)).toBe(1000);
+    expect(toCents(0)).toBe(0);
+    expect(toCents(-100)).toBe(0);
+    expect(toCents(99.7)).toBe(100);
+    expect(toCents('abc')).toBe(0);
+    expect(toCents(null)).toBe(0);
+    expect(toCents(undefined)).toBe(0);
+  });
+
+  it('explicitly separates passenger gross amount from toll pass-through in high-fare rides', () => {
+    const contract = buildRideFinancialContract({
+      passengerPaidCents: 10000,
+      tollFeeCents: 1500
+    });
+
+    expect(contract).toMatchObject({
+      passengerPaidCents: 10000,
+      grossFareCents: 8500,
+      tollFeeCents: 1500,
+      driverTollPassThroughCents: 1500
+    });
+    expect(contract.driverNetAmountCents + contract.retainedTotalCents).toBe(10000);
+    expect(contract.balanced).toBe(true);
+  });
+
+  it('applies percentage-based operational fee for fares above R$ 50', () => {
+    const contract = buildRideFinancialContract({
+      passengerPaidCents: 10000,
+      tollFeeCents: 0
+    });
+
+    expect(contract).toMatchObject({
+      grossFareCents: 10000,
+      leafOperationalFeeCents: 300,
+      paymentIntermediationFeeCents: 80,
+      driverNetAmountCents: 9620
+    });
+    expect(contract.feePolicy.operationalFeeType).toBe('above_50_percent');
+    expect(contract.balanced).toBe(true);
+  });
+
+  it('clamps subscription retention to available remainder after fees and toll', () => {
+    const contract = buildRideFinancialContract({
+      passengerPaidCents: 5000,
+      tollFeeCents: 1000,
+      subscriptionRetainedFeeCents: 99999
+    });
+
+    expect(contract.subscriptionRetainedFeeCents).toBeLessThan(99999);
+    expect(contract.feePolicy.subscriptionRetainedFeeClamped).toBe(true);
+    expect(contract.driverNetAmountCents).toBe(0);
+    expect(contract.balanced).toBe(true);
   });
 
   it('treats subscription retention as part of retained value without breaking balance', () => {
