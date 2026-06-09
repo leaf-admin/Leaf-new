@@ -55,6 +55,11 @@ jobs:
       - name: Run governance guard
         run: npm run governance:check
 
+      - name: Configure git author
+        run: |
+          git config --global user.name "leaf-opencode[bot]"
+          git config --global user.email "leaf-opencode[bot]@users.noreply.github.com"
+
       - name: Run OpenCode
         uses: anomalyco/opencode/github@latest
         env:
