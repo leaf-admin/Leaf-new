@@ -28,15 +28,15 @@ admin.initializeApp({
 async function testPhoneAuth() {
   try {
     console.log('🔍 Testando configuração do Firebase Auth...');
-    
+
     // Verificar se Phone Authentication está habilitado
     const authConfig = await admin.auth().getAuthConfig();
     console.log('✅ Auth config:', authConfig);
-    
+
     // Testar criação de usuário com telefone
     const phoneNumber = '+5521999814802';
     console.log('📱 Testando com número:', phoneNumber);
-    
+
     // Verificar se o usuário já existe
     try {
       const userRecord = await admin.auth().getUserByPhoneNumber(phoneNumber);
@@ -48,7 +48,7 @@ async function testPhoneAuth() {
         console.error('❌ Erro ao verificar usuário:', error);
       }
     }
-    
+
   } catch (error) {
     console.error('❌ Erro no teste:', error);
   }
