@@ -28,7 +28,8 @@
     "prelaunch:rides:concurrent": "node leaf-websocket-backend/scripts/tests/run-real-core-concurrent-rides.cjs",
     "canary:preflight:non-device": "node scripts/prelaunch/run-non-device-canary-preflight.cjs",
     "smoke:woovi-sandbox": "npm run -w leaf-websocket-backend smoke:woovi-sandbox --",
-    "branch:task": "bash scripts/workflow/new-task-branch.sh"
+    "branch:task": "bash scripts/workflow/new-task-branch.sh",
+    "governance:check": "node scripts/validation/assert-agent-governance.cjs"
   },
   "dependencies": {
     "axios": "^1.12.1",

@@ -1,0 +1,107 @@
+#!/usr/bin/env node
+
+const fs = require("node:fs");
+const path = require("node:path");
+
+const rootDir = path.resolve(__dirname, "..", "..");
+
+const requiredFiles = [
+  {
+    file: "AGENTS.md",
+    snippets: [
+      "# LEAF Agent Rules",
+      "## Required Rules",
+      "## Business Rules",
+      "## Stop Conditions",
+      "## Validation Ladder",
+    ],
+  },
+  {
+    file: "PROJECT_RULES.md",
+    snippets: [
+      "# LEAF Project Rules",
+      "## Trade-offs",
+      "## Guard Rails",
+      "## Stop Conditions",
+      "## Branch And PR Rules",
+    ],
+  },
+  {
+    file: "ARCHITECTURE.md",
+    snippets: [
+      "# LEAF Architecture",
+      "## Runtime Backend-first",
+      "## Payment Invariants",
+      "## Ride Lifecycle Invariants",
+      "## Legacy Policy",
+    ],
+  },
+  {
+    file: "docs/tasks/README.md",
+    snippets: [
+      "# LEAF Agent Task Workflow",
+      "## Codex Task Breakdown Prompt",
+      "## OpenCode Execution Prompt",
+      "## Codex Review Prompt",
+    ],
+  },
+  {
+    file: "docs/tasks/TASK_TEMPLATE.md",
+    snippets: [
+      "# Task Template",
+      "## Out Of Scope",
+      "## Acceptance Criteria",
+      "## Required Tests",
+      "## OpenCode Prompt",
+    ],
+  },
+  {
+    file: ".github/ISSUE_TEMPLATE/task.md",
+    snippets: [
+      "name: Task LEAF",
+      "## Fora de escopo",
+      "## Criterios de aceite",
+      "## Testes obrigatorios",
+      "## Prompt para OpenCode",
+    ],
+  },
+];
+
+const findings = [];
+
+for (const item of requiredFiles) {
+  const fullPath = path.join(rootDir, item.file);
+  if (!fs.existsSync(fullPath)) {
+    findings.push({ file: item.file, issue: "missing file" });
+    continue;
+  }
+
+  const contents = fs.readFileSync(fullPath, "utf8");
+  for (const snippet of item.snippets) {
+    if (!contents.includes(snippet)) {
+      findings.push({ file: item.file, issue: "missing required snippet", snippet });
+    }
+  }
+}
+
+const packageJsonPath = path.join(rootDir, "package.json");
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+if (packageJson.scripts?.["governance:check"] !== "node scripts/validation/assert-agent-governance.cjs") {
+  findings.push({
+    file: "package.json",
+    issue: "missing governance:check script",
+  });
+}
+
+const result = {
+  ok: findings.length === 0,
+  checkedFiles: requiredFiles.map((item) => item.file),
+  findings,
+};
+
+console.log(JSON.stringify(result, null, 2));
+
+if (findings.length > 0) {
+  process.exitCode = 1;
+}
+
