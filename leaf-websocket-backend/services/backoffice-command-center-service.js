@@ -310,13 +310,21 @@ function buildActionItems({
     });
   }
 
-  if (rideCostAnomaly && rideCostAnomaly.directionsPerRide >= rideCostAnomaly.directionsWarningPerRide) {
-    const isCritical = rideCostAnomaly.directionsPerRide >= rideCostAnomaly.directionsCriticalPerRide;
+  if (
+    rideCostAnomaly &&
+    toNumber(rideCostAnomaly.completedRides, 0) > 0 &&
+    rideCostAnomaly.status !== 'no_data' &&
+    toNumber(rideCostAnomaly.directionsPerRide, 0) >= toNumber(rideCostAnomaly.directionsWarningPerRide, 0)
+  ) {
+    const directionsPerRide = toNumber(rideCostAnomaly.directionsPerRide, 0);
+    const directionsWarningPerRide = toNumber(rideCostAnomaly.directionsWarningPerRide, 0);
+    const directionsCriticalPerRide = toNumber(rideCostAnomaly.directionsCriticalPerRide, 0);
+    const isCritical = directionsPerRide >= directionsCriticalPerRide;
     items.push({
       id: 'directions-anomaly',
       priority: isCritical ? 'alta' : 'media',
       title: 'Directions por corrida elevado',
-      description: `${toNumber(rideCostAnomaly.directionsPerRide).toFixed(2)} directions/corrida (limite aviso: ${rideCostAnomaly.directionsWarningPerRide}, critico: ${rideCostAnomaly.directionsCriticalPerRide}).`,
+      description: `${directionsPerRide.toFixed(2)} directions/corrida (limite aviso: ${directionsWarningPerRide}, critico: ${directionsCriticalPerRide}).`,
       href: '/dashboard'
     });
   }
