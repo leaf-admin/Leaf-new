@@ -1,3 +1,8 @@
+/**
+ * @test-only Legacy Firebase Auth test script with placeholder credentials.
+ * Uses hardcoded service account placeholders (YOUR_*) and a hardcoded
+ * databaseURL. Never executed in production. For local dev testing only.
+ */
 const admin = require('firebase-admin');
 
 // Configuração do Firebase Admin

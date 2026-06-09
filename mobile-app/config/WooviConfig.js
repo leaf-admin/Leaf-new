@@ -1,3 +1,8 @@
+/**
+ * @deprecated Legacy Woovi direct config. Active Pix payment path uses
+ * Leaf backend API (`/api/payment/advance`), not direct Woovi provider calls.
+ * See mobile-app/src/services/WooviService.js for the active implementation.
+ */
 const DEFAULT_PUBLIC_BACKEND_URL = 'https://api.leaf.app.br';
 
 const normalizeBaseUrl = (url) => {

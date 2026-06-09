@@ -1,3 +1,9 @@
+/**
+ * @deprecated Legacy hook consuming WooviDriverService (direct Woovi API calls).
+ * Active Pix payment path uses Leaf backend API (`/api/payment/advance`),
+ * not direct Woovi provider calls. This hook is NOT part of the active
+ * payment flow.
+ */
 import { useState, useEffect } from 'react';
 import WooviDriverService from '../services/WooviDriverService';
 

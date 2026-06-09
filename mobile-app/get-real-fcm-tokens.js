@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
 /**
+ * @test-only Legacy FCM token lookup helper with placeholder credentials.
+ * Uses hardcoded service account placeholders and a hardcoded databaseURL.
+ * Never executed in production. For local dev debugging only.
+ *
  * 🔍 BUSCAR TOKENS FCM REAIS DO FIREBASE
  * 
  * Este script busca tokens FCM reais dos usuários no Firebase Realtime Database
