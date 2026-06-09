@@ -112,7 +112,7 @@ Update the PR summary with evidence.
 - Trigger requires `/oc` or `/opencode` in the comment.
 - Trigger requires `OWNER`, `MEMBER`, or `COLLABORATOR` author association.
 - `share: false` prevents public OpenCode session sharing.
-- `persist-credentials: false` avoids leaving checkout credentials in Git config.
+- Checkout credentials are persisted for this workflow so OpenCode can push the action-created branch and open a PR. The token is the ephemeral `GITHUB_TOKEN` with workflow-scoped permissions.
 - `governance:check` must pass before OpenCode runs.
 - Provider keys live in GitHub Secrets only.
 - Business rules, payment, KYC, safety, maps cost, and store release behavior must follow `AGENTS.md`.
