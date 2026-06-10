@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Leaf Dashboard
 
-## Getting Started
+Backoffice operacional da Leaf para producao assistida.
 
-First, run the development server:
+## Superficies principais
+
+- `/dashboard`: cockpit diario com command center, custos e status dos servicos.
+- `/support`: inbox de chat/chamados e fluxo N0/N1/N2/N3.
+- `/campaign-center`: campanhas in-app, metricas e relatorios comerciais.
+- `/drivers/review-queue`: fila de cadastro/KYC/documentos de motoristas.
+- `/financial-reconciliation`: reconciliacao financeira, ledger e divergencias.
+- `/runtime-flags`: perfil efetivo de runtime, pagamento, KYC, maps, push e flags.
+
+## Ambiente local
+
+Use o proxy interno do Next para consumir a API Leaf. O browser nao deve chamar Google,
+Woovi/OpenPix, Firebase ou outro provedor pago diretamente.
+
+`.env.local` recomendado:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXT_PUBLIC_API_URL=/api
+LEAF_DASHBOARD_API_PROXY_TARGET=https://api.leaf.app.br/api
+NEXT_PUBLIC_WS_URL=https://socket.leaf.app.br
+NEXT_PUBLIC_API_DOCS_URL=https://api.leaf.app.br/api/docs
+DASHBOARD_BASIC_AUTH_ENABLED=true
+DASHBOARD_BASIC_AUTH_USER=leaflocal
+DASHBOARD_BASIC_AUTH_PASSWORD=<local-password>
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Subir local:
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+```bash
+npm --prefix leaf-dashboard-js run dev -- --hostname 127.0.0.1 --port 3014
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Validacao obrigatoria
 
-## Learn More
+```bash
+npm --prefix leaf-dashboard-js run qa:backoffice
+```
 
-To learn more about Next.js, take a look at the following resources:
+Esse comando executa:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- lint;
+- build Next;
+- smoke das paginas operacionais;
+- verificacao de basic auth;
+- verificacao de navegacao entre areas;
+- bloqueio de chamadas diretas do browser para Google, Woovi/OpenPix e Firebase.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Regras de custo
 
-## Deploy on Vercel
+- Dashboard consome apenas APIs Leaf.
+- Dados caros devem vir agregados do backend, especialmente `/api/ops/command-center`.
+- Refresh visual deve ser controlado e cacheado no backend.
+- Qualquer nova tela que precise de dados operacionais deve preferir endpoint agregado.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Regras de seguranca
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Basic auth protege ambiente local/exposto antes do login admin.
+- A sessao admin usa `/api/admin/auth/login` e token Bearer.
+- Acoes sensiveis precisam de RBAC no backend; validacao apenas no frontend nao basta.

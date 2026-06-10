@@ -12,13 +12,18 @@ These are production-critical references. Do not change without explicit approva
 
 | # | File | Line(s) | Pattern / Evidence | Risk if touched | Recommended next action |
 |---|------|---------|--------------------|-----------------|------------------------|
-| 1 | `.github/workflows/eas-build.yml` | 63 | `CORS_ORIGIN: https://api.62.169.31.231.sslip.io` | Changing this breaks CI EAS build CORS validation | Move to GitHub Actions secret or env variable after verifying current IP ownership |
-| 2 | `leaf-websocket-backend/server.vps.js` | entire file (13051 lines) | Current production backend runtime. Referenced in deploy scripts, healthcheck, and multiple docs as the live VPS runtime | Any change risks production backend availability | Preserve as-is. Track in LEA-8 slice for modular migration. Already documented in `DEVKIT_TECNICO_LEAF` and `CLEANUP_TRACKER` |
-| 3 | `leaf-websocket-backend/docker-compose.hostinger.yml` | entire file | Current operational compose despite legacy "hostinger" name. Referenced by `deploy-hostinger-docker.sh` | Breaking this breaks deployments | Rename to `docker-compose.yml` in a future slice after confirming no runbook references the old name |
-| 4 | `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh` | entire file | Current canonical deploy script (deploy-contabo-docker.sh delegates to it) | Breaking this breaks all deploys | Keep as-is. The name is legacy but the implementation is live |
-| 5 | `mobile-app/src/services/WooviService.js` | entire file (252 lines) | Active payment service routing through Leaf backend (`/api/payment/advance`). Already guarded by `payment-no-direct-woovi-guard.test.js` | Low — already sanitized in LEA-7 | Already clean. Document as reference |
-| 6 | `scripts/healthcheck-vps.sh` | entire file | Active VPS health check script | Breaking this breaks monitoring | Keep as-is. Consider renaming to `healthcheck-backend.sh` if VPS infra is generalized |
-| 7 | `config/firebase/.firebaserc` | entire file | Active Firebase project config | Breaking this breaks Firebase CLI operations | Keep as-is |
+| 1 | `leaf-websocket-backend/server.vps.js` | entire file (13051 lines) | Current production backend runtime. Referenced in deploy scripts, healthcheck, and multiple docs as the live VPS runtime | Any change risks production backend availability | Preserve as-is. Track in LEA-8 slice for modular migration. Already documented in `DEVKIT_TECNICO_LEAF` and `CLEANUP_TRACKER` |
+| 2 | `leaf-websocket-backend/docker-compose.hostinger.yml` | entire file | Current operational compose despite legacy "hostinger" name. Referenced by `deploy-hostinger-docker.sh` | Breaking this breaks deployments | Rename to `docker-compose.yml` in a future slice after confirming no runbook references the old name |
+| 3 | `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh` | entire file | Current canonical deploy script (deploy-contabo-docker.sh delegates to it) | Breaking this breaks all deploys | Keep as-is. The name is legacy but the implementation is live |
+| 4 | `mobile-app/src/services/WooviService.js` | entire file (252 lines) | Active payment service routing through Leaf backend (`/api/payment/advance`). Already guarded by `payment-no-direct-woovi-guard.test.js` | Low — already sanitized in LEA-7 | Already clean. Document as reference |
+| 5 | `scripts/healthcheck-vps.sh` | entire file | Active VPS health check script | Breaking this breaks monitoring | Keep as-is. Consider renaming to `healthcheck-backend.sh` if VPS infra is generalized |
+| 6 | `config/firebase/.firebaserc` | entire file | Active Firebase project config | Breaking this breaks Firebase CLI operations | Keep as-is |
+
+### Resolved in follow-up
+
+| File | Previous evidence | Resolution |
+|---|---|---|
+| `.github/workflows/eas-build.yml` | `CORS_ORIGIN: https://api.62.169.31.231.sslip.io` | Updated release gate validation to use `https://api.leaf.app.br`, matching the current public API domain. |
 
 ---
 
