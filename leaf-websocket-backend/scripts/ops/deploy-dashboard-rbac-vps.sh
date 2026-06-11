@@ -89,6 +89,7 @@ node --check "$BACKEND_LOCAL_DIR/services/create-booking-availability-precheck.j
 node --check "$BACKEND_LOCAL_DIR/services/gradual-radius-expander.js"
 node --check "$BACKEND_LOCAL_DIR/services/h3-map-service.js"
 node --check "$BACKEND_LOCAL_DIR/services/h3-visual-policy-service.js"
+node --check "$BACKEND_LOCAL_DIR/services/driver-destination-mode-service.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing-context-store.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing-context-provider.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing-baseline-materializer.js"
@@ -111,6 +112,7 @@ node --check "$BACKEND_LOCAL_DIR/routes/waitlist.js"
 node --check "$BACKEND_LOCAL_DIR/firebase-config.js"
 node --check "$BACKEND_LOCAL_DIR/services/city-activation-state-service.js"
 node --check "$BACKEND_LOCAL_DIR/utils/prometheus-metrics.js"
+node --check "$BACKEND_LOCAL_DIR/utils/pilot-launch-flags.js"
 node --check "$BACKEND_LOCAL_DIR/server.js"
 node --check "$BACKEND_LOCAL_DIR/server.vps.js"
 node --check "$BACKEND_LOCAL_DIR/workers/pricing-baseline-worker.js"
@@ -177,6 +179,7 @@ scp_cmd "$BACKEND_LOCAL_DIR/services/create-booking-availability-precheck.js" "$
 scp_cmd "$BACKEND_LOCAL_DIR/services/gradual-radius-expander.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/gradual-radius-expander.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/h3-map-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/h3-map-service.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/h3-visual-policy-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/h3-visual-policy-service.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/driver-destination-mode-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/driver-destination-mode-service.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-context-store.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-context-store.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-context-provider.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-context-provider.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-baseline-materializer.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-baseline-materializer.js"
@@ -198,6 +201,7 @@ scp_cmd "$BACKEND_LOCAL_DIR/routes/waitlist.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKE
 scp_cmd "$BACKEND_LOCAL_DIR/firebase-config.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/firebase-config.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/city-activation-state-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/city-activation-state-service.js"
 scp_cmd "$BACKEND_LOCAL_DIR/utils/prometheus-metrics.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/utils/prometheus-metrics.js"
+scp_cmd "$BACKEND_LOCAL_DIR/utils/pilot-launch-flags.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/utils/pilot-launch-flags.js"
 scp_cmd "$BACKEND_LOCAL_DIR/server.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/server.js"
 scp_cmd "$BACKEND_LOCAL_DIR/server.vps.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/server.vps.js"
 scp_cmd "$BACKEND_LOCAL_DIR/workers/pricing-baseline-worker.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/pricing-baseline-worker.js"
@@ -253,7 +257,7 @@ ssh_cmd "
     docker compose \$compose_args up -d --build websocket \$gateway_services
 
     if [ -f docker-compose.ops-workers.yml ]; then
-      docker compose \$compose_args up -d --build pricing-baseline-worker ride-health-monitor-worker
+      docker compose \$compose_args up -d --build --no-deps pricing-baseline-worker ride-health-monitor-worker
     fi
 
     if [ -n \"\$gateway_services\" ]; then
