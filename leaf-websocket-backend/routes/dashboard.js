@@ -620,6 +620,8 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
 
         if (action === 'reject') {
           reviewData.rejectionReason = rejectionReason;
+        } else {
+          reviewData.rejectionReason = null;
         }
 
         // ✅ Salvar alteração no Firebase Realtime Database

@@ -131,6 +131,7 @@ mobile-app/07-*.png
 /artifacts/
 /reports/
 /test-results/
+docs/architecture/E2E_DRIVER_DOCFLOW_DASHBOARD*.json
 mobile-app/builds/
 book_20_imagens/
 _debug_grid.png
