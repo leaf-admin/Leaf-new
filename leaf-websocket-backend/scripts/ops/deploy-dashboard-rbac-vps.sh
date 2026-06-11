@@ -239,10 +239,26 @@ ssh_cmd "
   set -e
   cd '$REMOTE_BACKEND_DIR'
   if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
+    compose_args='-f docker-compose.yml'
+    gateway_services=''
+    if [ -f docker-compose.gateway-scale.yml ]; then
+      compose_args=\"\$compose_args -f docker-compose.gateway-scale.yml\"
+      gateway_services='websocket-gateway-2 websocket-gateway-3'
+    fi
+
     if [ -f docker-compose.ops-workers.yml ]; then
-      docker compose -f docker-compose.yml -f docker-compose.ops-workers.yml up -d --build websocket pricing-baseline-worker ride-health-monitor-worker
-    else
-      docker compose up -d --build websocket
+      compose_args=\"\$compose_args -f docker-compose.ops-workers.yml\"
+    fi
+
+    docker compose \$compose_args up -d --build websocket \$gateway_services
+
+    if [ -f docker-compose.ops-workers.yml ]; then
+      docker compose \$compose_args up -d --build pricing-baseline-worker ride-health-monitor-worker
+    fi
+
+    if [ -n \"\$gateway_services\" ]; then
+      docker compose \$compose_args up -d --no-deps nginx
+      docker exec leaf-nginx nginx -t
     fi
   elif command -v pm2 >/dev/null 2>&1; then
     npm install --omit=dev >/dev/null 2>&1 || npm install >/dev/null 2>&1
