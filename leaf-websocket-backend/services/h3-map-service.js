@@ -10,6 +10,14 @@ const SEARCH_SCAN_COUNT = Number.parseInt(process.env.H3_MAP_SCAN_COUNT || '250'
 const SEARCH_SCAN_MAX_KEYS = Number.parseInt(process.env.H3_MAP_SCAN_MAX_KEYS || '4000', 10);
 const OPEN_REQUEST_ACTIVE_WINDOW_MS = Number.parseInt(process.env.H3_MAP_OPEN_REQUEST_WINDOW_MS || String(10 * 60 * 1000), 10);
 const ACTIVE_BOOKING_STALE_MS = Number.parseInt(process.env.H3_MAP_ACTIVE_BOOKING_STALE_MS || String(12 * 60 * 60 * 1000), 10);
+const MAX_DYNAMIC_SURGE_PERCENT = Math.min(
+  35,
+  Math.max(0, Number.parseInt(process.env.MAX_DYNAMIC_SURGE_PERCENT || '35', 10) || 35)
+);
+const SURGE_LABEL_MIN_PERCENT = Math.max(
+  1,
+  Number.parseInt(process.env.H3_MAP_SURGE_LABEL_MIN_PERCENT || '3', 10) || 3
+);
 const MIN_GEO_QUERY_KM = 0.1;
 const SUPPORTED_SURFACES = new Set(['driver', 'dashboard']);
 const SUPPORTED_MODES = new Set(['supply_demand']);
@@ -285,10 +293,79 @@ function buildVisualIntensity(metrics = {}, level = 'low') {
   return clamp(Math.max(weightedScore, floor), 0, 1);
 }
 
+function buildSurgeDisplay(metrics = {}, level = 'low') {
+  const visualIntensity = buildVisualIntensity(metrics, level);
+  const demand = Number(metrics.demand || 0);
+  const imbalance = Number(metrics.imbalance || 0);
+  const shortage = Math.max(0, -(Number(metrics.surplus) || 0));
+
+  if (demand <= 0 || (imbalance <= 0 && shortage <= 0)) {
+    return {
+      percent: 0,
+      multiplier: 1,
+      level: 'normal',
+      label: '',
+      labelVisible: false
+    };
+  }
+
+  const percent = Math.min(
+    MAX_DYNAMIC_SURGE_PERCENT,
+    Math.max(0, Math.round(visualIntensity * MAX_DYNAMIC_SURGE_PERCENT))
+  );
+  let surgeLevel = 'yellow';
+  if (percent >= 25) surgeLevel = 'purple';
+  else if (percent >= 13) surgeLevel = 'red';
+
+  return {
+    percent,
+    multiplier: Number((1 + percent / 100).toFixed(2)),
+    level: percent > 0 ? surgeLevel : 'normal',
+    label: percent > 0 ? `+${percent}%` : '',
+    labelVisible: percent >= SURGE_LABEL_MIN_PERCENT
+  };
+}
+
 function buildStyle(level, surface, resolution = 8, metrics = {}) {
   const dashboard = surface === 'dashboard';
   const resolutionBias = clamp((Number(resolution || 8) - 6) / 4, 0, 1);
   const visualIntensity = buildVisualIntensity(metrics, level);
+  const surge = buildSurgeDisplay(metrics, level);
+
+  if (surface === 'driver') {
+    if (surge.percent <= 0) {
+      return {
+        fill: '#000000',
+        stroke: '#000000',
+        fillOpacity: 0,
+        strokeOpacity: 0,
+        strokeWidth: 0,
+        visualIntensity: 0
+      };
+    }
+
+    const fillByLevel = {
+      yellow: '#FACC15',
+      red: '#EF4444',
+      purple: '#7E22CE'
+    };
+    const strokeByLevel = {
+      yellow: '#CA8A04',
+      red: '#B91C1C',
+      purple: '#581C87'
+    };
+    const surgeStrength = clamp(surge.percent / Math.max(1, MAX_DYNAMIC_SURGE_PERCENT), 0, 1);
+
+    return {
+      fill: fillByLevel[surge.level] || '#FACC15',
+      stroke: strokeByLevel[surge.level] || '#CA8A04',
+      fillOpacity: Number((0.11 + (0.22 * surgeStrength) + (0.025 * resolutionBias)).toFixed(3)),
+      strokeOpacity: Number((0.26 + (0.34 * surgeStrength) + (0.025 * resolutionBias)).toFixed(3)),
+      strokeWidth: Number((0.35 + (0.45 * surgeStrength) + (0.1 * resolutionBias)).toFixed(2)),
+      visualIntensity: Number(visualIntensity.toFixed(3))
+    };
+  }
+
   const fill = interpolatePalette(visualIntensity, [
     { at: 0, color: '#22C55E' },
     { at: 0.42, color: '#FACC15' },
@@ -837,13 +914,17 @@ class H3MapService {
       accumulator.driversAvailable += cell.metrics.availableDrivers;
       accumulator.openRequests += cell.metrics.openRequests;
       accumulator.activeTrips += cell.metrics.activeTrips;
+      accumulator.surgeCells += Number(cell.surge?.percent || 0) > 0 ? 1 : 0;
+      accumulator.maxSurgePercent = Math.max(accumulator.maxSurgePercent, Number(cell.surge?.percent || 0));
       return accumulator;
     }, {
       cells: 0,
       driversOnline: 0,
       driversAvailable: 0,
       openRequests: 0,
-      activeTrips: 0
+      activeTrips: 0,
+      surgeCells: 0,
+      maxSurgePercent: 0
     });
 
     return {
@@ -938,6 +1019,15 @@ class H3MapService {
           surplus,
           imbalance
         });
+        const styleInput = {
+          demand: cell.demand,
+          availableDrivers: cell.availableDrivers,
+          openRequests: cell.openRequests,
+          activeTrips: cell.activeTrips,
+          imbalance,
+          surplus
+        };
+        const surge = buildSurgeDisplay(styleInput, demandLevel);
 
         return {
           h3Index: cell.h3Index,
@@ -959,14 +1049,8 @@ class H3MapService {
             demandLevel,
             fillRateHint
           },
-          style: buildStyle(demandLevel, surface, resolution, {
-            demand: cell.demand,
-            availableDrivers: cell.availableDrivers,
-            openRequests: cell.openRequests,
-            activeTrips: cell.activeTrips,
-            imbalance,
-            surplus
-          })
+          surge,
+          style: buildStyle(demandLevel, surface, resolution, styleInput)
         };
       })
       .sort((left, right) => left.h3Index.localeCompare(right.h3Index));
@@ -989,6 +1073,7 @@ module.exports.helpers = {
   resolveDemandLevel,
   resolveFillRateHint,
   buildStyle,
+  buildSurgeDisplay,
   parseBoolean,
   getViewportH3Cells
 };

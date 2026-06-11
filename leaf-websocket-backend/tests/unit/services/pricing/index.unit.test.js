@@ -75,7 +75,7 @@ describe('pricing/index', () => {
     });
 
     expect(result.pricingPayload.operational_state).toBe(STATES.PRESSAO);
-    expect(result.pricingPayload.passenger_notice).toBe('Alta demanda nesta região');
+    expect(result.pricingPayload.passenger_notice).toBe('As tarifas estão mais altas devido às condições de trânsito e demanda.');
     expect(result.pricingPayload.driver_region_status.recommended_repositioning).toBe(true);
   });
 
@@ -116,7 +116,7 @@ describe('pricing/index', () => {
     });
 
     expect(result.pricingPayload.operational_state).toBe(STATES.EXCEPCIONAL);
-    expect(result.pricingPayload.passenger_notice).toBe('Preços mais altos no momento devido à demanda');
+    expect(result.pricingPayload.passenger_notice).toBe('As tarifas estão mais altas devido às condições de trânsito e demanda.');
     expect(result.exceptionalMode.exceptional_mode_active).toBe(true);
   });
 });

@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Polygon } from 'react-native-maps';
+import { Marker, Polygon } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import polyline from '@mapbox/polyline';
 import { fonts } from '../../theme/runtimeTokens';
@@ -3644,20 +3644,59 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return null;
     }
 
-    return driverH3Cells
-      .filter((cell) => Array.isArray(cell?.boundary) && cell.boundary.length >= 6)
-      .map((cell) => (
-        <Polygon
-          key={cell.h3Index}
-          coordinates={cell.boundary.map((point) => ({
-            latitude: Number(point.lat),
-            longitude: Number(point.lng)
-          }))}
-          strokeWidth={Number(cell?.style?.strokeWidth ?? 1)}
-          strokeColor={hexToRgba(cell?.style?.stroke || '#15803D', Number(cell?.style?.strokeOpacity ?? 0.58))}
-          fillColor={hexToRgba(cell?.style?.fill || '#22C55E', Number(cell?.style?.fillOpacity ?? 0.18))}
-        />
-      ));
+    const surgeCells = driverH3Cells.filter((cell) => (
+      Array.isArray(cell?.boundary)
+      && cell.boundary.length >= 6
+      && Number(cell?.surge?.percent || 0) > 0
+      && Number.isFinite(Number(cell?.center?.lat))
+      && Number.isFinite(Number(cell?.center?.lng))
+    ));
+
+    if (surgeCells.length === 0) {
+      return null;
+    }
+
+    const labelCells = [...surgeCells]
+      .filter((cell) => cell?.surge?.labelVisible !== false)
+      .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0))
+      .slice(0, 12);
+
+    return (
+      <>
+        {surgeCells.map((cell) => (
+          <Polygon
+            key={`surge-${cell.h3Index}`}
+            coordinates={cell.boundary.map((point) => ({
+              latitude: Number(point.lat),
+              longitude: Number(point.lng)
+            }))}
+            strokeWidth={Number(cell?.style?.strokeWidth ?? 0.7)}
+            strokeColor={hexToRgba(cell?.style?.stroke || '#CA8A04', Number(cell?.style?.strokeOpacity ?? 0.36))}
+            fillColor={hexToRgba(cell?.style?.fill || '#FACC15', Number(cell?.style?.fillOpacity ?? 0.18))}
+          />
+        ))}
+        {labelCells.map((cell) => {
+          const percent = Number(cell?.surge?.percent || 0);
+          const label = cell?.surge?.label || `+${Math.round(percent)}%`;
+
+          return (
+            <Marker
+              key={`surge-label-${cell.h3Index}`}
+              coordinate={{
+                latitude: Number(cell.center.lat),
+                longitude: Number(cell.center.lng)
+              }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+            >
+              <View style={styles.driverSurgeFlag}>
+                <Text style={styles.driverSurgeFlagText}>{label}</Text>
+              </View>
+            </Marker>
+          );
+        })}
+      </>
+    );
   }, [driverH3Cells, showDriverH3Overlay]);
 
   const getRouteEdgePadding = useCallback(() => {
@@ -6270,5 +6309,27 @@ const styles = StyleSheet.create({
     width: '44%',
     height: 13,
     marginTop: 9,
+  },
+  driverSurgeFlag: {
+    minWidth: 44,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(23,20,18,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.82)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  driverSurgeFlagText: {
+    color: '#FFFFFF',
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 14,
   }
 });

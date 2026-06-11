@@ -41,11 +41,8 @@ function normalizeStateContext(stateContext = {}) {
 }
 
 function buildPassengerNotice(operationalState) {
-  if (operationalState === STATES.PRESSAO) {
-    return 'Alta demanda nesta região';
-  }
-  if (operationalState === STATES.EXCEPCIONAL) {
-    return 'Preços mais altos no momento devido à demanda';
+  if (operationalState === STATES.PRESSAO || operationalState === STATES.EXCEPCIONAL) {
+    return 'As tarifas estão mais altas devido às condições de trânsito e demanda.';
   }
   return null;
 }

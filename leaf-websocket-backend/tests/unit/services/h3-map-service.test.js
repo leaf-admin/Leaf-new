@@ -9,6 +9,40 @@ describe('H3MapService', () => {
     expect(helpers.resolutionForZoom(17)).toBe(10);
   });
 
+  test('driver surface exposes dynamic fare regions only when surcharge exists', () => {
+    const normalStyle = helpers.buildStyle('low', 'driver', 8, {
+      demand: 0,
+      availableDrivers: 3,
+      imbalance: 0,
+      surplus: 3,
+    });
+    expect(normalStyle.fillOpacity).toBe(0);
+    expect(normalStyle.strokeOpacity).toBe(0);
+
+    const surge = helpers.buildSurgeDisplay({
+      demand: 8,
+      availableDrivers: 0,
+      openRequests: 8,
+      activeTrips: 0,
+      imbalance: 8,
+      surplus: -8,
+    }, 'critical');
+    expect(surge.percent).toBeLessThanOrEqual(35);
+    expect(surge.level).toBe('purple');
+    expect(surge.label).toMatch(/^\+/);
+
+    const hotStyle = helpers.buildStyle('critical', 'driver', 8, {
+      demand: 8,
+      availableDrivers: 0,
+      openRequests: 8,
+      activeTrips: 0,
+      imbalance: 8,
+      surplus: -8,
+    });
+    expect(hotStyle.fill).toBe('#7E22CE');
+    expect(hotStyle.fillOpacity).toBeGreaterThan(0);
+  });
+
   test('builds h3 payload from redis-backed snapshot', async () => {
     const service = new H3MapService();
     const driverGeo = {
@@ -84,6 +118,8 @@ describe('H3MapService', () => {
     expect(result.summary.driversOnline).toBe(3);
     expect(result.summary.openRequests).toBe(1);
     expect(result.summary.activeTrips).toBe(1);
+    expect(result.summary).toHaveProperty('surgeCells');
+    expect(result.summary).toHaveProperty('maxSurgePercent');
     expect(Array.isArray(result.cells)).toBe(true);
     expect(result.cells.length).toBeGreaterThan(0);
     expect(result.cells[0].boundary.length).toBeGreaterThanOrEqual(6);
