@@ -416,6 +416,35 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     expect(result.stdout).not.toContain('geo-key');
   });
 
+  it('reports places cache enabled by default unless explicitly disabled', () => {
+    const enabledByDefault = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      GOOGLE_MAPS_API_KEY: 'maps-key'
+    });
+
+    expect(enabledByDefault.report.diagnostics.maps.placesCacheEnabled).toEqual({
+      value: true,
+      source: 'default'
+    });
+
+    const disabledExplicitly = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      GOOGLE_MAPS_API_KEY: 'maps-key',
+      ENABLE_PLACES_CACHE: 'false'
+    });
+
+    expect(disabledExplicitly.report.diagnostics.maps.placesCacheEnabled).toEqual({
+      value: false,
+      source: 'env'
+    });
+  });
+
   it('blocks production when EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK is true', () => {
     const result = runValidator({
       ...baseProdEnv,

@@ -51,9 +51,18 @@ function buildFirebaseSection() {
 }
 
 function buildPushSection() {
+  const firebaseAdminConfigured =
+    presence('FIREBASE_SERVICE_ACCOUNT_JSON') ||
+    presence('GOOGLE_APPLICATION_CREDENTIALS_JSON') ||
+    presence('GOOGLE_APPLICATION_CREDENTIALS');
+  const legacyFcmServerKeyConfigured = presence('FCM_SERVER_KEY');
+  const demandNotificationServiceEnabled = envBool('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', false);
+
   return {
-    configured: envBool('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', false),
-    fcmConfigured: presence('FCM_SERVER_KEY'),
+    configured: firebaseAdminConfigured || legacyFcmServerKeyConfigured || demandNotificationServiceEnabled,
+    provider: firebaseAdminConfigured ? 'firebase-admin' : legacyFcmServerKeyConfigured ? 'legacy-fcm-server-key' : null,
+    fcmConfigured: firebaseAdminConfigured || legacyFcmServerKeyConfigured,
+    demandNotificationServiceEnabled,
     allowPublicDirectFcmSend: envBool('ALLOW_PUBLIC_DIRECT_FCM_SEND', false)
   };
 }
@@ -79,7 +88,7 @@ function buildMapsSection() {
     keyConfigured,
     clientDirectGoogleFallbackAllowed,
     backendOnly: keyConfigured && !clientDirectGoogleFallbackAllowed,
-    placesCacheEnabled: envBool('ENABLE_PLACES_CACHE', false),
+    placesCacheEnabled: envBool('ENABLE_PLACES_CACHE', true),
     receiptMapImagesConfigured: presence('GEO_KEY')
   };
 }
