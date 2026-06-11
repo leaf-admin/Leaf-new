@@ -34,6 +34,18 @@ Subir local:
 npm --prefix leaf-dashboard-js run dev -- --hostname 127.0.0.1 --port 3014
 ```
 
+Criar/recriar sessao admin local sem gravar segredo no repo:
+
+```bash
+source ~/.leaf/dashboard-admin.env
+npm --prefix leaf-dashboard-js run session:admin
+npm --prefix leaf-dashboard-js run session:admin:snippet < ~/.leaf/dashboard-session.json
+```
+
+Cole o snippet gerado no console do browser local para preencher `sessionStorage`
+e entrar no dashboard. O arquivo `~/.leaf/dashboard-admin.env` deve ficar com
+permissao `600`.
+
 ## Validacao obrigatoria
 
 ```bash

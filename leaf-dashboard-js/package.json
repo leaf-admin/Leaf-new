@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "smoke:backoffice": "node scripts/tests/smoke-backoffice.cjs",
-    "qa:backoffice": "npm run lint && npm run build && npm run smoke:backoffice"
+    "qa:backoffice": "npm run lint && npm run build && npm run smoke:backoffice",
+    "session:admin": "node scripts/ops/create-dashboard-admin-session.cjs",
+    "session:admin:snippet": "node scripts/ops/print-dashboard-session-snippet.cjs"
   },
   "dependencies": {
     "@react-google-maps/api": "^2.20.7",

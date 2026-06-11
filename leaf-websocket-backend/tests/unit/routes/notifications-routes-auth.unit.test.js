@@ -46,7 +46,12 @@ jest.mock('../../../services/fcm-service', () => jest.fn(() => ({
   redis: null,
   setRedis: jest.fn(),
   initialize: jest.fn().mockResolvedValue(undefined),
-  getServiceStats: jest.fn().mockResolvedValue({ activeTokens: 0 })
+  getServiceStats: jest.fn().mockResolvedValue({ activeTokens: 0 }),
+  sendNotificationToUsers: jest.fn().mockResolvedValue({
+    success: true,
+    results: [{ userId: 'user_1', success: true }],
+    summary: { total: 1, success: 1, failed: 0 }
+  })
 })));
 
 jest.mock('../../../utils/redis-scan', () => ({
@@ -124,6 +129,33 @@ describe('notification schedule route auth', () => {
       data: [{ id: 'scheduled_1', title: 'Teste' }]
     });
     expect(mockRequireRole).toHaveBeenCalledWith(['admin', 'super-admin', 'manager', 'development']);
+  });
+
+  it('allows dashboard operators to send immediate push by user id', async () => {
+    const response = await request(createApp())
+      .post('/api/notifications/send')
+      .set('Authorization', 'Bearer manager')
+      .send({
+        userIds: ['user_1'],
+        title: 'Teste operacional',
+        body: 'Mensagem de smoke',
+        priority: 'high',
+        data: { source: 'backoffice_smoke' }
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      data: {
+        sentTo: 1,
+        summary: { total: 1, success: 1, failed: 0 },
+        notification: expect.objectContaining({
+          title: 'Teste operacional',
+          body: 'Mensagem de smoke',
+          priority: 'high'
+        })
+      }
+    });
   });
 
   it('keeps scheduled notification cancellation limited to super-admin', async () => {

@@ -4,6 +4,7 @@ const redisPool = require('../utils/redis-pool');
 const { logError, logStructured } = require('../utils/logger');
 const passengerTrustService = require('./passenger-trust-service');
 const FCMService = require('./fcm-service');
+const auditService = require('./audit-service');
 
 const OPERATIONAL_STATUSES = new Set(['active', 'blocked', 'suspended']);
 const DRIVER_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
@@ -321,6 +322,31 @@ async function updateUserOperationalStatus(userId, payload = {}, options = {}) {
     });
   }
 
+  await auditService.logEvent({
+    userId: operator?.id || 'dashboard',
+    action: 'dashboard.user.operational_status.update',
+    resource: 'user',
+    severity: status === 'active' ? 'INFO' : 'WARNING',
+    details: {
+      targetUserId: record.userId,
+      targetUserType: record.userType,
+      status,
+      reason: payload.reason || null,
+      durationDays: payload.durationDays || null,
+      expiresAt,
+      reasonCode,
+      operatorEmail: operator?.email || null,
+      operatorRole: operator?.role || null
+    },
+    success: true
+  }).catch((error) => {
+    logError(error, 'Erro ao registrar auditoria de status operacional', {
+      service: 'dashboard-user-management-service',
+      userId: record.userId,
+      status
+    });
+  });
+
   return {
     success: true,
     userId: record.userId,
@@ -422,6 +448,31 @@ async function requestDriverDocument(driverId, documentType, payload = {}, optio
   const pushResult = payload.sendPush === false
     ? { success: false, skipped: true }
     : await sendDocumentRequestPush(safeDriverId, safeDocumentType, documentPayload.requestReason);
+
+  await auditService.logEvent({
+    userId: operator?.id || 'dashboard',
+    action: 'dashboard.driver.document.request',
+    resource: 'driver_document',
+    severity: 'WARNING',
+    details: {
+      targetDriverId: safeDriverId,
+      documentType: safeDocumentType,
+      reason: documentPayload.requestReason,
+      previousStatus: previousStatus || null,
+      status: requestStatus,
+      operatorEmail: operator?.email || null,
+      operatorRole: operator?.role || null,
+      pushRequested: payload.sendPush !== false,
+      pushSuccess: pushResult?.success === true
+    },
+    success: true
+  }).catch((error) => {
+    logError(error, 'Erro ao registrar auditoria de solicitacao de documento', {
+      service: 'dashboard-user-management-service',
+      driverId: safeDriverId,
+      documentType: safeDocumentType
+    });
+  });
 
   return {
     success: true,

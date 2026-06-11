@@ -519,7 +519,12 @@ router.patch('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERAT
     const legacyDb = firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
     const updatedUser = await updateUserProfile(safeUserId, req.body || {}, {
       mirrorToLegacyRtdb: legacyDashboardUsersMirrorEnabled,
-      legacyDb
+      legacyDb,
+      operator: {
+        id: req.user?.id || req.user?.userId || null,
+        email: req.user?.email || null,
+        role: req.user?.role || null
+      }
     });
 
     if (!updatedUser) {

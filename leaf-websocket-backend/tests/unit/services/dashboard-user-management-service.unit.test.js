@@ -6,6 +6,7 @@ const mockPassengerBlock = jest.fn();
 const mockPassengerUnblock = jest.fn();
 const mockFcmInitialize = jest.fn();
 const mockSendNotificationToUser = jest.fn();
+const mockAuditLogEvent = jest.fn();
 
 const mockRedisMulti = {
   del: jest.fn(() => mockRedisMulti),
@@ -76,6 +77,10 @@ jest.mock('../../../services/fcm-service', () => jest.fn(() => ({
   sendNotificationToUser: (...args) => mockSendNotificationToUser(...args)
 })));
 
+jest.mock('../../../services/audit-service', () => ({
+  logEvent: (...args) => mockAuditLogEvent(...args)
+}));
+
 jest.mock('../../../utils/logger', () => ({
   logError: jest.fn(),
   logStructured: jest.fn()
@@ -97,6 +102,7 @@ describe('dashboard-user-management-service', () => {
     mockRedisMulti.exec.mockClear();
     mockFcmInitialize.mockResolvedValue(undefined);
     mockSendNotificationToUser.mockResolvedValue({ success: true, summary: { success: 1 } });
+    mockAuditLogEvent.mockResolvedValue({ success: true, logId: 'audit_1' });
     service = require('../../../services/dashboard-user-management-service');
   });
 
@@ -135,6 +141,21 @@ describe('dashboard-user-management-service', () => {
       dispatchEligible: 'false',
       dispatchEligibilityCode: 'USER_STATUS_BLOCKED'
     }));
+    expect(mockAuditLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'admin_1',
+      action: 'dashboard.user.operational_status.update',
+      resource: 'user',
+      severity: 'WARNING',
+      details: expect.objectContaining({
+        targetUserId: 'driver_1',
+        targetUserType: 'driver',
+        status: 'blocked',
+        reason: 'Risco operacional',
+        reasonCode: 'USER_STATUS_BLOCKED',
+        operatorEmail: 'admin@leaf.test'
+      }),
+      success: true
+    }));
   });
 
   it('reactivates customers and clears passenger trust block', async () => {
@@ -162,6 +183,16 @@ describe('dashboard-user-management-service', () => {
     expect(mockPassengerUnblock).toHaveBeenCalledWith('customer_1', expect.objectContaining({
       operatorId: 'support_1',
       reasonCode: 'dashboard_reactivation'
+    }));
+    expect(mockAuditLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'support_1',
+      action: 'dashboard.user.operational_status.update',
+      severity: 'INFO',
+      details: expect.objectContaining({
+        targetUserId: 'customer_1',
+        targetUserType: 'customer',
+        status: 'active'
+      })
     }));
   });
 
@@ -251,6 +282,23 @@ describe('dashboard-user-management-service', () => {
     expect(mockSendNotificationToUser).toHaveBeenCalledWith('driver_2', expect.objectContaining({
       title: 'Documento pendente',
       data: expect.objectContaining({ documentType: 'cnh' })
+    }));
+    expect(mockAuditLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'admin_1',
+      action: 'dashboard.driver.document.request',
+      resource: 'driver_document',
+      severity: 'WARNING',
+      details: expect.objectContaining({
+        targetDriverId: 'driver_2',
+        documentType: 'cnh',
+        reason: 'Envie uma CNH mais recente',
+        previousStatus: 'approved',
+        status: 'requested',
+        operatorEmail: 'admin@leaf.test',
+        pushRequested: true,
+        pushSuccess: true
+      }),
+      success: true
     }));
   });
 });
