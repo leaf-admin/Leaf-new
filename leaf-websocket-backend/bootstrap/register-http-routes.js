@@ -57,6 +57,12 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Registrar rotas IMEDIATAMENTE após middleware básico
     logStructured('info', 'Registrando rotas...', { service: 'server' });
 
+    // Rotas publicas de Universal Links / App Links precisam responder no dominio raiz
+    // antes de qualquer rota de dashboard/catch-all.
+    const appLinkAssociationRoutes = require('../routes/app-link-association');
+    app.use('/', appLinkAssociationRoutes);
+    logStructured('info', 'Rotas de App Links registradas', { service: 'server' });
+
     // Rotas de monitoramento do cache
     app.use('/cache', cacheMonitoring);
     logStructured('info', 'Rotas de cache registradas', { service: 'server' });
