@@ -301,17 +301,29 @@ echo "[deploy] Instalando/buildando/reiniciando dashboard..."
 ssh_cmd "
   set -e
   cd '$REMOTE_DASHBOARD_DIR'
-  npm install
-  npm run build
-
-  if command -v pm2 >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && [ -f docker-compose.contabo.yml ]; then
+    dashboard_env_args=''
+    if [ -f .env.production.local ]; then
+      dashboard_env_args='--env-file .env.production.local'
+    fi
+    docker compose \$dashboard_env_args -f docker-compose.contabo.yml up -d --build leaf-dashboard
+    if docker ps --format '{{.Names}}' | grep -qx leaf-nginx; then
+      docker exec leaf-nginx nginx -t
+      docker exec leaf-nginx nginx -s reload
+    fi
+  elif command -v npm >/dev/null 2>&1 && command -v pm2 >/dev/null 2>&1; then
+    npm install
+    npm run build
     pm2 delete leaf-dashboard-js 2>/dev/null || true
     pm2 start npm --name leaf-dashboard-js -- run start -- --port $DASHBOARD_PORT --hostname 0.0.0.0
     pm2 save >/dev/null 2>&1 || true
-  elif command -v systemctl >/dev/null 2>&1; then
+  elif command -v npm >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
+    npm install
+    npm run build
     systemctl restart leaf-dashboard 2>/dev/null || true
   else
-    nohup npm start -- --port $DASHBOARD_PORT --hostname 0.0.0.0 >/tmp/leaf-dashboard.log 2>&1 &
+    echo '[deploy] Nenhum runtime suportado encontrado para o dashboard.' >&2
+    exit 1
   fi
 "
 
@@ -354,7 +366,11 @@ ssh_cmd "
 ssh_cmd "
   set -e
   for i in \$(seq 1 40); do
-    if curl -fsS -m 4 http://127.0.0.1:$DASHBOARD_PORT/login >/dev/null; then
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx leaf-dashboard; then
+      if docker exec leaf-dashboard wget -q -O /dev/null http://127.0.0.1:3000/login; then
+        exit 0
+      fi
+    elif curl -fsS -m 4 http://127.0.0.1:$DASHBOARD_PORT/login >/dev/null; then
       exit 0
     fi
     sleep 2
