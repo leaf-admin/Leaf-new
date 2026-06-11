@@ -131,6 +131,7 @@ const queueMonitoringRoutes = require('./routes/queue-monitoring');
 const IntegratedKYCService = require('./services/IntegratedKYCService');
 const kycPolicyService = require('./services/kyc-policy-service');
 const { resolveBiometricPolicy } = require('./services/kyc-biometric-production-policy');
+const driverActivationStateService = require('./services/driver-activation-state-service');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
 // ============================================================================================
 
@@ -588,6 +589,25 @@ async function enforceDailyKYCForOnline(driverId) {
     }
 
     try {
+        const activationState = await driverActivationStateService.resolveDriverActivationState({ driverId });
+        if (activationState?.canGoOnline && !activationState?.requiresLiveness) {
+            return {
+                allowed: true,
+                reason: 'Motorista apto pela politica canonica de ativacao.',
+                code: 'driverActivationActive',
+                details: activationState
+            };
+        }
+        if (activationState && !activationState.canAttemptOnline) {
+            return {
+                allowed: false,
+                reason: activationState.blockingReason || 'Motorista nao apto para ficar online.',
+                code: activationState.requiresLiveness ? 'kycRequired' : 'driverActivationBlocked',
+                requirement: activationState.requiresLiveness ? 'LIVENESS_REQUIRED' : undefined,
+                details: activationState
+            };
+        }
+
         const approvalGate = await kycPolicyService.requireApprovedKyc(driverId);
         if (!approvalGate.allowed) {
             return {
