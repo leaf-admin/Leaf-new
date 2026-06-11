@@ -7,6 +7,9 @@ const { writeVisibleBookingSnapshot } = require('../services/booking-visibility-
 const {
     resolveDriverActivationState
 } = require('../services/driver-activation-state-service');
+const {
+    resolveDestinationModeIntent
+} = require('../services/driver-destination-mode-service');
 
 const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
     30,
@@ -304,7 +307,13 @@ function registerSocketDriverControlHandlers({
             const existingDriverState = await redis.hgetall(driverKey);
             const existingIsEligible = existingDriverState?.dispatchEligible === 'true';
             const requestedDestinationMode = normalizeDriverDestinationModePayload(data);
-            const shouldWriteDestinationMode = !isOnline || requestedDestinationMode.provided;
+            let destinationIntent = {
+                allowed: true,
+                shouldWrite: false,
+                patch: null,
+                destinationMode: undefined,
+                policy: null
+            };
 
             if (!isOnline) {
                 await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
@@ -388,6 +397,24 @@ function registerSocketDriverControlHandlers({
                 }
             }
 
+            destinationIntent = await resolveDestinationModeIntent({
+                redis,
+                driverId,
+                requestedMode: requestedDestinationMode,
+                existingDriverState,
+                isOnline
+            });
+            if (!destinationIntent.allowed) {
+                socket.emit('driverStatusError', {
+                    success: false,
+                    error: destinationIntent.error || 'Destino de caminho indisponível agora.',
+                    code: destinationIntent.code || 'DRIVER_DESTINATION_MODE_REJECTED',
+                    destinationModePolicy: destinationIntent.policy || null
+                });
+                return;
+            }
+            const shouldWriteDestinationMode = destinationIntent.shouldWrite === true;
+
             await redis.hset(driverKey, {
                 driverId,
                 status,
@@ -397,19 +424,7 @@ function registerSocketDriverControlHandlers({
                     ? (existingDriverState?.dispatchEligibilityCode || 'AWAITING_LOCATION_SYNC')
                     : 'OFFLINE',
                 dispatchEligibilityCheckedAt: new Date().toISOString(),
-                ...(shouldWriteDestinationMode
-                    ? {
-                        destinationModeActive: String(isOnline && requestedDestinationMode.active),
-                        driverDestinationModeActive: String(isOnline && requestedDestinationMode.active),
-                        destinationModeLat: isOnline ? requestedDestinationMode.lat : '',
-                        destinationModeLng: isOnline ? requestedDestinationMode.lng : '',
-                        destinationModeExpiresAt: isOnline ? requestedDestinationMode.expiresAt : '',
-                        destinationModeMinProgressKm: isOnline ? requestedDestinationMode.minProgressKm : '',
-                        destinationModeArrivalRadiusKm: isOnline ? requestedDestinationMode.arrivalRadiusKm : '',
-                        destinationModeLabel: isOnline ? requestedDestinationMode.label : '',
-                        destinationModeAddress: isOnline ? requestedDestinationMode.address : ''
-                    }
-                    : {}),
+                ...(shouldWriteDestinationMode ? destinationIntent.patch : {}),
                 updatedAt: new Date().toISOString()
             });
 
@@ -437,13 +452,9 @@ function registerSocketDriverControlHandlers({
                 isOnline,
                 dispatchEligible: isOnline && existingIsEligible,
                 destinationMode: shouldWriteDestinationMode
-                    ? {
-                        active: isOnline && requestedDestinationMode.active,
-                        label: isOnline ? requestedDestinationMode.label : '',
-                        address: isOnline ? requestedDestinationMode.address : '',
-                        expiresAt: isOnline ? requestedDestinationMode.expiresAt : ''
-                    }
+                    ? destinationIntent.destinationMode
                     : undefined,
+                destinationModePolicy: destinationIntent.policy || null,
                 checkedAt: new Date().toISOString()
             });
             scheduleMapH3Refresh(io, {

@@ -1,6 +1,7 @@
 const express = require('express');
 const { logStructured, logError } = require('../utils/logger');
 const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
+const { readPolicyFromEnv } = require('../services/driver-destination-mode-service');
 const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
 const router = express.Router();
 
@@ -122,6 +123,19 @@ function buildDriverOnlinePolicy() {
     };
 }
 
+function buildDriverDestinationPolicy() {
+    const policy = readPolicyFromEnv();
+    return {
+        enabled: policy.enabled,
+        baseDailyQuota: policy.baseDailyQuota,
+        maxDailyQuota: policy.maxDailyQuota,
+        extraEveryCompletedTrips: policy.extraEveryCompletedTrips,
+        durationMinutes: policy.durationMinutes,
+        minProgressKm: policy.minProgressKm,
+        arrivalRadiusKm: policy.arrivalRadiusKm
+    };
+}
+
 function buildSupportPolicy() {
     return {
         inAppChatEnabled: envBool('ENABLE_IN_APP_SUPPORT_CHAT', true),
@@ -209,6 +223,7 @@ router.get('/runtime-config', async (req, res) => {
             mapsRoutingPolicy: buildMapsRoutingPolicy(),
             notificationPolicy: buildNotificationPolicy(),
             driverOnlinePolicy: buildDriverOnlinePolicy(),
+            driverDestinationPolicy: buildDriverDestinationPolicy(),
             campaignSurfaces: {
                 passengerHome: envBool('ENABLE_PASSENGER_HOME_CAMPAIGNS', true),
                 driverHome: envBool('ENABLE_DRIVER_HOME_CAMPAIGNS', true)

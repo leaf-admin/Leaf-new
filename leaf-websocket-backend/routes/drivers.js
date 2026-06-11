@@ -3,7 +3,9 @@ const router = express.Router();
 const redisPool = require('../utils/redis-pool');
 const driverLockManager = require('../services/driver-lock-manager');
 const PaymentService = require('../services/payment-service');
-const { logger } = require('../utils/logger');
+const { getPolicyForDriver } = require('../services/driver-destination-mode-service');
+const { requireFirebaseUser } = require('../middleware/firebase-user-auth');
+const { logger, logStructured, logError } = require('../utils/logger');
 const paymentService = new PaymentService();
 
 // Firebase integration
@@ -63,6 +65,31 @@ async function updateRealtimeRoot(updates) {
 }
 
 // 🚗 DRIVER APPROVAL APIs
+
+router.get('/api/drivers/me/destination-policy', requireFirebaseUser, async (req, res) => {
+  try {
+    const driverId = req.authenticatedUser.uid;
+    const redis = redisPool.getConnection();
+    const driverState = await redis.hgetall(`driver:${driverId}`).catch(() => ({}));
+    const policy = await getPolicyForDriver({
+      redis,
+      driverId,
+      driverState
+    });
+
+    return res.json({
+      success: true,
+      driverId,
+      policy
+    });
+  } catch (error) {
+    logError(error, '❌ Erro ao buscar política de destino do motorista:', { service: 'drivers-routes' });
+    return res.status(500).json({
+      success: false,
+      error: 'Não foi possível carregar os destinos de caminho agora.'
+    });
+  }
+});
 
 // GET /api/drivers/applications - Listar aplicações de motoristas
 router.get('/api/drivers/applications', requireFirebase, async (req, res) => {

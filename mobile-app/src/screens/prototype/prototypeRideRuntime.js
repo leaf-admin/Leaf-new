@@ -119,6 +119,13 @@ const SUPPRESSED_BOOKING_EVENT_WINDOW_MS = 15000;
 const RUNTIME_LIFECYCLE_EVENT_DEDUP_WINDOW_MS = 1500;
 const ACTIVE_RIDE_SNAPSHOT_COORDINATE_PRECISION = 4;
 const DRIVER_STATUS_RETRY_ATTEMPTS = 2;
+const DRIVER_DESTINATION_MODE_DURATION_MINUTES = Math.max(
+  15,
+  Number.parseInt(
+    process.env.EXPO_PUBLIC_DRIVER_DESTINATION_MODE_DURATION_MINUTES || "90",
+    10,
+  ) || 90,
+);
 const DRIVER_ACTIVATION_REMOTE_SYNC_INTERVAL_MS = 12000;
 const DRIVER_ACTIVATION_SYNC_MIN_GAP_MS = 6000;
 const DESTINATION_SEARCH_MIN_QUERY_LENGTH = 3;
@@ -2535,8 +2542,15 @@ function buildDriverDestinationModeState(input = {}) {
     : null;
   const coordinate = normalizedDestination?.coordinate || null;
   const active = Boolean(source.active) && Boolean(coordinate);
+  const durationMinutes = Number(
+    source.durationMinutes || source.destinationModeDurationMinutes,
+  );
+  const fallbackDurationMinutes =
+    Number.isFinite(durationMinutes) && durationMinutes > 0
+      ? durationMinutes
+      : DRIVER_DESTINATION_MODE_DURATION_MINUTES;
   const fallbackExpiresAt =
-    Date.now() + Math.max(1, Number(source.durationHours || 4)) * 60 * 60 * 1000;
+    Date.now() + Math.max(1, fallbackDurationMinutes) * 60 * 1000;
   const expiresAt = source.expiresAt || source.destinationModeExpiresAt || null;
   const normalizedExpiresAt = active
     ? sanitizeText(expiresAt, "") || new Date(fallbackExpiresAt).toISOString()

@@ -724,7 +724,7 @@ function DriverHomeOverlay({
               <View style={styles.destinationModeCopy}>
                 <Text style={styles.destinationModeTitle}>Destino de caminho</Text>
                 <Text style={styles.destinationModeSubtitle}>
-                  Receba corridas que avancem pelo menos 1 km e terminem perto do seu caminho.
+                  Use um destino do dia para receber corridas que aproximem você do caminho.
                 </Text>
               </View>
               <View
@@ -755,7 +755,7 @@ function DriverHomeOverlay({
             />
             {hasActiveDestinationMode ? (
               <Text style={styles.destinationModeActiveHint} numberOfLines={2}>
-                Ativo para {destinationModeLabel}. A preferência expira automaticamente em até 4 horas.
+                Ativo para {destinationModeLabel}. A preferência expira automaticamente.
               </Text>
             ) : null}
             <View style={styles.modalActions}>

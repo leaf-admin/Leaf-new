@@ -39,6 +39,13 @@ describe('app routes runtime config', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env = { ...originalEnv };
+    process.env.ENABLE_DRIVER_DESTINATION_MODE = 'true';
+    process.env.DRIVER_DESTINATION_DAILY_BASE_QUOTA = '2';
+    process.env.DRIVER_DESTINATION_DAILY_MAX_QUOTA = '4';
+    process.env.DRIVER_DESTINATION_EXTRA_EVERY_TRIPS = '100';
+    process.env.DRIVER_DESTINATION_DURATION_MINUTES = '90';
+    process.env.DRIVER_DESTINATION_MIN_PROGRESS_KM = '1';
+    process.env.DRIVER_DESTINATION_ARRIVAL_RADIUS_KM = '3';
     mockGetRuntimeSummary.mockResolvedValue({
       defaultEnvironment: 'production',
       defaultProfile: {
@@ -92,6 +99,14 @@ describe('app routes runtime config', () => {
     expect(JSON.stringify(response.body)).not.toContain('must-not-leak');
     expect(response.body.mapsRoutingPolicy.placesCacheEnabled).toBe(true);
     expect(response.body.notificationPolicy.configured).toBe(true);
+    expect(response.body.driverDestinationPolicy).toMatchObject({
+      enabled: true,
+      baseDailyQuota: 2,
+      maxDailyQuota: 4,
+      durationMinutes: 90,
+      minProgressKm: 1,
+      arrivalRadiusKm: 3
+    });
   });
 
   it('does not expose legacy BaaS copy in app info', async () => {
