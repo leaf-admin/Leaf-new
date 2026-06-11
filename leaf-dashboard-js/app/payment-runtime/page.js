@@ -12,6 +12,32 @@ import { leafAPI } from "@/src/services/api";
 const nowPlusHours = (hours) => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 const shortId = () => `sandbox-${Date.now().toString(36)}`;
 
+const defaultH3Policy = () => ({
+  enabled: true,
+  opacity: 1,
+  resolutionOffset: 0,
+  palette: {
+    yellow: "#FACC15",
+    red: "#EF4444",
+    purple: "#7E22CE",
+    yellowStroke: "#CA8A04",
+    redStroke: "#B91C1C",
+    purpleStroke: "#581C87",
+  },
+  label: {
+    enabled: true,
+    minPercent: 3,
+    maxVisible: 12,
+    template: "+{percent}%",
+    backgroundColor: "#171412",
+    backgroundOpacity: 0.9,
+    textColor: "#FFFFFF",
+    borderColor: "#FFFFFF",
+    borderOpacity: 0.82,
+    fontSize: 12,
+  },
+});
+
 const defaultForm = () => ({
   profileId: shortId(),
   name: "Canary sandbox",
@@ -78,6 +104,8 @@ export default function PaymentRuntimePage() {
   const [resolveInput, setResolveInput] = useState({ userId: "", phone: "" });
   const [resolveResult, setResolveResult] = useState(null);
   const [resolving, setResolving] = useState(false);
+  const [h3Policy, setH3Policy] = useState(defaultH3Policy);
+  const [h3Saving, setH3Saving] = useState(false);
 
   const activeSandboxCount = useMemo(
     () => profiles.filter((profile) =>
@@ -91,12 +119,50 @@ export default function PaymentRuntimePage() {
     try {
       setLoading(true);
       setError("");
-      const response = await leafAPI.listPaymentRuntimeProfiles({ includeInactive: true });
-      setProfiles(Array.isArray(response?.profiles) ? response.profiles : []);
+      const [profilesResult, h3Result] = await Promise.allSettled([
+        leafAPI.listPaymentRuntimeProfiles({ includeInactive: true }),
+        leafAPI.getH3VisualPolicy(),
+      ]);
+      if (profilesResult.status === "fulfilled") {
+        setProfiles(Array.isArray(profilesResult.value?.profiles) ? profilesResult.value.profiles : []);
+      } else {
+        throw profilesResult.reason;
+      }
+      if (h3Result.status === "fulfilled") {
+        const h3Response = h3Result.value;
+        setH3Policy({
+          ...defaultH3Policy(),
+          ...(h3Response?.policy || {}),
+          palette: {
+            ...defaultH3Policy().palette,
+            ...(h3Response?.policy?.palette || {}),
+          },
+          label: {
+            ...defaultH3Policy().label,
+            ...(h3Response?.policy?.label || {}),
+          },
+        });
+      }
     } catch (err) {
       setError(err?.message || "Falha ao carregar perfis de pagamento");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveH3Policy = async (event) => {
+    event.preventDefault();
+    try {
+      setH3Saving(true);
+      setError("");
+      setSuccess("");
+      const response = await leafAPI.updateH3VisualPolicy(h3Policy);
+      setH3Policy(response?.policy || h3Policy);
+      setSuccess("Estilo do mapa de demanda salvo. O app recebe a mudança em até 30 segundos.");
+    } catch (err) {
+      setError(err?.message || "Falha ao salvar estilo do mapa de demanda");
+    } finally {
+      setH3Saving(false);
     }
   };
 
@@ -174,6 +240,153 @@ export default function PaymentRuntimePage() {
           <KpiCard title="Default" value="produção" tone="positive" subtitle="quando nenhum perfil bate" />
           <KpiCard title="Cache" value="~30s" subtitle="sem rebuild e sem restart" />
         </section>
+
+        <Panel
+          title="Mapa de tarifa dinâmica"
+          subtitle="Ajuste a aparência no mapa do motorista sem nova build. O cálculo e o teto de 35% não mudam aqui."
+          className="panel-span-full"
+        >
+          <form className="section-stack" onSubmit={saveH3Policy}>
+            <div className="form-grid">
+              <label className="form-field">
+                Exibição
+                <select
+                  value={h3Policy.enabled ? "enabled" : "disabled"}
+                  onChange={(event) => setH3Policy({ ...h3Policy, enabled: event.target.value === "enabled" })}
+                >
+                  <option value="enabled">ativa</option>
+                  <option value="disabled">oculta</option>
+                </select>
+              </label>
+              <label className="form-field">
+                Tamanho das regiões
+                <select
+                  value={h3Policy.resolutionOffset}
+                  onChange={(event) => setH3Policy({ ...h3Policy, resolutionOffset: Number(event.target.value) })}
+                >
+                  <option value={-1}>grandes</option>
+                  <option value={0}>padrão</option>
+                  <option value={1}>pequenas e detalhadas</option>
+                </select>
+              </label>
+              <label className="form-field">
+                Opacidade: {Math.round(Number(h3Policy.opacity || 0) * 100)}%
+                <input
+                  type="range"
+                  min="0.15"
+                  max="1"
+                  step="0.05"
+                  value={h3Policy.opacity}
+                  onChange={(event) => setH3Policy({ ...h3Policy, opacity: Number(event.target.value) })}
+                />
+              </label>
+            </div>
+
+            <div className="form-grid">
+              {[
+                ["yellow", "Faixa amarela"],
+                ["red", "Faixa vermelha"],
+                ["purple", "Faixa roxa"],
+              ].map(([key, label]) => (
+                <label className="form-field" key={key}>
+                  {label}
+                  <input
+                    type="color"
+                    value={h3Policy.palette[key]}
+                    onChange={(event) => setH3Policy({
+                      ...h3Policy,
+                      palette: { ...h3Policy.palette, [key]: event.target.value.toUpperCase() },
+                    })}
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="form-grid">
+              <label className="form-field">
+                Tags de variação
+                <select
+                  value={h3Policy.label.enabled ? "enabled" : "disabled"}
+                  onChange={(event) => setH3Policy({
+                    ...h3Policy,
+                    label: { ...h3Policy.label, enabled: event.target.value === "enabled" },
+                  })}
+                >
+                  <option value="enabled">ativas</option>
+                  <option value="disabled">ocultas</option>
+                </select>
+              </label>
+              <label className="form-field">
+                Mostrar a partir de
+                <input
+                  type="number"
+                  min="1"
+                  max="35"
+                  value={h3Policy.label.minPercent}
+                  onChange={(event) => setH3Policy({
+                    ...h3Policy,
+                    label: { ...h3Policy.label, minPercent: Number(event.target.value) },
+                  })}
+                />
+              </label>
+              <label className="form-field">
+                Máximo de tags
+                <input
+                  type="number"
+                  min="0"
+                  max="24"
+                  value={h3Policy.label.maxVisible}
+                  onChange={(event) => setH3Policy({
+                    ...h3Policy,
+                    label: { ...h3Policy.label, maxVisible: Number(event.target.value) },
+                  })}
+                />
+              </label>
+              <label className="form-field">
+                Formato
+                <input
+                  value={h3Policy.label.template}
+                  placeholder="+{percent}%"
+                  onChange={(event) => setH3Policy({
+                    ...h3Policy,
+                    label: { ...h3Policy.label, template: event.target.value },
+                  })}
+                />
+              </label>
+              <label className="form-field">
+                Fundo da tag
+                <input
+                  type="color"
+                  value={h3Policy.label.backgroundColor}
+                  onChange={(event) => setH3Policy({
+                    ...h3Policy,
+                    label: { ...h3Policy.label, backgroundColor: event.target.value.toUpperCase() },
+                  })}
+                />
+              </label>
+              <label className="form-field">
+                Texto da tag
+                <input
+                  type="color"
+                  value={h3Policy.label.textColor}
+                  onChange={(event) => setH3Policy({
+                    ...h3Policy,
+                    label: { ...h3Policy.label, textColor: event.target.value.toUpperCase() },
+                  })}
+                />
+              </label>
+            </div>
+
+            <div className="row-actions">
+              <button type="submit" disabled={h3Saving}>
+                {h3Saving ? "Salvando..." : "Publicar estilo"}
+              </button>
+              <button type="button" className="button-secondary" onClick={() => setH3Policy(defaultH3Policy())}>
+                Restaurar padrão no formulário
+              </button>
+            </div>
+          </form>
+        </Panel>
 
         <section className="grid">
           <Panel

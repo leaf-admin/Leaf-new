@@ -5,10 +5,15 @@ const request = require('supertest');
 
 const mockGetRuntimeSummary = jest.fn();
 const mockResolveProfile = jest.fn();
+const mockGetH3VisualPolicy = jest.fn();
 
 jest.mock('../../../services/payment-runtime-profile-service', () => ({
   getRuntimeSummary: (...args) => mockGetRuntimeSummary(...args),
   resolveProfile: (...args) => mockResolveProfile(...args)
+}));
+
+jest.mock('../../../services/h3-visual-policy-service', () => ({
+  getPolicy: (...args) => mockGetH3VisualPolicy(...args)
 }));
 
 jest.mock('../../../utils/pilot-launch-flags', () => ({
@@ -71,6 +76,18 @@ describe('app routes runtime config', () => {
         clientSecret: 'must-not-leak'
       }
     });
+    mockGetH3VisualPolicy.mockResolvedValue({
+      enabled: true,
+      opacity: 0.7,
+      resolutionOffset: 0,
+      label: {
+        enabled: true,
+        minPercent: 3,
+        maxVisible: 12,
+        template: '+{percent}%'
+      },
+      version: 2
+    });
   });
 
   afterAll(() => {
@@ -98,6 +115,11 @@ describe('app routes runtime config', () => {
     );
     expect(JSON.stringify(response.body)).not.toContain('must-not-leak');
     expect(response.body.mapsRoutingPolicy.placesCacheEnabled).toBe(true);
+    expect(response.body.mapsRoutingPolicy.h3VisualPolicy).toMatchObject({
+      enabled: true,
+      opacity: 0.7,
+      version: 2
+    });
     expect(response.body.notificationPolicy.configured).toBe(true);
     expect(response.body.driverDestinationPolicy).toMatchObject({
       enabled: true,

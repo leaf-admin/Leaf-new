@@ -43,6 +43,66 @@ describe('H3MapService', () => {
     expect(hotStyle.fillOpacity).toBeGreaterThan(0);
   });
 
+  test('applies backend visual policy without changing the surcharge cap', () => {
+    const visualPolicy = {
+      opacity: 0.5,
+      palette: {
+        purple: '#123456',
+        purpleStroke: '#654321',
+      },
+      label: {
+        enabled: true,
+        minPercent: 20,
+        template: 'extra {percent}%'
+      }
+    };
+    const metrics = {
+      demand: 8,
+      availableDrivers: 0,
+      openRequests: 8,
+      activeTrips: 0,
+      imbalance: 8,
+      surplus: -8,
+    };
+
+    const surge = helpers.buildSurgeDisplay(metrics, 'critical', visualPolicy);
+    const style = helpers.buildStyle('critical', 'driver', 8, metrics, visualPolicy);
+
+    expect(surge.percent).toBe(35);
+    expect(surge.label).toBe('extra 35%');
+    expect(surge.labelVisible).toBe(true);
+    expect(style.fill).toBe('#123456');
+    expect(style.stroke).toBe('#654321');
+    expect(style.fillOpacity).toBeLessThan(0.3);
+  });
+
+  test('hides the driver overlay when runtime policy is disabled', () => {
+    const metrics = {
+      demand: 8,
+      availableDrivers: 0,
+      openRequests: 8,
+      activeTrips: 0,
+      imbalance: 8,
+      surplus: -8,
+    };
+    const policy = {
+      enabled: false,
+      label: {
+        enabled: true,
+        minPercent: 1,
+        template: '+{percent}%'
+      }
+    };
+
+    const surge = helpers.buildSurgeDisplay(metrics, 'critical', policy);
+    const style = helpers.buildStyle('critical', 'driver', 8, metrics, policy);
+
+    expect(surge.percent).toBe(35);
+    expect(surge.labelVisible).toBe(false);
+    expect(style.fillOpacity).toBe(0);
+    expect(style.strokeOpacity).toBe(0);
+  });
+
   test('builds h3 payload from redis-backed snapshot', async () => {
     const service = new H3MapService();
     const driverGeo = {

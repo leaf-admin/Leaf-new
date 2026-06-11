@@ -3,6 +3,7 @@ const { logStructured, logError } = require('../utils/logger');
 const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
 const { readPolicyFromEnv } = require('../services/driver-destination-mode-service');
 const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
+const h3VisualPolicyService = require('../services/h3-visual-policy-service');
 const router = express.Router();
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
@@ -188,9 +189,10 @@ router.get('/info', async (req, res) => {
 router.get('/runtime-config', async (req, res) => {
     try {
         const context = getOptionalRuntimeContext(req);
-        const [paymentSummary, effectivePaymentProfile] = await Promise.all([
+        const [paymentSummary, effectivePaymentProfile, h3VisualPolicy] = await Promise.all([
             paymentRuntimeProfileService.getRuntimeSummary(),
-            paymentRuntimeProfileService.resolveProfile(context)
+            paymentRuntimeProfileService.resolveProfile(context),
+            h3VisualPolicyService.getPolicy()
         ]);
 
         const hasRuntimeContext = Boolean(context.userId || context.passengerId || context.phone || context.phoneNumber);
@@ -222,7 +224,10 @@ router.get('/runtime-config', async (req, res) => {
             },
             biometricRuntime: buildBiometricRuntime(),
             featureGates: getPilotLaunchFlags(),
-            mapsRoutingPolicy: buildMapsRoutingPolicy(),
+            mapsRoutingPolicy: {
+                ...buildMapsRoutingPolicy(),
+                h3VisualPolicy
+            },
             notificationPolicy: buildNotificationPolicy(),
             driverOnlinePolicy: buildDriverOnlinePolicy(),
             driverDestinationPolicy: buildDriverDestinationPolicy(),

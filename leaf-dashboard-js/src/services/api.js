@@ -313,6 +313,17 @@ class LeafApiService {
     return this.request("/health/runtime-flags");
   }
 
+  async getH3VisualPolicy() {
+    return this.request("/map/h3-visual-policy");
+  }
+
+  async updateH3VisualPolicy(policy = {}) {
+    return this.request("/map/h3-visual-policy", {
+      method: "PUT",
+      body: JSON.stringify(policy),
+    });
+  }
+
   async getAlerts(limit = 20) {
     return this.request(`/alerts?limit=${encodeURIComponent(limit)}`);
   }

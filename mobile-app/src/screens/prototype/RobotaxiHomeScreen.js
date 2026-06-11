@@ -100,6 +100,19 @@ const DEFAULT_USER_COORDINATE = {
   latitude: PROTOTYPE_REGION.latitude,
   longitude: PROTOTYPE_REGION.longitude
 };
+const DEFAULT_DRIVER_H3_VISUAL_POLICY = {
+  enabled: true,
+  label: {
+    enabled: true,
+    maxVisible: 12,
+    backgroundColor: '#171412',
+    backgroundOpacity: 0.9,
+    textColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+    borderOpacity: 0.82,
+    fontSize: 12
+  }
+};
 
 function pickHomeMapCoordinate(...values) {
   for (const value of values) {
@@ -1176,6 +1189,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     hasPrototypeHomeSurfaceHydratedInSession
   );
   const [driverH3Cells, setDriverH3Cells] = useState([]);
+  const [driverH3VisualPolicy, setDriverH3VisualPolicy] = useState(DEFAULT_DRIVER_H3_VISUAL_POLICY);
   const [driverH3RefreshNonce, setDriverH3RefreshNonce] = useState(0);
   const [showRecoveredConnectionHint, setShowRecoveredConnectionHint] = useState(false);
   const [qaConnectionVisualState, setQaConnectionVisualState] = useState(null);
@@ -3347,6 +3361,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       driverH3LastFetchAtRef.current = 0;
       driverH3DisabledUntilRef.current = 0;
       setDriverH3Cells([]);
+      setDriverH3VisualPolicy(DEFAULT_DRIVER_H3_VISUAL_POLICY);
       return;
     }
 
@@ -3429,6 +3444,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         }
 
         setDriverH3Cells(Array.isArray(response?.cells) ? response.cells : []);
+        setDriverH3VisualPolicy(response?.visualPolicy || DEFAULT_DRIVER_H3_VISUAL_POLICY);
       } catch (error) {
         if (!controller.signal.aborted) {
           const status = Number(error?.status || error?.response?.status || 0);
@@ -3436,6 +3452,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             driverH3DisabledUntilRef.current = Date.now() + DRIVER_H3_AUTH_COOLDOWN_MS;
           }
           setDriverH3Cells([]);
+          setDriverH3VisualPolicy(DEFAULT_DRIVER_H3_VISUAL_POLICY);
         }
       }
     }, DRIVER_H3_VIEWPORT_DEBOUNCE_MS);
@@ -3640,7 +3657,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [scheduleDriverH3Refresh, showDriverH3Overlay]);
 
   const driverH3MapChildren = useMemo(() => {
-    if (!showDriverH3Overlay || !Array.isArray(driverH3Cells) || driverH3Cells.length === 0) {
+    if (
+      !showDriverH3Overlay
+      || driverH3VisualPolicy?.enabled === false
+      || !Array.isArray(driverH3Cells)
+      || driverH3Cells.length === 0
+    ) {
       return null;
     }
 
@@ -3657,9 +3679,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
 
     const labelCells = [...surgeCells]
-      .filter((cell) => cell?.surge?.labelVisible !== false)
+      .filter((cell) => (
+        driverH3VisualPolicy?.label?.enabled !== false
+        && cell?.surge?.labelVisible !== false
+      ))
       .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0))
-      .slice(0, 12);
+      .slice(0, Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 12)));
 
     return (
       <>
@@ -3689,15 +3714,40 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges={false}
             >
-              <View style={styles.driverSurgeFlag}>
-                <Text style={styles.driverSurgeFlagText}>{label}</Text>
+              <View
+                style={[
+                  styles.driverSurgeFlag,
+                  {
+                    backgroundColor: hexToRgba(
+                      driverH3VisualPolicy?.label?.backgroundColor || '#171412',
+                      Number(driverH3VisualPolicy?.label?.backgroundOpacity ?? 0.9)
+                    ),
+                    borderColor: hexToRgba(
+                      driverH3VisualPolicy?.label?.borderColor || '#FFFFFF',
+                      Number(driverH3VisualPolicy?.label?.borderOpacity ?? 0.82)
+                    )
+                  }
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.driverSurgeFlagText,
+                    {
+                      color: driverH3VisualPolicy?.label?.textColor || '#FFFFFF',
+                      fontSize: Number(driverH3VisualPolicy?.label?.fontSize || 12),
+                      lineHeight: Number(driverH3VisualPolicy?.label?.fontSize || 12) + 2
+                    }
+                  ]}
+                >
+                  {label}
+                </Text>
               </View>
             </Marker>
           );
         })}
       </>
     );
-  }, [driverH3Cells, showDriverH3Overlay]);
+  }, [driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay]);
 
   const getRouteEdgePadding = useCallback(() => {
     const routeAreaTop = Math.max(insets.top + 12, activeOcclusion.top + 12);
