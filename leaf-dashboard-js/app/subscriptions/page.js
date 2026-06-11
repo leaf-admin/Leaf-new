@@ -16,7 +16,7 @@ export default function SubscriptionsPage() {
   const [busyId, setBusyId] = useState("");
   const [freeDays, setFreeDays] = useState(7);
   const [waveDraft, setWaveDraft] = useState("wave_1");
-  const [dailyFeeDraft, setDailyFeeDraft] = useState(990);
+  const [dailyFeeDraft, setDailyFeeDraft] = useState(1490);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");

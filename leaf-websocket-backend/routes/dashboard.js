@@ -4118,8 +4118,9 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
     const subscriptionsData = subscriptionsSnapshot.val() || {};
     const now = new Date();
 
-    const plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '990', 10);
+    const plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '1490', 10);
     const eliteDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_ELITE_DAILY_CENTS || '0', 10);
+    const dailyBillingEnabled = String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
 
     let rows = Object.keys(users).map((driverId) => {
       const driver = users[driverId] || {};
@@ -4168,7 +4169,7 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
       const latestFreeEnd = freeEnds.length > 0
         ? new Date(Math.max(...freeEnds.map((date) => date.getTime())))
         : null;
-      const isFree = subscription.isFeeExempt === true || latestFreeEnd !== null;
+      const isFree = subscription.isFeeExempt === true || latestFreeEnd !== null || !dailyBillingEnabled;
 
       const appliedDailyFeeCents = isFree ? 0 : dailyFeeCents;
 
@@ -4190,6 +4191,10 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
           collectionMode: String(subscription.collectionMode || driver.subscription_collection_mode || 'withdrawal').toLowerCase(),
           dailyFeeCents: appliedDailyFeeCents,
           dailyFee: Number((appliedDailyFeeCents / 100).toFixed(2)),
+          nominalDailyFeeCents: dailyFeeCents,
+          nominalDailyFee: Number((dailyFeeCents / 100).toFixed(2)),
+          dailyBillingEnabled,
+          dailyBillingSuspended: !dailyBillingEnabled,
           weeklyFeeCents,
           weeklyFee: Number((weeklyFeeCents / 100).toFixed(2)),
           pendingFeeCents,

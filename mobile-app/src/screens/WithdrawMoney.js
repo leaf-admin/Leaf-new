@@ -169,8 +169,8 @@ export default function WithdrawMoneyScreen(props) {
           accessibilityLabel="driver-withdraw-password-input"
         />
         <View style={styles.dailyFeeRow}>
-          <Text style={styles.dailyFeeLabel}>Taxa diária</Text>
-          <Text style={styles.dailyFeeStruck}>R$ 9,90</Text>
+          <Text style={styles.dailyFeeLabel}>Diária por faturamento</Text>
+          <Text style={styles.dailyFeeStruck}>Até R$ 14,90</Text>
           <Text style={styles.dailyFeeFree}>R$ 0,00 agora</Text>
         </View>
         {hasAmount && currentWithdrawFee > 0 && (

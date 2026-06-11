@@ -495,7 +495,7 @@ describe('PaymentService financial rules', () => {
     const service = new PaymentService();
 
     expect(service.SUBSCRIPTION_DAILY_BILLING_ENABLED).toBe(false);
-    expect(service.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS).toBe(990);
+    expect(service.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS).toBe(1490);
   });
 
   it('returns nominal daily fee but zero effective fee while daily billing is suspended', async () => {
@@ -524,7 +524,7 @@ describe('PaymentService financial rules', () => {
       subscriptionPendingFeeCents: 0,
       subscriptionPendingFeeRawCents: 990,
       subscriptionDailyFeeCents: 0,
-      subscriptionDailyFeeNominalCents: 990,
+      subscriptionDailyFeeNominalCents: 1490,
       subscriptionDailyFeeEffectiveCents: 0,
       subscriptionDailyFeeSuspended: true,
       subscriptionDailyBillingEnabled: false,
