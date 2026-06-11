@@ -1,6 +1,8 @@
 const {
+  buildDestinationEntitlement,
   getPolicyForDriver,
   grantedQuotaForDriver,
+  recordDriverDestinationDailyRideCompletion,
   resolveDestinationModeIntent
 } = require('../../../services/driver-destination-mode-service');
 
@@ -9,6 +11,17 @@ function createRedisMock(initial = {}) {
 
   return {
     hget: jest.fn(async (key, field) => hashes.get(key)?.[field] ?? null),
+    hgetall: jest.fn(async (key) => hashes.get(key) || {}),
+    hset: jest.fn(async (key, fieldOrPayload, maybeValue) => {
+      const current = hashes.get(key) || {};
+      if (typeof fieldOrPayload === 'string') {
+        current[fieldOrPayload] = String(maybeValue);
+      } else {
+        Object.assign(current, fieldOrPayload);
+      }
+      hashes.set(key, current);
+      return 1;
+    }),
     hincrby: jest.fn(async (key, field, increment) => {
       const current = hashes.get(key) || {};
       const next = Number.parseInt(current[field] || '0', 10) + increment;
@@ -16,6 +29,15 @@ function createRedisMock(initial = {}) {
       hashes.set(key, current);
       return next;
     }),
+    sadd: jest.fn(async (key, member) => {
+      const current = hashes.get(key) || { __set: new Set() };
+      if (!(current.__set instanceof Set)) current.__set = new Set();
+      const before = current.__set.size;
+      current.__set.add(member);
+      hashes.set(key, current);
+      return current.__set.size > before ? 1 : 0;
+    }),
+    expire: jest.fn(async () => 1),
     multi: jest.fn(() => ({
       hset: jest.fn(function hset(key, payload) {
         hashes.set(key, { ...(hashes.get(key) || {}), ...payload });
@@ -39,8 +61,8 @@ describe('driver-destination-mode-service', () => {
       ...originalEnv,
       ENABLE_DRIVER_DESTINATION_MODE: 'true',
       DRIVER_DESTINATION_DAILY_BASE_QUOTA: '2',
-      DRIVER_DESTINATION_DAILY_MAX_QUOTA: '4',
-      DRIVER_DESTINATION_EXTRA_EVERY_TRIPS: '100',
+      DRIVER_DESTINATION_DAILY_MAX_QUOTA: '12',
+      DRIVER_DESTINATION_BONUS_RIDE_WINDOW: '5',
       DRIVER_DESTINATION_DURATION_MINUTES: '90',
       DRIVER_DESTINATION_MIN_PROGRESS_KM: '1',
       DRIVER_DESTINATION_ARRIVAL_RADIUS_KM: '3'
@@ -51,11 +73,41 @@ describe('driver-destination-mode-service', () => {
     process.env = originalEnv;
   });
 
-  it('grants quota by completed trips without exceeding the cap', () => {
-    expect(grantedQuotaForDriver({ totalTrips: 0 })).toBe(2);
-    expect(grantedQuotaForDriver({ totalTrips: 100 })).toBe(3);
-    expect(grantedQuotaForDriver({ totalTrips: 250 })).toBe(4);
-    expect(grantedQuotaForDriver({ totalTrips: 900 })).toBe(4);
+  it('starts the day with two base destination tickets', () => {
+    const entitlement = buildDestinationEntitlement(
+      { destinationModeDailyCompletedTripsDay: '2026-06-11', destinationModeDailyCompletedTrips: '0' },
+      { used: '0' },
+      undefined,
+      new Date('2026-06-11T12:00:00.000Z')
+    );
+
+    expect(entitlement).toMatchObject({
+      baseDailyQuota: 2,
+      dailyQuota: 2,
+      usedToday: 0,
+      remainingToday: 2,
+      bonusReady: false,
+      ridesUntilNextBonus: 5
+    });
+    expect(grantedQuotaForDriver({ destinationModeDailyCompletedTrips: '0' })).toBe(2);
+  });
+
+  it('unlocks one non-accumulating bonus after five daily rides', () => {
+    const entitlement = buildDestinationEntitlement(
+      { destinationModeDailyCompletedTripsDay: '2026-06-11', destinationModeDailyCompletedTrips: '12' },
+      { used: '0', bonusAnchorTrips: '0' },
+      undefined,
+      new Date('2026-06-11T12:00:00.000Z')
+    );
+
+    expect(entitlement).toMatchObject({
+      dailyCompletedTrips: 12,
+      dailyQuota: 3,
+      remainingToday: 3,
+      bonusReady: true,
+      bonusRemaining: 1,
+      ridesUntilNextBonus: 0
+    });
   });
 
   it('consumes one daily destination when a new active target is enabled', async () => {
@@ -65,7 +117,10 @@ describe('driver-destination-mode-service', () => {
     const result = await resolveDestinationModeIntent({
       redis,
       driverId: 'driver_1',
-      existingDriverState: { totalTrips: '0' },
+      existingDriverState: {
+        destinationModeDailyCompletedTripsDay: '2026-06-11',
+        destinationModeDailyCompletedTrips: '0'
+      },
       isOnline: true,
       now,
       requestedMode: {
@@ -86,6 +141,7 @@ describe('driver-destination-mode-service', () => {
       },
       policy: {
         dailyQuota: 2,
+        baseDailyQuota: 2,
         usedToday: 1,
         remainingToday: 1,
         durationMinutes: 90
@@ -140,7 +196,10 @@ describe('driver-destination-mode-service', () => {
     const result = await resolveDestinationModeIntent({
       redis,
       driverId: 'driver_1',
-      existingDriverState: { totalTrips: '0' },
+      existingDriverState: {
+        destinationModeDailyCompletedTripsDay: '2026-06-11',
+        destinationModeDailyCompletedTrips: '4'
+      },
       isOnline: true,
       now: new Date('2026-06-11T12:00:00.000Z'),
       requestedMode: {
@@ -156,9 +215,121 @@ describe('driver-destination-mode-service', () => {
       code: 'DRIVER_DESTINATION_DAILY_QUOTA_EXCEEDED',
       policy: {
         dailyQuota: 2,
+        baseDailyQuota: 2,
         usedToday: 2,
-        remainingToday: 0
+        remainingToday: 0,
+        ridesUntilNextBonus: 1
       }
+    });
+  });
+
+  it('allows a bonus activation after five daily rides and resets the next bonus window', async () => {
+    const redis = createRedisMock({
+      'driver_destination_usage:driver_1:2026-06-11': {
+        used: '2',
+        bonusAnchorTrips: '0'
+      }
+    });
+
+    const result = await resolveDestinationModeIntent({
+      redis,
+      driverId: 'driver_1',
+      existingDriverState: {
+        destinationModeDailyCompletedTripsDay: '2026-06-11',
+        destinationModeDailyCompletedTrips: '5'
+      },
+      isOnline: true,
+      now: new Date('2026-06-11T12:00:00.000Z'),
+      requestedMode: {
+        provided: true,
+        active: true,
+        lat: '-22.984',
+        lng: '-43.222'
+      }
+    });
+
+    expect(result).toMatchObject({
+      allowed: true,
+      consumed: true,
+      policy: {
+        usedToday: 3,
+        remainingToday: 0,
+        dailyCompletedTrips: 5,
+        bonusReady: false,
+        ridesUntilNextBonus: 5
+      }
+    });
+    expect(redis.__hashes.get('driver_destination_usage:driver_1:2026-06-11')).toMatchObject({
+      used: '3',
+      bonusAnchorTrips: '5'
+    });
+  });
+
+  it('does not unlock another bonus until five rides after the previous bonus use', async () => {
+    const redis = createRedisMock({
+      'driver_destination_usage:driver_1:2026-06-11': {
+        used: '3',
+        bonusAnchorTrips: '5'
+      }
+    });
+
+    const result = await resolveDestinationModeIntent({
+      redis,
+      driverId: 'driver_1',
+      existingDriverState: {
+        destinationModeDailyCompletedTripsDay: '2026-06-11',
+        destinationModeDailyCompletedTrips: '9'
+      },
+      isOnline: true,
+      now: new Date('2026-06-11T12:00:00.000Z'),
+      requestedMode: {
+        provided: true,
+        active: true,
+        lat: '-22.984',
+        lng: '-43.222'
+      }
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      code: 'DRIVER_DESTINATION_DAILY_QUOTA_EXCEEDED',
+      policy: {
+        dailyCompletedTrips: 9,
+        ridesUntilNextBonus: 1,
+        bonusReady: false
+      }
+    });
+  });
+
+  it('unlocks the next bonus after five more rides when the previous bonus was consumed', async () => {
+    const redis = createRedisMock({
+      'driver_destination_usage:driver_1:2026-06-11': {
+        used: '3',
+        bonusAnchorTrips: '5'
+      }
+    });
+
+    const result = await resolveDestinationModeIntent({
+      redis,
+      driverId: 'driver_1',
+      existingDriverState: {
+        destinationModeDailyCompletedTripsDay: '2026-06-11',
+        destinationModeDailyCompletedTrips: '10'
+      },
+      isOnline: true,
+      now: new Date('2026-06-11T12:00:00.000Z'),
+      requestedMode: {
+        provided: true,
+        active: true,
+        lat: '-22.984',
+        lng: '-43.222'
+      }
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(redis.__hashes.get('driver_destination_usage:driver_1:2026-06-11')).toMatchObject({
+      used: '4',
+      bonusAnchorTrips: '10'
     });
   });
 
@@ -199,14 +370,18 @@ describe('driver-destination-mode-service', () => {
   it('returns a public policy snapshot with current remaining quota', async () => {
     const redis = createRedisMock({
       'driver_destination_usage:driver_2:2026-06-11': {
-        used: '1'
+        used: '1',
+        bonusAnchorTrips: '0'
       }
     });
 
     const policy = await getPolicyForDriver({
       redis,
       driverId: 'driver_2',
-      driverState: { totalTrips: '120' },
+      driverState: {
+        destinationModeDailyCompletedTripsDay: '2026-06-11',
+        destinationModeDailyCompletedTrips: '5'
+      },
       now: new Date('2026-06-11T12:00:00.000Z')
     });
 
@@ -215,9 +390,42 @@ describe('driver-destination-mode-service', () => {
       dailyQuota: 3,
       usedToday: 1,
       remainingToday: 2,
+      bonusRideWindow: 5,
+      bonusReady: true,
       durationMinutes: 90,
       minProgressKm: 1,
       arrivalRadiusKm: 3
+    });
+  });
+
+  it('records completed rides for destination bonus idempotently', async () => {
+    const redis = createRedisMock();
+    const now = new Date('2026-06-11T12:00:00.000Z');
+
+    const first = await recordDriverDestinationDailyRideCompletion({
+      redis,
+      driverId: 'driver_3',
+      bookingId: 'booking_1',
+      now
+    });
+    const duplicate = await recordDriverDestinationDailyRideCompletion({
+      redis,
+      driverId: 'driver_3',
+      bookingId: 'booking_1',
+      now
+    });
+
+    expect(first).toMatchObject({
+      recorded: true,
+      completedToday: 1
+    });
+    expect(duplicate).toMatchObject({
+      recorded: false,
+      reason: 'already_recorded'
+    });
+    expect(redis.__hashes.get('driver:driver_3')).toMatchObject({
+      destinationModeDailyCompletedTrips: '1',
+      destinationModeDailyCompletedTripsDay: '2026-06-11'
     });
   });
 });

@@ -129,7 +129,9 @@ function buildDriverDestinationPolicy() {
         enabled: policy.enabled,
         baseDailyQuota: policy.baseDailyQuota,
         maxDailyQuota: policy.maxDailyQuota,
-        extraEveryCompletedTrips: policy.extraEveryCompletedTrips,
+        bonusRideWindow: policy.bonusRideWindow,
+        extraEveryCompletedTrips: policy.bonusRideWindow,
+        maxCarriedBonusTickets: 1,
         durationMinutes: policy.durationMinutes,
         minProgressKm: policy.minProgressKm,
         arrivalRadiusKm: policy.arrivalRadiusKm

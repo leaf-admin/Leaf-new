@@ -41,8 +41,8 @@ describe('app routes runtime config', () => {
     process.env = { ...originalEnv };
     process.env.ENABLE_DRIVER_DESTINATION_MODE = 'true';
     process.env.DRIVER_DESTINATION_DAILY_BASE_QUOTA = '2';
-    process.env.DRIVER_DESTINATION_DAILY_MAX_QUOTA = '4';
-    process.env.DRIVER_DESTINATION_EXTRA_EVERY_TRIPS = '100';
+    process.env.DRIVER_DESTINATION_DAILY_MAX_QUOTA = '12';
+    process.env.DRIVER_DESTINATION_BONUS_RIDE_WINDOW = '5';
     process.env.DRIVER_DESTINATION_DURATION_MINUTES = '90';
     process.env.DRIVER_DESTINATION_MIN_PROGRESS_KM = '1';
     process.env.DRIVER_DESTINATION_ARRIVAL_RADIUS_KM = '3';
@@ -102,7 +102,9 @@ describe('app routes runtime config', () => {
     expect(response.body.driverDestinationPolicy).toMatchObject({
       enabled: true,
       baseDailyQuota: 2,
-      maxDailyQuota: 4,
+      maxDailyQuota: 12,
+      bonusRideWindow: 5,
+      maxCarriedBonusTickets: 1,
       durationMinutes: 90,
       minProgressKm: 1,
       arrivalRadiusKm: 3

@@ -43,11 +43,17 @@ function dayKey(date = new Date(), timeZone = DEFAULT_TIME_ZONE) {
 }
 
 function readPolicyFromEnv() {
+  const bonusRideWindow = parsePositiveInt(
+    process.env.DRIVER_DESTINATION_BONUS_RIDE_WINDOW ||
+      process.env.DRIVER_DESTINATION_EXTRA_EVERY_TRIPS,
+    5
+  );
   return {
     enabled: parseBool(process.env.ENABLE_DRIVER_DESTINATION_MODE, true),
     baseDailyQuota: parsePositiveInt(process.env.DRIVER_DESTINATION_DAILY_BASE_QUOTA, 2),
-    maxDailyQuota: parsePositiveInt(process.env.DRIVER_DESTINATION_DAILY_MAX_QUOTA, 4),
-    extraEveryCompletedTrips: parsePositiveInt(process.env.DRIVER_DESTINATION_EXTRA_EVERY_TRIPS, 100),
+    maxDailyQuota: parsePositiveInt(process.env.DRIVER_DESTINATION_DAILY_MAX_QUOTA, 12),
+    bonusRideWindow,
+    extraEveryCompletedTrips: bonusRideWindow,
     durationMinutes: parsePositiveInt(process.env.DRIVER_DESTINATION_DURATION_MINUTES, 90),
     minProgressKm: parsePositiveFloat(process.env.DRIVER_DESTINATION_MIN_PROGRESS_KM, 1),
     arrivalRadiusKm: parsePositiveFloat(process.env.DRIVER_DESTINATION_ARRIVAL_RADIUS_KM, 3),
@@ -56,26 +62,69 @@ function readPolicyFromEnv() {
   };
 }
 
-function totalTripsFromDriverState(driverState = {}) {
+function parseNonNegativeInt(value, fallback = 0) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function dailyTripsFromDriverState(driverState = {}, date = new Date(), policy = readPolicyFromEnv()) {
+  const currentDay = dayKey(date, policy.timeZone);
+  const destinationModeDay = String(driverState.destinationModeDailyCompletedTripsDay || '').trim();
+  if (destinationModeDay && destinationModeDay === currentDay) {
+    return parseNonNegativeInt(driverState.destinationModeDailyCompletedTrips, 0);
+  }
+
   return Math.max(
     0,
-    Number.parseInt(
-      driverState.totalTrips ??
-        driverState.completedTrips ??
-        driverState.ridesCount ??
-        driverState.completed_rides ??
+    parseNonNegativeInt(
+      driverState.dailyCompletedTrips ??
+        driverState.todayCompletedTrips ??
+        driverState.completedToday ??
+        driverState.ridesToday ??
+        driverState.todayTrips ??
+        driverState.driverTripsToday ??
         0,
-      10
-    ) || 0
+      0
+    )
   );
 }
 
-function grantedQuotaForDriver(driverState = {}, policy = readPolicyFromEnv()) {
-  const base = Math.max(0, Number.parseInt(policy.baseDailyQuota, 10) || 0);
-  const max = Math.max(base, Number.parseInt(policy.maxDailyQuota, 10) || base);
-  const every = Math.max(1, Number.parseInt(policy.extraEveryCompletedTrips, 10) || 1);
-  const bonus = Math.floor(totalTripsFromDriverState(driverState) / every);
-  return Math.min(max, base + bonus);
+function buildDestinationEntitlement(driverState = {}, usage = {}, policy = readPolicyFromEnv(), now = new Date()) {
+  const baseDailyQuota = Math.max(0, parseNonNegativeInt(policy.baseDailyQuota, 0));
+  const maxDailyQuota = Math.max(baseDailyQuota, parseNonNegativeInt(policy.maxDailyQuota, baseDailyQuota));
+  const bonusRideWindow = Math.max(1, parseNonNegativeInt(policy.bonusRideWindow || policy.extraEveryCompletedTrips, 5));
+  const usedToday = Math.max(0, parseNonNegativeInt(usage.used, 0));
+  const dailyCompletedTrips = dailyTripsFromDriverState(driverState, now, policy);
+  const bonusAnchorTrips = Math.min(
+    dailyCompletedTrips,
+    Math.max(0, parseNonNegativeInt(usage.bonusAnchorTrips, 0))
+  );
+  const ridesSinceBonusAnchor = Math.max(0, dailyCompletedTrips - bonusAnchorTrips);
+  const bonusReady = ridesSinceBonusAnchor >= bonusRideWindow;
+  const baseRemaining = Math.max(0, baseDailyQuota - Math.min(usedToday, baseDailyQuota));
+  const bonusRemaining = bonusReady ? 1 : 0;
+  const maxRemaining = Math.max(0, maxDailyQuota - usedToday);
+  const remainingToday = Math.min(maxRemaining, baseRemaining + bonusRemaining);
+
+  return {
+    baseDailyQuota,
+    maxDailyQuota,
+    bonusRideWindow,
+    bonusAnchorTrips,
+    bonusReady,
+    dailyCompletedTrips,
+    dailyQuota: Math.min(maxDailyQuota, baseDailyQuota + (bonusReady ? 1 : 0)),
+    usedToday,
+    baseRemaining,
+    bonusRemaining,
+    remainingToday,
+    ridesSinceBonusAnchor,
+    ridesUntilNextBonus: bonusReady ? 0 : Math.max(0, bonusRideWindow - ridesSinceBonusAnchor)
+  };
+}
+
+function grantedQuotaForDriver(driverState = {}, policy = readPolicyFromEnv(), usage = {}, now = new Date()) {
+  return buildDestinationEntitlement(driverState, usage, policy, now).dailyQuota;
 }
 
 function usageKey(driverId, date = new Date(), policy = readPolicyFromEnv()) {
@@ -183,45 +232,110 @@ async function readUsage(redis, driverId, date = new Date(), policy = readPolicy
   }
 
   const key = usageKey(driverId, date, policy);
-  const usedRaw = await redis.hget(key, 'used').catch(() => null);
+  const [usedRaw, bonusAnchorRaw] = await Promise.all([
+    redis.hget(key, 'used').catch(() => null),
+    redis.hget(key, 'bonusAnchorTrips').catch(() => null)
+  ]);
   return {
     used: Math.max(0, Number.parseInt(usedRaw || '0', 10) || 0),
+    bonusAnchorTrips: Math.max(0, Number.parseInt(bonusAnchorRaw || '0', 10) || 0),
     key,
     day: dayKey(date, policy.timeZone)
   };
 }
 
-async function consumeUsage(redis, driverId, date, policy) {
+async function consumeUsage(redis, driverId, date, policy, { consumeBonus = false, dailyCompletedTrips = 0 } = {}) {
   const key = usageKey(driverId, date, policy);
   const used = await redis.hincrby(key, 'used', 1);
+  const payload = {
+    day: dayKey(date, policy.timeZone),
+    updatedAt: date.toISOString()
+  };
+  if (consumeBonus) {
+    payload.bonusAnchorTrips = String(Math.max(0, parseNonNegativeInt(dailyCompletedTrips, 0)));
+    payload.bonusConsumedAt = date.toISOString();
+  }
   await redis
     .multi()
-    .hset(key, {
-      day: dayKey(date, policy.timeZone),
-      updatedAt: date.toISOString()
-    })
+    .hset(key, payload)
     .expire(key, policy.usageTtlSeconds)
     .exec();
   return Math.max(0, Number.parseInt(used, 10) || 0);
 }
 
+async function recordDriverDestinationDailyRideCompletion({
+  redis,
+  driverId,
+  bookingId,
+  now = new Date(),
+  policy = readPolicyFromEnv()
+}) {
+  if (!redis || !driverId || !bookingId) {
+    return { recorded: false, reason: 'missing_input' };
+  }
+
+  const day = dayKey(now, policy.timeZone);
+  const completedSetKey = `driver_destination_completed_rides:${driverId}:${day}`;
+  const driverKey = `driver:${driverId}`;
+  const added = await redis.sadd(completedSetKey, String(bookingId)).catch(() => 0);
+  await redis.expire(completedSetKey, policy.usageTtlSeconds).catch(() => null);
+
+  if (Number(added) !== 1) {
+    return { recorded: false, reason: 'already_recorded', day };
+  }
+
+  const existingDay = await redis.hget(driverKey, 'destinationModeDailyCompletedTripsDay').catch(() => null);
+  if (existingDay && String(existingDay) !== day) {
+    await redis
+      .multi()
+      .hset(driverKey, {
+        destinationModeDailyCompletedTripsDay: day,
+        destinationModeDailyCompletedTrips: '0'
+      })
+      .exec()
+      .catch(() => null);
+  } else if (!existingDay) {
+    await redis.hset(driverKey, 'destinationModeDailyCompletedTripsDay', day).catch(() => null);
+  }
+
+  const completedToday = await redis.hincrby(driverKey, 'destinationModeDailyCompletedTrips', 1);
+  await redis
+    .hset(driverKey, {
+      destinationModeDailyCompletedTripsDay: day,
+      destinationModeDailyCompletedTripsUpdatedAt: now.toISOString()
+    })
+    .catch(() => null);
+
+  return {
+    recorded: true,
+    day,
+    completedToday: parseNonNegativeInt(completedToday, 0)
+  };
+}
+
 async function getPolicyForDriver({ redis, driverId, driverState = {}, now = new Date() }) {
   const policy = readPolicyFromEnv();
-  const quota = grantedQuotaForDriver(driverState, policy);
   const usage = await readUsage(redis, driverId, now, policy);
+  const entitlement = buildDestinationEntitlement(driverState, usage, policy, now);
   const existing = readExistingMode(driverState, now);
 
   return {
     enabled: policy.enabled,
-    dailyQuota: quota,
-    usedToday: usage.used,
-    remainingToday: Math.max(0, quota - usage.used),
+    dailyQuota: entitlement.dailyQuota,
+    baseDailyQuota: entitlement.baseDailyQuota,
+    usedToday: entitlement.usedToday,
+    remainingToday: entitlement.remainingToday,
     day: usage.day,
     durationMinutes: policy.durationMinutes,
     minProgressKm: policy.minProgressKm,
     arrivalRadiusKm: policy.arrivalRadiusKm,
-    extraEveryCompletedTrips: policy.extraEveryCompletedTrips,
-    maxDailyQuota: policy.maxDailyQuota,
+    bonusRideWindow: entitlement.bonusRideWindow,
+    extraEveryCompletedTrips: entitlement.bonusRideWindow,
+    maxDailyQuota: entitlement.maxDailyQuota,
+    maxCarriedBonusTickets: 1,
+    dailyCompletedTrips: entitlement.dailyCompletedTrips,
+    bonusReady: entitlement.bonusReady,
+    ridesUntilNextBonus: entitlement.ridesUntilNextBonus,
     active: existing.active,
     activeExpiresAt: existing.active ? existing.expiresAt : null
   };
@@ -306,25 +420,40 @@ async function resolveDestinationModeIntent({
     };
   }
 
-  const quota = grantedQuotaForDriver(existingDriverState, policy);
   const usage = await readUsage(redis, driverId, now, policy);
-  if (usage.used >= quota) {
+  const entitlement = buildDestinationEntitlement(existingDriverState, usage, policy, now);
+  if (entitlement.remainingToday <= 0) {
     return {
       allowed: false,
       code: 'DRIVER_DESTINATION_DAILY_QUOTA_EXCEEDED',
       error: 'Você já usou seus destinos de caminho de hoje.',
       policy: {
         enabled: policy.enabled,
-        dailyQuota: quota,
-        usedToday: usage.used,
+        dailyQuota: entitlement.dailyQuota,
+        baseDailyQuota: entitlement.baseDailyQuota,
+        usedToday: entitlement.usedToday,
         remainingToday: 0,
+        dailyCompletedTrips: entitlement.dailyCompletedTrips,
+        bonusRideWindow: entitlement.bonusRideWindow,
+        ridesUntilNextBonus: entitlement.ridesUntilNextBonus,
+        bonusReady: entitlement.bonusReady,
         day: usage.day,
         durationMinutes: policy.durationMinutes
       }
     };
   }
 
-  const usedToday = await consumeUsage(redis, driverId, now, policy);
+  const consumeBonus = entitlement.baseRemaining <= 0;
+  const usedToday = await consumeUsage(redis, driverId, now, policy, {
+    consumeBonus,
+    dailyCompletedTrips: entitlement.dailyCompletedTrips
+  });
+  const nextUsage = {
+    ...usage,
+    used: usedToday,
+    bonusAnchorTrips: consumeBonus ? entitlement.dailyCompletedTrips : usage.bonusAnchorTrips
+  };
+  const nextEntitlement = buildDestinationEntitlement(existingDriverState, nextUsage, policy, now);
   const patch = buildActiveModePatch(mode, policy, now);
   return {
     allowed: true,
@@ -339,10 +468,15 @@ async function resolveDestinationModeIntent({
     },
     policy: {
       enabled: policy.enabled,
-      dailyQuota: quota,
+      dailyQuota: nextEntitlement.dailyQuota,
+      baseDailyQuota: nextEntitlement.baseDailyQuota,
       usedToday,
-      remainingToday: Math.max(0, quota - usedToday),
+      remainingToday: nextEntitlement.remainingToday,
       day: usage.day,
+      dailyCompletedTrips: nextEntitlement.dailyCompletedTrips,
+      bonusRideWindow: nextEntitlement.bonusRideWindow,
+      bonusReady: nextEntitlement.bonusReady,
+      ridesUntilNextBonus: nextEntitlement.ridesUntilNextBonus,
       durationMinutes: policy.durationMinutes,
       minProgressKm: policy.minProgressKm,
       arrivalRadiusKm: policy.arrivalRadiusKm
@@ -353,12 +487,14 @@ async function resolveDestinationModeIntent({
 module.exports = {
   buildActiveModePatch,
   buildInactiveModePatch,
+  buildDestinationEntitlement,
+  dailyTripsFromDriverState,
   dayKey,
   getPolicyForDriver,
   grantedQuotaForDriver,
   parseDestinationMode,
   readPolicyFromEnv,
+  recordDriverDestinationDailyRideCompletion,
   resolveDestinationModeIntent,
-  totalTripsFromDriverState,
   usageKey
 };
