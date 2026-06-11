@@ -141,6 +141,12 @@ section{padding:100px 40px}
 .taxa-table td:first-child{font-weight:500;color:var(--ink)}
 .taxa-table td strong{font-weight:700;color:var(--ink)}
 .taxa-note{font-size:11px;font-weight:300;color:var(--ink-40);margin-top:16px;font-style:italic;line-height:1.6}
+.policy-list{display:grid;gap:10px;margin-top:20px}
+.policy-list div{display:flex;align-items:flex-start;gap:10px;font-size:13px;font-weight:300;line-height:1.55;color:var(--ink-70);padding:12px 0;border-bottom:1px solid var(--ink-06)}
+.policy-list span{width:7px;height:7px;border-radius:50%;background:var(--ink);margin-top:7px;flex:0 0 7px}
+.driver-fee-callout{border:1px solid var(--ink-15);background:var(--paper);padding:18px 20px;margin:22px 0 18px}
+.driver-fee-callout strong{display:block;font-size:15px;color:var(--ink);margin-bottom:6px}
+.driver-fee-callout p{font-size:13px;line-height:1.65;color:var(--ink-70);margin:0;max-width:none}
 
 /* motorista recebe */
 .receive-bar{margin:24px 0 8px}
@@ -470,7 +476,7 @@ footer{padding:40px 40px 28px;border-top:1px solid var(--ink-15);background:var(
             <div class="ips-block driver">
               <div class="ips-block-label">Motorista recebeu</div>
               <div class="ips-block-value accent">R$&thinsp;40<span class="ips-cents accent">,51</span></div>
-              <div class="ips-block-sub">Taxa operacional: R$&thinsp;1,49</div>
+              <div class="ips-block-sub">Diária no lançamento: R$&thinsp;0,00</div>
             </div>
 
             <!-- comparação -->
@@ -507,12 +513,12 @@ footer{padding:40px 40px 28px;border-top:1px solid var(--ink-15);background:var(
 
   <div class="hero-stats">
     <div class="stat-item">
-      <div class="s-num">Até 96%</div>
-      <div class="s-label">da corrida vai pro motorista</div>
+      <div class="s-num">R$&thinsp;0</div>
+      <div class="s-label">diária operacional no lançamento</div>
     </div>
     <div class="stat-item">
-      <div class="s-num">Taxa fixa</div>
-      <div class="s-label">A plataforma nunca ganha mais que o operacional</div>
+      <div class="s-num">Por faixa</div>
+      <div class="s-label">diária futura acompanha o faturamento</div>
     </div>
     <div class="stat-item">
       <div class="s-num">100%</div>
@@ -547,76 +553,58 @@ footer{padding:40px 40px 28px;border-top:1px solid var(--ink-15);background:var(
   <div class="model-split">
     <div class="model-col">
       <div class="model-col-label">Para passageiros</div>
-      <h3>O preço que você já paga. O serviço que você nunca teve.</h3>
-      <p>A Leaf usa o mesmo cálculo de tarifa dos apps tradicionais. Você não paga a mais. Mas como o motorista ganha muito mais por corrida, ele pode se dar ao luxo de oferecer um serviço de verdade — porque trabalhar na Leaf vale a pena.</p>
+      <h3>Preço claro para quem viaja. Regra justa para quem dirige.</h3>
+      <p>A corrida continua com valor fechado antes do Pix. O passageiro sabe quanto vai pagar, o motorista sabe quanto a corrida representa, e a Leaf mantém a operação transparente dos dois lados.</p>
 
-      <table class="taxa-table">
-        <thead>
-          <tr>
-            <th>Valor da corrida</th>
-            <th>Taxa operacional</th>
-            <th>Taxa Pix (0,8%)</th>
-            <th>Motorista recebe</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Até R$ 20</td>
-            <td>R$&thinsp;<strong>0,99</strong></td>
-            <td>R$ 0,50*</td>
-            <td><strong>≈ 92%</strong></td>
-          </tr>
-          <tr>
-            <td>R$ 20 – R$ 50</td>
-            <td>R$&thinsp;<strong>1,49</strong></td>
-            <td>0,8%</td>
-            <td><strong>≈ 94%</strong></td>
-          </tr>
-          <tr>
-            <td>Acima de R$ 50</td>
-            <td><strong>3%</strong> do valor</td>
-            <td>0,8%</td>
-            <td><strong>≈ 96%</strong></td>
-          </tr>
-        </tbody>
-      </table>
-      <p class="taxa-note" style="margin-top:20px;border-top:1px solid var(--ink-06);padding-top:12px">* Taxa mínima de R$&thinsp;0,50 por transação Pix. Valores públicos, fixos e imutáveis durante a viagem.</p>
+      <div class="driver-fee-callout">
+        <strong>No lançamento, a diária operacional é R$ 0,00.</strong>
+        <p>Ela só poderá ser ativada quando a cidade tiver maturidade operacional e capacidade real de gerar renda consistente para motoristas parceiros.</p>
+      </div>
+
+      <div class="policy-list">
+        <div><span></span><p>Quando houver ativação, a Leaf comunicará os motoristas com pelo menos 60 dias de antecedência.</p></div>
+        <div><span></span><p>A cobrança acontece somente no momento do saque. Não existe mensalidade, assinatura antecipada, compra de créditos ou recarga obrigatória.</p></div>
+        <div><span></span><p>Se o motorista não faturar pela Leaf no dia, não há diária operacional a pagar.</p></div>
+        <div><span></span><p>Saques abaixo de R$ 500,00 seguem com a tarifa de R$ 1,00 do processamento de saque. Essa regra é separada da diária operacional.</p></div>
+      </div>
     </div>
 
     <div class="model-col dark">
       <div class="model-col-label">Para motoristas</div>
-      <h3 style="color:var(--white)">Nos apps tradicionais, você fica com 55%. Na Leaf, você fica com quase tudo.</h3>
-      <p style="color:rgba(255,255,255,.5);margin-bottom:24px">Numa corrida de R$&thinsp;42,00 nas plataformas tradicionais, o motorista recebe cerca de R$&thinsp;23. Na Leaf, recebe R$&thinsp;40. Na mesma corrida. Com o mesmo passageiro. Fazendo a mesma rota.</p>
+      <h3 style="color:var(--white)">A diária acompanha o seu resultado. Não o contrário.</h3>
+      <p style="color:rgba(255,255,255,.5);margin-bottom:24px">A Leaf não nasce cobrando diária. E, quando essa regra for ativada, ela será proporcional ao faturamento bruto diário feito dentro da plataforma.</p>
 
-      <div class="rb-label">Distribuição por plataforma — corrida de R$ 42</div>
-      <div class="receive-bar">
-        <div class="rb-label" style="margin-bottom:6px">Apps tradicionais</div>
-        <div class="rb-track"><div class="rb-fill" style="width:55%;background:rgba(255,255,255,.2)"></div></div>
-        <div class="rb-nums"><span style="color:rgba(255,255,255,.4)">~R$ 23,00</span><span style="color:rgba(255,255,255,.2)">55%</span></div>
-      </div>
-      <div class="receive-bar">
-        <div class="rb-label" style="margin-bottom:6px">Leaf</div>
-        <div class="rb-track"><div class="rb-fill" style="width:96%" title="Até 96%"></div></div>
-        <div class="rb-nums"><span>~R$ 40,00</span><span>96%</span></div>
-      </div>
-
-      <div class="competitors-compare" style="margin-top:28px">
-        <div class="cc-item">
-          <div class="cc-app">App A</div>
-          <div class="cc-pct">~55%</div>
-          <div class="cc-sub">pro motorista</div>
-        </div>
-        <div class="cc-item">
-          <div class="cc-app">App B</div>
-          <div class="cc-pct">~68%</div>
-          <div class="cc-sub">pro motorista</div>
-        </div>
-        <div class="cc-item leaf">
-          <div class="cc-app">Leaf</div>
-          <div class="cc-pct">Até 96%</div>
-          <div class="cc-sub">pro motorista</div>
-        </div>
-      </div>
+      <table class="taxa-table" style="margin-top:10px">
+        <thead>
+          <tr>
+            <th style="color:rgba(255,255,255,.35)">Faturamento bruto diário</th>
+            <th style="color:rgba(255,255,255,.35)">Diária operacional</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color:rgba(255,255,255,.65)">Até R$ 100</td>
+            <td style="color:var(--accent)"><strong style="color:var(--accent)">R$ 0,00</strong></td>
+          </tr>
+          <tr>
+            <td style="color:rgba(255,255,255,.65)">R$ 100 a R$ 200</td>
+            <td style="color:var(--accent)"><strong style="color:var(--accent)">R$ 4,90</strong></td>
+          </tr>
+          <tr>
+            <td style="color:rgba(255,255,255,.65)">R$ 200 a R$ 300</td>
+            <td style="color:var(--accent)"><strong style="color:var(--accent)">R$ 7,90</strong></td>
+          </tr>
+          <tr>
+            <td style="color:rgba(255,255,255,.65)">R$ 300 a R$ 500</td>
+            <td style="color:var(--accent)"><strong style="color:var(--accent)">R$ 12,90</strong></td>
+          </tr>
+          <tr>
+            <td style="color:rgba(255,255,255,.65)">Acima de R$ 500</td>
+            <td style="color:var(--accent)"><strong style="color:var(--accent)">R$ 14,90</strong></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="taxa-note" style="color:rgba(255,255,255,.35);margin-top:18px">Regra desativada no lançamento. A ativação depende de maturidade da cidade, comunicação prévia e critérios operacionais claros.</p>
     </div>
   </div>
 </section>
@@ -630,15 +618,15 @@ footer{padding:40px 40px 28px;border-top:1px solid var(--ink-15);background:var(
         <div class="feat-title">Mesmo preço.<br>Serviço melhor.</div>
       </div>
       <div>
-        <div class="feat-body">Quando um motorista recebe até 96% da corrida, ele tem motivo real para caprichar. Carro limpo, pontualidade, atenção. Você tem a experiência de uma categoria superior — sem pagar nada a mais por isso.</div>
+        <div class="feat-body">Quando a plataforma respeita o motorista, ele tem motivo real para caprichar. Carro limpo, pontualidade, atenção. Você tem a experiência de uma categoria superior — sem pagar nada a mais por isso.</div>
         <div class="feat-tag">A lógica Leaf</div>
       </div>
     </div>
 
     <div class="feat accent reveal d1">
       <div class="feat-n">02</div>
-      <div class="feat-title">Taxa fixa.<br>Sem percentual absurdo.</div>
-      <div class="feat-body">R$&thinsp;0,99 por corridas até R$&thinsp;20. R$&thinsp;1,49 até R$&thinsp;50. Apenas 3% acima disso. É o suficiente pra manter a plataforma. Sem ganância.</div>
+      <div class="feat-title">Diária clara.<br>Sem surpresa.</div>
+      <div class="feat-body">No lançamento, a diária operacional é zero. Quando for ativada, será por faixa de faturamento, avisada com antecedência e cobrada somente no saque.</div>
       <div class="feat-tag">Modelo justo</div>
     </div>
 
@@ -938,15 +926,15 @@ footer{padding:40px 40px 28px;border-top:1px solid var(--ink-15);background:var(
     <div class="s-title">Trabalhe<br>mais.<br><em>Guarde mais.</em></div>
     <div class="earnings-row">
       <div class="earn-item">
-        <div class="earn-num">96%</div>
-        <div class="earn-label">da corrida<br>fica com você</div>
+        <div class="earn-num">R$&thinsp;0</div>
+        <div class="earn-label">diária no<br>lançamento</div>
       </div>
       <div class="earn-item">
         <div class="earn-num">R$&thinsp;0</div>
         <div class="earn-label">Taxa de<br>cadastro</div>
       </div>
     </div>
-    <p>Sem percentual de 25%, 30%, 45%. Só uma taxa fixa pequena e o custo do Pix. O resto é seu. Todo mês, toda semana, toda corrida.</p>
+    <p>Sem mensalidade antecipada, sem compra de créditos e sem cobrança sem faturamento. Quando a diária operacional for ativada, ela será calculada por faixa de faturamento e cobrada apenas no saque.</p>
     <a href="#" class="btn-outline-white">
       Quero dirigir na Leaf
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 7h10M8 3l4 4-4 4"/></svg>
