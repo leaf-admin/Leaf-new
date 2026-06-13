@@ -182,6 +182,11 @@ describe('H3MapService', () => {
     expect(result.summary.activeTrips).toBe(1);
     expect(result.summary).toHaveProperty('surgeCells');
     expect(result.summary).toHaveProperty('maxSurgePercent');
+    expect(result.source).toBe('leaf_internal_supply_demand');
+    expect(result.paidProviderCalls).toBe(false);
+    expect(result.refreshPolicy.pollIntervalMs).toBeGreaterThanOrEqual(30000);
+    expect(result.refreshPolicy.trafficLayerEnabled).toBe(true);
+    expect(result.cells.reduce((sum, cell) => sum + cell.metrics.demand, 0)).toBe(1);
     expect(Array.isArray(result.cells)).toBe(true);
     expect(result.cells.length).toBeGreaterThan(0);
     expect(result.cells[0].boundary.length).toBeGreaterThanOrEqual(6);

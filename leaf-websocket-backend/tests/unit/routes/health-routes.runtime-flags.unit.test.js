@@ -174,6 +174,24 @@ describe('health runtime flags route', () => {
     expect(response.body.maps.receiptMapImagesConfigured).toBe(true);
   });
 
+  it('reports pricing separation and driver traffic-layer policy', async () => {
+    process.env.PRICING_DEMAND_PRESSURE_MODE = 'active';
+    process.env.ENABLE_DRIVER_TRAFFIC_LAYER = 'true';
+    process.env.WOOVI_ENVIRONMENT = 'sandbox';
+    process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
+
+    const app = createApp();
+    const response = await request(app).get('/health/runtime-flags');
+
+    expect(response.status).toBe(200);
+    expect(response.body.pricing).toEqual({
+      demandPressureMode: 'active',
+      trafficPricing: 'traffic_aware_time_component',
+      heatmapSource: 'leaf_internal_supply_demand',
+      driverTrafficLayerEnabled: true
+    });
+  });
+
   it('reports maps.googleFallbackAllowed and backendOnly', async () => {
     process.env.GOOGLE_MAPS_API_KEY = 'maps-key';
     process.env.WOOVI_ENVIRONMENT = 'sandbox';

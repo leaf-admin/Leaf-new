@@ -25,7 +25,7 @@ describe('H3VisualPolicyService', () => {
     expect(policy.palette.yellow).toBe('#ABCDEF');
     expect(policy.palette.red).toBe('#EF4444');
     expect(policy.label.minPercent).toBe(1);
-    expect(policy.label.maxVisible).toBe(24);
+    expect(policy.label.maxVisible).toBe(8);
     expect(policy.label.template).toBe('tarifa {percent}');
     expect(policy.label.fontSize).toBe(16);
   });

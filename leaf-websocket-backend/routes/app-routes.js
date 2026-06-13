@@ -4,6 +4,7 @@ const paymentRuntimeProfileService = require('../services/payment-runtime-profil
 const { readPolicyFromEnv } = require('../services/driver-destination-mode-service');
 const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
 const h3VisualPolicyService = require('../services/h3-visual-policy-service');
+const { resolvePricingModelMode } = require('../services/pricing');
 const router = express.Router();
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
@@ -89,7 +90,21 @@ function buildMapsRoutingPolicy() {
         routesCacheEnabled: envBool('ENABLE_ROUTES_CACHE', true),
         routesCacheTtlSeconds,
         trafficAwareRoutes,
-        alternativeRoutesEnabled: envBool('ENABLE_ALTERNATIVE_ROUTES', false)
+        alternativeRoutesEnabled: envBool('ENABLE_ALTERNATIVE_ROUTES', false),
+        driverTrafficLayerEnabled: envBool('ENABLE_DRIVER_TRAFFIC_LAYER', true),
+        demandHeatmap: {
+            source: 'leaf_internal_supply_demand',
+            paidProviderCalls: false,
+            refreshIntervalSeconds: Math.max(
+                30,
+                Number.parseInt(process.env.H3_MAP_CLIENT_REFRESH_INTERVAL_MS || '60000', 10) / 1000
+            ),
+            backendCacheTtlSeconds: Math.max(
+                5,
+                Number.parseInt(process.env.H3_MAP_CACHE_TTL_MS || '10000', 10) / 1000
+            ),
+            trafficAffectsHeatmap: false
+        }
     };
 }
 
@@ -202,6 +217,7 @@ router.get('/info', async (req, res) => {
 router.get('/runtime-config', async (req, res) => {
     try {
         const context = getOptionalRuntimeContext(req);
+        const pricingModelMode = resolvePricingModelMode();
         const [paymentSummary, effectivePaymentProfile, h3VisualPolicy] = await Promise.all([
             paymentRuntimeProfileService.getRuntimeSummary(),
             paymentRuntimeProfileService.resolveProfile(context),
@@ -240,6 +256,15 @@ router.get('/runtime-config', async (req, res) => {
             mapsRoutingPolicy: {
                 ...buildMapsRoutingPolicy(),
                 h3VisualPolicy
+            },
+            pricingPolicy: {
+                mode: pricingModelMode,
+                trafficPricing: 'traffic_aware_time_component',
+                dynamicMarkup:
+                    pricingModelMode === 'active'
+                        ? 'leaf_supply_demand_pressure'
+                        : 'legacy_combined_pressure',
+                maxDynamicMarkupPercent: 35
             },
             notificationPolicy: buildNotificationPolicy(),
             driverOnlinePolicy: buildDriverOnlinePolicy(),

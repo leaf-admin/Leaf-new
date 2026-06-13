@@ -2,18 +2,30 @@ const h3 = require('h3-js');
 const { logStructured } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const { normalizeDriverStatus } = require('./dashboard-live-data-service');
+const {
+  MAX_DEMAND_MARKUP_PERCENT,
+  calculateDemandPressure
+} = require('./pricing/demandPressure');
 
-const CACHE_TTL_MS = Number.parseInt(process.env.H3_MAP_CACHE_TTL_MS || '5000', 10);
+const CACHE_TTL_MS = Number.parseInt(process.env.H3_MAP_CACHE_TTL_MS || '10000', 10);
+const CLIENT_REFRESH_INTERVAL_MS = Math.max(
+  30000,
+  Number.parseInt(process.env.H3_MAP_CLIENT_REFRESH_INTERVAL_MS || '60000', 10)
+);
+const CLIENT_STALE_AFTER_MS = Math.max(
+  CLIENT_REFRESH_INTERVAL_MS,
+  Number.parseInt(process.env.H3_MAP_CLIENT_STALE_AFTER_MS || '120000', 10)
+);
+const DRIVER_TRAFFIC_LAYER_ENABLED = !['0', 'false', 'off', 'no'].includes(
+  String(process.env.ENABLE_DRIVER_TRAFFIC_LAYER || 'true').trim().toLowerCase()
+);
 const MAX_CELLS = Number.parseInt(process.env.H3_MAP_MAX_CELLS || '500', 10);
 const BBOX_MAX_SPAN_DEGREES = Number.parseFloat(process.env.H3_MAP_MAX_BBOX_SPAN_DEGREES || '5');
 const SEARCH_SCAN_COUNT = Number.parseInt(process.env.H3_MAP_SCAN_COUNT || '250', 10);
 const SEARCH_SCAN_MAX_KEYS = Number.parseInt(process.env.H3_MAP_SCAN_MAX_KEYS || '4000', 10);
 const OPEN_REQUEST_ACTIVE_WINDOW_MS = Number.parseInt(process.env.H3_MAP_OPEN_REQUEST_WINDOW_MS || String(10 * 60 * 1000), 10);
 const ACTIVE_BOOKING_STALE_MS = Number.parseInt(process.env.H3_MAP_ACTIVE_BOOKING_STALE_MS || String(12 * 60 * 60 * 1000), 10);
-const MAX_DYNAMIC_SURGE_PERCENT = Math.min(
-  35,
-  Math.max(0, Number.parseInt(process.env.MAX_DYNAMIC_SURGE_PERCENT || '35', 10) || 35)
-);
+const MAX_DYNAMIC_SURGE_PERCENT = MAX_DEMAND_MARKUP_PERCENT;
 const SURGE_LABEL_MIN_PERCENT = Math.max(
   1,
   Number.parseInt(process.env.H3_MAP_SURGE_LABEL_MIN_PERCENT || '3', 10) || 3
@@ -266,65 +278,22 @@ function interpolatePalette(score, stops, fallbackColor) {
   return stops[stops.length - 1]?.color || fallbackColor;
 }
 
-function buildVisualIntensity(metrics = {}, level = 'low') {
-  const demandNorm = clamp((Number(metrics.demand) || 0) / 8, 0, 1);
-  const imbalanceNorm = clamp((Number(metrics.imbalance) || 0) / 3, 0, 1);
-  const shortageNorm = clamp(Math.max(0, -(Number(metrics.surplus) || 0)) / 4, 0, 1);
-  const openRequestsNorm = clamp((Number(metrics.openRequests) || 0) / 5, 0, 1);
-
-  if (demandNorm === 0 && imbalanceNorm === 0 && shortageNorm === 0 && openRequestsNorm === 0) {
-    return 0;
-  }
-
-  const weightedScore =
-    (0.4 * demandNorm) +
-    (0.35 * imbalanceNorm) +
-    (0.15 * shortageNorm) +
-    (0.1 * openRequestsNorm);
-
-  const levelFloor = {
-    low: 0.04,
-    medium: 0.28,
-    high: 0.54,
-    critical: 0.78
-  };
-
-  const floor = levelFloor[level] ?? 0.04;
-  return clamp(Math.max(weightedScore, floor), 0, 1);
-}
-
 function formatSurgeLabel(template, percent) {
   return String(template || '+{percent}%').replaceAll('{percent}', String(percent));
 }
 
 function buildSurgeDisplay(metrics = {}, level = 'low', visualPolicy = {}) {
-  const visualIntensity = buildVisualIntensity(metrics, level);
-  const demand = Number(metrics.demand || 0);
-  const imbalance = Number(metrics.imbalance || 0);
-  const shortage = Math.max(0, -(Number(metrics.surplus) || 0));
-
-  if (demand <= 0 || (imbalance <= 0 && shortage <= 0)) {
-    return {
-      percent: 0,
-      multiplier: 1,
-      level: 'normal',
-      label: '',
-      labelVisible: false
-    };
-  }
-
-  const percent = Math.min(
-    MAX_DYNAMIC_SURGE_PERCENT,
-    Math.max(0, Math.round(visualIntensity * MAX_DYNAMIC_SURGE_PERCENT))
-  );
-  let surgeLevel = 'yellow';
-  if (percent >= 25) surgeLevel = 'purple';
-  else if (percent >= 13) surgeLevel = 'red';
+  const demandPressure = calculateDemandPressure({
+    demand: metrics.demand,
+    openRequests: metrics.openRequests,
+    availableDrivers: metrics.availableDrivers
+  });
+  const percent = demandPressure.percent;
 
   return {
     percent,
-    multiplier: Number((1 + percent / 100).toFixed(2)),
-    level: percent > 0 ? surgeLevel : 'normal',
+    multiplier: demandPressure.multiplier,
+    level: demandPressure.level,
     label: percent > 0 ? formatSurgeLabel(visualPolicy?.label?.template, percent) : '',
     labelVisible:
       visualPolicy?.enabled !== false
@@ -337,8 +306,8 @@ function buildSurgeDisplay(metrics = {}, level = 'low', visualPolicy = {}) {
 function buildStyle(level, surface, resolution = 8, metrics = {}, visualPolicy = {}) {
   const dashboard = surface === 'dashboard';
   const resolutionBias = clamp((Number(resolution || 8) - 6) / 4, 0, 1);
-  const visualIntensity = buildVisualIntensity(metrics, level);
   const surge = buildSurgeDisplay(metrics, level, visualPolicy);
+  const visualIntensity = surge.percent / Math.max(1, MAX_DYNAMIC_SURGE_PERCENT);
   const opacity = clamp(Number(visualPolicy?.opacity ?? 1), 0.15, 1);
 
   if (surface === 'driver') {
@@ -369,8 +338,8 @@ function buildStyle(level, surface, resolution = 8, metrics = {}, visualPolicy =
       fill: fillByLevel[surge.level] || '#FACC15',
       stroke: strokeByLevel[surge.level] || '#CA8A04',
       fillOpacity: Number(((0.1 + (0.18 * surgeStrength) + (0.018 * resolutionBias)) * opacity).toFixed(3)),
-      strokeOpacity: Number(((0.045 + (0.07 * surgeStrength) + (0.01 * resolutionBias)) * opacity).toFixed(3)),
-      strokeWidth: Number((0.18 + (0.15 * surgeStrength) + (0.04 * resolutionBias)).toFixed(2)),
+      strokeOpacity: 0,
+      strokeWidth: 0,
       visualIntensity: Number(visualIntensity.toFixed(3))
     };
   }
@@ -960,6 +929,15 @@ class H3MapService {
 
     return {
       generatedAt: new Date().toISOString(),
+      source: 'leaf_internal_supply_demand',
+      paidProviderCalls: false,
+      refreshPolicy: {
+        pollIntervalMs: CLIENT_REFRESH_INTERVAL_MS,
+        staleAfterMs: CLIENT_STALE_AFTER_MS,
+        backendCacheTtlMs: CACHE_TTL_MS,
+        socketHintsEnabled: true,
+        trafficLayerEnabled: DRIVER_TRAFFIC_LAYER_ENABLED
+      },
       bbox: {
         minLng: bbox.minLng,
         minLat: bbox.minLat,
@@ -1014,7 +992,6 @@ class H3MapService {
       const h3Index = h3.latLngToCell(trip.location.lat, trip.location.lng, resolution);
       const cell = getCell(h3Index);
       cell.activeTrips += 1;
-      cell.demand += 1;
     });
 
     if (includeEmpty) {

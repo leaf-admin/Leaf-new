@@ -150,6 +150,14 @@ function buildRuntimeFlagsPayload() {
     push: buildPushSection(),
     kyc: buildKycSection(),
     maps: buildMapsSection(),
+    pricing: {
+      demandPressureMode: String(process.env.PRICING_DEMAND_PRESSURE_MODE || 'dry_run')
+        .trim()
+        .toLowerCase(),
+      trafficPricing: 'traffic_aware_time_component',
+      heatmapSource: 'leaf_internal_supply_demand',
+      driverTrafficLayerEnabled: envBool('ENABLE_DRIVER_TRAFFIC_LAYER', true)
+    },
     socket: buildSocketSection(),
     guards: {
       appReview,

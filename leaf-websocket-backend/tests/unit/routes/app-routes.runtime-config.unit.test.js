@@ -117,12 +117,24 @@ describe('app routes runtime config', () => {
     expect(response.body.mapsRoutingPolicy.placesCacheEnabled).toBe(true);
     expect(response.body.mapsRoutingPolicy.trafficAwareRoutes).toBe(true);
     expect(response.body.mapsRoutingPolicy.routesCacheTtlSeconds).toBe(90);
+    expect(response.body.mapsRoutingPolicy.driverTrafficLayerEnabled).toBe(true);
+    expect(response.body.mapsRoutingPolicy.demandHeatmap).toMatchObject({
+      source: 'leaf_internal_supply_demand',
+      paidProviderCalls: false,
+      trafficAffectsHeatmap: false
+    });
     expect(response.body.mapsRoutingPolicy.h3VisualPolicy).toMatchObject({
       enabled: true,
       opacity: 0.7,
       version: 2
     });
     expect(response.body.notificationPolicy.configured).toBe(true);
+    expect(response.body.pricingPolicy).toMatchObject({
+      mode: 'dry_run',
+      trafficPricing: 'traffic_aware_time_component',
+      dynamicMarkup: 'legacy_combined_pressure',
+      maxDynamicMarkupPercent: 35
+    });
     expect(response.body.driverDestinationPolicy).toMatchObject({
       enabled: true,
       baseDailyQuota: 2,

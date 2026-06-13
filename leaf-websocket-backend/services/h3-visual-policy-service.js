@@ -8,7 +8,7 @@ const DEFAULT_CACHE_TTL_MS = 30 * 1000;
 const DEFAULT_POLICY = Object.freeze({
   enabled: true,
   opacity: 1,
-  resolutionOffset: 0,
+  resolutionOffset: -1,
   palette: {
     yellow: '#FACC15',
     red: '#EF4444',
@@ -20,7 +20,7 @@ const DEFAULT_POLICY = Object.freeze({
   label: {
     enabled: true,
     minPercent: 3,
-    maxVisible: 12,
+    maxVisible: 5,
     template: '+{percent}%',
     backgroundColor: '#171412',
     backgroundOpacity: 0.9,
@@ -65,7 +65,7 @@ function normalizePolicy(raw = {}, currentVersion = DEFAULT_POLICY.version) {
     label: {
       enabled: label.enabled !== false,
       minPercent: Math.round(clamp(label.minPercent ?? DEFAULT_POLICY.label.minPercent, 1, 35)),
-      maxVisible: Math.round(clamp(label.maxVisible ?? DEFAULT_POLICY.label.maxVisible, 0, 24)),
+      maxVisible: Math.round(clamp(label.maxVisible ?? DEFAULT_POLICY.label.maxVisible, 0, 8)),
       template: normalizeTemplate(label.template),
       backgroundColor: normalizeHex(label.backgroundColor, DEFAULT_POLICY.label.backgroundColor),
       backgroundOpacity: Number(clamp(

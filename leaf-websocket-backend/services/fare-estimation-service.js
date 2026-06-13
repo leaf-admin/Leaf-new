@@ -104,6 +104,7 @@ function buildFareEstimationCacheKey({
       : '';
 
   return [
+    String(process.env.PRICING_DEMAND_PRESSURE_MODE || 'dry_run').trim().toLowerCase(),
     normalizeCarType(carType),
     roundForCache(pickupLat, FARE_ESTIMATION_CACHE_COORD_PRECISION),
     roundForCache(pickupLng, FARE_ESTIMATION_CACHE_COORD_PRECISION),

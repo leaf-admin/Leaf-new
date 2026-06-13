@@ -15,7 +15,7 @@ const shortId = () => `sandbox-${Date.now().toString(36)}`;
 const defaultH3Policy = () => ({
   enabled: true,
   opacity: 1,
-  resolutionOffset: 0,
+  resolutionOffset: -1,
   palette: {
     yellow: "#FACC15",
     red: "#EF4444",
@@ -27,7 +27,7 @@ const defaultH3Policy = () => ({
   label: {
     enabled: true,
     minPercent: 3,
-    maxVisible: 12,
+    maxVisible: 5,
     template: "+{percent}%",
     backgroundColor: "#171412",
     backgroundOpacity: 0.9,
@@ -242,8 +242,8 @@ export default function PaymentRuntimePage() {
         </section>
 
         <Panel
-          title="Mapa de tarifa dinâmica"
-          subtitle="Ajuste a aparência no mapa do motorista sem nova build. O cálculo e o teto de 35% não mudam aqui."
+          title="Mapa de pressão de demanda"
+          subtitle="Ajuste a aparência no mapa do motorista sem nova build. A cotação continua sendo a fonte de verdade para o adicional."
           className="panel-span-full"
         >
           <form className="section-stack" onSubmit={saveH3Policy}>
@@ -334,7 +334,7 @@ export default function PaymentRuntimePage() {
                 <input
                   type="number"
                   min="0"
-                  max="24"
+                  max="8"
                   value={h3Policy.label.maxVisible}
                   onChange={(event) => setH3Policy({
                     ...h3Policy,

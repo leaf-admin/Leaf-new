@@ -6,9 +6,19 @@ const {
 const pricingContextProvider = require('../../../services/pricing-context-provider');
 
 describe('fare-estimation-service', () => {
+  const originalPricingMode = process.env.PRICING_DEMAND_PRESSURE_MODE;
+
   beforeEach(() => {
     __resetEstimateCacheForTests();
     jest.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    if (originalPricingMode === undefined) {
+      delete process.env.PRICING_DEMAND_PRESSURE_MODE;
+    } else {
+      process.env.PRICING_DEMAND_PRESSURE_MODE = originalPricingMode;
+    }
   });
 
   test('normalizeCarType deve mapear categorias legadas', () => {
@@ -118,5 +128,42 @@ describe('fare-estimation-service', () => {
     expect(spy).toHaveBeenCalledTimes(1);
     expect(second.estimatedFare).toBe(first.estimatedFare);
     expect(second.pricingAudit.cacheSource).toBe('fare_estimation_hot_cache');
+  });
+
+  test('troca do modelo de pricing não reaproveita cotação do modo anterior', async () => {
+    const spy = jest.spyOn(pricingContextProvider, 'buildDerivedPricingContext');
+    const payload = {
+      pickupLocation: { lat: -22.9075, lng: -43.1736 },
+      destinationLocation: { lat: -22.9121, lng: -43.1825 },
+      carType: 'Leaf Plus',
+      routeDistanceKm: 5,
+      routeDurationSecs: 900,
+      tollFee: 0,
+      clientEstimatedFare: 0,
+      pricingContext: {
+        operational: {
+          current: {
+            active_requests_5m: 8,
+            idle_drivers: 2,
+            avg_pickup_eta_min: 5,
+            trip_time_inflation: 1.4,
+            cancel_rate: 0.12,
+            accept_rate: 0.7,
+            avg_speed_kmh: 18
+          }
+        }
+      }
+    };
+
+    process.env.PRICING_DEMAND_PRESSURE_MODE = 'dry_run';
+    const dryRun = await estimateRideFare(payload);
+
+    process.env.PRICING_DEMAND_PRESSURE_MODE = 'active';
+    const active = await estimateRideFare(payload);
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(dryRun.pricingPayload.pricing_model_mode).toBe('dry_run');
+    expect(active.pricingPayload.pricing_model_mode).toBe('active');
+    expect(active.pricingAudit.cacheSource).toBeUndefined();
   });
 });
