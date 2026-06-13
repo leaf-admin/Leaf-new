@@ -46,10 +46,10 @@ assert_no_match "leaf_redis_2024" \
   "leaf-websocket-backend/utils/docker-detector.js" \
   "fallback Redis hardcoded"
 assert_no_match 'CORS_ORIGIN=\*' \
-  "leaf-websocket-backend/docker-compose.hostinger.yml" \
+  "leaf-websocket-backend/docker-compose.production.yml" \
   "CORS wildcard em compose de produção"
 assert_no_match 'JWT_SECRET=\$\{JWT_SECRET:-' \
-  "leaf-websocket-backend/docker-compose.hostinger.yml" \
+  "leaf-websocket-backend/docker-compose.production.yml" \
   "fallback inseguro para JWT_SECRET"
 assert_no_match "JWT_SECRET\\s*=\\s*['\"][^'\"]+['\"]" \
   "scripts/maintenance/jwt-generator.js" \

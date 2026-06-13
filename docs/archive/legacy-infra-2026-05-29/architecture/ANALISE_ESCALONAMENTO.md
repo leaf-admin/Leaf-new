@@ -39,7 +39,7 @@
 - ❌ **Custo cresce exponencialmente:** 4GB → 8GB → 16GB (custo dobra)
 - ❌ **Não resolve geografia:** Usuários distantes têm latência
 
-#### **💰 CUSTO ESTIMADO (DigitalOcean/Vultr):**
+#### **💰 CUSTO ESTIMADO (provedor anterior/Vultr):**
 - 2 vCPU / 4GB: ~$24/mês
 - 4 vCPU / 8GB: ~$48/mês (2x)
 - 8 vCPU / 16GB: ~$96/mês (4x)

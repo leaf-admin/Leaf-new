@@ -121,7 +121,7 @@ node --check "$BACKEND_LOCAL_DIR/scripts/ops/materialize-pricing-baselines.cjs"
 node --check "$BACKEND_LOCAL_DIR/scripts/ops/backfill-ride-health-index.cjs"
 node --check "$BACKEND_LOCAL_DIR/scripts/create-admin-profile-user.js"
 if command -v docker >/dev/null 2>&1; then
-  docker compose -f "$BACKEND_LOCAL_DIR/docker-compose.hostinger.yml" -f "$BACKEND_LOCAL_DIR/docker-compose.ops-workers.yml" config --services >/dev/null
+  docker compose -f "$BACKEND_LOCAL_DIR/docker-compose.production.yml" -f "$BACKEND_LOCAL_DIR/docker-compose.gateway-scale.yml" -f "$BACKEND_LOCAL_DIR/docker-compose.ops-workers.yml" config --services >/dev/null
 fi
 npm --prefix "$DASH_LOCAL_DIR" run -s lint
 npm --prefix "$DASH_LOCAL_DIR" run -s build

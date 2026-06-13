@@ -32,8 +32,6 @@ node_modules
 /store-assets/
 /system-images/
 /vehicle-image-bank/
-/digitaloceankey
-/digitaloceankey.pub
 
 # Exclude sibling workspaces from mobile EAS uploads.
 /leaf-websocket-backend/

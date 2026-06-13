@@ -275,8 +275,8 @@ Esses itens nao sao "lixo local". Eles nao reprovam o app por si so, salvo se fo
 - `/Users/izaakdias/Documents/Leaf-new/deploy-package/`
 - `/Users/izaakdias/Documents/Leaf-new/internal-go-live-guide.sh`
 - `/Users/izaakdias/Documents/Leaf-new/test-endpoints.sh`
-- `/Users/izaakdias/Documents/Leaf-new/digitaloceankey`
-- `/Users/izaakdias/Documents/Leaf-new/digitaloceankey.pub`
+- `/Users/izaakdias/Documents/Leaf-new/provedor-legadokey`
+- `/Users/izaakdias/Documents/Leaf-new/provedor-legadokey.pub`
 
 Esses nomes parecem operacionais/legados, mas podem estar ligados a deploy, historico de infra ou scripts de validacao. Nao deletar sem dono definido.
 

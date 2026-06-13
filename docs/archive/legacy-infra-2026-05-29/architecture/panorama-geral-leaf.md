@@ -69,7 +69,7 @@
 ```bash
 # Servidores:
 ✅ VPS Vultr - Backend principal
-✅ VPS Hostinger - Backup/Redundância
+✅ VPS provedor anterior - Backup/Redundância
 ✅ Firebase - Cloud Functions
 ✅ Redis - Cache distribuído
 

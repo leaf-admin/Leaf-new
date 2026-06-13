@@ -57,7 +57,7 @@ Resultado:
 - O host Contabo nao tem Node instalado fora do Docker; validacoes remotas devem usar `docker exec`.
 - A imagem de producao instala dependencias com `npm install --omit=dev`, entao `socket.io-client` nao esta disponivel no container. O smoke remoto usa `ws`, que e dependencia de producao, para validar handshake Socket.IO bruto.
 - Antes do deploy principal, a producao antiga nao exibia `socketRedisAdapter` no `/health/quick`.
-- O deploy principal foi feito na Contabo, nao em DigitalOcean.
+- O deploy principal foi feito na Contabo, nao em provedor legado.
 
 ## Automacao adicionada
 
@@ -490,7 +490,7 @@ Evidencia:
 
 Higiene operacional pos-cutover:
 
-- `docker-compose.hostinger.yml`, `docker-compose.local.yml`, `docker-compose.ops-workers.yml` e `docker-compose.realtime-secondary.yml` nao usam mais o atributo obsoleto `version`.
+- `docker-compose.production.yml`, `docker-compose.local.yml`, `docker-compose.ops-workers.yml` e `docker-compose.realtime-secondary.yml` nao usam mais o atributo obsoleto `version`.
 - Variaveis opcionais que geravam warning de interpolacao no compose agora usam default vazio:
   - `WOOVI_CLIENT_ID`
   - `WOOVI_CLIENT_SECRET`

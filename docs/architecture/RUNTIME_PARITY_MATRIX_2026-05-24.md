@@ -12,9 +12,9 @@ O processo `sideeffects-worker` segue preservado com `LEAF_SERVER_RUNTIME=vps` p
 Evidencias locais:
 
 - `scripts/runtime/start-server.sh` aceita `LEAF_SERVER_RUNTIME=modular|vps|custom`.
-- `docker-compose.hostinger.yml` ainda fixa `LEAF_SERVER_RUNTIME=vps` para ambientes derivados desse compose.
+- O compose de produção usa `LEAF_SERVER_RUNTIME=modular`.
 - Na Contabo, `/opt/leaf-app/docker-compose.yml` esta com `websocket` em `LEAF_SERVER_RUNTIME=modular` e `sideeffects-worker` em `LEAF_SERVER_RUNTIME=vps`.
-- `docker-compose.hostinger.yml` roda `RUNTIME_ROLE=gateway`, `LEAF_CLUSTER_ENABLED=true`, `ENABLE_SOCKETIO_REDIS_ADAPTER=true` e flags legacy desligadas por padrao.
+- `docker-compose.production.yml` roda `RUNTIME_ROLE=gateway`, `LEAF_CLUSTER_ENABLED=true`, `ENABLE_SOCKETIO_REDIS_ADAPTER=true` e flags legacy desligadas por padrao.
 - `server.js` e o runtime modular viraram o gateway ativo de producao apos canary especifico, backup e smoke funcional.
 - `npm run report:runtime-parity` gera inventario JSON/Markdown em `test-results/runtime-contract-inventory.*`.
 - `npm run check:runtime-parity` falha se voltar a existir rota HTTP ou evento Socket.IO presente somente no runtime VPS.

@@ -46,8 +46,6 @@ leaf-websocket-backend/leaf-reactnative-firebase-adminsdk-*.json
 **/firebase-credentials.json
 
 # Security-sensitive artifacts
-digitaloceankey
-digitaloceankey.pub
 *.pem
 *.p12
 *.pfx
