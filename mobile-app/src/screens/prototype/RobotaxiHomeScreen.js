@@ -36,7 +36,11 @@ import { resolvePassengerAutoRoute, shouldAutoSyncPassengerRoute } from './passe
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
 import useSearchElapsedClock from './useSearchElapsedClock';
 import { openDriverExternalNavigation } from '../../services/DriverExternalNavigationService';
-import { fetchH3CellsForRegion } from '../../services/runtime/h3MapService';
+import {
+  fetchH3CellsForRegion,
+  isCoordinateInsideRegion,
+  resolveH3LabelAnchor,
+} from '../../services/runtime/h3MapService';
 import WebSocketManager from '../../services/WebSocketManager';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
 import { resolveMeaningfulAddress } from './addressLabelUtils';
@@ -3430,9 +3434,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         return;
       }
 
-      driverH3LastFetchKeyRef.current = requestKey;
-      driverH3LastFetchAtRef.current = now;
-
       try {
         const response = await fetchH3CellsForRegion(regionForFetch, {
           surface: 'driver',
@@ -3443,6 +3444,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           return;
         }
 
+        driverH3LastFetchKeyRef.current = requestKey;
+        driverH3LastFetchAtRef.current = Date.now();
         setDriverH3Cells(Array.isArray(response?.cells) ? response.cells : []);
         setDriverH3VisualPolicy(response?.visualPolicy || DEFAULT_DRIVER_H3_VISUAL_POLICY);
       } catch (error) {
@@ -3682,6 +3685,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       .filter((cell) => (
         driverH3VisualPolicy?.label?.enabled !== false
         && cell?.surge?.labelVisible !== false
+        && isCoordinateInsideRegion(cell?.center, visibleMapRegion, 0.035)
       ))
       .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0))
       .slice(0, Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 12)));
@@ -3695,14 +3699,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               latitude: Number(point.lat),
               longitude: Number(point.lng)
             }))}
-            strokeWidth={Number(cell?.style?.strokeWidth ?? 0.7)}
-            strokeColor={hexToRgba(cell?.style?.stroke || '#CA8A04', Number(cell?.style?.strokeOpacity ?? 0.36))}
-            fillColor={hexToRgba(cell?.style?.fill || '#FACC15', Number(cell?.style?.fillOpacity ?? 0.18))}
+            strokeWidth={Math.min(Number(cell?.style?.strokeWidth ?? 0.28), 0.32)}
+            strokeColor={hexToRgba(
+              cell?.style?.stroke || '#CA8A04',
+              Math.min(Number(cell?.style?.strokeOpacity ?? 0.08), 0.12)
+            )}
+            fillColor={hexToRgba(
+              cell?.style?.fill || '#FACC15',
+              Math.min(Number(cell?.style?.fillOpacity ?? 0.18), 0.24)
+            )}
           />
         ))}
         {labelCells.map((cell) => {
           const percent = Number(cell?.surge?.percent || 0);
           const label = cell?.surge?.label || `+${Math.round(percent)}%`;
+          const anchor = resolveH3LabelAnchor(cell.center, visibleMapRegion);
 
           return (
             <Marker
@@ -3711,10 +3722,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 latitude: Number(cell.center.lat),
                 longitude: Number(cell.center.lng)
               }}
-              anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
+              anchor={anchor}
+              tracksViewChanges={Platform.OS === 'android'}
             >
               <View
+                collapsable={false}
                 style={[
                   styles.driverSurgeFlag,
                   {
@@ -3747,7 +3759,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         })}
       </>
     );
-  }, [driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay]);
+  }, [driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay, visibleMapRegion]);
 
   const getRouteEdgePadding = useCallback(() => {
     const routeAreaTop = Math.max(insets.top + 12, activeOcclusion.top + 12);
@@ -4127,8 +4139,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    setVisibleMapRegion(nextRegion);
-  }, [homePickupPickerVisible, resolveVisibleMapCenterCoordinate, showDriverH3Overlay]);
+    setVisibleMapRegion((previousRegion) => (
+      buildDriverH3RequestKey(previousRegion) === buildDriverH3RequestKey(nextRegion)
+        ? previousRegion
+        : nextRegion
+    ));
+  }, [
+    buildDriverH3RequestKey,
+    homePickupPickerVisible,
+    resolveVisibleMapCenterCoordinate,
+    showDriverH3Overlay,
+  ]);
 
   const handleMapLayout = useCallback(event => {
     const nextWidth = event?.nativeEvent?.layout?.width;
@@ -6361,9 +6382,10 @@ const styles = StyleSheet.create({
     marginTop: 9,
   },
   driverSurgeFlag: {
-    minWidth: 44,
+    minWidth: 52,
+    minHeight: 28,
     borderRadius: 999,
-    paddingHorizontal: 9,
+    paddingHorizontal: 10,
     paddingVertical: 5,
     backgroundColor: 'rgba(23,20,18,0.9)',
     borderWidth: 1,
@@ -6375,11 +6397,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 8,
     elevation: 6,
+    overflow: 'visible',
+    flexShrink: 0,
   },
   driverSurgeFlagText: {
     color: '#FFFFFF',
     fontFamily: fonts.SemiBold,
     fontSize: 12,
     lineHeight: 14,
+    textAlign: 'center',
+    includeFontPadding: false,
+    flexShrink: 0,
   }
 });

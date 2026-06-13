@@ -74,6 +74,8 @@ describe('H3MapService', () => {
     expect(style.fill).toBe('#123456');
     expect(style.stroke).toBe('#654321');
     expect(style.fillOpacity).toBeLessThan(0.3);
+    expect(style.strokeOpacity).toBeLessThan(style.fillOpacity);
+    expect(style.strokeWidth).toBeLessThanOrEqual(0.4);
   });
 
   test('hides the driver overlay when runtime policy is disabled', () => {

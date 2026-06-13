@@ -73,13 +73,13 @@ describe('ride-cost-telemetry-service', () => {
       snapshot: {
         google: {
           skus: {
-            directionsLegacy: {
-              label: 'Directions',
+            directionsAdvancedLegacy: {
+              label: 'Directions Advanced',
               family: 'Routes APIs Legacy',
               unit: 'request',
               requestCount: 2,
               billableUnits: 2,
-              estimatedCostUsd: 0.01,
+              estimatedCostUsd: 0.02,
             },
           },
         },
@@ -104,21 +104,22 @@ describe('ride-cost-telemetry-service', () => {
     expect(report.totals.sourceCount).toBe(1);
     expect(report.totals.google.requestCount).toBe(2);
     expect(report.totals.google.billableUnits).toBe(2);
-    expect(report.totals.google.estimatedCostUsd).toBe(0.01);
+    expect(report.totals.google.estimatedCostUsd).toBe(0.02);
     expect(report.totals.google.directions.requestCount).toBe(2);
+    expect(report.totals.google.directions.estimatedCostUsd).toBe(0.02);
     expect(report.totals.google.directions.byUserType.customer).toBe(2);
     expect(report.totals.backend.attempts).toBe(1);
     expect(report.totals.backend.successes).toBe(1);
     expect(report.totals.backend.totalLatencyMs).toBe(812);
-    expect(report.totals.cost.totalUsd).toBeCloseTo(0.01, 6);
+    expect(report.totals.cost.totalUsd).toBeCloseTo(0.02, 6);
     expect(report.totals.cost.budgetStatus).toBe('within_budget');
     expect(report.totals.cost.excludedCostProviders).toEqual(['woovi', 'payment_processor']);
     expect(redisHashes.get('booking:booking_123')).toEqual(
       expect.objectContaining({
-        costTelemetryGoogleUsd: '0.01',
+        costTelemetryGoogleUsd: '0.02',
         costTelemetryGoogleBillableUnits: '2',
         costTelemetrySourceCount: '1',
-        costTelemetryTotalUsd: '0.01',
+        costTelemetryTotalUsd: '0.02',
         costTelemetryDirectionsRequests: '2',
         costTelemetryPassengerDirectionsRequests: '2',
       }),

@@ -40,6 +40,10 @@ function normalizeText(value, fallback = '') {
   return normalized.length > 0 ? normalized : fallback;
 }
 
+function isTrafficAwareRoutingEnabled() {
+  return normalizeBoolean(process.env.ENABLE_TRAFFIC_AWARE_ROUTES, true);
+}
+
 function normalizeTelemetry(telemetry = {}) {
   const bookingId = normalizeText(telemetry?.bookingId, null);
   const sourceKey = normalizeText(telemetry?.sourceKey, null);
@@ -673,7 +677,7 @@ router.post('/api/places/directions', async (req, res) => {
     const startLoc = normalizeText(req.body?.startLoc, '');
     const destLoc = normalizeText(req.body?.destLoc, '');
     const waypoints = req.body?.waypoints || null;
-    const trafficEnabled = normalizeBoolean(req.body?.trafficEnabled, false);
+    const trafficEnabled = isTrafficAwareRoutingEnabled();
     const alternativesEnabled = normalizeBoolean(req.body?.alternativesEnabled, false);
     const forceFresh = normalizeBoolean(req.body?.forceFresh, false);
     const routeScope = normalizeText(req.body?.routeScope, 'unknown');
@@ -791,7 +795,7 @@ router.post('/api/places/directions', async (req, res) => {
         sourceKey: telemetrySourceKey,
         sourceMeta: telemetrySourceMeta,
         requestMeta: telemetry.requestMeta,
-        skuKey: 'directionsLegacy',
+        skuKey: trafficEnabled ? 'directionsAdvancedLegacy' : 'directionsLegacy',
         requestCount: 1,
         billableUnits: 1,
         metadata: {

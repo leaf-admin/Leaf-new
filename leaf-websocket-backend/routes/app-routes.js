@@ -68,14 +68,27 @@ function buildMapsRoutingPolicy() {
     const clientDirectGoogleFallback =
         envBool('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false) ||
         envBool('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false);
+    const trafficAwareRoutes = envBool('ENABLE_TRAFFIC_AWARE_ROUTES', true);
+    const routesCacheTtlSeconds = Number.parseInt(
+        trafficAwareRoutes
+            ? process.env.PLACES_DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS ||
+              process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS ||
+              process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS ||
+              process.env.DIRECTIONS_CACHE_TTL_SECONDS ||
+              '90'
+            : process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS ||
+              process.env.DIRECTIONS_CACHE_TTL_SECONDS ||
+              '180',
+        10
+    );
     return {
         backendOnly: presence('GOOGLE_MAPS_API_KEY') && !clientDirectGoogleFallback,
         clientDirectGoogleFallback,
         placesCacheEnabled: envBool('ENABLE_PLACES_CACHE', true),
         placesCacheTtlSeconds: Number.parseInt(process.env.PLACES_CACHE_TTL_SECONDS || `${30 * 24 * 60 * 60}`, 10),
         routesCacheEnabled: envBool('ENABLE_ROUTES_CACHE', true),
-        routesCacheTtlSeconds: Number.parseInt(process.env.ROUTES_CACHE_TTL_SECONDS || `${5 * 60}`, 10),
-        trafficAwareRoutes: envBool('ENABLE_TRAFFIC_AWARE_ROUTES', true),
+        routesCacheTtlSeconds,
+        trafficAwareRoutes,
         alternativeRoutesEnabled: envBool('ENABLE_ALTERNATIVE_ROUTES', false)
     };
 }

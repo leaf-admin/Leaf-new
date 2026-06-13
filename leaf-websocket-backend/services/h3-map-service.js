@@ -368,9 +368,9 @@ function buildStyle(level, surface, resolution = 8, metrics = {}, visualPolicy =
     return {
       fill: fillByLevel[surge.level] || '#FACC15',
       stroke: strokeByLevel[surge.level] || '#CA8A04',
-      fillOpacity: Number(((0.11 + (0.22 * surgeStrength) + (0.025 * resolutionBias)) * opacity).toFixed(3)),
-      strokeOpacity: Number(((0.26 + (0.34 * surgeStrength) + (0.025 * resolutionBias)) * opacity).toFixed(3)),
-      strokeWidth: Number((0.35 + (0.45 * surgeStrength) + (0.1 * resolutionBias)).toFixed(2)),
+      fillOpacity: Number(((0.1 + (0.18 * surgeStrength) + (0.018 * resolutionBias)) * opacity).toFixed(3)),
+      strokeOpacity: Number(((0.045 + (0.07 * surgeStrength) + (0.01 * resolutionBias)) * opacity).toFixed(3)),
+      strokeWidth: Number((0.18 + (0.15 * surgeStrength) + (0.04 * resolutionBias)).toFixed(2)),
       visualIntensity: Number(visualIntensity.toFixed(3))
     };
   }

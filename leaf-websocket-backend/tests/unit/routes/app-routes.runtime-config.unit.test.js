@@ -115,6 +115,8 @@ describe('app routes runtime config', () => {
     );
     expect(JSON.stringify(response.body)).not.toContain('must-not-leak');
     expect(response.body.mapsRoutingPolicy.placesCacheEnabled).toBe(true);
+    expect(response.body.mapsRoutingPolicy.trafficAwareRoutes).toBe(true);
+    expect(response.body.mapsRoutingPolicy.routesCacheTtlSeconds).toBe(90);
     expect(response.body.mapsRoutingPolicy.h3VisualPolicy).toMatchObject({
       enabled: true,
       opacity: 0.7,

@@ -39,6 +39,66 @@ export function bboxFromRegion(region) {
   };
 }
 
+export function isCoordinateInsideRegion(coordinate, region, insetRatio = 0) {
+  const latitude = Number(coordinate?.latitude ?? coordinate?.lat);
+  const longitude = Number(coordinate?.longitude ?? coordinate?.lng);
+  const bbox = bboxFromRegion(region);
+  if (!bbox || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return false;
+  }
+
+  const safeInset = clamp(Number(insetRatio) || 0, 0, 0.45);
+  const latitudeInset = (bbox.maxLat - bbox.minLat) * safeInset;
+  const longitudeInset = (bbox.maxLng - bbox.minLng) * safeInset;
+
+  return latitude >= bbox.minLat + latitudeInset
+    && latitude <= bbox.maxLat - latitudeInset
+    && longitude >= bbox.minLng + longitudeInset
+    && longitude <= bbox.maxLng - longitudeInset;
+}
+
+export function resolveH3LabelAnchor(coordinate, region, edgeRatio = 0.16) {
+  const latitude = Number(coordinate?.latitude ?? coordinate?.lat);
+  const longitude = Number(coordinate?.longitude ?? coordinate?.lng);
+  const latitudeDelta = Number(region?.latitudeDelta);
+  const longitudeDelta = Number(region?.longitudeDelta);
+  const centerLatitude = Number(region?.latitude);
+  const centerLongitude = Number(region?.longitude);
+
+  if (
+    !Number.isFinite(latitude)
+    || !Number.isFinite(longitude)
+    || !Number.isFinite(latitudeDelta)
+    || !Number.isFinite(longitudeDelta)
+    || !Number.isFinite(centerLatitude)
+    || !Number.isFinite(centerLongitude)
+    || latitudeDelta <= 0
+    || longitudeDelta <= 0
+  ) {
+    return { x: 0.5, y: 0.5 };
+  }
+
+  const safeEdgeRatio = clamp(Number(edgeRatio) || 0.16, 0.05, 0.35);
+  const minLatitude = centerLatitude - latitudeDelta / 2;
+  const maxLatitude = centerLatitude + latitudeDelta / 2;
+  const minLongitude = centerLongitude - longitudeDelta / 2;
+  const horizontalPosition = (longitude - minLongitude) / longitudeDelta;
+  const verticalPosition = (maxLatitude - latitude) / latitudeDelta;
+
+  return {
+    x: horizontalPosition <= safeEdgeRatio
+      ? 0
+      : horizontalPosition >= 1 - safeEdgeRatio
+        ? 1
+        : 0.5,
+    y: verticalPosition <= safeEdgeRatio
+      ? 0
+      : verticalPosition >= 1 - safeEdgeRatio
+        ? 1
+        : 0.5
+  };
+}
+
 export function buildH3ViewportParams(region, surface = 'driver', options = {}) {
   const bbox = bboxFromRegion(region);
   if (!bbox) return null;
@@ -73,6 +133,8 @@ export async function fetchH3CellsForRegion(region, options = {}) {
 export default {
   estimateZoomFromRegion,
   bboxFromRegion,
+  isCoordinateInsideRegion,
+  resolveH3LabelAnchor,
   buildH3ViewportParams,
   fetchH3CellsForRegion
 };

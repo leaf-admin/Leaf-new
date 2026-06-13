@@ -303,6 +303,15 @@ const TELEMETRY_GOOGLE_SKU_DEFINITIONS = Object.freeze({
       '0.005',
     ),
   },
+  directionsAdvancedLegacy: {
+    label: 'Directions Advanced',
+    family: 'Routes APIs Legacy',
+    unit: 'request',
+    unitPriceUsd: readPositiveNumberFromEnv(
+      process.env.RIDE_COST_TELEMETRY_SKU_DIRECTIONS_ADVANCED_USD,
+      '0.01',
+    ),
+  },
   distanceMatrixLegacyElement: {
     label: 'Distance Matrix',
     family: 'Routes APIs Legacy',
@@ -846,7 +855,7 @@ class RideCostTelemetryService {
         );
         totals.google.skus[skuKey] = aggregateSku;
 
-        if (skuKey === 'directionsLegacy') {
+        if (skuKey === 'directionsLegacy' || skuKey === 'directionsAdvancedLegacy') {
           totals.google.directions.requestCount += requestCount;
           totals.google.directions.billableUnits = roundUnits(
             totals.google.directions.billableUnits + billableUnits,

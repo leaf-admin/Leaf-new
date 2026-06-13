@@ -45,6 +45,7 @@ function createApp() {
 
 describe('places routes', () => {
   beforeEach(() => {
+    process.env.ENABLE_TRAFFIC_AWARE_ROUTES = 'true';
     jest.clearAllMocks();
     mockSearchPlace.mockResolvedValue(null);
     mockFetchAutocompletePredictions.mockResolvedValue([]);
@@ -290,15 +291,17 @@ describe('places routes', () => {
     expect(mockIngestGoogleSkuUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: 'booking_dir_1',
-        skuKey: 'directionsLegacy',
+        skuKey: 'directionsAdvancedLegacy',
         metadata: expect.objectContaining({
           forceFresh: true,
+          trafficEnabled: true,
         }),
       }),
     );
     expect(mockFetchDirectionsRoute).toHaveBeenCalledWith(
       expect.objectContaining({
         forceFresh: true,
+        trafficEnabled: true,
       }),
     );
     expect(mockIngestOperationalUsage).toHaveBeenCalledWith(
