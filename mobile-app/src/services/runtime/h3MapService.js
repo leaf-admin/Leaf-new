@@ -99,6 +99,46 @@ export function resolveH3LabelAnchor(coordinate, region, edgeRatio = 0.16) {
   };
 }
 
+export function selectSeparatedH3Labels(cells = [], region, options = {}) {
+  const latitudeDelta = Number(region?.latitudeDelta);
+  const longitudeDelta = Number(region?.longitudeDelta);
+  if (
+    !Array.isArray(cells)
+    || !Number.isFinite(latitudeDelta)
+    || !Number.isFinite(longitudeDelta)
+    || latitudeDelta <= 0
+    || longitudeDelta <= 0
+  ) {
+    return [];
+  }
+
+  const maxVisible = Math.max(0, Math.min(5, Number(options.maxVisible ?? 5)));
+  const minDistanceRatio = clamp(Number(options.minDistanceRatio ?? 0.18), 0.08, 0.4);
+  const selected = [];
+
+  for (const cell of cells) {
+    if (selected.length >= maxVisible) break;
+
+    const latitude = Number(cell?.center?.lat);
+    const longitude = Number(cell?.center?.lng);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+
+    const overlaps = selected.some((candidate) => {
+      const latitudeDistance =
+        Math.abs(latitude - Number(candidate.center.lat)) / latitudeDelta;
+      const longitudeDistance =
+        Math.abs(longitude - Number(candidate.center.lng)) / longitudeDelta;
+      return Math.hypot(latitudeDistance, longitudeDistance) < minDistanceRatio;
+    });
+
+    if (!overlaps) {
+      selected.push(cell);
+    }
+  }
+
+  return selected;
+}
+
 export function buildH3ViewportParams(region, surface = 'driver', options = {}) {
   const bbox = bboxFromRegion(region);
   if (!bbox) return null;
@@ -116,7 +156,7 @@ export function buildH3ViewportParams(region, surface = 'driver', options = {}) 
 export async function fetchH3CellsForRegion(region, options = {}) {
   const surface = options.surface || 'driver';
   const params = buildH3ViewportParams(region, surface, {
-    includeEmpty: options.includeEmpty === true || surface === 'driver'
+    includeEmpty: options.includeEmpty === true
   });
   if (!params) {
     return { cells: [], summary: null };
@@ -135,6 +175,7 @@ export default {
   bboxFromRegion,
   isCoordinateInsideRegion,
   resolveH3LabelAnchor,
+  selectSeparatedH3Labels,
   buildH3ViewportParams,
   fetchH3CellsForRegion
 };

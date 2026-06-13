@@ -40,6 +40,7 @@ import {
   fetchH3CellsForRegion,
   isCoordinateInsideRegion,
   resolveH3LabelAnchor,
+  selectSeparatedH3Labels,
 } from '../../services/runtime/h3MapService';
 import WebSocketManager from '../../services/WebSocketManager';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
@@ -108,7 +109,7 @@ const DEFAULT_DRIVER_H3_VISUAL_POLICY = {
   enabled: true,
   label: {
     enabled: true,
-    maxVisible: 12,
+    maxVisible: 5,
     backgroundColor: '#171412',
     backgroundOpacity: 0.9,
     textColor: '#FFFFFF',
@@ -155,6 +156,7 @@ const MAP_OCCLUSION_REPOSITION_MS = 760;
 const MAP_RETURN_REPOSITION_MS = 820;
 const DRIVER_H3_VIEWPORT_DEBOUNCE_MS = 420;
 const DRIVER_H3_SOCKET_REFRESH_DEBOUNCE_MS = 900;
+const DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS = 60000;
 const DRIVER_H3_MIN_FETCH_INTERVAL_MS = 30000;
 const DRIVER_H3_AUTH_COOLDOWN_MS = 120000;
 const HOME_AUTOMATION_POLL_MS = 350;
@@ -1194,6 +1196,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   );
   const [driverH3Cells, setDriverH3Cells] = useState([]);
   const [driverH3VisualPolicy, setDriverH3VisualPolicy] = useState(DEFAULT_DRIVER_H3_VISUAL_POLICY);
+  const [driverH3RefreshPolicy, setDriverH3RefreshPolicy] = useState({
+    pollIntervalMs: DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS,
+    staleAfterMs: DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS * 2,
+    trafficLayerEnabled: true,
+  });
   const [driverH3RefreshNonce, setDriverH3RefreshNonce] = useState(0);
   const [showRecoveredConnectionHint, setShowRecoveredConnectionHint] = useState(false);
   const [qaConnectionVisualState, setQaConnectionVisualState] = useState(null);
@@ -2700,7 +2707,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const isLiveTripMapActive = ['accepted', 'arrived', 'started'].includes(
     normalizedBookingStatus
   );
-  const shouldShowTrafficLayer = false;
+  const shouldShowTrafficLayer = Boolean(
+    isDriverRole
+    && shouldRenderRuntimeMapState
+    && driverH3RefreshPolicy?.trafficLayerEnabled !== false
+  );
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
   const isPickupPhase =
     normalizedBookingStatus === 'accepted' ||
@@ -3429,7 +3440,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }
 
       const fetchedRecently =
-        now - driverH3LastFetchAtRef.current < DRIVER_H3_MIN_FETCH_INTERVAL_MS;
+        now - driverH3LastFetchAtRef.current < Math.max(
+          DRIVER_H3_MIN_FETCH_INTERVAL_MS,
+          Number(driverH3RefreshPolicy?.pollIntervalMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS)
+        );
       if (fetchedRecently) {
         return;
       }
@@ -3448,6 +3462,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         driverH3LastFetchAtRef.current = Date.now();
         setDriverH3Cells(Array.isArray(response?.cells) ? response.cells : []);
         setDriverH3VisualPolicy(response?.visualPolicy || DEFAULT_DRIVER_H3_VISUAL_POLICY);
+        setDriverH3RefreshPolicy({
+          pollIntervalMs: Math.max(
+            DRIVER_H3_MIN_FETCH_INTERVAL_MS,
+            Number(response?.refreshPolicy?.pollIntervalMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS)
+          ),
+          staleAfterMs: Math.max(
+            DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS,
+            Number(response?.refreshPolicy?.staleAfterMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS * 2)
+          ),
+          trafficLayerEnabled: response?.refreshPolicy?.trafficLayerEnabled !== false,
+        });
       } catch (error) {
         if (!controller.signal.aborted) {
           const status = Number(error?.status || error?.response?.status || 0);
@@ -3464,7 +3489,30 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [buildDriverH3RequestKey, driverH3RefreshNonce, showDriverH3Overlay, targetRegion, visibleMapRegion]);
+  }, [
+    buildDriverH3RequestKey,
+    driverH3RefreshNonce,
+    driverH3RefreshPolicy?.pollIntervalMs,
+    showDriverH3Overlay,
+    targetRegion,
+    visibleMapRegion
+  ]);
+
+  useEffect(() => {
+    if (!showDriverH3Overlay) {
+      return undefined;
+    }
+
+    const intervalMs = Math.max(
+      DRIVER_H3_MIN_FETCH_INTERVAL_MS,
+      Number(driverH3RefreshPolicy?.pollIntervalMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS)
+    );
+    const interval = setInterval(() => {
+      setDriverH3RefreshNonce((current) => current + 1);
+    }, intervalMs);
+
+    return () => clearInterval(interval);
+  }, [driverH3RefreshPolicy?.pollIntervalMs, showDriverH3Overlay]);
 
   useEffect(() => {
     return () => {
@@ -3681,14 +3729,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return null;
     }
 
-    const labelCells = [...surgeCells]
+    const labelCandidates = [...surgeCells]
       .filter((cell) => (
         driverH3VisualPolicy?.label?.enabled !== false
         && cell?.surge?.labelVisible !== false
         && isCoordinateInsideRegion(cell?.center, visibleMapRegion, 0.035)
       ))
-      .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0))
-      .slice(0, Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 12)));
+      .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0));
+    const labelCells = selectSeparatedH3Labels(labelCandidates, visibleMapRegion, {
+      maxVisible: Math.min(
+        5,
+        Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 5))
+      ),
+      minDistanceRatio: 0.18,
+    });
 
     return (
       <>
@@ -3699,14 +3753,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               latitude: Number(point.lat),
               longitude: Number(point.lng)
             }))}
-            strokeWidth={Math.min(Number(cell?.style?.strokeWidth ?? 0.28), 0.32)}
-            strokeColor={hexToRgba(
-              cell?.style?.stroke || '#CA8A04',
-              Math.min(Number(cell?.style?.strokeOpacity ?? 0.08), 0.12)
-            )}
+            strokeWidth={0}
+            strokeColor="rgba(0,0,0,0)"
             fillColor={hexToRgba(
               cell?.style?.fill || '#FACC15',
-              Math.min(Number(cell?.style?.fillOpacity ?? 0.18), 0.24)
+              Math.min(Number(cell?.style?.fillOpacity ?? 0.16), 0.2)
             )}
           />
         ))}
