@@ -9,7 +9,7 @@ import { leafAPI } from "@/src/services/api";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 
-const DASHBOARD_REFRESH_MS = 30000;
+const DASHBOARD_REFRESH_MS = 60000;
 
 function toNumber(value, fallback = 0) {
   const numeric = Number(value);
@@ -596,11 +596,17 @@ export default function DashboardPage() {
       }
     };
 
+    const loadWhenVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+
     load();
-    const timer = setInterval(load, DASHBOARD_REFRESH_MS);
+    const timer = setInterval(loadWhenVisible, DASHBOARD_REFRESH_MS);
+    document.addEventListener("visibilitychange", loadWhenVisible);
     return () => {
       mounted = false;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", loadWhenVisible);
     };
   }, []);
 
@@ -738,7 +744,7 @@ export default function DashboardPage() {
                   <span className={snapshot?.cache?.status === "HIT" ? "status-ok" : "meta-badge"}>
                     {snapshot?.cache?.status || "-"}
                   </span>
-                  <small>idade {snapshot?.cache?.ageSeconds ?? "-"}s · TTL {snapshot?.scope?.ttlSeconds || 20}s</small>
+                  <small>idade {snapshot?.cache?.ageSeconds ?? "-"}s · TTL {snapshot?.scope?.ttlSeconds || 90}s</small>
                 </div>
               </div>
               <div className="row">
@@ -810,7 +816,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="row">
                   <div className="label">Cache</div>
-                  <div className="value">Redis TTL={snapshot?.scope?.ttlSeconds || 20}s configurado por BACKOFFICE_COMMAND_CENTER_TTL_SECONDS</div>
+                  <div className="value">Redis TTL={snapshot?.scope?.ttlSeconds || 90}s configurado por BACKOFFICE_COMMAND_CENTER_TTL_SECONDS</div>
                 </div>
                 <div className="row">
                   <div className="label">Browser → provedores pagos</div>

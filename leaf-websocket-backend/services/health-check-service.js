@@ -18,6 +18,28 @@ class HealthCheckService {
     this.redisHealthConfigKey = '';
     this.redisHealthInFlight = null;
     this.redisHealthCache = null;
+    this.firebaseHealthInFlight = null;
+    this.firebaseHealthCache = null;
+  }
+
+  getFirebaseHealthCacheTtlMs() {
+    return Math.max(
+      30 * 1000,
+      Number.parseInt(process.env.HEALTH_FIREBASE_CACHE_TTL_MS || String(5 * 60 * 1000), 10)
+    );
+  }
+
+  getFirebaseThresholds() {
+    return {
+      warningMs: Math.max(
+        500,
+        Number.parseInt(process.env.HEALTH_FIREBASE_WARNING_MS || '2500', 10)
+      ),
+      unhealthyMs: Math.max(
+        1000,
+        Number.parseInt(process.env.HEALTH_FIREBASE_UNHEALTHY_MS || '8000', 10)
+      )
+    };
   }
 
   getSystemThresholds() {
@@ -437,9 +459,49 @@ class HealthCheckService {
    * Health check do Firebase
    */
   async checkFirebase() {
+    const now = Date.now();
+    if (
+      this.firebaseHealthCache &&
+      now - this.firebaseHealthCache.checkedAt < this.getFirebaseHealthCacheTtlMs()
+    ) {
+      return {
+        ...this.firebaseHealthCache.payload,
+        cache: {
+          status: 'HIT',
+          ageMs: now - this.firebaseHealthCache.checkedAt,
+          ttlMs: this.getFirebaseHealthCacheTtlMs()
+        }
+      };
+    }
+
+    if (this.firebaseHealthInFlight) {
+      return this.firebaseHealthInFlight;
+    }
+
+    this.firebaseHealthInFlight = this.runFirebaseHealthCheck()
+      .then((payload) => {
+        this.firebaseHealthCache = { checkedAt: Date.now(), payload };
+        return {
+          ...payload,
+          cache: {
+            status: 'MISS',
+            ageMs: 0,
+            ttlMs: this.getFirebaseHealthCacheTtlMs()
+          }
+        };
+      });
+    try {
+      return await this.firebaseHealthInFlight;
+    } finally {
+      this.firebaseHealthInFlight = null;
+    }
+  }
+
+  async runFirebaseHealthCheck() {
     try {
       const firestore = firebaseConfig.getFirestore();
       const canReadRealtime = typeof firebaseConfig.getFromRealtimeDB === 'function';
+      const thresholds = this.getFirebaseThresholds();
 
       const results = {
         firestore: { status: 'unavailable', message: 'Firestore não inicializado' },
@@ -454,8 +516,13 @@ class HealthCheckService {
           await firestore.collection('_health').limit(1).get();
           const responseTime = Date.now() - startTime;
           results.firestore = {
-            status: responseTime > 500 ? 'warning' : 'healthy',
+            status: responseTime >= thresholds.unhealthyMs
+              ? 'unhealthy'
+              : responseTime >= thresholds.warningMs
+                ? 'warning'
+                : 'healthy',
             responseTime: `${responseTime}ms`,
+            thresholds,
             message: 'Firestore está saudável'
           };
         } catch (error) {
@@ -474,8 +541,13 @@ class HealthCheckService {
           await firebaseConfig.getFromRealtimeDB('.info/connected');
           const responseTime = Date.now() - startTime;
           results.realtimeDB = {
-            status: responseTime > 500 ? 'warning' : 'healthy',
+            status: responseTime >= thresholds.unhealthyMs
+              ? 'unhealthy'
+              : responseTime >= thresholds.warningMs
+                ? 'warning'
+                : 'healthy',
             responseTime: `${responseTime}ms`,
+            thresholds,
             message: 'Realtime DB está saudável'
           };
         } catch (error) {
