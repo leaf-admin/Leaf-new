@@ -76,7 +76,7 @@ O host principal precisa expor o Redis apenas no loopback local:
 - `127.0.0.1:6379 -> redis:6379`
 
 Isso já está preparado em:
-- [docker-compose.hostinger.yml](/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/docker-compose.hostinger.yml)
+- [docker-compose.production.yml](/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/docker-compose.production.yml)
 
 Depois disso, o host secundário consome o Redis do principal via túnel SSH local:
 

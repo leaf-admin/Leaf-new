@@ -22,6 +22,9 @@ function registerSocketCompleteTripHandler({
 }) {
     const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+    const {
+        recordDriverDestinationDailyRideCompletion
+    } = require('../services/driver-destination-mode-service');
 
     socket.on('completeTrip', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
@@ -191,6 +194,22 @@ function registerSocketCompleteTripHandler({
                 metrics.recordRideCompleted(city, serviceType || 'standard');
                 if (Number.isFinite(Number(resultDuration)) && Number(resultDuration) >= 0) {
                     metrics.recordRideTotalDuration(Number(resultDuration), city);
+                }
+
+                try {
+                    await recordDriverDestinationDailyRideCompletion({
+                        redis,
+                        driverId: resultDriverId || driverId,
+                        bookingId: resultBookingId || bookingId,
+                        now: new Date()
+                    });
+                } catch (destinationPolicyError) {
+                    logStructured('warn', 'Falha ao atualizar contador diário de destino do motorista', {
+                        bookingId,
+                        driverId: resultDriverId || driverId,
+                        eventType: 'completeTrip',
+                        error: destinationPolicyError.message
+                    });
                 }
 
                 // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão processar notificações)

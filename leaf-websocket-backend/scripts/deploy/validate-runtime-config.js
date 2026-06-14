@@ -449,7 +449,7 @@ function main() {
         clientDirectGoogleFallbackAllowed:
           boolEnv('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false) ||
           boolEnv('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false),
-        placesCacheEnabled: booleanDiagnostic('ENABLE_PLACES_CACHE', false),
+        placesCacheEnabled: booleanDiagnostic('ENABLE_PLACES_CACHE', true),
         receiptMapImagesConfigured: Boolean(String(process.env.GEO_KEY || '').trim())
       },
       push: {

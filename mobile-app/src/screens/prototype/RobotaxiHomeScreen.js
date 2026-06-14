@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Polygon } from 'react-native-maps';
+import { Marker, Polygon } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import polyline from '@mapbox/polyline';
 import { fonts } from '../../theme/runtimeTokens';
@@ -36,7 +36,12 @@ import { resolvePassengerAutoRoute, shouldAutoSyncPassengerRoute } from './passe
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
 import useSearchElapsedClock from './useSearchElapsedClock';
 import { openDriverExternalNavigation } from '../../services/DriverExternalNavigationService';
-import { fetchH3CellsForRegion } from '../../services/runtime/h3MapService';
+import {
+  fetchH3CellsForRegion,
+  isCoordinateInsideRegion,
+  resolveH3LabelAnchor,
+  selectSeparatedH3Labels,
+} from '../../services/runtime/h3MapService';
 import WebSocketManager from '../../services/WebSocketManager';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
 import { resolveMeaningfulAddress } from './addressLabelUtils';
@@ -100,6 +105,19 @@ const DEFAULT_USER_COORDINATE = {
   latitude: PROTOTYPE_REGION.latitude,
   longitude: PROTOTYPE_REGION.longitude
 };
+const DEFAULT_DRIVER_H3_VISUAL_POLICY = {
+  enabled: true,
+  label: {
+    enabled: true,
+    maxVisible: 5,
+    backgroundColor: '#171412',
+    backgroundOpacity: 0.9,
+    textColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+    borderOpacity: 0.82,
+    fontSize: 12
+  }
+};
 
 function pickHomeMapCoordinate(...values) {
   for (const value of values) {
@@ -138,6 +156,7 @@ const MAP_OCCLUSION_REPOSITION_MS = 760;
 const MAP_RETURN_REPOSITION_MS = 820;
 const DRIVER_H3_VIEWPORT_DEBOUNCE_MS = 420;
 const DRIVER_H3_SOCKET_REFRESH_DEBOUNCE_MS = 900;
+const DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS = 60000;
 const DRIVER_H3_MIN_FETCH_INTERVAL_MS = 30000;
 const DRIVER_H3_AUTH_COOLDOWN_MS = 120000;
 const HOME_AUTOMATION_POLL_MS = 350;
@@ -1176,6 +1195,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     hasPrototypeHomeSurfaceHydratedInSession
   );
   const [driverH3Cells, setDriverH3Cells] = useState([]);
+  const [driverH3VisualPolicy, setDriverH3VisualPolicy] = useState(DEFAULT_DRIVER_H3_VISUAL_POLICY);
+  const [driverH3RefreshPolicy, setDriverH3RefreshPolicy] = useState({
+    pollIntervalMs: DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS,
+    staleAfterMs: DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS * 2,
+    trafficLayerEnabled: true,
+  });
   const [driverH3RefreshNonce, setDriverH3RefreshNonce] = useState(0);
   const [showRecoveredConnectionHint, setShowRecoveredConnectionHint] = useState(false);
   const [qaConnectionVisualState, setQaConnectionVisualState] = useState(null);
@@ -2682,7 +2707,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const isLiveTripMapActive = ['accepted', 'arrived', 'started'].includes(
     normalizedBookingStatus
   );
-  const shouldShowTrafficLayer = false;
+  const shouldShowTrafficLayer = Boolean(
+    isDriverRole
+    && shouldRenderRuntimeMapState
+    && driverH3RefreshPolicy?.trafficLayerEnabled !== false
+  );
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
   const isPickupPhase =
     normalizedBookingStatus === 'accepted' ||
@@ -3347,6 +3376,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       driverH3LastFetchAtRef.current = 0;
       driverH3DisabledUntilRef.current = 0;
       setDriverH3Cells([]);
+      setDriverH3VisualPolicy(DEFAULT_DRIVER_H3_VISUAL_POLICY);
       return;
     }
 
@@ -3410,13 +3440,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }
 
       const fetchedRecently =
-        now - driverH3LastFetchAtRef.current < DRIVER_H3_MIN_FETCH_INTERVAL_MS;
+        now - driverH3LastFetchAtRef.current < Math.max(
+          DRIVER_H3_MIN_FETCH_INTERVAL_MS,
+          Number(driverH3RefreshPolicy?.pollIntervalMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS)
+        );
       if (fetchedRecently) {
         return;
       }
-
-      driverH3LastFetchKeyRef.current = requestKey;
-      driverH3LastFetchAtRef.current = now;
 
       try {
         const response = await fetchH3CellsForRegion(regionForFetch, {
@@ -3428,7 +3458,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           return;
         }
 
+        driverH3LastFetchKeyRef.current = requestKey;
+        driverH3LastFetchAtRef.current = Date.now();
         setDriverH3Cells(Array.isArray(response?.cells) ? response.cells : []);
+        setDriverH3VisualPolicy(response?.visualPolicy || DEFAULT_DRIVER_H3_VISUAL_POLICY);
+        setDriverH3RefreshPolicy({
+          pollIntervalMs: Math.max(
+            DRIVER_H3_MIN_FETCH_INTERVAL_MS,
+            Number(response?.refreshPolicy?.pollIntervalMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS)
+          ),
+          staleAfterMs: Math.max(
+            DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS,
+            Number(response?.refreshPolicy?.staleAfterMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS * 2)
+          ),
+          trafficLayerEnabled: response?.refreshPolicy?.trafficLayerEnabled !== false,
+        });
       } catch (error) {
         if (!controller.signal.aborted) {
           const status = Number(error?.status || error?.response?.status || 0);
@@ -3436,6 +3480,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             driverH3DisabledUntilRef.current = Date.now() + DRIVER_H3_AUTH_COOLDOWN_MS;
           }
           setDriverH3Cells([]);
+          setDriverH3VisualPolicy(DEFAULT_DRIVER_H3_VISUAL_POLICY);
         }
       }
     }, DRIVER_H3_VIEWPORT_DEBOUNCE_MS);
@@ -3444,7 +3489,30 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [buildDriverH3RequestKey, driverH3RefreshNonce, showDriverH3Overlay, targetRegion, visibleMapRegion]);
+  }, [
+    buildDriverH3RequestKey,
+    driverH3RefreshNonce,
+    driverH3RefreshPolicy?.pollIntervalMs,
+    showDriverH3Overlay,
+    targetRegion,
+    visibleMapRegion
+  ]);
+
+  useEffect(() => {
+    if (!showDriverH3Overlay) {
+      return undefined;
+    }
+
+    const intervalMs = Math.max(
+      DRIVER_H3_MIN_FETCH_INTERVAL_MS,
+      Number(driverH3RefreshPolicy?.pollIntervalMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS)
+    );
+    const interval = setInterval(() => {
+      setDriverH3RefreshNonce((current) => current + 1);
+    }, intervalMs);
+
+    return () => clearInterval(interval);
+  }, [driverH3RefreshPolicy?.pollIntervalMs, showDriverH3Overlay]);
 
   useEffect(() => {
     return () => {
@@ -3640,25 +3708,109 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [scheduleDriverH3Refresh, showDriverH3Overlay]);
 
   const driverH3MapChildren = useMemo(() => {
-    if (!showDriverH3Overlay || !Array.isArray(driverH3Cells) || driverH3Cells.length === 0) {
+    if (
+      !showDriverH3Overlay
+      || driverH3VisualPolicy?.enabled === false
+      || !Array.isArray(driverH3Cells)
+      || driverH3Cells.length === 0
+    ) {
       return null;
     }
 
-    return driverH3Cells
-      .filter((cell) => Array.isArray(cell?.boundary) && cell.boundary.length >= 6)
-      .map((cell) => (
-        <Polygon
-          key={cell.h3Index}
-          coordinates={cell.boundary.map((point) => ({
-            latitude: Number(point.lat),
-            longitude: Number(point.lng)
-          }))}
-          strokeWidth={Number(cell?.style?.strokeWidth ?? 1)}
-          strokeColor={hexToRgba(cell?.style?.stroke || '#15803D', Number(cell?.style?.strokeOpacity ?? 0.58))}
-          fillColor={hexToRgba(cell?.style?.fill || '#22C55E', Number(cell?.style?.fillOpacity ?? 0.18))}
-        />
-      ));
-  }, [driverH3Cells, showDriverH3Overlay]);
+    const surgeCells = driverH3Cells.filter((cell) => (
+      Array.isArray(cell?.boundary)
+      && cell.boundary.length >= 6
+      && Number(cell?.surge?.percent || 0) > 0
+      && Number.isFinite(Number(cell?.center?.lat))
+      && Number.isFinite(Number(cell?.center?.lng))
+    ));
+
+    if (surgeCells.length === 0) {
+      return null;
+    }
+
+    const labelCandidates = [...surgeCells]
+      .filter((cell) => (
+        driverH3VisualPolicy?.label?.enabled !== false
+        && cell?.surge?.labelVisible !== false
+        && isCoordinateInsideRegion(cell?.center, visibleMapRegion, 0.035)
+      ))
+      .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0));
+    const labelCells = selectSeparatedH3Labels(labelCandidates, visibleMapRegion, {
+      maxVisible: Math.min(
+        5,
+        Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 5))
+      ),
+      minDistanceRatio: 0.18,
+    });
+
+    return (
+      <>
+        {surgeCells.map((cell) => (
+          <Polygon
+            key={`surge-${cell.h3Index}`}
+            coordinates={cell.boundary.map((point) => ({
+              latitude: Number(point.lat),
+              longitude: Number(point.lng)
+            }))}
+            strokeWidth={0}
+            strokeColor="rgba(0,0,0,0)"
+            fillColor={hexToRgba(
+              cell?.style?.fill || '#FACC15',
+              Math.min(Number(cell?.style?.fillOpacity ?? 0.16), 0.2)
+            )}
+          />
+        ))}
+        {labelCells.map((cell) => {
+          const percent = Number(cell?.surge?.percent || 0);
+          const label = cell?.surge?.label || `+${Math.round(percent)}%`;
+          const anchor = resolveH3LabelAnchor(cell.center, visibleMapRegion);
+
+          return (
+            <Marker
+              key={`surge-label-${cell.h3Index}`}
+              coordinate={{
+                latitude: Number(cell.center.lat),
+                longitude: Number(cell.center.lng)
+              }}
+              anchor={anchor}
+              tracksViewChanges={Platform.OS === 'android'}
+            >
+              <View
+                collapsable={false}
+                style={[
+                  styles.driverSurgeFlag,
+                  {
+                    backgroundColor: hexToRgba(
+                      driverH3VisualPolicy?.label?.backgroundColor || '#171412',
+                      Number(driverH3VisualPolicy?.label?.backgroundOpacity ?? 0.9)
+                    ),
+                    borderColor: hexToRgba(
+                      driverH3VisualPolicy?.label?.borderColor || '#FFFFFF',
+                      Number(driverH3VisualPolicy?.label?.borderOpacity ?? 0.82)
+                    )
+                  }
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.driverSurgeFlagText,
+                    {
+                      color: driverH3VisualPolicy?.label?.textColor || '#FFFFFF',
+                      fontSize: Number(driverH3VisualPolicy?.label?.fontSize || 12),
+                      lineHeight: Number(driverH3VisualPolicy?.label?.fontSize || 12) + 2
+                    }
+                  ]}
+                >
+                  {label}
+                </Text>
+              </View>
+            </Marker>
+          );
+        })}
+      </>
+    );
+  }, [driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay, visibleMapRegion]);
 
   const getRouteEdgePadding = useCallback(() => {
     const routeAreaTop = Math.max(insets.top + 12, activeOcclusion.top + 12);
@@ -4038,8 +4190,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    setVisibleMapRegion(nextRegion);
-  }, [homePickupPickerVisible, resolveVisibleMapCenterCoordinate, showDriverH3Overlay]);
+    setVisibleMapRegion((previousRegion) => (
+      buildDriverH3RequestKey(previousRegion) === buildDriverH3RequestKey(nextRegion)
+        ? previousRegion
+        : nextRegion
+    ));
+  }, [
+    buildDriverH3RequestKey,
+    homePickupPickerVisible,
+    resolveVisibleMapCenterCoordinate,
+    showDriverH3Overlay,
+  ]);
 
   const handleMapLayout = useCallback(event => {
     const nextWidth = event?.nativeEvent?.layout?.width;
@@ -6270,5 +6431,33 @@ const styles = StyleSheet.create({
     width: '44%',
     height: 13,
     marginTop: 9,
+  },
+  driverSurgeFlag: {
+    minWidth: 52,
+    minHeight: 28,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(23,20,18,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.82)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 6,
+    overflow: 'visible',
+    flexShrink: 0,
+  },
+  driverSurgeFlagText: {
+    color: '#FFFFFF',
+    fontFamily: fonts.SemiBold,
+    fontSize: 12,
+    lineHeight: 14,
+    textAlign: 'center',
+    includeFontPadding: false,
+    flexShrink: 0,
   }
 });

@@ -32,7 +32,7 @@ Fluxo alvo:
 1. Hipótese: separar execução reduz contenção no gateway e melhora previsibilidade do caminho crítico.
 2. Evidência: antes havia acoplamento de listeners no mesmo runtime e consumo misto de stream.
 3. Mudança proposta: `RUNTIME_ROLE=gateway` no websocket e serviço `sideeffects-worker` dedicado.
-4. Diff resumido: `docker-compose.hostinger.yml` com novo serviço `sideeffects-worker`, healthcheck próprio, limits e restart policy.
+4. Diff resumido: `docker-compose.production.yml` com novo serviço `sideeffects-worker`, healthcheck próprio, limits e restart policy.
 5. Risco: drift de configuração entre gateway/worker.
 6. Benchmark antes/depois: funcionalidade manteve 100% de conclusão em todos os cenários da fase.
 7. Rollback: remover `sideeffects-worker`, reativar embedded workers no gateway.
@@ -75,7 +75,7 @@ Fluxo alvo:
 1. Hipótese: warnings de eventos não tratados geravam ruído/log overhead no worker.
 2. Evidência: logs mostravam frequência alta de `Nenhum handler registrado` para tipos conhecidos não críticos.
 3. Mudança proposta: `WORKER_UNHANDLED_QUIET_EVENTS` + skip silencioso no `WorkerManager`.
-4. Diff resumido: `workers/WorkerManager.js` e env no `docker-compose.hostinger.yml`.
+4. Diff resumido: `workers/WorkerManager.js` e env no `docker-compose.production.yml`.
 5. Risco: ocultar evento relevante por configuração incorreta da lista.
 6. Benchmark antes/depois:
    - run3 (pré-quiet): worker CPU p95 = 27.46%

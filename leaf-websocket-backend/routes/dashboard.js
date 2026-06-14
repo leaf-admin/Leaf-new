@@ -21,6 +21,7 @@ const driverSubscriptionService = require('../services/driver-subscription-servi
 const subscriptionStateService = require('../services/subscription-state-service');
 const modernMetricsService = require('../services/modern-metrics-service');
 const h3MapService = require('../services/h3-map-service');
+const h3VisualPolicyService = require('../services/h3-visual-policy-service');
 const financialReconciliationDashboardService = require('../services/financial-reconciliation-dashboard-service');
 const FinancialLedgerService = require('../services/financial-ledger-service');
 const auditService = require('../services/audit-service');
@@ -152,6 +153,10 @@ function hardenDashboardApiRoutes() {
       continue;
     }
 
+    if (dashboardRouteHasMiddleware(layer, authenticateMapH3Access, 'authenticateMapH3Access')) {
+      continue;
+    }
+
     const methods = getDashboardRouteMethods(layer);
     const roles = resolveDashboardHardeningRoles(methods, routePath);
     const roleMiddleware = requireRole(roles);
@@ -261,6 +266,102 @@ async function authenticateLegacyDashboardSupportJWTOrSkip(req, res, next) {
     });
   }
 }
+
+function extractBearerToken(req) {
+  const header = String(req.headers?.authorization || '').trim();
+  if (!header.toLowerCase().startsWith('bearer ')) {
+    return null;
+  }
+  return header.slice(7).trim();
+}
+
+async function authenticateMapH3Access(req, res, next) {
+  try {
+    const token = extractBearerToken(req);
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token não fornecido'
+      });
+    }
+
+    try {
+      const decoded = jwt.verify(token, DASHBOARD_JWT_SECRET);
+      const adminUser = await getAdminUser(decoded.userId, {
+        source: 'dashboard-routes.map-h3-gate',
+        maxAgeMs: 15 * 1000
+      });
+
+      if (adminUser.exists && adminUser.data?.active !== false) {
+        const userData = adminUser.data || {};
+        const role = decoded.role || userData.role || 'viewer';
+
+        if (!DASHBOARD_OPERATION_ROLES.includes(role)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Acesso negado'
+          });
+        }
+
+        req.user = {
+          id: decoded.userId,
+          email: decoded.email || userData.email,
+          role,
+          permissions: decoded.permissions || userData.permissions || []
+        };
+        req.mapH3AuthSource = 'dashboard';
+        return next();
+      }
+    } catch (_dashboardTokenError) {
+      // The mobile app uses Firebase ID tokens. If the token is not a dashboard
+      // JWT, fall through to Firebase verification below.
+    }
+
+    const requestedSurface = String(req.query?.surface || 'dashboard').trim().toLowerCase();
+    if (requestedSurface !== 'driver') {
+      return res.status(403).json({
+        success: false,
+        error: 'Acesso negado'
+      });
+    }
+
+    try {
+      firebaseConfig?.initializeFirebase?.();
+    } catch (_firebaseInitError) {
+      // initializeFirebase is idempotent and logs its own failures.
+    }
+
+    const decodedFirebaseToken = await admin.auth().verifyIdToken(token);
+    const uid = String(decodedFirebaseToken?.uid || '').trim();
+    if (!uid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token sem UID válido'
+      });
+    }
+
+    req.firebaseUser = decodedFirebaseToken;
+    req.authenticatedUser = {
+      uid,
+      phoneNumber: decodedFirebaseToken.phone_number || decodedFirebaseToken.phoneNumber || null,
+      userType: decodedFirebaseToken.userType || decodedFirebaseToken.usertype || null,
+      authSource: 'firebase'
+    };
+    req.mapH3AuthSource = 'firebase';
+    return next();
+  } catch (error) {
+    logError(error, 'Falha ao autenticar acesso ao mapa H3', {
+      service: 'dashboard-routes',
+      operation: 'authenticateMapH3Access'
+    });
+    return res.status(401).json({
+      success: false,
+      error: 'Token inválido ou expirado'
+    });
+  }
+}
+
+authenticateMapH3Access._dashboardAutoMiddleware = 'authenticateMapH3Access';
 
 function parseRatingValue(value) {
   const parsed = Number.parseFloat(value);
@@ -519,7 +620,12 @@ router.patch('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERAT
     const legacyDb = firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
     const updatedUser = await updateUserProfile(safeUserId, req.body || {}, {
       mirrorToLegacyRtdb: legacyDashboardUsersMirrorEnabled,
-      legacyDb
+      legacyDb,
+      operator: {
+        id: req.user?.id || req.user?.userId || null,
+        email: req.user?.email || null,
+        role: req.user?.role || null
+      }
     });
 
     if (!updatedUser) {
@@ -615,6 +721,8 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
 
         if (action === 'reject') {
           reviewData.rejectionReason = rejectionReason;
+        } else {
+          reviewData.rejectionReason = null;
         }
 
         // ✅ Salvar alteração no Firebase Realtime Database
@@ -3238,19 +3346,24 @@ router.get('/api/map/locations', async (req, res) => {
   }
 });
 
-router.get('/api/map/h3-cells', async (req, res) => {
+router.get('/api/map/h3-cells', authenticateMapH3Access, async (req, res) => {
   try {
     const redis = redisPool.getConnection();
+    const surface = String(req.query.surface || 'dashboard').trim().toLowerCase();
+    const visualPolicy = surface === 'driver'
+      ? await h3VisualPolicyService.getPolicy()
+      : h3VisualPolicyService.getDefaultPolicy();
     const includeEmpty = h3MapService.helpers.parseBoolean(req.query.includeEmpty, false);
     const includeBoundary = h3MapService.helpers.parseBoolean(req.query.includeBoundary, true);
     const payload = await h3MapService.getCells({
       redis,
       bbox: req.query.bbox,
       zoom: req.query.zoom,
-      surface: String(req.query.surface || 'dashboard').trim().toLowerCase(),
+      surface,
       mode: String(req.query.mode || 'supply_demand').trim().toLowerCase(),
       includeEmpty,
-      includeBoundary
+      includeBoundary,
+      visualPolicy
     });
 
     res.json(payload);
@@ -3268,6 +3381,58 @@ router.get('/api/map/h3-cells', async (req, res) => {
     });
   }
 });
+
+router.get(
+  '/api/map/h3-visual-policy',
+  authenticateJWT,
+  requireRole(DASHBOARD_MONITORING_ROLES),
+  async (_req, res) => {
+    try {
+      const policy = await h3VisualPolicyService.getPolicy({ forceRefresh: true });
+      return res.json({ success: true, policy });
+    } catch (error) {
+      logError(error, 'Erro ao carregar política visual H3', {
+        service: 'dashboard-routes',
+        operation: 'getH3VisualPolicy'
+      });
+      return res.status(503).json({ success: false, error: 'Política visual indisponível' });
+    }
+  }
+);
+
+router.put(
+  '/api/map/h3-visual-policy',
+  authenticateJWT,
+  requireRole(DASHBOARD_MONITORING_ROLES),
+  async (req, res) => {
+    try {
+      const previous = await h3VisualPolicyService.getPolicy({ forceRefresh: true });
+      const policy = await h3VisualPolicyService.updatePolicy(req.body || {}, req.user || {});
+
+      await auditService.logEvent({
+        userId: req.user?.id || 'dashboard',
+        action: 'dashboard.map.h3_visual_policy.update',
+        resource: 'runtime_config',
+        severity: 'INFO',
+        details: {
+          previous,
+          next: policy,
+          operatorEmail: req.user?.email || null,
+          operatorRole: req.user?.role || null
+        },
+        success: true
+      });
+
+      return res.json({ success: true, policy });
+    } catch (error) {
+      logError(error, 'Erro ao salvar política visual H3', {
+        service: 'dashboard-routes',
+        operation: 'updateH3VisualPolicy'
+      });
+      return res.status(400).json({ success: false, error: error.message || 'Política visual inválida' });
+    }
+  }
+);
 
 // 🗺️ Heat Map Data - Dados para Mapa de Calor
 router.get('/api/map/heatmap', async (req, res) => {
@@ -4113,8 +4278,9 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
     const subscriptionsData = subscriptionsSnapshot.val() || {};
     const now = new Date();
 
-    const plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '990', 10);
+    const plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '1490', 10);
     const eliteDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_ELITE_DAILY_CENTS || '0', 10);
+    const dailyBillingEnabled = String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
 
     let rows = Object.keys(users).map((driverId) => {
       const driver = users[driverId] || {};
@@ -4163,7 +4329,7 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
       const latestFreeEnd = freeEnds.length > 0
         ? new Date(Math.max(...freeEnds.map((date) => date.getTime())))
         : null;
-      const isFree = subscription.isFeeExempt === true || latestFreeEnd !== null;
+      const isFree = subscription.isFeeExempt === true || latestFreeEnd !== null || !dailyBillingEnabled;
 
       const appliedDailyFeeCents = isFree ? 0 : dailyFeeCents;
 
@@ -4185,6 +4351,10 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
           collectionMode: String(subscription.collectionMode || driver.subscription_collection_mode || 'withdrawal').toLowerCase(),
           dailyFeeCents: appliedDailyFeeCents,
           dailyFee: Number((appliedDailyFeeCents / 100).toFixed(2)),
+          nominalDailyFeeCents: dailyFeeCents,
+          nominalDailyFee: Number((dailyFeeCents / 100).toFixed(2)),
+          dailyBillingEnabled,
+          dailyBillingSuspended: !dailyBillingEnabled,
           weeklyFeeCents,
           weeklyFee: Number((weeklyFeeCents / 100).toFixed(2)),
           pendingFeeCents,

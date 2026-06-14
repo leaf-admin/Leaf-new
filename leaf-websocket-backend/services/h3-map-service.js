@@ -2,14 +2,34 @@ const h3 = require('h3-js');
 const { logStructured } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const { normalizeDriverStatus } = require('./dashboard-live-data-service');
+const {
+  MAX_DEMAND_MARKUP_PERCENT,
+  calculateDemandPressure
+} = require('./pricing/demandPressure');
 
-const CACHE_TTL_MS = Number.parseInt(process.env.H3_MAP_CACHE_TTL_MS || '5000', 10);
+const CACHE_TTL_MS = Number.parseInt(process.env.H3_MAP_CACHE_TTL_MS || '10000', 10);
+const CLIENT_REFRESH_INTERVAL_MS = Math.max(
+  30000,
+  Number.parseInt(process.env.H3_MAP_CLIENT_REFRESH_INTERVAL_MS || '60000', 10)
+);
+const CLIENT_STALE_AFTER_MS = Math.max(
+  CLIENT_REFRESH_INTERVAL_MS,
+  Number.parseInt(process.env.H3_MAP_CLIENT_STALE_AFTER_MS || '120000', 10)
+);
+const DRIVER_TRAFFIC_LAYER_ENABLED = !['0', 'false', 'off', 'no'].includes(
+  String(process.env.ENABLE_DRIVER_TRAFFIC_LAYER || 'true').trim().toLowerCase()
+);
 const MAX_CELLS = Number.parseInt(process.env.H3_MAP_MAX_CELLS || '500', 10);
 const BBOX_MAX_SPAN_DEGREES = Number.parseFloat(process.env.H3_MAP_MAX_BBOX_SPAN_DEGREES || '5');
 const SEARCH_SCAN_COUNT = Number.parseInt(process.env.H3_MAP_SCAN_COUNT || '250', 10);
 const SEARCH_SCAN_MAX_KEYS = Number.parseInt(process.env.H3_MAP_SCAN_MAX_KEYS || '4000', 10);
 const OPEN_REQUEST_ACTIVE_WINDOW_MS = Number.parseInt(process.env.H3_MAP_OPEN_REQUEST_WINDOW_MS || String(10 * 60 * 1000), 10);
 const ACTIVE_BOOKING_STALE_MS = Number.parseInt(process.env.H3_MAP_ACTIVE_BOOKING_STALE_MS || String(12 * 60 * 60 * 1000), 10);
+const MAX_DYNAMIC_SURGE_PERCENT = MAX_DEMAND_MARKUP_PERCENT;
+const SURGE_LABEL_MIN_PERCENT = Math.max(
+  1,
+  Number.parseInt(process.env.H3_MAP_SURGE_LABEL_MIN_PERCENT || '3', 10) || 3
+);
 const MIN_GEO_QUERY_KM = 0.1;
 const SUPPORTED_SURFACES = new Set(['driver', 'dashboard']);
 const SUPPORTED_MODES = new Set(['supply_demand']);
@@ -258,37 +278,72 @@ function interpolatePalette(score, stops, fallbackColor) {
   return stops[stops.length - 1]?.color || fallbackColor;
 }
 
-function buildVisualIntensity(metrics = {}, level = 'low') {
-  const demandNorm = clamp((Number(metrics.demand) || 0) / 8, 0, 1);
-  const imbalanceNorm = clamp((Number(metrics.imbalance) || 0) / 3, 0, 1);
-  const shortageNorm = clamp(Math.max(0, -(Number(metrics.surplus) || 0)) / 4, 0, 1);
-  const openRequestsNorm = clamp((Number(metrics.openRequests) || 0) / 5, 0, 1);
-
-  if (demandNorm === 0 && imbalanceNorm === 0 && shortageNorm === 0 && openRequestsNorm === 0) {
-    return 0;
-  }
-
-  const weightedScore =
-    (0.4 * demandNorm) +
-    (0.35 * imbalanceNorm) +
-    (0.15 * shortageNorm) +
-    (0.1 * openRequestsNorm);
-
-  const levelFloor = {
-    low: 0.04,
-    medium: 0.28,
-    high: 0.54,
-    critical: 0.78
-  };
-
-  const floor = levelFloor[level] ?? 0.04;
-  return clamp(Math.max(weightedScore, floor), 0, 1);
+function formatSurgeLabel(template, percent) {
+  return String(template || '+{percent}%').replaceAll('{percent}', String(percent));
 }
 
-function buildStyle(level, surface, resolution = 8, metrics = {}) {
+function buildSurgeDisplay(metrics = {}, level = 'low', visualPolicy = {}) {
+  const demandPressure = calculateDemandPressure({
+    demand: metrics.demand,
+    openRequests: metrics.openRequests,
+    availableDrivers: metrics.availableDrivers
+  });
+  const percent = demandPressure.percent;
+
+  return {
+    percent,
+    multiplier: demandPressure.multiplier,
+    level: demandPressure.level,
+    label: percent > 0 ? formatSurgeLabel(visualPolicy?.label?.template, percent) : '',
+    labelVisible:
+      visualPolicy?.enabled !== false
+      &&
+      visualPolicy?.label?.enabled !== false
+      && percent >= Number(visualPolicy?.label?.minPercent || SURGE_LABEL_MIN_PERCENT)
+  };
+}
+
+function buildStyle(level, surface, resolution = 8, metrics = {}, visualPolicy = {}) {
   const dashboard = surface === 'dashboard';
   const resolutionBias = clamp((Number(resolution || 8) - 6) / 4, 0, 1);
-  const visualIntensity = buildVisualIntensity(metrics, level);
+  const surge = buildSurgeDisplay(metrics, level, visualPolicy);
+  const visualIntensity = surge.percent / Math.max(1, MAX_DYNAMIC_SURGE_PERCENT);
+  const opacity = clamp(Number(visualPolicy?.opacity ?? 1), 0.15, 1);
+
+  if (surface === 'driver') {
+    if (visualPolicy?.enabled === false || surge.percent <= 0) {
+      return {
+        fill: '#000000',
+        stroke: '#000000',
+        fillOpacity: 0,
+        strokeOpacity: 0,
+        strokeWidth: 0,
+        visualIntensity: 0
+      };
+    }
+
+    const fillByLevel = {
+      yellow: visualPolicy?.palette?.yellow || '#FACC15',
+      red: visualPolicy?.palette?.red || '#EF4444',
+      purple: visualPolicy?.palette?.purple || '#7E22CE'
+    };
+    const strokeByLevel = {
+      yellow: visualPolicy?.palette?.yellowStroke || '#CA8A04',
+      red: visualPolicy?.palette?.redStroke || '#B91C1C',
+      purple: visualPolicy?.palette?.purpleStroke || '#581C87'
+    };
+    const surgeStrength = clamp(surge.percent / Math.max(1, MAX_DYNAMIC_SURGE_PERCENT), 0, 1);
+
+    return {
+      fill: fillByLevel[surge.level] || '#FACC15',
+      stroke: strokeByLevel[surge.level] || '#CA8A04',
+      fillOpacity: Number(((0.1 + (0.18 * surgeStrength) + (0.018 * resolutionBias)) * opacity).toFixed(3)),
+      strokeOpacity: 0,
+      strokeWidth: 0,
+      visualIntensity: Number(visualIntensity.toFixed(3))
+    };
+  }
+
   const fill = interpolatePalette(visualIntensity, [
     { at: 0, color: '#22C55E' },
     { at: 0.42, color: '#FACC15' },
@@ -301,10 +356,10 @@ function buildStyle(level, surface, resolution = 8, metrics = {}) {
     { at: 0.72, color: '#B45309' },
     { at: 1, color: '#B91C1C' }
   ], '#15803D');
-  const fillOpacity = dashboard
+  const fillOpacityBase = dashboard
     ? 0.015 + (0.055 * visualIntensity) + (0.01 * resolutionBias)
     : 0.025 + (0.075 * visualIntensity) + (0.012 * resolutionBias);
-  const strokeOpacity = dashboard
+  const strokeOpacityBase = dashboard
     ? 0.04 + (0.09 * visualIntensity) + (0.012 * resolutionBias)
     : 0.055 + (0.11 * visualIntensity) + (0.015 * resolutionBias);
   const strokeWidth = dashboard
@@ -314,8 +369,8 @@ function buildStyle(level, surface, resolution = 8, metrics = {}) {
   return {
     fill,
     stroke,
-    fillOpacity: Number(fillOpacity.toFixed(3)),
-    strokeOpacity: Number(strokeOpacity.toFixed(3)),
+    fillOpacity: Number((fillOpacityBase * opacity).toFixed(3)),
+    strokeOpacity: Number((strokeOpacityBase * opacity).toFixed(3)),
     strokeWidth: Number(strokeWidth.toFixed(2)),
     visualIntensity: Number(visualIntensity.toFixed(3))
   };
@@ -408,14 +463,15 @@ class H3MapService {
     this.cache = new Map();
   }
 
-  getCacheKey({ bbox, resolution, surface, mode, includeEmpty, includeBoundary }) {
+  getCacheKey({ bbox, resolution, surface, mode, includeEmpty, includeBoundary, visualPolicy }) {
     return [
       normalizeBBoxForCache(bbox),
       resolution,
       surface,
       mode,
       includeEmpty ? '1' : '0',
-      includeBoundary ? '1' : '0'
+      includeBoundary ? '1' : '0',
+      Number(visualPolicy?.version || 1)
     ].join(':');
   }
 
@@ -443,7 +499,8 @@ class H3MapService {
     surface = 'dashboard',
     mode = 'supply_demand',
     includeEmpty = false,
-    includeBoundary = true
+    includeBoundary = true,
+    visualPolicy = {}
   }) {
     if (!redis) {
       throw createHttpError(503, 'Redis indisponível para montar mapa H3');
@@ -457,8 +514,17 @@ class H3MapService {
       throw createHttpError(400, 'mode inválido. Use supply_demand.');
     }
 
-    let resolution = resolutionForZoom(zoom);
-    const cacheKey = this.getCacheKey({ bbox, resolution, surface, mode, includeEmpty, includeBoundary });
+    const resolutionOffset = Math.round(clamp(Number(visualPolicy?.resolutionOffset || 0), -1, 1));
+    let resolution = clamp(resolutionForZoom(zoom) + resolutionOffset, 6, 10);
+    const cacheKey = this.getCacheKey({
+      bbox,
+      resolution,
+      surface,
+      mode,
+      includeEmpty,
+      includeBoundary,
+      visualPolicy
+    });
     metrics.recordH3CellsRequest(surface, mode);
 
     const cached = this.getCached(cacheKey);
@@ -481,7 +547,8 @@ class H3MapService {
       surface,
       includeEmpty,
       includeBoundary,
-      snapshot
+      snapshot,
+      visualPolicy
     });
 
     while (payload.cells.length > MAX_CELLS && resolution > 1) {
@@ -492,7 +559,8 @@ class H3MapService {
         surface,
         includeEmpty,
         includeBoundary,
-        snapshot
+        snapshot,
+        visualPolicy
       });
     }
 
@@ -506,7 +574,15 @@ class H3MapService {
     };
 
     this.setCached(
-      this.getCacheKey({ bbox, resolution: payload.resolution, surface, mode, includeEmpty, includeBoundary }),
+      this.getCacheKey({
+        bbox,
+        resolution: payload.resolution,
+        surface,
+        mode,
+        includeEmpty,
+        includeBoundary,
+        visualPolicy
+      }),
       payload
     );
 
@@ -821,14 +897,15 @@ class H3MapService {
     return trips;
   }
 
-  buildPayload({ bbox, resolution, surface, includeEmpty, includeBoundary, snapshot }) {
+  buildPayload({ bbox, resolution, surface, includeEmpty, includeBoundary, snapshot, visualPolicy = {} }) {
     const aggregated = this.aggregateCells({
       bbox,
       resolution,
       surface,
       includeEmpty,
       includeBoundary,
-      snapshot
+      snapshot,
+      visualPolicy
     });
 
     const summary = aggregated.cells.reduce((accumulator, cell) => {
@@ -837,17 +914,30 @@ class H3MapService {
       accumulator.driversAvailable += cell.metrics.availableDrivers;
       accumulator.openRequests += cell.metrics.openRequests;
       accumulator.activeTrips += cell.metrics.activeTrips;
+      accumulator.surgeCells += Number(cell.surge?.percent || 0) > 0 ? 1 : 0;
+      accumulator.maxSurgePercent = Math.max(accumulator.maxSurgePercent, Number(cell.surge?.percent || 0));
       return accumulator;
     }, {
       cells: 0,
       driversOnline: 0,
       driversAvailable: 0,
       openRequests: 0,
-      activeTrips: 0
+      activeTrips: 0,
+      surgeCells: 0,
+      maxSurgePercent: 0
     });
 
     return {
       generatedAt: new Date().toISOString(),
+      source: 'leaf_internal_supply_demand',
+      paidProviderCalls: false,
+      refreshPolicy: {
+        pollIntervalMs: CLIENT_REFRESH_INTERVAL_MS,
+        staleAfterMs: CLIENT_STALE_AFTER_MS,
+        backendCacheTtlMs: CACHE_TTL_MS,
+        socketHintsEnabled: true,
+        trafficLayerEnabled: DRIVER_TRAFFIC_LAYER_ENABLED
+      },
       bbox: {
         minLng: bbox.minLng,
         minLat: bbox.minLat,
@@ -855,12 +945,13 @@ class H3MapService {
         maxLat: bbox.maxLat
       },
       resolution: aggregated.resolution,
+      visualPolicy,
       summary,
       cells: aggregated.cells
     };
   }
 
-  aggregateCells({ bbox, resolution, surface, includeEmpty, includeBoundary, snapshot }) {
+  aggregateCells({ bbox, resolution, surface, includeEmpty, includeBoundary, snapshot, visualPolicy = {} }) {
     const cells = new Map();
 
     const getCell = (h3Index) => {
@@ -901,7 +992,6 @@ class H3MapService {
       const h3Index = h3.latLngToCell(trip.location.lat, trip.location.lng, resolution);
       const cell = getCell(h3Index);
       cell.activeTrips += 1;
-      cell.demand += 1;
     });
 
     if (includeEmpty) {
@@ -938,6 +1028,15 @@ class H3MapService {
           surplus,
           imbalance
         });
+        const styleInput = {
+          demand: cell.demand,
+          availableDrivers: cell.availableDrivers,
+          openRequests: cell.openRequests,
+          activeTrips: cell.activeTrips,
+          imbalance,
+          surplus
+        };
+        const surge = buildSurgeDisplay(styleInput, demandLevel, visualPolicy);
 
         return {
           h3Index: cell.h3Index,
@@ -959,14 +1058,8 @@ class H3MapService {
             demandLevel,
             fillRateHint
           },
-          style: buildStyle(demandLevel, surface, resolution, {
-            demand: cell.demand,
-            availableDrivers: cell.availableDrivers,
-            openRequests: cell.openRequests,
-            activeTrips: cell.activeTrips,
-            imbalance,
-            surplus
-          })
+          surge,
+          style: buildStyle(demandLevel, surface, resolution, styleInput, visualPolicy)
         };
       })
       .sort((left, right) => left.h3Index.localeCompare(right.h3Index));
@@ -989,6 +1082,7 @@ module.exports.helpers = {
   resolveDemandLevel,
   resolveFillRateHint,
   buildStyle,
+  buildSurgeDisplay,
   parseBoolean,
   getViewportH3Cells
 };

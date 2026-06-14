@@ -36,8 +36,8 @@ Limpar o projeto em baby steps, sem remover legado vivo nem misturar limpeza com
 
 - Screenshots soltos na raiz e em `mobile-app/*.png` que não fazem parte de assets do app.
 - Artefatos locais e temporários em `reports/`, `test-results/` e pastas de QA antigas, respeitando o que estiver versionado.
-- `.do/app.yaml` e scripts/documentos de DigitalOcean se não forem mais usados.
-- Scripts de infra antiga com Hostinger/Vultr/sslip, depois de confirmar que nenhum runbook atual depende deles.
+- `.do/app.yaml` e scripts/documentos de provedor legado se não forem mais usados.
+- Scripts de infra antiga com provedor legado/Vultr/sslip, depois de confirmar que nenhum runbook atual depende deles.
 - `landing-page/assets/referencia-files`, se forem somente referências copiadas e não parte da landing publicada.
 - `web-app`, se permanecer fora dos workspaces ativos e sem referência operacional.
 
@@ -116,10 +116,10 @@ Validação:
 
 Escopo: remover scripts historicos de deploy/manutencao que nao fazem parte do fluxo Contabo atual e eram sinalizados pelo scanner por CORS aberto.
 
-- Removidos scripts antigos de Hostinger/self-hosted/147.182:
+- Removidos scripts antigos de provedor legado/self-hosted/147.182:
   - `scripts/maintenance/deploy/add-trip-tracking-apis.sh`
-  - `scripts/maintenance/deploy/deploy-to-hostinger.sh`
-  - `scripts/maintenance/deploy/setup-hostinger-leaf.sh`
+  - `scripts/maintenance/deploy/deploy-to-provedor-legado.sh`
+  - `scripts/maintenance/deploy/setup-provedor-legado-leaf.sh`
   - `scripts/maintenance/deploy/setup-self-hosted.sh`
   - `scripts/maintenance/deploy/test-simple-apis.sh`
   - `scripts/maintenance/server.js`
@@ -219,8 +219,8 @@ Validação:
 
 Escopo: remover scripts historicos de infra fora do caminho Contabo/modular atual.
 
-- Removidos scripts antigos de Hostinger/Vultr/migracao:
-  - `scripts/maintenance/hostinger/setup-hostinger-fallback.sh`
+- Removidos scripts antigos de provedor legado/Vultr/migracao:
+  - `scripts/maintenance/provedor-legado/setup-provedor-legado-fallback.sh`
   - `scripts/maintenance/migration/migrate-to-vultr.sh`
   - `scripts/maintenance/vultr/install-vultr.sh`
   - `scripts/maintenance/vultr/nginx-leaf-app.conf`
@@ -228,7 +228,7 @@ Escopo: remover scripts historicos de infra fora do caminho Contabo/modular atua
   - `scripts/maintenance/vultr/setup-vultr-economico.sh`
   - `scripts/maintenance/vultr/setup-vultr-primary.sh`
   - `scripts/maintenance/tests/test-vps-differences.cjs`
-- Mantido `leaf-websocket-backend/docker-compose.hostinger.yml` porque ainda e o compose operacional/canonico apesar do nome legado.
+- Mantido `leaf-websocket-backend/docker-compose.production.yml` porque ainda e o compose operacional/canonico apesar do nome legado.
 
 Validação:
 
@@ -258,7 +258,7 @@ Validação:
 
 ## Bloco 12 - Executado
 
-Escopo: remover manifest DigitalOcean App Platform que nao pertence ao deploy Contabo atual.
+Escopo: remover manifest provedor legado App Platform que nao pertence ao deploy Contabo atual.
 
 - Removido `.do/app.yaml`.
 - Removida a entrada explicita de `.do/app.yaml` do scanner de secrets.
@@ -279,7 +279,7 @@ Escopo: alinhar documentacao tecnica principal com runtime modular e dominios ca
   - SSH remoto deve ser definido via env dos scripts operacionais.
   - Runtime atual documentado como `server.js` modular.
   - `server.vps.js` documentado apenas como rollback legado temporario.
-  - `docker-compose.hostinger.yml` mantido como compose atual com nome legado.
+  - `docker-compose.production.yml` mantido como compose atual com nome legado.
 
 Validação:
 
@@ -336,7 +336,7 @@ Escopo: remover pacote Docker/HA/autoscale antigo do backend.
 - Mantidos os scripts vivos/canonicos:
   - `leaf-websocket-backend/scripts/deploy/validate-runtime-config.js`
   - `leaf-websocket-backend/scripts/deploy/deploy-secondary-realtime-host.sh`
-  - `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh` por compatibilidade operacional atual.
+  - `leaf-websocket-backend/scripts/deploy-contabo-docker.sh` por compatibilidade operacional atual.
 
 Validação:
 
@@ -366,7 +366,7 @@ Validação:
 
 Escopo: alinhar borda backend ativa aos dominios Leaf.
 
-- Atualizado `docker-compose.hostinger.yml` para usar `https://api.leaf.app.br` e `https://api.leaf.app.br/api/woovi/webhook` como defaults.
+- Atualizado `docker-compose.production.yml` para usar `https://api.leaf.app.br` e `https://api.leaf.app.br/api/woovi/webhook` como defaults.
 - Atualizado `docker-compose.realtime-secondary.yml` com os mesmos defaults canonicos.
 - Atualizado `nginx.conf`, montado pelo compose ativo, para servir HTTP/HTTPS em `api.leaf.app.br`, `socket.leaf.app.br` e `dashboard.leaf.app.br`.
 - Removidos nomes/certificados `sslip.io` da configuracao `nginx.multi-gateway.conf` usada pelo compose de gateway escalado.
@@ -437,7 +437,7 @@ Validação:
 
 Escopo: alinhar scripts operacionais ativos com Contabo, runtime modular e dominios Leaf.
 
-- Removidos defaults para IPs antigos, `sslip.io` e `digitaloceankey` dos scripts atuais de deploy/canary/rollout.
+- Removidos defaults para IPs antigos, `sslip.io` e `provedor-legadokey` dos scripts atuais de deploy/canary/rollout.
 - Scripts de deploy agora exigem host/chave explicitos via `VPS_IP`/`CONTABO_HOST` e `VPS_SSH_KEY`/`SSH_KEY_PATH`/`CONTABO_KEY`.
 - `check-vps-runtime-parity.sh` passa a assumir `RUNTIME_MODE=modular` por default.
 - Deploy/canary de dashboard e realtime passam a publicar defaults para `https://api.leaf.app.br`, `https://socket.leaf.app.br` e `https://dashboard.leaf.app.br`.
@@ -446,7 +446,7 @@ Escopo: alinhar scripts operacionais ativos com Contabo, runtime modular e domin
 Validação:
 
 - `bash -n` nos scripts shell alterados: PASS.
-- `rg` direcionado nos scripts alterados confirmou ausencia de `147.182`, `62.169`, `digitaloceankey` e `sslip.io`: PASS.
+- `rg` direcionado nos scripts alterados confirmou ausencia de `147.182`, `62.169`, `provedor-legadokey` e `sslip.io`: PASS.
 - `git diff --check`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`: PASS.
@@ -527,12 +527,12 @@ Validação:
 Escopo: alinhar documentacao operacional ativa aos dominios Leaf e ao runtime Contabo atual.
 
 - Atualizados runbooks ativos de teste, cutover, soft release, capacidade, segundo host realtime, Play Console e KYC dedicado.
-- Removidas instrucoes operacionais que ainda mandavam usar `sslip.io`, IP direto da VPS ou chave `digitaloceankey`.
+- Removidas instrucoes operacionais que ainda mandavam usar `sslip.io`, IP direto da VPS ou chave `provedor-legadokey`.
 - Mantidos arquivos historicos como evidencia; eles devem ficar separados do caminho operacional atual.
 
 Validação:
 
-- Varredura final de documentacao ativa sem referencias antigas a IP direto, `sslip.io`, `digitaloceankey` ou provedores antigos: PASS.
+- Varredura final de documentacao ativa sem referencias antigas a IP direto, `sslip.io`, `provedor-legadokey` ou provedores antigos: PASS.
 - `node -c scripts/prelaunch/assert-store-go-static.cjs`: PASS.
 - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: PASS.
 - `git diff --check`: PASS.
@@ -548,7 +548,7 @@ Escopo: arquivar relatorios historicos que citavam provedores antigos, IP direto
 
 Validação:
 
-- Varredura final de documentacao ativa sem referencias antigas a IP direto, `sslip.io`, `digitaloceankey` ou provedores antigos: PASS.
+- Varredura final de documentacao ativa sem referencias antigas a IP direto, `sslip.io`, `provedor-legadokey` ou provedores antigos: PASS.
 - `node scripts/prelaunch/assert-store-go-static.cjs`: PASS com warnings historicos conhecidos e `Failures: 0`.
 - `git diff --check`: PASS.
 
@@ -585,27 +585,25 @@ Validação:
   - `vehicle-image-bank`: `1.2G`
 - `git status --short`: limpo antes do registro deste bloco.
 
-## Bloco 32 - Executado
+## Bloco 32 - Superado pelo deploy modular de 2026-06-13
 
-Escopo: criar aliases canonicos para nomes legados vivos sem quebrar compatibilidade.
+O bloco originalmente criou aliases temporários. Eles foram removidos depois da
+validação do runtime modular:
 
-- Criados aliases de compose:
-  - `leaf-websocket-backend/docker-compose.contabo.yml`
-  - `leaf-websocket-backend/docker-compose.production.yml`
-- Os aliases apontam para `docker-compose.hostinger.yml`, que segue sendo o compose operacional por compatibilidade.
-- Criados wrappers de deploy:
-  - `leaf-websocket-backend/scripts/deploy-contabo-docker.sh`
-  - `scripts/deploy-contabo-completo.sh`
-- Os wrappers chamam o script legado compatível `deploy-hostinger-docker.sh`.
+- `docker-compose.production.yml` agora é um arquivo real e a base canônica.
+- `docker-compose.gateway-scale.yml` é o override canônico de escala.
+- `leaf-websocket-backend/scripts/deploy-contabo-docker.sh` faz rollout
+  incremental, sem derrubar Redis ou volumes.
+- `scripts/deploy-contabo-completo.sh` permanece como wrapper suportado.
 - `server.vps.js` permanece preservado como rollback deprecated, sem renome nesta etapa.
 
 Validação:
 
 - `bash -n leaf-websocket-backend/scripts/deploy-contabo-docker.sh scripts/deploy-contabo-completo.sh`: PASS.
 - `npm --prefix leaf-websocket-backend run check:no-active-vps-runtime`: PASS.
-- `node` confirmou que os aliases de compose sao symlinks para `docker-compose.hostinger.yml` e que o alvo existe.
+- O compose canônico é um arquivo regular, sem symlink para nomes antigos.
 - `git diff --check`: PASS.
-- `docker compose -f docker-compose.contabo.yml config --services`: nao executado porque `docker` nao esta disponivel neste shell.
+- `docker compose -f docker-compose.production.yml -f docker-compose.gateway-scale.yml config --services`: obrigatório no deploy modular.
 
 ## Bloco 33 - Executado
 
@@ -617,6 +615,32 @@ Escopo: reforcar guardrail de bypass de pagamento no mobile.
 - A mudanca mantem ferramentas QA disponiveis quando as duas flags estao ligadas em ambiente permitido.
 - Adicionado teste unitario da politica de runtime.
 - Atualizado production guard para travar regressao nesta regra.
+
+## Bloco 34 - Deploy modular e remoção de referências de provedores antigos
+
+Escopo:
+
+- Tornar `docker-compose.production.yml` um arquivo real e a base canônica.
+- Usar `docker-compose.gateway-scale.yml` como override de escala.
+- Substituir o deploy destrutivo por rollout modular na Contabo.
+- Remover scripts, aliases, chaves locais e referências nominais de provedores
+  anteriores da árvore atual.
+
+Guardrails:
+
+- Deploy exige `CONFIRM_PRODUCTION_DEPLOY=true`.
+- Não executa `docker compose down`.
+- Não usa `-v` e não reinicia Redis.
+- Cria backup remoto antes da sincronização.
+- Exclui `.env`, credenciais, certificados, logs e volumes da sincronização.
+- Atualiza um gateway por vez e exige health antes de avançar.
+- Atualiza workers individualmente e valida health.
+- Valida API, socket e Nginx ao final.
+
+Rollback:
+
+- Cada rollout salva compose, inventário de imagens e código anterior em
+  `/opt/leaf-app/backups/modular-rollout-YYYYMMDD-HHMMSS`.
 
 Validação:
 

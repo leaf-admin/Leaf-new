@@ -147,7 +147,7 @@ class LocalCacheService {
 const endpoints = [
     'https://us-central1-leaf-reactnative.cloudfunctions.net',
     'https://backup-leaf-api.herokuapp.com',
-    'https://leaf-api-vps.digitalocean.com'
+    'https://api.leaf.app.br'
 ];
 
 async function makeRequest(endpoint, data) {

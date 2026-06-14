@@ -9,6 +9,102 @@ describe('H3MapService', () => {
     expect(helpers.resolutionForZoom(17)).toBe(10);
   });
 
+  test('driver surface exposes dynamic fare regions only when surcharge exists', () => {
+    const normalStyle = helpers.buildStyle('low', 'driver', 8, {
+      demand: 0,
+      availableDrivers: 3,
+      imbalance: 0,
+      surplus: 3,
+    });
+    expect(normalStyle.fillOpacity).toBe(0);
+    expect(normalStyle.strokeOpacity).toBe(0);
+
+    const surge = helpers.buildSurgeDisplay({
+      demand: 8,
+      availableDrivers: 0,
+      openRequests: 8,
+      activeTrips: 0,
+      imbalance: 8,
+      surplus: -8,
+    }, 'critical');
+    expect(surge.percent).toBeLessThanOrEqual(35);
+    expect(surge.level).toBe('purple');
+    expect(surge.label).toMatch(/^\+/);
+
+    const hotStyle = helpers.buildStyle('critical', 'driver', 8, {
+      demand: 8,
+      availableDrivers: 0,
+      openRequests: 8,
+      activeTrips: 0,
+      imbalance: 8,
+      surplus: -8,
+    });
+    expect(hotStyle.fill).toBe('#7E22CE');
+    expect(hotStyle.fillOpacity).toBeGreaterThan(0);
+  });
+
+  test('applies backend visual policy without changing the surcharge cap', () => {
+    const visualPolicy = {
+      opacity: 0.5,
+      palette: {
+        purple: '#123456',
+        purpleStroke: '#654321',
+      },
+      label: {
+        enabled: true,
+        minPercent: 20,
+        template: 'extra {percent}%'
+      }
+    };
+    const metrics = {
+      demand: 8,
+      availableDrivers: 0,
+      openRequests: 8,
+      activeTrips: 0,
+      imbalance: 8,
+      surplus: -8,
+    };
+
+    const surge = helpers.buildSurgeDisplay(metrics, 'critical', visualPolicy);
+    const style = helpers.buildStyle('critical', 'driver', 8, metrics, visualPolicy);
+
+    expect(surge.percent).toBe(35);
+    expect(surge.label).toBe('extra 35%');
+    expect(surge.labelVisible).toBe(true);
+    expect(style.fill).toBe('#123456');
+    expect(style.stroke).toBe('#654321');
+    expect(style.fillOpacity).toBeLessThan(0.3);
+    expect(style.strokeOpacity).toBeLessThan(style.fillOpacity);
+    expect(style.strokeWidth).toBeLessThanOrEqual(0.4);
+  });
+
+  test('hides the driver overlay when runtime policy is disabled', () => {
+    const metrics = {
+      demand: 8,
+      availableDrivers: 0,
+      openRequests: 8,
+      activeTrips: 0,
+      imbalance: 8,
+      surplus: -8,
+    };
+    const policy = {
+      enabled: false,
+      label: {
+        enabled: true,
+        minPercent: 1,
+        template: '+{percent}%'
+      }
+    };
+
+    const surge = helpers.buildSurgeDisplay(metrics, 'critical', policy);
+    const style = helpers.buildStyle('critical', 'driver', 8, metrics, policy);
+
+    expect(surge.percent).toBe(35);
+    expect(surge.labelVisible).toBe(false);
+    expect(style.fillOpacity).toBe(0);
+    expect(style.strokeOpacity).toBe(0);
+  });
+
   test('builds h3 payload from redis-backed snapshot', async () => {
     const service = new H3MapService();
     const driverGeo = {
@@ -84,6 +180,13 @@ describe('H3MapService', () => {
     expect(result.summary.driversOnline).toBe(3);
     expect(result.summary.openRequests).toBe(1);
     expect(result.summary.activeTrips).toBe(1);
+    expect(result.summary).toHaveProperty('surgeCells');
+    expect(result.summary).toHaveProperty('maxSurgePercent');
+    expect(result.source).toBe('leaf_internal_supply_demand');
+    expect(result.paidProviderCalls).toBe(false);
+    expect(result.refreshPolicy.pollIntervalMs).toBeGreaterThanOrEqual(30000);
+    expect(result.refreshPolicy.trafficLayerEnabled).toBe(true);
+    expect(result.cells.reduce((sum, cell) => sum + cell.metrics.demand, 0)).toBe(1);
     expect(Array.isArray(result.cells)).toBe(true);
     expect(result.cells.length).toBeGreaterThan(0);
     expect(result.cells[0].boundary.length).toBeGreaterThanOrEqual(6);

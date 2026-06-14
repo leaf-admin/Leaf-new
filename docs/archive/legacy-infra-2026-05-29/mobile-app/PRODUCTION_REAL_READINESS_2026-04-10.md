@@ -191,7 +191,7 @@
 - Qualquer build pública deve sair com:
   - `APP_REVIEW=false`
   - `driverWithdrawalsEnabled=false`
-  - host atual da Contabo, nunca o host antigo da DigitalOcean
+  - host atual da Contabo, nunca o host antigo da provedor anterior
 
 ## Comando útil
 

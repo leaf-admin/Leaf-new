@@ -20,7 +20,7 @@ O proxy da Contabo deve responder por:
 Arquivos:
 
 - `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/nginx.conf`
-- `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/docker-compose.hostinger.yml`
+- `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/docker-compose.production.yml`
 
 ## TLS
 

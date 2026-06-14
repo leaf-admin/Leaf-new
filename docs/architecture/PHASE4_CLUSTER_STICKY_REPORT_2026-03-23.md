@@ -11,7 +11,7 @@ Executar Fase 4 no backend websocket da VPS para melhor uso de 2 vCPU com Node c
 
 Arquivos alterados nesta fase:
 - `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/server.vps.js`
-- `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/docker-compose.hostinger.yml`
+- `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/docker-compose.production.yml`
 - `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/nginx.conf`
 - `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/tests/e2e/backend/__helpers__/websocket-test-client.js`
 - `/Users/izaakdias/Documents/Leaf-new/leaf-websocket-backend/scripts/stress-test/sustained-active-rides-capacity.cjs`
@@ -28,7 +28,7 @@ Arquivos alterados nesta fase:
 - Ativar cluster configurável por env e isolar jobs periódicos em worker líder.
 4. Diff resumido
 - `server.vps.js`: flags `LEAF_CLUSTER_ENABLED`, `LEAF_CLUSTER_WORKERS`, `LEAF_CLUSTER_SCHEDULER_LEADER_ID`; split `cluster primary/worker`; guarda de jobs periódicos.
-- `docker-compose.hostinger.yml`: envs de cluster adicionadas.
+- `docker-compose.production.yml`: envs de cluster adicionadas.
 5. Risco
 - Duplicação de side effects se liderança falhar; mitigado por guard explícito de worker líder.
 6. Benchmark antes/depois

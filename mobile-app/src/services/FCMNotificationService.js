@@ -124,6 +124,7 @@ class FCMNotificationService {
         this.backgroundMessageHandler = null;
         this.pendingTokenRegistration = null; // Token pendente para registrar quando WebSocket conectar
         this.wsConnectListener = null; // Listener para quando WebSocket conectar
+        this.wsAuthenticatedListener = null;
         this.tokenRenewalInterval = null;
         this.retryTokenUpdateTimeout = null;
         this.backendTokenRegistrationPromise = null;
@@ -281,6 +282,17 @@ class FCMNotificationService {
         }
     }
 
+    getCurrentAuthRegistrationContext() {
+        try {
+            const userState = store.getState().auth;
+            const userId = userState?.uid || userState?.profile?.uid || null;
+            const userType = userState?.userType || userState?.profile?.userType || 'customer';
+            return { userId, userType };
+        } catch (error) {
+            return { userId: null, userType: 'customer' };
+        }
+    }
+
     setupAuthChangeTokenRegistration() {
         if (this.authUnsubscribe || typeof store.subscribe !== 'function') {
             return;
@@ -299,6 +311,20 @@ class FCMNotificationService {
                 this.scheduleTokenBackendUpdate(this.fcmToken);
             }
         });
+    }
+
+    ensureWebSocketAuthenticatedListener(wsManager) {
+        if (this.wsAuthenticatedListener) {
+            return;
+        }
+
+        this.wsAuthenticatedListener = () => {
+            if (this.fcmToken) {
+                Logger.log('🔄 WebSocket autenticado; revalidando token FCM para a sessão atual.');
+                this.scheduleTokenBackendUpdate(this.fcmToken, { force: true });
+            }
+        };
+        wsManager.on('authenticated', this.wsAuthenticatedListener);
     }
 
     async ensurePermissionBeforeDisplay() {
@@ -375,7 +401,7 @@ class FCMNotificationService {
         }
     }
 
-    scheduleTokenBackendUpdate(token) {
+    scheduleTokenBackendUpdate(token, options = {}) {
         if (!token) {
             return null;
         }
@@ -385,7 +411,7 @@ class FCMNotificationService {
             return this.backendTokenRegistrationPromise;
         }
 
-        this.backendTokenRegistrationPromise = this.updateTokenOnBackend(token)
+        this.backendTokenRegistrationPromise = this.updateTokenOnBackend(token, options)
             .catch((error) => {
                 Logger.warn('⚠️ Registro FCM em background falhou:', error?.message || error);
                 return false;
@@ -417,7 +443,7 @@ class FCMNotificationService {
     }
 
     // Atualizar token no backend
-    async updateTokenOnBackend(token) {
+    async updateTokenOnBackend(token, options = {}) {
         try {
             // ✅ CRÍTICO: Se token for null, não tentar registrar
             if (!token) {
@@ -447,7 +473,7 @@ class FCMNotificationService {
             Logger.log('👤 Estado do usuário para FCM:', { userId, userType });
 
             const registrationKey = `${userId || 'anonymous'}:${userType}:${token}`;
-            if (registrationKey === this.lastBackendTokenRegistrationKey) {
+            if (!options.force && registrationKey === this.lastBackendTokenRegistrationKey) {
                 Logger.log('ℹ️ Token FCM já registrado para o usuário atual; pulando duplicidade.');
                 return;
             }
@@ -455,6 +481,7 @@ class FCMNotificationService {
             // Registrar token via WebSocket (método correto)
             try {
                 const wsManager = WebSocketManager.getInstance();
+                this.ensureWebSocketAuthenticatedListener(wsManager);
 
                 // Se não estiver conectado, guardar o token e deixar o orquestrador
                 // abrir o realtime quando a sessão já estiver hidratada.
@@ -1026,7 +1053,8 @@ class FCMNotificationService {
         }
 
         try {
-            const { token, userId, userType } = this.pendingTokenRegistration;
+            const { token } = this.pendingTokenRegistration;
+            const { userId, userType } = this.getCurrentAuthRegistrationContext();
             const wsManager = WebSocketManager.getInstance();
 
             if (wsManager.isConnected()) {
@@ -1047,6 +1075,23 @@ class FCMNotificationService {
         }
     }
 
+    async revalidateCurrentSessionToken(reason = 'manual') {
+        try {
+            const token = this.fcmToken || await this.getFCMToken();
+            if (!token) {
+                Logger.warn(`⚠️ Revalidação FCM ignorada (${reason}): token indisponível.`);
+                return false;
+            }
+
+            Logger.log(`🔄 Revalidando token FCM (${reason})`);
+            await this.updateTokenOnBackend(token, { force: true });
+            return true;
+        } catch (error) {
+            Logger.error('❌ Erro ao revalidar token FCM:', error);
+            return false;
+        }
+    }
+
     // Destruir serviço
     destroy() {
         try {
@@ -1057,6 +1102,12 @@ class FCMNotificationService {
                 const wsManager = WebSocketManager.getInstance();
                 wsManager.off('connect', this.wsConnectListener);
                 this.wsConnectListener = null;
+            }
+
+            if (this.wsAuthenticatedListener) {
+                const wsManager = WebSocketManager.getInstance();
+                wsManager.off('authenticated', this.wsAuthenticatedListener);
+                this.wsAuthenticatedListener = null;
             }
 
             // Limpar intervalo de renovação

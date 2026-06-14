@@ -161,7 +161,8 @@ describe('FCMNotificationService initialization', () => {
     expect(FCMNotificationService.isServiceInitialized()).toBe(true);
     await flushMicrotasks();
 
-    expect(mockWsManager.on).toHaveBeenCalledTimes(1);
+    expect(mockWsManager.on).toHaveBeenCalledWith('authenticated', expect.any(Function));
+    expect(mockWsManager.on).toHaveBeenCalledWith('connect', expect.any(Function));
     expect(mockWsManager.connect).not.toHaveBeenCalled();
     expect(mockWsManager.registerFCMToken).not.toHaveBeenCalled();
   });
@@ -225,6 +226,32 @@ describe('FCMNotificationService initialization', () => {
 
     expect(mockWsManager.registerFCMToken).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user_2', userType: 'driver', fcmToken: 'mock_token' })
+    );
+  });
+
+  it('revalidates the current token when websocket authenticates an already logged session', async () => {
+    mockDevice.isDevice = true;
+    mockAuthState = { uid: 'driver_1', userType: 'driver' };
+
+    await FCMNotificationService.initialize();
+    await FCMNotificationService.backendTokenRegistrationPromise;
+
+    const authenticatedListener = mockWsManager.on.mock.calls.find(
+      ([eventName]) => eventName === 'authenticated'
+    )?.[1];
+
+    expect(authenticatedListener).toEqual(expect.any(Function));
+    expect(mockWsManager.registerFCMToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'driver_1', userType: 'driver', fcmToken: 'mock_token' })
+    );
+
+    mockAuthState = { uid: 'driver_1', profile: { uid: 'driver_1', userType: 'driver' } };
+    authenticatedListener({ uid: 'driver_1', userType: 'driver' });
+    await FCMNotificationService.backendTokenRegistrationPromise;
+
+    expect(mockWsManager.registerFCMToken).toHaveBeenCalledTimes(2);
+    expect(mockWsManager.registerFCMToken).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: 'driver_1', userType: 'driver', fcmToken: 'mock_token' })
     );
   });
 

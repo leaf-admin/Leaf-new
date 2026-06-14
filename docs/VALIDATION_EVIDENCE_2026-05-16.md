@@ -15,7 +15,7 @@ Checkpoint de rollback: `checkpoint/pre-cleanup-20260516-current-state`
 | Comando | Resultado | Evidencia |
 | --- | --- | --- |
 | `npm run test:profile` | PASS | Perfil impresso com branch `codex/project-cleanup-20260516`, Node `v20.20.2`, `APP_REVIEW=false`. |
-| `bash -n scripts/maintenance/start-all-services.sh scripts/maintenance/services/restart-all-services.sh scripts/deploy-hostinger-completo.sh` | PASS | Sintaxe shell valida. |
+| `bash -n scripts/maintenance/start-all-services.sh scripts/maintenance/services/restart-all-services.sh scripts/deploy-contabo-completo.sh` | PASS | Sintaxe shell valida. |
 | `node --check leaf-websocket-backend/server.js && node --check leaf-websocket-backend/server.vps.js && node --check scripts/prelaunch/run-prelaunch-suite.cjs && node --check leaf-websocket-backend/scripts/tests/assert-sensitive-route-guards.cjs` | PASS | Sintaxe JS valida. |
 | `cd mobile-app && npx expo config --json` | PASS | `name=Leaf`, `slug=leafapp-reactnative`, `ios.buildNumber=23`, `android.versionCode=110`, `scheme=leafapp`. |
 | `npm run lint:dashboard` | PASS | ESLint do `leaf-dashboard-js` sem erros. |

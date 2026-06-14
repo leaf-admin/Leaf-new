@@ -13,7 +13,7 @@ class DriverBalanceService {
     Logger.log('🔗 DriverBalanceService baseUrl:', this.baseUrl);
     this.WITHDRAW_FEE_THRESHOLD = 500;
     this.WITHDRAW_FEE_BELOW_THRESHOLD = 1;
-    this.SUBSCRIPTION_DAILY_FEE_NOMINAL = 9.90;
+    this.SUBSCRIPTION_DAILY_FEE_NOMINAL = 14.90;
   }
 
   async getAuthHeaders(extraHeaders = {}) {

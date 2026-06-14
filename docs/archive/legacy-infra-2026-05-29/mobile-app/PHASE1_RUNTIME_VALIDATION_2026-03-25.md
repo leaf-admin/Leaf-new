@@ -1,7 +1,7 @@
 # Fase 1 - Runtime Validation
 
-Data: 2026-03-25  
-Ambiente validado: VPS DigitalOcean (`api.147.182.204.181.sslip.io` / `socket.147.182.204.181.sslip.io`)  
+Data: 2026-03-25
+Ambiente validado: VPS provedor anterior (`api.147.182.204.181.sslip.io` / `socket.147.182.204.181.sslip.io`)
 Usuários canônicos:
 - Passageiro `11999999999` -> `OjML1wSzdNRaynjqMRlSW1Y0LVy2`
 - Motorista `11888888888` -> `8vg2kxxqi3TYKlpD6eBlWgYseIq2`

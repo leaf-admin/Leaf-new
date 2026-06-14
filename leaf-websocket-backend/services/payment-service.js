@@ -46,7 +46,12 @@ class PaymentService {
       String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
     this.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS = Math.max(
       0,
-      Number.parseInt(process.env.SUBSCRIPTION_DAILY_FEE_CENTS || '990', 10) || 990
+      Number.parseInt(
+        process.env.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS ||
+        process.env.SUBSCRIPTION_DAILY_MAX_FEE_CENTS ||
+        '1490',
+        10
+      ) || 1490
     );
     this.SUBSCRIPTION_SETTLE_ON_WITHDRAW =
       String(process.env.SUBSCRIPTION_SETTLE_ON_WITHDRAW || 'true').toLowerCase() !== 'false';

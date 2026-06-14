@@ -4,6 +4,16 @@ const {
 } = require('../../../../services/pricing');
 
 describe('pricing/index', () => {
+  const originalPricingMode = process.env.PRICING_DEMAND_PRESSURE_MODE;
+
+  afterEach(() => {
+    if (originalPricingMode === undefined) {
+      delete process.env.PRICING_DEMAND_PRESSURE_MODE;
+    } else {
+      process.env.PRICING_DEMAND_PRESSURE_MODE = originalPricingMode;
+    }
+  });
+
   test('cenário normal deve retornar payload limpo para passageiro', () => {
     const result = runDynamicPricingEngine({
       trip: {
@@ -75,7 +85,7 @@ describe('pricing/index', () => {
     });
 
     expect(result.pricingPayload.operational_state).toBe(STATES.PRESSAO);
-    expect(result.pricingPayload.passenger_notice).toBe('Alta demanda nesta região');
+    expect(result.pricingPayload.passenger_notice).toBe('As tarifas estão mais altas devido às condições de trânsito e demanda.');
     expect(result.pricingPayload.driver_region_status.recommended_repositioning).toBe(true);
   });
 
@@ -116,7 +126,84 @@ describe('pricing/index', () => {
     });
 
     expect(result.pricingPayload.operational_state).toBe(STATES.EXCEPCIONAL);
-    expect(result.pricingPayload.passenger_notice).toBe('Preços mais altos no momento devido à demanda');
+    expect(result.pricingPayload.passenger_notice).toBe('As tarifas estão mais altas devido às condições de trânsito e demanda.');
     expect(result.exceptionalMode.exceptional_mode_active).toBe(true);
+  });
+
+  test('modo ativo cobra adicional apenas por demanda e mantém trânsito no tempo da tarifa', () => {
+    process.env.PRICING_DEMAND_PRESSURE_MODE = 'active';
+    const buildInput = (tripTimeInflation, durationMinTraffic) => ({
+      trip: {
+        distance_km: 8,
+        duration_min_traffic: durationMinTraffic,
+        eta_pickup_min: 4
+      },
+      operational: {
+        current: {
+          active_requests_5m: 8,
+          idle_drivers: 2,
+          avg_pickup_eta_min: 5,
+          trip_time_inflation: tripTimeInflation,
+          cancel_rate: 0.04,
+          accept_rate: 0.95,
+          avg_speed_kmh: 20
+        },
+        baseline: {
+          expected_requests_5m: 8,
+          expected_idle_drivers: 2,
+          expected_pickup_eta_min: 5,
+          expected_speed_kmh: 26,
+          expected_cancel_rate: 0.04
+        },
+        state_context: {
+          now: '2026-06-13T12:00:00.000Z'
+        }
+      }
+    });
+
+    const normalTraffic = runDynamicPricingEngine(buildInput(1, 18));
+    const heavyTraffic = runDynamicPricingEngine(buildInput(1.6, 30));
+
+    expect(heavyTraffic.pricingPayload.dynamic_percentage)
+      .toBe(normalTraffic.pricingPayload.dynamic_percentage);
+    expect(heavyTraffic.pricingPayload.final_price)
+      .toBeGreaterThan(normalTraffic.pricingPayload.final_price);
+    expect(heavyTraffic.pricingPayload.dynamic_reason).toBe('demand_pressure');
+    expect(heavyTraffic.pricingPayload.traffic_adjusted).toBe(true);
+    expect(heavyTraffic.pricingPayload.passenger_notice)
+      .toBe('Há mais pedidos que motoristas disponíveis nesta região.');
+    expect(heavyTraffic.pricingPayload.traffic_notice)
+      .toBe('O valor considera o tempo estimado com o trânsito atual.');
+  });
+
+  test('dry-run preserva a tarifa atual e expõe a comparação da nova regra', () => {
+    process.env.PRICING_DEMAND_PRESSURE_MODE = 'dry_run';
+    const result = runDynamicPricingEngine({
+      trip: {
+        distance_km: 6,
+        duration_min_traffic: 20,
+        eta_pickup_min: 6
+      },
+      operational: {
+        current: {
+          active_requests_5m: 8,
+          idle_drivers: 2,
+          avg_pickup_eta_min: 7,
+          trip_time_inflation: 1.4,
+          cancel_rate: 0.12,
+          accept_rate: 0.7,
+          avg_speed_kmh: 15
+        }
+      }
+    });
+
+    expect(result.pricingPayload.pricing_model).toBe('legacy_combined_pressure');
+    expect(result.pricingPayload.pricing_model_mode).toBe('dry_run');
+    expect(result.pricingPayload.pricing_shadow).toEqual(expect.objectContaining({
+      model: 'demand_pressure_v2',
+      dynamic_percentage: expect.any(Number),
+      final_price: expect.any(Number),
+      difference_from_active_price: expect.any(Number)
+    }));
   });
 });

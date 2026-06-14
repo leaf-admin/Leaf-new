@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: './leaf-websocket-backend/package-lock.json'
+          cache-dependency-path: './package-lock.json'
 
       - name: Install dependencies
         run: npm ci
@@ -60,7 +60,7 @@ jobs:
           WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true'
           WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false'
           LEAF_PIX_KEY: ci-pix-key-placeholder
-          CORS_ORIGIN: https://api.62.169.31.231.sslip.io
+          CORS_ORIGIN: https://api.leaf.app.br
           APP_REVIEW: 'false'
           BYPASS_GEOFENCE: 'false'
           GEOFENCE_RADIUS_KM: '25'
@@ -97,7 +97,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: './mobile-app/package-lock.json'
+          cache-dependency-path: './package-lock.json'
 
       - name: Install dependencies
         run: npm ci
@@ -128,7 +128,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: './mobile-app/package-lock.json'
+          cache-dependency-path: './package-lock.json'
 
       - name: Setup Expo And EAS
         uses: expo/expo-github-action@v8

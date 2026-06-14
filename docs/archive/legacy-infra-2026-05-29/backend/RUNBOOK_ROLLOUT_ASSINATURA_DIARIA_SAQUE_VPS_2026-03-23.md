@@ -1,7 +1,7 @@
 # Runbook: Rollout Assinatura Diária + Cobrança no Saque (VPS)
 
 Data: 23/03/2026
-Escopo: backend na VPS DigitalOcean, com diretório remoto em `/opt/leaf`, `/opt/leaf/leaf-websocket-backend` ou `/opt/leaf-app`.
+Escopo: backend na VPS provedor anterior, com diretório remoto em `/opt/leaf`, `/opt/leaf/leaf-websocket-backend` ou `/opt/leaf-app`.
 
 ## 1) Objetivo do rollout
 

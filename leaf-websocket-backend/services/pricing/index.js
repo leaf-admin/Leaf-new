@@ -1,4 +1,5 @@
 const { calculatePressureScore } = require('./pressureScore');
+const { calculateDemandPressure } = require('./demandPressure');
 const { calculateExceptionScore } = require('./exceptionScore');
 const { STATES, classifyOperationalState } = require('./operationalState');
 const { evaluateExceptionalMode } = require('./dynamicRules');
@@ -40,17 +41,50 @@ function normalizeStateContext(stateContext = {}) {
   };
 }
 
-function buildPassengerNotice(operationalState) {
-  if (operationalState === STATES.PRESSAO) {
-    return 'Alta demanda nesta região';
+const PRICING_MODEL_MODES = new Set(['legacy', 'dry_run', 'active']);
+
+function resolvePricingModelMode() {
+  const configured = String(process.env.PRICING_DEMAND_PRESSURE_MODE || 'dry_run')
+    .trim()
+    .toLowerCase();
+  return PRICING_MODEL_MODES.has(configured) ? configured : 'dry_run';
+}
+
+function buildPassengerNotice({ operationalState, demandPressure, pricingModelMode }) {
+  if (pricingModelMode === 'active') {
+    return demandPressure.percent > 0
+      ? 'Há mais pedidos que motoristas disponíveis nesta região.'
+      : null;
   }
-  if (operationalState === STATES.EXCEPCIONAL) {
-    return 'Preços mais altos no momento devido à demanda';
+
+  if (operationalState === STATES.PRESSAO || operationalState === STATES.EXCEPCIONAL) {
+    return 'As tarifas estão mais altas devido às condições de trânsito e demanda.';
   }
   return null;
 }
 
-function buildDriverRegionStatus(operationalState, current = {}) {
+function buildTrafficNotice(current = {}) {
+  return Number(current.trip_time_inflation || 1) >= 1.1
+    ? 'O valor considera o tempo estimado com o trânsito atual.'
+    : null;
+}
+
+function buildDriverRegionStatus(operationalState, current = {}, demandPressure = null, pricingModelMode = 'legacy') {
+  if (pricingModelMode === 'active' && demandPressure) {
+    const opportunityLevel = demandPressure.percent >= 25
+      ? 'HIGH'
+      : demandPressure.percent > 0
+        ? 'MEDIUM'
+        : 'LOW';
+    return {
+      state: demandPressure.percent > 0 ? STATES.PRESSAO : STATES.NORMAL,
+      driver_notice: demandPressure.percent > 0 ? 'Alta procura nesta região' : 'Região estável',
+      opportunity_level: opportunityLevel,
+      recommended_repositioning: demandPressure.percent > 0,
+      demand_markup_percent: demandPressure.percent
+    };
+  }
+
   if (operationalState === STATES.EXCEPCIONAL) {
     return {
       state: STATES.EXCEPCIONAL,
@@ -83,6 +117,11 @@ function buildPricingResponse(engineResult) {
   const scorePressao = clamp(engineResult.pressure.score, 0, 1);
   const scoreExcecao = clamp(engineResult.exception.score, 0, 1);
   const operationalState = engineResult.operationalState.estado_atual;
+  const pricingModelMode = engineResult.pricingModelMode;
+  const activePricingModel = pricingModelMode === 'active'
+    ? 'demand_pressure_v2'
+    : 'legacy_combined_pressure';
+  const trafficNotice = buildTrafficNotice(current);
 
   return {
     car_type: fare.car_type,
@@ -100,8 +139,40 @@ function buildPricingResponse(engineResult) {
     minimum_fare_applied: fare.valor_minimo_aplicado,
     final_price: fare.preco_final,
     operational_state: operationalState,
-    passenger_notice: buildPassengerNotice(operationalState),
-    driver_region_status: buildDriverRegionStatus(operationalState, current)
+    pricing_model: activePricingModel,
+    pricing_model_mode: pricingModelMode,
+    dynamic_reason: fare.percentual_dinamico_aplicado > 0
+      ? (pricingModelMode === 'active' ? 'demand_pressure' : 'combined_pressure')
+      : null,
+    passenger_notice: buildPassengerNotice({
+      operationalState,
+      demandPressure: engineResult.demandPressure,
+      pricingModelMode
+    }),
+    traffic_adjusted: Boolean(trafficNotice),
+    traffic_notice: trafficNotice,
+    demand_pressure: {
+      score: Number(engineResult.demandPressure.score.toFixed(4)),
+      percent: engineResult.demandPressure.percent,
+      multiplier: engineResult.demandPressure.multiplier,
+      breakdown: engineResult.demandPressure.breakdown
+    },
+    pricing_shadow: pricingModelMode === 'dry_run'
+      ? {
+          model: 'demand_pressure_v2',
+          dynamic_percentage: engineResult.demandFare.percentual_dinamico_aplicado,
+          final_price: engineResult.demandFare.preco_final,
+          difference_from_active_price: Number(
+            (engineResult.demandFare.preco_final - fare.preco_final).toFixed(2)
+          )
+        }
+      : null,
+    driver_region_status: buildDriverRegionStatus(
+      operationalState,
+      current,
+      engineResult.demandPressure,
+      pricingModelMode
+    )
   };
 }
 
@@ -117,6 +188,7 @@ function runDynamicPricingEngine(input = {}) {
   };
 
   const pressure = calculatePressureScore(current);
+  const demandPressure = calculateDemandPressure(current);
   const exception = calculateExceptionScore(current, baseline);
   const operationalState = classifyOperationalState({
     score_pressao: pressure.score,
@@ -130,7 +202,7 @@ function runDynamicPricingEngine(input = {}) {
     is_special_zone: stateContext.is_special_zone,
     zone_type: stateContext.zone_type
   });
-  const fare = calculateDynamicFare({
+  const legacyFare = calculateDynamicFare({
     distance_km: trip.distance_km,
     duration_min_traffic: trip.duration_min_traffic,
     eta_pickup_min: trip.eta_pickup_min,
@@ -138,16 +210,29 @@ function runDynamicPricingEngine(input = {}) {
     score_pressao: pressure.score,
     score_excecao: exception.score
   });
+  const demandFare = calculateDynamicFare({
+    distance_km: trip.distance_km,
+    duration_min_traffic: trip.duration_min_traffic,
+    eta_pickup_min: trip.eta_pickup_min,
+    carType: trip.carType,
+    dynamic_markup_rate: demandPressure.markupRate
+  });
+  const pricingModelMode = resolvePricingModelMode();
+  const fare = pricingModelMode === 'active' ? demandFare : legacyFare;
 
   const engineResult = {
     current,
     baseline,
     stateContext,
     pressure,
+    demandPressure,
     exception,
     operationalState,
     exceptionalMode,
-    fare
+    fare,
+    legacyFare,
+    demandFare,
+    pricingModelMode
   };
 
   return {
@@ -159,10 +244,12 @@ function runDynamicPricingEngine(input = {}) {
 module.exports = {
   STATES,
   calculatePressureScore,
+  calculateDemandPressure,
   calculateExceptionScore,
   classifyOperationalState,
   evaluateExceptionalMode,
   calculateDynamicFare,
   buildPricingResponse,
+  resolvePricingModelMode,
   runDynamicPricingEngine
 };

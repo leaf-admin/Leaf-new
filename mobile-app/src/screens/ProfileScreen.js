@@ -836,11 +836,11 @@ export default function ProfileScreen({ navigation }) {
 
                             <View style={[styles.withdrawSubscriptionInfo, { backgroundColor: isDarkMode ? '#243126' : '#EEF8F0' }]}>
                                 <Text style={[cardTypography.subtitle, styles.withdrawSubscriptionLabel, { color: isDarkMode ? '#BFE6C7' : '#1F6B37' }]}>
-                                    Taxa diária
+                                    Diária por faturamento
                                 </Text>
                                 <View style={styles.withdrawSubscriptionValues}>
                                     <Text style={[styles.withdrawSubscriptionStruck, { color: isDarkMode ? '#9DB2A2' : '#6E7D72' }]}>
-                                        R$ 9,90
+                                        Até R$ 14,90
                                     </Text>
                                     <Text style={[styles.withdrawSubscriptionFree, { color: isDarkMode ? '#DDF7E4' : MAIN_COLOR }]}>
                                         R$ 0,00 neste momento
@@ -921,11 +921,11 @@ export default function ProfileScreen({ navigation }) {
 
                                 <View style={styles.confirmRow}>
                                     <Text style={[cardTypography.subtitle, styles.confirmRowLabel, { color: isDarkMode ? '#ccc' : colors.GRAY }]}>
-                                        Taxa diária:
+                                        Diária por faturamento:
                                     </Text>
                                     <View style={styles.confirmSubscriptionValues}>
                                         <Text style={[styles.confirmSubscriptionStruck, { color: isDarkMode ? '#999' : colors.GRAY }]}>
-                                            R$ 9,90
+                                            Até R$ 14,90
                                         </Text>
                                         <Text style={[cardTypography.title, styles.confirmRowValue, { color: MAIN_COLOR }]}>
                                             R$ 0,00

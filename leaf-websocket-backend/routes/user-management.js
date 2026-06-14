@@ -37,7 +37,7 @@ router.post(
     try {
       const result = await updateUserOperationalStatus(req.params.userId, req.body || {}, {
         operator: {
-          id: req.user?.id || null,
+          id: req.user?.id || req.user?.userId || null,
           email: req.user?.email || null,
           role: req.user?.role || null
         }
@@ -64,7 +64,7 @@ router.post(
         req.body || {},
         {
           operator: {
-            id: req.user?.id || null,
+            id: req.user?.id || req.user?.userId || null,
             email: req.user?.email || null,
             role: req.user?.role || null
           }

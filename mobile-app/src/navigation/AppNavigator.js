@@ -1,6 +1,6 @@
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
-import { CommonActions, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { CommonActions, NavigationContainer, createNavigationContainerRef, getStateFromPath } from '@react-navigation/native';
 import { TransitionPresets, createStackNavigator } from '@react-navigation/stack';
 import Constants from 'expo-constants';
 
@@ -313,6 +313,20 @@ const legacyPlanScreenParams = {
   targetRoute: 'Map'
 };
 
+function normalizeLeafAppLinkPath(path) {
+  const normalizedPath = String(path || '').replace(/^\/+/, '');
+
+  if (normalizedPath === 'viagem') {
+    return 'robotaxi/trip/public';
+  }
+
+  if (normalizedPath.startsWith('viagem/')) {
+    return normalizedPath.replace(/^viagem\//, 'robotaxi/trip/public/');
+  }
+
+  return path;
+}
+
 const appLinking = {
   prefixes: ['leafapp://', 'br.com.leaf.ride://', 'https://leaf.app.br', 'https://www.leaf.app.br'],
   config: {
@@ -390,7 +404,10 @@ const appLinking = {
       RobotaxiMenuSettings: 'robotaxi/menu/settings',
       EarningsReport: 'driver/earnings'
     }
-  }
+  },
+  getStateFromPath(path, options) {
+    return getStateFromPath(normalizeLeafAppLinkPath(path), options);
+  },
 };
 
 const PROTOTYPE_QA_DEEP_LINK_ROUTES = {

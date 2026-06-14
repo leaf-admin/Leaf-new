@@ -46,8 +46,6 @@ leaf-websocket-backend/leaf-reactnative-firebase-adminsdk-*.json
 **/firebase-credentials.json
 
 # Security-sensitive artifacts
-digitaloceankey
-digitaloceankey.pub
 *.pem
 *.p12
 *.pfx
@@ -128,8 +126,10 @@ mobile-app/02-*.png
 mobile-app/07-*.png
 
 # Workspace-level test artifacts
+/artifacts/
 /reports/
 /test-results/
+docs/architecture/E2E_DRIVER_DOCFLOW_DASHBOARD*.json
 mobile-app/builds/
 book_20_imagens/
 _debug_grid.png

@@ -43,7 +43,7 @@ jest.mock('../../../services/fare-estimation-service', () => ({
       score_pressao: 0.32,
       score_excecao: 0.11,
       operational_state: 'PRESSAO',
-      passenger_notice: 'Alta demanda nesta região',
+      passenger_notice: 'As tarifas estão mais altas devido às condições de trânsito e demanda.',
       driver_region_status: {
         state: 'PRESSAO',
         opportunity_level: 'MEDIUM',
@@ -125,7 +125,7 @@ describe('RequestRideCommand', () => {
         score_pressao: 0.32,
         score_excecao: 0.11,
         operational_state: 'PRESSAO',
-        passenger_notice: 'Alta demanda nesta região',
+        passenger_notice: 'As tarifas estão mais altas devido às condições de trânsito e demanda.',
         driver_region_status: {
           state: 'PRESSAO',
           opportunity_level: 'MEDIUM',
@@ -212,7 +212,7 @@ describe('RequestRideCommand', () => {
       pricingSnapshotLocked: true,
       pricingSnapshotLockedAt: expect.any(String),
       pricingPayload: expect.objectContaining({
-        passenger_notice: 'Alta demanda nesta região'
+        passenger_notice: 'As tarifas estão mais altas devido às condições de trânsito e demanda.'
       }),
       pricingAudit: expect.objectContaining({
         stateSource: 'redis_materialized'

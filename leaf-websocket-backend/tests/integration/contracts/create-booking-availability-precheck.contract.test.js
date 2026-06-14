@@ -1,11 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
+const repoRoot = path.resolve(__dirname, '../../../..');
+
 function read(relativePath) {
-  return fs.readFileSync(
-    path.join('/Users/izaakdias/Documents/Leaf-new', relativePath),
-    'utf8'
-  );
+  return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
 describe('createBooking availability precheck contract', () => {

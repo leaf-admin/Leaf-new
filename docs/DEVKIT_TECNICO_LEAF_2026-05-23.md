@@ -360,13 +360,13 @@ Workers e streams:
 Docker/backend:
 
 - `leaf-websocket-backend/Dockerfile`
-- `leaf-websocket-backend/docker-compose.hostinger.yml`
+- `leaf-websocket-backend/docker-compose.production.yml`
 - `leaf-websocket-backend/docker-compose.local.yml`
 - `leaf-websocket-backend/docker-compose.ops-workers.yml`
 - `leaf-websocket-backend/docker-compose.realtime-secondary.yml`
 - `leaf-websocket-backend/nginx.conf`
 
-Compose canonico de VPS (`docker-compose.hostinger.yml`) contem:
+Compose canonico de VPS (`docker-compose.production.yml`) contem:
 
 - `redis`
 - `websocket`
@@ -776,7 +776,7 @@ Backend VPS:
 
 - Runtime atual: modular em `server.js` (`LEAF_SERVER_RUNTIME=modular`).
 - Rollback legado preservado temporariamente: `server.vps.js`.
-- Compose principal: `leaf-websocket-backend/docker-compose.hostinger.yml` (nome legado, uso atual).
+- Compose principal: `leaf-websocket-backend/docker-compose.production.yml`.
 - Deploy operacional atual documentado em workers como:
 
 ```bash
@@ -786,7 +786,7 @@ bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh
 Scripts de deploy/manutencao relevantes:
 
 - `scripts/healthcheck-vps.sh`
-- `leaf-websocket-backend/scripts/deploy-hostinger-docker.sh`
+- `leaf-websocket-backend/scripts/deploy-contabo-docker.sh`
 - `leaf-websocket-backend/scripts/deploy/deploy-secondary-realtime-host.sh`
 - `leaf-websocket-backend/scripts/deploy/validate-runtime-config.js`
 - `leaf-websocket-backend/scripts/ops/*`

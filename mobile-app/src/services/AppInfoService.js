@@ -56,7 +56,7 @@ class AppInfoService {
                     version: '1.0.0',
                     date: new Date().toISOString().split('T')[0],
                     title: 'Lançamento Inicial',
-                    description: '• Integração completa com Woovi PIX\n• Sistema de busca de motoristas\n• Rastreamento em tempo real\n• Chat integrado\n• Dashboard para motoristas\n• Conta Leaf BaaS'
+                    description: '• Pagamento via Pix\n• Sistema de busca de motoristas\n• Rastreamento em tempo real\n• Chat integrado\n• Ganhos e saque para motoristas'
                 }
             ]
         };
@@ -88,4 +88,3 @@ class AppInfoService {
 }
 
 export default new AppInfoService();
-

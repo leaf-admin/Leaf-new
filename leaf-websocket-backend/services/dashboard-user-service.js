@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const { logError } = require('../utils/logger');
+const auditService = require('./audit-service');
 
 const USER_STATS_CACHE_TTL_MS = Math.max(
   15000,
@@ -547,6 +548,23 @@ async function updateUserProfile(userId, payload = {}, options = {}) {
   const nowIso = new Date().toISOString();
   updates.updatedAt = nowIso;
   await userRef.set(updates, { merge: true });
+
+  const operator = options.operator || {};
+  const operatorId = operator.id || operator.userId || operator.email || 'dashboard-system';
+  await auditService.logEvent({
+    userId: operatorId,
+    action: 'dashboard.user.profile.update',
+    resource: 'user',
+    severity: 'INFO',
+    details: {
+      targetUserId: safeUserId,
+      fieldsChanged: Object.keys(updates).filter((field) => field !== 'updatedAt').sort(),
+      mirroredToLegacyRtdb: Boolean(options.mirrorToLegacyRtdb && options.legacyDb),
+      operatorEmail: operator.email || null,
+      operatorRole: operator.role || null
+    },
+    success: true
+  });
 
   if (options.mirrorToLegacyRtdb && options.legacyDb) {
     try {

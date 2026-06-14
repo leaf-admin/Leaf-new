@@ -5,7 +5,8 @@ const path = require('path');
 
 const backendRoot = path.resolve(__dirname, '..', '..');
 const files = [
-  'docker-compose.hostinger.yml',
+  'docker-compose.production.yml',
+  'docker-compose.gateway-scale.yml',
   'docker-compose.realtime-secondary.yml',
   'docker-compose.ops-workers.yml'
 ];

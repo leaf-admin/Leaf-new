@@ -7,6 +7,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const PDFDocument = require('pdfkit');
 const firebaseConfig = require('../../firebase-config');
+const driverApplicationService = require('../../services/driver-application-service');
 const admin = require('firebase-admin');
 
 const API_BASE = process.env.E2E_API_BASE || 'http://localhost:3001/api';
@@ -151,6 +152,22 @@ function authHeaders(token) {
   return {
     Authorization: `Bearer ${token}`
   };
+}
+
+function getDocumentByType(documentsPayload = {}, type, normalizedKey = null) {
+  const normalized = normalizedKey ? documentsPayload?.[normalizedKey] : null;
+  const allDocuments = Array.isArray(documentsPayload?.all_documents)
+    ? documentsPayload.all_documents
+    : [];
+  return documentsPayload?.[type] || allDocuments.find((item) => item?.type === type) || normalized || null;
+}
+
+function getDocumentFileUrl(documentPayload = {}) {
+  return documentPayload?.fileUrl ||
+    documentPayload?.front ||
+    documentPayload?.registration ||
+    documentPayload?.file ||
+    null;
 }
 
 async function ensureHttp200(url, label, timings) {
@@ -338,6 +355,10 @@ async function ensureHttp200(url, label, timings) {
       await db.ref().update(updates);
     }, timings);
 
+    await timed('dashboard:sync_driver_application_mirror', () =>
+      driverApplicationService.syncDriverApplication(driverId, { db }),
+    timings);
+
     const authData = await loginAdmin(timings);
     if (!authData?.success || !authData?.accessToken) {
       throw new Error('Falha no login admin');
@@ -404,20 +425,25 @@ async function ensureHttp200(url, label, timings) {
     ), timings);
 
     const docsAfterUpload = docsAfterUploadResponse?.data?.data || {};
-    const cnhDoc = docsAfterUpload?.documents?.cnh;
-    const crlvDoc = docsAfterUpload?.documents?.crlv;
-    const antecedentesDoc = docsAfterUpload?.documents?.antecedentes_criminais;
+    const docsAfterUploadPayload = docsAfterUpload?.documents || {};
+    const cnhDoc = getDocumentByType(docsAfterUploadPayload, 'cnh', 'license');
+    const crlvDoc = getDocumentByType(docsAfterUploadPayload, 'crlv', 'vehicle');
+    const antecedentesDoc = getDocumentByType(docsAfterUploadPayload, 'antecedentes_criminais', 'backgroundCheck');
 
-    if (!cnhDoc?.fileUrl || !crlvDoc?.fileUrl || !antecedentesDoc?.fileUrl) {
+    const cnhFileUrl = getDocumentFileUrl(cnhDoc);
+    const crlvFileUrl = getDocumentFileUrl(crlvDoc);
+    const antecedentesFileUrl = getDocumentFileUrl(antecedentesDoc);
+
+    if (!cnhFileUrl || !crlvFileUrl || !antecedentesFileUrl) {
       throw new Error('Nem todos os documentos possuem fileUrl para visualização no dashboard');
     }
 
     report.checks.documentKeysAfterUpload = Object.keys(docsAfterUpload.documents || {});
 
     const fileChecks = {
-      cnh: await ensureHttp200(cnhDoc.fileUrl, 'cnh', timings),
-      crlv: await ensureHttp200(crlvDoc.fileUrl, 'crlv', timings),
-      antecedentes: await ensureHttp200(antecedentesDoc.fileUrl, 'antecedentes', timings)
+      cnh: await ensureHttp200(cnhFileUrl, 'cnh', timings),
+      crlv: await ensureHttp200(crlvFileUrl, 'crlv', timings),
+      antecedentes: await ensureHttp200(antecedentesFileUrl, 'antecedentes', timings)
     };
 
     report.checks.fileAccess = fileChecks;
@@ -509,24 +535,32 @@ async function ensureHttp200(url, label, timings) {
       ), timings);
 
       const docsAfterReview = docsAfterReviewResponse?.data?.data || {};
+      const docsAfterReviewPayload = docsAfterReview?.documents || {};
+      const reviewedCnhDoc = getDocumentByType(docsAfterReviewPayload, 'cnh', 'license');
+      const reviewedCrlvDoc = getDocumentByType(docsAfterReviewPayload, 'crlv', 'vehicle');
+      const reviewedAntecedentesDoc = getDocumentByType(docsAfterReviewPayload, 'antecedentes_criminais', 'backgroundCheck');
       report.checks.postReviewStatuses = {
-        cnh: docsAfterReview?.documents?.cnh?.status || null,
-        cnhRejectionReason: docsAfterReview?.documents?.cnh?.rejectionReason || null,
-        crlv: docsAfterReview?.documents?.crlv?.status || null,
-        crlvRejectionReason: docsAfterReview?.documents?.crlv?.rejectionReason || null,
-        antecedentes: docsAfterReview?.documents?.antecedentes_criminais?.status || null
+        cnh: reviewedCnhDoc?.status || null,
+        cnhRejectionReason: reviewedCnhDoc?.rejectionReason || null,
+        crlv: reviewedCrlvDoc?.status || null,
+        crlvRejectionReason: reviewedCrlvDoc?.rejectionReason || null,
+        antecedentes: reviewedAntecedentesDoc?.status || null
       };
     } else {
       report.checks.reviewResponses = {
         skipped: true,
         reason: 'E2E_SKIP_FINAL_APPROVAL'
       };
+      const docsAfterUploadPayload = docsAfterUpload?.documents || {};
+      const skippedCnhDoc = getDocumentByType(docsAfterUploadPayload, 'cnh', 'license');
+      const skippedCrlvDoc = getDocumentByType(docsAfterUploadPayload, 'crlv', 'vehicle');
+      const skippedAntecedentesDoc = getDocumentByType(docsAfterUploadPayload, 'antecedentes_criminais', 'backgroundCheck');
       report.checks.postReviewStatuses = {
-        cnh: docsAfterUpload?.documents?.cnh?.status || null,
-        cnhRejectionReason: docsAfterUpload?.documents?.cnh?.rejectionReason || null,
-        crlv: docsAfterUpload?.documents?.crlv?.status || null,
-        crlvRejectionReason: docsAfterUpload?.documents?.crlv?.rejectionReason || null,
-        antecedentes: docsAfterUpload?.documents?.antecedentes_criminais?.status || null
+        cnh: skippedCnhDoc?.status || null,
+        cnhRejectionReason: skippedCnhDoc?.rejectionReason || null,
+        crlv: skippedCrlvDoc?.status || null,
+        crlvRejectionReason: skippedCrlvDoc?.rejectionReason || null,
+        antecedentes: skippedAntecedentesDoc?.status || null
       };
     }
 

@@ -105,7 +105,7 @@ bash leaf-websocket-backend/scripts/ops/deploy-dashboard-rbac-vps.sh
 
 Compose do runtime:
 
-- base: `docker-compose.hostinger.yml`
+- base: `docker-compose.production.yml`
 - overlay operacional: `docker-compose.ops-workers.yml`
 
 ### 3. Executar Múltiplos Workers

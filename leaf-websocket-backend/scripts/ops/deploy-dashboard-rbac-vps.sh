@@ -82,11 +82,14 @@ echo "[deploy] Validando sintaxe local..."
 node --check "$BACKEND_LOCAL_DIR/bootstrap/register-socket-create-booking-handler.js"
 node --check "$BACKEND_LOCAL_DIR/commands/RequestRideCommand.js"
 node --check "$BACKEND_LOCAL_DIR/routes/dashboard.js"
+node --check "$BACKEND_LOCAL_DIR/routes/app-routes.js"
 node --check "$BACKEND_LOCAL_DIR/routes/pricing.js"
 node --check "$BACKEND_LOCAL_DIR/services/fare-estimation-service.js"
 node --check "$BACKEND_LOCAL_DIR/services/create-booking-availability-precheck.js"
 node --check "$BACKEND_LOCAL_DIR/services/gradual-radius-expander.js"
 node --check "$BACKEND_LOCAL_DIR/services/h3-map-service.js"
+node --check "$BACKEND_LOCAL_DIR/services/h3-visual-policy-service.js"
+node --check "$BACKEND_LOCAL_DIR/services/driver-destination-mode-service.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing-context-store.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing-context-provider.js"
 node --check "$BACKEND_LOCAL_DIR/services/pricing-baseline-materializer.js"
@@ -109,6 +112,7 @@ node --check "$BACKEND_LOCAL_DIR/routes/waitlist.js"
 node --check "$BACKEND_LOCAL_DIR/firebase-config.js"
 node --check "$BACKEND_LOCAL_DIR/services/city-activation-state-service.js"
 node --check "$BACKEND_LOCAL_DIR/utils/prometheus-metrics.js"
+node --check "$BACKEND_LOCAL_DIR/utils/pilot-launch-flags.js"
 node --check "$BACKEND_LOCAL_DIR/server.js"
 node --check "$BACKEND_LOCAL_DIR/server.vps.js"
 node --check "$BACKEND_LOCAL_DIR/workers/pricing-baseline-worker.js"
@@ -117,7 +121,7 @@ node --check "$BACKEND_LOCAL_DIR/scripts/ops/materialize-pricing-baselines.cjs"
 node --check "$BACKEND_LOCAL_DIR/scripts/ops/backfill-ride-health-index.cjs"
 node --check "$BACKEND_LOCAL_DIR/scripts/create-admin-profile-user.js"
 if command -v docker >/dev/null 2>&1; then
-  docker compose -f "$BACKEND_LOCAL_DIR/docker-compose.hostinger.yml" -f "$BACKEND_LOCAL_DIR/docker-compose.ops-workers.yml" config --services >/dev/null
+  docker compose -f "$BACKEND_LOCAL_DIR/docker-compose.production.yml" -f "$BACKEND_LOCAL_DIR/docker-compose.gateway-scale.yml" -f "$BACKEND_LOCAL_DIR/docker-compose.ops-workers.yml" config --services >/dev/null
 fi
 npm --prefix "$DASH_LOCAL_DIR" run -s lint
 npm --prefix "$DASH_LOCAL_DIR" run -s build
@@ -167,12 +171,15 @@ echo "[deploy] Enviando backend..."
 scp_cmd "$BACKEND_LOCAL_DIR/bootstrap/register-socket-create-booking-handler.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/bootstrap/register-socket-create-booking-handler.js"
 scp_cmd "$BACKEND_LOCAL_DIR/commands/RequestRideCommand.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/commands/RequestRideCommand.js"
 scp_cmd "$BACKEND_LOCAL_DIR/routes/dashboard.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/dashboard.js"
+scp_cmd "$BACKEND_LOCAL_DIR/routes/app-routes.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/app-routes.js"
 scp_cmd "$BACKEND_LOCAL_DIR/routes/pricing.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/pricing.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/dashboard-websocket.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/dashboard-websocket.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/fare-estimation-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/fare-estimation-service.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/create-booking-availability-precheck.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/create-booking-availability-precheck.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/gradual-radius-expander.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/gradual-radius-expander.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/h3-map-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/h3-map-service.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/h3-visual-policy-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/h3-visual-policy-service.js"
+scp_cmd "$BACKEND_LOCAL_DIR/services/driver-destination-mode-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/driver-destination-mode-service.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-context-store.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-context-store.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-context-provider.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-context-provider.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/pricing-baseline-materializer.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/pricing-baseline-materializer.js"
@@ -194,6 +201,7 @@ scp_cmd "$BACKEND_LOCAL_DIR/routes/waitlist.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKE
 scp_cmd "$BACKEND_LOCAL_DIR/firebase-config.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/firebase-config.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/city-activation-state-service.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/city-activation-state-service.js"
 scp_cmd "$BACKEND_LOCAL_DIR/utils/prometheus-metrics.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/utils/prometheus-metrics.js"
+scp_cmd "$BACKEND_LOCAL_DIR/utils/pilot-launch-flags.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/utils/pilot-launch-flags.js"
 scp_cmd "$BACKEND_LOCAL_DIR/server.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/server.js"
 scp_cmd "$BACKEND_LOCAL_DIR/server.vps.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/server.vps.js"
 scp_cmd "$BACKEND_LOCAL_DIR/workers/pricing-baseline-worker.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/pricing-baseline-worker.js"
@@ -235,10 +243,26 @@ ssh_cmd "
   set -e
   cd '$REMOTE_BACKEND_DIR'
   if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
+    compose_args='-f docker-compose.yml'
+    gateway_services=''
+    if [ -f docker-compose.gateway-scale.yml ]; then
+      compose_args=\"\$compose_args -f docker-compose.gateway-scale.yml\"
+      gateway_services='websocket-gateway-2 websocket-gateway-3'
+    fi
+
     if [ -f docker-compose.ops-workers.yml ]; then
-      docker compose -f docker-compose.yml -f docker-compose.ops-workers.yml up -d --build websocket pricing-baseline-worker ride-health-monitor-worker
-    else
-      docker compose up -d --build websocket
+      compose_args=\"\$compose_args -f docker-compose.ops-workers.yml\"
+    fi
+
+    docker compose \$compose_args up -d --build websocket \$gateway_services
+
+    if [ -f docker-compose.ops-workers.yml ]; then
+      docker compose \$compose_args up -d --build --no-deps pricing-baseline-worker ride-health-monitor-worker
+    fi
+
+    if [ -n \"\$gateway_services\" ]; then
+      docker compose \$compose_args up -d --no-deps nginx
+      docker exec leaf-nginx nginx -t
     fi
   elif command -v pm2 >/dev/null 2>&1; then
     npm install --omit=dev >/dev/null 2>&1 || npm install >/dev/null 2>&1
@@ -277,17 +301,29 @@ echo "[deploy] Instalando/buildando/reiniciando dashboard..."
 ssh_cmd "
   set -e
   cd '$REMOTE_DASHBOARD_DIR'
-  npm install
-  npm run build
-
-  if command -v pm2 >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && [ -f docker-compose.contabo.yml ]; then
+    dashboard_env_args=''
+    if [ -f .env.production.local ]; then
+      dashboard_env_args='--env-file .env.production.local'
+    fi
+    docker compose \$dashboard_env_args -f docker-compose.contabo.yml up -d --build leaf-dashboard
+    if docker ps --format '{{.Names}}' | grep -qx leaf-nginx; then
+      docker exec leaf-nginx nginx -t
+      docker exec leaf-nginx nginx -s reload
+    fi
+  elif command -v npm >/dev/null 2>&1 && command -v pm2 >/dev/null 2>&1; then
+    npm install
+    npm run build
     pm2 delete leaf-dashboard-js 2>/dev/null || true
     pm2 start npm --name leaf-dashboard-js -- run start -- --port $DASHBOARD_PORT --hostname 0.0.0.0
     pm2 save >/dev/null 2>&1 || true
-  elif command -v systemctl >/dev/null 2>&1; then
+  elif command -v npm >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
+    npm install
+    npm run build
     systemctl restart leaf-dashboard 2>/dev/null || true
   else
-    nohup npm start -- --port $DASHBOARD_PORT --hostname 0.0.0.0 >/tmp/leaf-dashboard.log 2>&1 &
+    echo '[deploy] Nenhum runtime suportado encontrado para o dashboard.' >&2
+    exit 1
   fi
 "
 
@@ -330,7 +366,11 @@ ssh_cmd "
 ssh_cmd "
   set -e
   for i in \$(seq 1 40); do
-    if curl -fsS -m 4 http://127.0.0.1:$DASHBOARD_PORT/login >/dev/null; then
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx leaf-dashboard; then
+      if docker exec leaf-dashboard wget -q -O /dev/null http://127.0.0.1:3000/login; then
+        exit 0
+      fi
+    elif curl -fsS -m 4 http://127.0.0.1:$DASHBOARD_PORT/login >/dev/null; then
       exit 0
     fi
     sleep 2

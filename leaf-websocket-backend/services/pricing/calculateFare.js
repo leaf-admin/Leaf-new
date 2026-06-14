@@ -87,7 +87,7 @@ function getPublicRateCards() {
 }
 
 /**
- * @param {{distance_km?:number, duration_min_traffic?:number, eta_pickup_min?:number, score_pressao?:number, score_excecao?:number, carType?:string}} input
+ * @param {{distance_km?:number, duration_min_traffic?:number, eta_pickup_min?:number, score_pressao?:number, score_excecao?:number, dynamic_markup_rate?:number, carType?:string}} input
  */
 function calculateDynamicFare(input = {}) {
   const rateCard = getRateCard(input.carType || input.car_type || input.serviceCategory || input.category);
@@ -101,10 +101,13 @@ function calculateDynamicFare(input = {}) {
   const timeComponent = durationMinTraffic * rateCard.valor_min;
   const tarifaBase = rateCard.preco_base + rateCard.taxa_fixa + distanceComponent + timeComponent;
 
-  const dynamicMarkupRate = Math.min(
-    rateCard.max_dynamic_markup,
-    (rateCard.score_pressao_weight * scorePressao) + (rateCard.score_excecao_weight * scoreExcecao)
-  );
+  const explicitDynamicMarkupRate = Number(input.dynamic_markup_rate);
+  const dynamicMarkupRate = Number.isFinite(explicitDynamicMarkupRate)
+    ? Math.min(rateCard.max_dynamic_markup, Math.max(0, explicitDynamicMarkupRate))
+    : Math.min(
+        rateCard.max_dynamic_markup,
+        (rateCard.score_pressao_weight * scorePressao) + (rateCard.score_excecao_weight * scoreExcecao)
+      );
   const fatorDinamico = 1 + dynamicMarkupRate;
   const additionalPickup = Math.min(
     rateCard.pickup_cap,
@@ -132,6 +135,9 @@ function calculateDynamicFare(input = {}) {
       distancia_component: roundCurrency(distanceComponent),
       tempo_component: roundCurrency(timeComponent),
       dynamic_markup_value: roundCurrency(tarifaBase * dynamicMarkupRate),
+      dynamic_markup_source: Number.isFinite(explicitDynamicMarkupRate)
+        ? 'demand_pressure'
+        : 'legacy_combined_pressure',
       pickup_adjustment: roundCurrency(additionalPickup)
     }
   };

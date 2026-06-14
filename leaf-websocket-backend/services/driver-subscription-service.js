@@ -41,8 +41,9 @@ function toMoney(value, fallback = 0) {
 
 class DriverSubscriptionService {
   constructor() {
-    this.plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '990', 10);
+    this.plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '1490', 10);
     this.eliteDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_ELITE_DAILY_CENTS || '0', 10);
+    this.dailyBillingEnabled = String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
     this.readModelMaxAgeMs = Number.parseInt(process.env.SUBSCRIPTION_READMODEL_MAX_AGE_MS || '60000', 10);
   }
 
@@ -92,7 +93,7 @@ class DriverSubscriptionService {
     const latestFreeEnd = freeEnds.length > 0
       ? new Date(Math.max(...freeEnds.map((date) => date.getTime())))
       : null;
-    const isFree = subscription.isFeeExempt === true || latestFreeEnd !== null;
+    const isFree = subscription.isFeeExempt === true || latestFreeEnd !== null || !this.dailyBillingEnabled;
     const appliedDailyFeeCents = isFree ? 0 : dailyFeeCents;
     const driverName = String(
       driver.name ||
@@ -118,6 +119,10 @@ class DriverSubscriptionService {
         collectionMode: String(subscription.collectionMode || driver.subscription_collection_mode || 'withdrawal').toLowerCase(),
         dailyFeeCents: appliedDailyFeeCents,
         dailyFee: Number((appliedDailyFeeCents / 100).toFixed(2)),
+        nominalDailyFeeCents: dailyFeeCents,
+        nominalDailyFee: Number((dailyFeeCents / 100).toFixed(2)),
+        dailyBillingEnabled: this.dailyBillingEnabled,
+        dailyBillingSuspended: !this.dailyBillingEnabled,
         weeklyFeeCents,
         weeklyFee: Number((weeklyFeeCents / 100).toFixed(2)),
         pendingFeeCents,
