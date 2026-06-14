@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: './leaf-websocket-backend/package-lock.json'
+          cache-dependency-path: './package-lock.json'
 
       - name: Install dependencies
         run: npm ci
@@ -97,7 +97,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: './mobile-app/package-lock.json'
+          cache-dependency-path: './package-lock.json'
 
       - name: Install dependencies
         run: npm ci
@@ -128,7 +128,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: './mobile-app/package-lock.json'
+          cache-dependency-path: './package-lock.json'
 
       - name: Setup Expo And EAS
         uses: expo/expo-github-action@v8
