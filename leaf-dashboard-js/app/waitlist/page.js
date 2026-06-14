@@ -112,7 +112,9 @@ export default function WaitlistPage() {
       await loadWaitlist();
     };
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 60000);
     return () => {
       mounted = false;
       clearInterval(timer);

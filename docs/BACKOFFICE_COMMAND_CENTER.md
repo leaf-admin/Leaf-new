@@ -28,7 +28,11 @@ O snapshot e cacheado em Redis com TTL controlado por:
 
 `BACKOFFICE_COMMAND_CENTER_TTL_SECONDS`
 
-Default: 20s. Minimo: 5s. Maximo: 120s.
+Default: 90s. Minimo: 30s. Maximo: 300s.
+
+O dashboard consulta o snapshot a cada 60s somente enquanto a aba esta visivel.
+Com o TTL default, uma aba alterna entre `MISS` e `HIT`, em vez de refazer a
+agregacao cara em todo refresh. Abas ocultas nao consultam o endpoint.
 
 ## Regra de custo
 
@@ -79,7 +83,7 @@ As paginas detalhadas continuam existindo para drill-down:
 5. Abrir `/financial-reconciliation` apos canary, corrida real ou alerta financeiro.
 6. Abrir `/audit` quando houver acao sensivel, mudanca de status, bloqueio, reativacao ou investigacao.
 
-Evite manter telas de drill-down abertas em varios navegadores. O painel diario foi feito para ficar aberto sem multiplicar leituras.
+Evite manter telas de drill-down abertas em varios navegadores. O painel diario foi feito para ficar aberto sem multiplicar leituras. As telas operacionais pausam polling quando a aba esta oculta; suporte N0 usa Socket.IO como caminho principal e polling lento apenas como fallback.
 
 ## Guardrail de leituras Firestore
 
@@ -135,8 +139,18 @@ Importante: o guardrail estima e monitora leituras. Ele nao deve substituir cach
 
 ## Observabilidade detalhada
 
-`/observability` e uma tela tecnica e ainda faz varias chamadas internas para diagnostico. O polling default foi reduzido para 30s e pode ser configurado por:
+`/observability` e uma tela tecnica e ainda faz varias chamadas internas para diagnostico. O polling default e de 60s, pausa quando a aba esta oculta e pode ser configurado por:
 
 `NEXT_PUBLIC_OBSERVABILITY_POLL_MS`
+
+O health Firebase real e cacheado por cinco minutos por processo para evitar
+leituras repetidas sem evento novo. A latencia somente gera warning acima de
+2,5s por default; 1,27s continua sendo reportado como metrica, nao como falha.
+
+Variaveis:
+
+- `HEALTH_FIREBASE_CACHE_TTL_MS`: default `300000`.
+- `HEALTH_FIREBASE_WARNING_MS`: default `2500`.
+- `HEALTH_FIREBASE_UNHEALTHY_MS`: default `8000`.
 
 O uso recomendado no dia a dia e manter `/dashboard` aberto e abrir `/observability` somente para investigacao.

@@ -62,6 +62,29 @@ describe('health-check-service firebase checks', () => {
     expect(getFromRealtimeDBMock).toHaveBeenCalledWith('.info/connected');
     expect(result.status).toBe('healthy');
     expect(result.components.realtimeDB.status).toBe('healthy');
+    expect(result.cache.status).toBe('MISS');
+  });
+
+  test('checkFirebase reutiliza cache e nao repete leituras pagas', async () => {
+    const first = await healthCheckService.checkFirebase();
+    const second = await healthCheckService.checkFirebase();
+
+    expect(first.cache.status).toBe('MISS');
+    expect(second.cache.status).toBe('HIT');
+    expect(getFirestoreMock).toHaveBeenCalledTimes(1);
+    expect(getFromRealtimeDBMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('checkFirebase deduplica verificacoes simultaneas', async () => {
+    const [first, second] = await Promise.all([
+      healthCheckService.checkFirebase(),
+      healthCheckService.checkFirebase()
+    ]);
+
+    expect(first.cache.status).toBe('MISS');
+    expect(second.cache.status).toBe('MISS');
+    expect(getFirestoreMock).toHaveBeenCalledTimes(1);
+    expect(getFromRealtimeDBMock).toHaveBeenCalledTimes(1);
   });
 
   test('checkSystem trata pico curto de CPU como warning em producao pequena', () => {

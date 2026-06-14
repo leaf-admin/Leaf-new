@@ -215,7 +215,14 @@ describe('backoffice-command-center-service', () => {
     expect(snapshot.costControls.externalPaidApisCalled).toBe(false);
     expect(snapshot.costControls.paidApiFamilies).toEqual([]);
     expect(snapshot.cache.status).toBe('MISS');
+    expect(snapshot.scope.ttlSeconds).toBe(90);
     expect(redis.set).toHaveBeenCalledTimes(1);
+    expect(redis.set).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      'EX',
+      90
+    );
     expect(opsGetOverview).toHaveBeenCalledWith({ hours: 1, autoEscalate: false });
     expect(getReviewQueueSummary).toHaveBeenCalledTimes(1);
     expect(collectUsageSnapshot).toHaveBeenCalledTimes(1);

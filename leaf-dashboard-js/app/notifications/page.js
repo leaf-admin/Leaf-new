@@ -62,11 +62,17 @@ export default function NotificationsPage() {
         if (mounted) setLoading(false);
       }
     };
+    const loadWhenVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(loadWhenVisible, 60000);
+    document.addEventListener("visibilitychange", loadWhenVisible);
     return () => {
       mounted = false;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", loadWhenVisible);
     };
   }, []);
 

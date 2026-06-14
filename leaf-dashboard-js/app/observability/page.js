@@ -10,8 +10,8 @@ import { TechnicalDetails } from "@/src/components/ui/DataViews";
 
 const grafanaBase = process.env.NEXT_PUBLIC_GRAFANA_URL || "";
 const POLL_INTERVAL_MS = Math.max(
-  10000,
-  Number.parseInt(process.env.NEXT_PUBLIC_OBSERVABILITY_POLL_MS || "30000", 10) || 30000,
+  30000,
+  Number.parseInt(process.env.NEXT_PUBLIC_OBSERVABILITY_POLL_MS || "60000", 10) || 60000,
 );
 
 const SOURCE_DEFS = [
@@ -433,11 +433,17 @@ export default function ObservabilityPage() {
       }
     };
 
+    const loadWhenVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+
     load();
-    const timer = setInterval(load, POLL_INTERVAL_MS);
+    const timer = setInterval(loadWhenVisible, POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", loadWhenVisible);
     return () => {
       mounted = false;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", loadWhenVisible);
     };
   }, []);
 

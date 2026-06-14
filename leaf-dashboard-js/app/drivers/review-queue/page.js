@@ -156,9 +156,9 @@ export default function DriversReviewQueuePage() {
     };
     run();
     const timer = setInterval(() => {
-      if (!mounted) return;
+      if (!mounted || document.visibilityState !== "visible") return;
       load({ silent: true });
-    }, 30000);
+    }, 60000);
     return () => {
       mounted = false;
       clearInterval(timer);

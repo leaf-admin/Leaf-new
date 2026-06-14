@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import KpiCard from "@/src/components/ui/KpiCard";
@@ -13,8 +13,8 @@ import wsService from "@/src/services/websocket-service";
 import { normalizeRole } from "@/src/utils/dashboard-access";
 
 const OPEN_STATUSES = new Set(["open", "assigned", "in_progress", "escalated"]);
-const SUPPORT_POLL_MS = 30000;
-const MESSAGE_POLL_MS = 5000;
+const SUPPORT_POLL_MS = 60000;
+const MESSAGE_POLL_MS = 30000;
 const SUPPORT_QUICK_REPLIES = [
   "Obrigado pelo contato. Vou verificar isso agora e te retorno por aqui.",
   "Recebemos sua mensagem. Para seguir com segurança, vou transformar este atendimento em chamado.",
@@ -335,6 +335,7 @@ function deriveSummary(tickets, queueSummary) {
 }
 
 export default function SupportPage() {
+  const chatRealtimeRef = useRef(false);
   const { user } = useAuth();
   const [tickets, setTickets] = useState([]);
   const [queueSummary, setQueueSummary] = useState(null);
@@ -472,7 +473,9 @@ export default function SupportPage() {
       await loadTickets(options);
     };
     run();
-    const timer = setInterval(() => run({ silent: true }), SUPPORT_POLL_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") run({ silent: true });
+    }, SUPPORT_POLL_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -486,7 +489,9 @@ export default function SupportPage() {
       await loadChatInbox();
     };
     run();
-    const timer = setInterval(run, MESSAGE_POLL_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible" && !chatRealtimeRef.current) run();
+    }, MESSAGE_POLL_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -507,24 +512,33 @@ export default function SupportPage() {
     const onChatStatusChange = () => {
       loadChatInbox();
     };
+    const onRealtimeReady = () => {
+      chatRealtimeRef.current = true;
+      if (mounted) setChatRealtime("tempo real");
+    };
+    const onRealtimeUnavailable = () => {
+      chatRealtimeRef.current = false;
+      if (mounted) setChatRealtime("polling");
+    };
 
     wsService.on("support:chat:new", onNewChatMessage);
     wsService.on("support:chat:closed", onChatStatusChange);
     wsService.on("support:chat:converted", onChatStatusChange);
+    wsService.on("authenticated", onRealtimeReady);
+    wsService.on("disconnect", onRealtimeUnavailable);
     wsService
       .connect()
-      .then(() => {
-        if (mounted) setChatRealtime("tempo real");
-      })
-      .catch(() => {
-        if (mounted) setChatRealtime("polling");
-      });
+      .then(onRealtimeReady)
+      .catch(onRealtimeUnavailable);
 
     return () => {
       mounted = false;
+      chatRealtimeRef.current = false;
       wsService.off("support:chat:new", onNewChatMessage);
       wsService.off("support:chat:closed", onChatStatusChange);
       wsService.off("support:chat:converted", onChatStatusChange);
+      wsService.off("authenticated", onRealtimeReady);
+      wsService.off("disconnect", onRealtimeUnavailable);
     };
   }, [loadChatInbox, selectedN0Chat?.userId]);
 
@@ -536,7 +550,9 @@ export default function SupportPage() {
       await loadOrchestratorOverview();
     };
     run();
-    const timer = setInterval(run, SUPPORT_POLL_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") run();
+    }, SUPPORT_POLL_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -550,7 +566,9 @@ export default function SupportPage() {
       await loadSupportAudit();
     };
     run();
-    const timer = setInterval(run, SUPPORT_POLL_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") run();
+    }, SUPPORT_POLL_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -572,7 +590,11 @@ export default function SupportPage() {
       }
     };
     loadTicketMessages();
-    const timer = setInterval(loadTicketMessages, MESSAGE_POLL_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadTicketMessages();
+      }
+    }, MESSAGE_POLL_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -600,7 +622,11 @@ export default function SupportPage() {
       }
     };
     loadChatData();
-    const timer = setInterval(loadChatData, MESSAGE_POLL_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadChatData();
+      }
+    }, MESSAGE_POLL_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -628,7 +654,11 @@ export default function SupportPage() {
       }
     };
     loadN0Chat();
-    const timer = setInterval(loadN0Chat, MESSAGE_POLL_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible" && !chatRealtimeRef.current) {
+        loadN0Chat();
+      }
+    }, MESSAGE_POLL_MS);
     return () => {
       mounted = false;
       clearInterval(timer);

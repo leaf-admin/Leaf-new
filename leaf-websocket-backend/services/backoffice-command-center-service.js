@@ -10,9 +10,9 @@ const rideCostAlertService = require('./ride-cost-alert-service');
 const WorkerHealthMonitor = require('../workers/health-monitor');
 const { logStructured } = require('../utils/logger');
 
-const DEFAULT_TTL_SECONDS = 20;
-const MIN_TTL_SECONDS = 5;
-const MAX_TTL_SECONDS = 120;
+const DEFAULT_TTL_SECONDS = 90;
+const MIN_TTL_SECONDS = 30;
+const MAX_TTL_SECONDS = 300;
 
 function clampNumber(value, fallback, min, max) {
   const parsed = Number.parseInt(value, 10);
