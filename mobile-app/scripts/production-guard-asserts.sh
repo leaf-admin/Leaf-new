@@ -13,7 +13,9 @@ require_pattern() {
   local file="$1"
   local pattern="$2"
   local label="$3"
-  if ! rg -q "$pattern" "$file"; then
+  if command -v rg >/dev/null 2>&1; then
+    rg -q "$pattern" "$file" || fail "$label missing in $file"
+  elif ! grep -Eq "$pattern" "$file"; then
     fail "$label missing in $file"
   fi
 }

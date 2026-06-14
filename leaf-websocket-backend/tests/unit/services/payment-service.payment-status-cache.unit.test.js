@@ -114,6 +114,8 @@ describe('PaymentService payment status cache', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    process.env.WOOVI_ENVIRONMENT = 'production';
+    process.env.WOOVI_API_TOKEN = 'unit-test-production-token';
     mockCacheStore.clear();
     mockCreateCharge.mockReset();
     mockCreateChargeWithSplit.mockReset();
