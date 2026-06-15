@@ -4,6 +4,7 @@ import { AppState, Platform } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Device from 'expo-device';
 import {
+    BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY,
     requestBackgroundLocationPermissionWithDisclosure,
     requestForegroundLocationPermissionWithDisclosure
 } from './AndroidPermissionDisclosure';
