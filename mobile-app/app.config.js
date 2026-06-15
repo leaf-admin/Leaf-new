@@ -371,9 +371,9 @@ module.exports = {
         [
             "expo-location",
             {
-                "locationAlwaysAndWhenInUsePermission": "A Leaf utiliza sua localização em primeiro e segundo plano exclusivamente para motoristas receberem corridas, manter navegação ativa e acompanhar viagens em tempo real.",
-                "locationAlwaysPermission": "A Leaf utiliza sua localização em segundo plano para permitir que motoristas recebam corridas e tenham a navegação ativa mesmo com o app minimizado, garantindo uma experiência contínua e segura.",
-                "locationWhenInUsePermission": "A Leaf utiliza sua localização para encontrar motoristas próximos, calcular rotas e permitir o acompanhamento da corrida em tempo real, melhorando a experiência de uso e segurança.",
+                "locationAlwaysAndWhenInUsePermission": "A Leaf coleta e envia sua localização precisa aos servidores da Leaf para corridas, rotas, navegação, acompanhamento em tempo real e segurança. Para motoristas online ou em corrida, isso pode acontecer mesmo quando o app estiver fechado ou não estiver em uso. A Leaf não usa sua localização para anúncios.",
+                "locationAlwaysPermission": "A Leaf coleta e envia sua localização precisa em segundo plano para permitir que motoristas online recebam corridas, mantenham a navegação ativa e compartilhem a posição com o passageiro durante a viagem, mesmo quando o app estiver fechado ou não estiver em uso. A Leaf não usa sua localização para anúncios.",
+                "locationWhenInUsePermission": "A Leaf coleta e envia sua localização precisa aos servidores da Leaf para mostrar sua posição no mapa, definir partida, encontrar motoristas próximos, calcular rotas, estimar preço e acompanhar corridas com segurança. A Leaf não usa sua localização para anúncios.",
                 "isIosBackgroundLocationEnabled": true,
                 "isAndroidBackgroundLocationEnabled": true,
                 "isAndroidForegroundServiceEnabled": true

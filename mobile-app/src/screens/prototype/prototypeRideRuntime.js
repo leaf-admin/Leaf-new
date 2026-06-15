@@ -7,6 +7,7 @@ import polyline from "@mapbox/polyline";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Logger from "../../utils/Logger";
+import { requestForegroundLocationPermissionWithDisclosure } from "../../services/AndroidPermissionDisclosure";
 import WebSocketManager from "../../services/WebSocketManager";
 import realtimeConnectionOrchestrator from "../../services/RealtimeConnectionOrchestrator";
 import receiptService from "../../services/ReceiptService";
@@ -6280,7 +6281,7 @@ async function ensureCurrentLocation(options = {}) {
         });
         return;
       }
-      permission = await Location.requestForegroundPermissionsAsync();
+      permission = await requestForegroundLocationPermissionWithDisclosure();
     }
 
     if (permission.status !== "granted") {

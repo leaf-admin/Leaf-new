@@ -24,6 +24,7 @@ import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/botto
 import WebSocketManager from '../../services/WebSocketManager';
 import TripDataService from '../../services/TripDataService';
 import * as Location from 'expo-location';
+import { requestForegroundLocationPermissionWithDisclosure } from '../../services/AndroidPermissionDisclosure';
 import { GetDistance } from '../../services/runtime/mapGeoService';
 import { Animated } from 'react-native';
 import NetworkStatusBanner from '../NetworkStatusBanner';
@@ -123,7 +124,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
         if (!pickupLat || !pickupLng) return;
 
         // Obter localização atual do motorista
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        const { status } = await requestForegroundLocationPermissionWithDisclosure();
         if (status !== 'granted') return;
 
         const currentLocation = await Location.getCurrentPositionAsync({
@@ -468,7 +469,7 @@ const DriverEnRouteUI = React.memo(function DriverEnRouteUI({ booking, onArrived
       }
 
       // Obter localização atual do motorista
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await requestForegroundLocationPermissionWithDisclosure();
       if (status !== 'granted') {
         Alert.alert('Erro', 'Permissão de localização necessária');
         return;

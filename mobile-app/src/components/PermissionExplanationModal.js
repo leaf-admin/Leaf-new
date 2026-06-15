@@ -28,15 +28,15 @@ const PermissionExplanationModal = ({
       if (locationType === 'background') {
         return {
           title: 'Localização em segundo plano',
-          text: 'A Leaf coleta sua localização para permitir que você receba corridas e mantenha a navegação ativa mesmo quando o app não está em uso.\n\nA localização em segundo plano é usada somente enquanto você estiver online como motorista ou durante uma corrida, para operação, acompanhamento da viagem e segurança. A Leaf não usa essa permissão para anúncios.',
+          text: 'A Leaf coleta e envia sua localização precisa aos servidores da Leaf para permitir que você receba corridas próximas, mantenha a navegação ativa, compartilhe sua posição com o passageiro durante a viagem e viabilize recursos de segurança.\n\nQuando você estiver online como motorista ou em uma corrida, a Leaf pode coletar localização em segundo plano, mesmo quando o app estiver fechado ou não estiver em uso. A Leaf não usa sua localização para anúncios.',
           acceptButton: 'Entendi e continuar',
           cancelButton: 'Agora não',
         };
       } else {
         return {
-          title: '📍 Navegação e coleta no local correto',
-          text: 'A Leaf usa sua localização para ajudar você a navegar até o passageiro, calcular rotas e registrar o início e o fim das viagens.\n\nSem essa permissão, você ainda poderá acessar o app, mas não conseguirá realizar viagens.',
-          acceptButton: 'Permitir localização',
+          title: 'Localização do motorista',
+          text: 'A Leaf coleta e envia sua localização precisa aos servidores da Leaf para mostrar sua posição no mapa, encontrar corridas próximas, calcular rotas, orientar a navegação e registrar etapas da viagem com segurança.\n\nSem essa permissão, você ainda pode acessar o app, mas não conseguirá ficar online nem realizar corridas. A Leaf não usa sua localização para anúncios.',
+          acceptButton: 'Concordo e continuar',
           cancelButton: 'Agora não',
         };
       }
@@ -45,9 +45,9 @@ const PermissionExplanationModal = ({
     // Localização - Passageiro
     if (permissionType === 'location' && userType === 'customer') {
       return {
-        title: '📍 Encontre motoristas próximos',
-        text: 'A Leaf usa sua localização para encontrar motoristas próximos, calcular rotas e estimar o valor da corrida.\n\nVocê pode continuar usando o app sem ativar a localização, mas não será possível solicitar corridas.',
-        acceptButton: 'Ativar localização',
+        title: 'Localização do passageiro',
+        text: 'A Leaf coleta e envia sua localização precisa aos servidores da Leaf para mostrar sua posição no mapa, definir o ponto de partida, encontrar motoristas próximos, calcular rota, estimar preço e acompanhar a corrida com segurança.\n\nDurante uma corrida, sua localização pode ser compartilhada com o motorista para facilitar o embarque e a viagem. A Leaf não usa sua localização para anúncios.',
+        acceptButton: 'Concordo e continuar',
         cancelButton: 'Agora não',
       };
     }
