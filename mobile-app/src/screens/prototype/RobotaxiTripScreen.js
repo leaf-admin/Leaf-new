@@ -209,10 +209,14 @@ function getFirstName(value, fallback = 'Motorista') {
   return firstName || fallback;
 }
 
-function resolveVehicleColorLabel(...values) {
-  const colorLabel = values
+function pickFirstNonEmptyString(...values) {
+  return values
     .map(value => String(value || '').trim())
-    .find(Boolean);
+    .find(Boolean) || '';
+}
+
+function resolveVehicleColorLabel(...values) {
+  const colorLabel = pickFirstNonEmptyString(...values);
   return colorLabel || 'Cor a confirmar';
 }
 
@@ -236,6 +240,20 @@ function normalizeMapCoordinate(value) {
 function toPositiveNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function normalizeRouteCoordinateList(value) {
+  if (typeof value === 'string') {
+    try {
+      return normalizeRouteCoordinateList(JSON.parse(value));
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  return Array.isArray(value)
+    ? value.map(normalizeMapCoordinate).filter(Boolean)
+    : [];
 }
 
 function pickPassengerPaidAmountFromSource(source = {}, { includeFareFallback = false } = {}) {
@@ -423,6 +441,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     currentHeading,
     currentAddress,
     driverCoordinate,
+    driverTripMeta,
     profileUid,
     riderProfile,
     endTripEarlyFlow,
@@ -441,10 +460,42 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const destination = route?.params?.destination || selectedDestination?.name || 'Destino';
   const destinationAddress = route?.params?.destinationAddress || selectedDestination?.address || destination;
   const vehicle = route?.params?.vehicle || selectedVehicle || 'Leaf Plus';
-  const fallbackDriverName =
-    route?.params?.driverName || activeBooking?.driverName || driverActiveRide?.driverName || null;
-  const fallbackVehicleModel = route?.params?.vehicleModel || vehicle;
-  const fallbackVehiclePlate = route?.params?.vehiclePlate || '';
+  const fallbackDriverName = pickFirstNonEmptyString(
+    route?.params?.driverName,
+    activeBooking?.driverName,
+    activeBooking?.driver?.name,
+    driverActiveRide?.driverName,
+    driverActiveRide?.driver?.name,
+  );
+  const fallbackVehicleModel = pickFirstNonEmptyString(
+    route?.params?.vehicleModel,
+    route?.params?.vehicleLabel,
+    activeBooking?.vehicleModel,
+    activeBooking?.vehicleLabel,
+    activeBooking?.driverVehicle,
+    activeBooking?.driver?.vehicle?.model,
+    activeBooking?.vehicle?.model,
+    driverActiveRide?.vehicleModel,
+    driverActiveRide?.vehicleLabel,
+    driverActiveRide?.driverVehicle,
+    driverActiveRide?.driver?.vehicle?.model,
+    driverActiveRide?.vehicle?.model,
+    vehicle,
+  );
+  const fallbackVehiclePlate = pickFirstNonEmptyString(
+    route?.params?.vehiclePlate,
+    route?.params?.plate,
+    activeBooking?.vehiclePlate,
+    activeBooking?.plate,
+    activeBooking?.driverVehiclePlate,
+    activeBooking?.driver?.vehicle?.plate,
+    activeBooking?.vehicle?.plate,
+    driverActiveRide?.vehiclePlate,
+    driverActiveRide?.plate,
+    driverActiveRide?.driverVehiclePlate,
+    driverActiveRide?.driver?.vehicle?.plate,
+    driverActiveRide?.vehicle?.plate,
+  );
   const resolvedTripDistanceKm =
     toPositiveNumber(route?.params?.tripDistanceKm) ??
     toPositiveNumber(tripDistanceKm);
@@ -463,23 +514,55 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     paymentState,
     selectedFare,
   });
-  const driverName =
-    String(route?.params?.driverName || driverInfo?.name || fallbackDriverName || 'Motorista Leaf').trim() || 'Motorista Leaf';
-  const vehicleModel =
-    String(route?.params?.vehicleModel || driverInfo?.model || driverInfo?.vehicle?.model || fallbackVehicleModel || vehicle).trim() ||
+  const driverName = pickFirstNonEmptyString(
+    route?.params?.driverName,
+    driverInfo?.name,
+    driverInfo?.driverName,
+    driverInfo?.driver?.name,
+    fallbackDriverName,
+    'Motorista Leaf',
+  ) || 'Motorista Leaf';
+  const vehicleModel = pickFirstNonEmptyString(
+    route?.params?.vehicleModel,
+    route?.params?.vehicleLabel,
+    driverInfo?.model,
+    driverInfo?.vehicleModel,
+    driverInfo?.driverVehicle,
+    driverInfo?.vehicle?.model,
+    driverInfo?.driver?.vehicle?.model,
+    fallbackVehicleModel,
+    vehicle,
+  ) ||
     'Leaf Plus';
-  const vehiclePlate =
-    String(route?.params?.vehiclePlate || driverInfo?.plate || driverInfo?.vehicle?.plate || fallbackVehiclePlate || '').trim();
+  const vehiclePlate = pickFirstNonEmptyString(
+    route?.params?.vehiclePlate,
+    route?.params?.plate,
+    driverInfo?.plate,
+    driverInfo?.vehiclePlate,
+    driverInfo?.driverVehiclePlate,
+    driverInfo?.vehicle?.plate,
+    driverInfo?.driver?.vehicle?.plate,
+    fallbackVehiclePlate,
+  );
   const vehicleColorLabel = resolveVehicleColorLabel(
     route?.params?.vehicleColor,
+    route?.params?.carColor,
+    route?.params?.color,
     driverInfo?.color,
     driverInfo?.vehicleColor,
+    driverInfo?.carColor,
     driverInfo?.vehicle?.color,
+    driverInfo?.driver?.vehicle?.color,
     activeBooking?.vehicleColor,
+    activeBooking?.carColor,
+    activeBooking?.color,
     activeBooking?.vehicle?.color,
+    activeBooking?.driver?.vehicle?.color,
     driverActiveRide?.vehicleColor,
+    driverActiveRide?.carColor,
+    driverActiveRide?.color,
     driverActiveRide?.vehicle?.color,
-    route?.params?.vehicleColor,
+    driverActiveRide?.driver?.vehicle?.color,
   );
   const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
     surface: 'ride_map',
@@ -506,7 +589,31 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         route?.params?.driverPhoto ||
         '',
     ).trim() || null;
-  const distanceLabel = formatDistanceLabel(resolvedTripDistanceKm);
+  const resolvedPickupDistanceKm =
+    toPositiveNumber(route?.params?.driverDistanceToPickupKm) ??
+    toPositiveNumber(route?.params?.pickupDistanceKm) ??
+    toPositiveNumber(activeBooking?.driverDistanceToPickupKm) ??
+    toPositiveNumber(activeBooking?.pickupDistanceKm) ??
+    toPositiveNumber(activeBooking?.driverToPickupDistanceKm) ??
+    toPositiveNumber(driverActiveRide?.driverDistanceToPickupKm) ??
+    toPositiveNumber(driverActiveRide?.pickupDistanceKm) ??
+    toPositiveNumber(driverActiveRide?.driverToPickupDistanceKm) ??
+    toPositiveNumber(driverTripMeta?.pickupDistanceKm) ??
+    null;
+  const resolvedPickupEtaMin =
+    toPositiveNumber(route?.params?.estimatedArrivalToPickupMin) ??
+    toPositiveNumber(route?.params?.pickupEtaMinutes) ??
+    toPositiveNumber(activeBooking?.estimatedArrivalToPickupMin) ??
+    toPositiveNumber(activeBooking?.pickupEtaMinutes) ??
+    toPositiveNumber(activeBooking?.driverToPickupEtaMinutes) ??
+    toPositiveNumber(driverActiveRide?.estimatedArrivalToPickupMin) ??
+    toPositiveNumber(driverActiveRide?.pickupEtaMinutes) ??
+    toPositiveNumber(driverActiveRide?.driverToPickupEtaMinutes) ??
+    toPositiveNumber(driverTripMeta?.pickupEtaMinutes) ??
+    toPositiveNumber(driverTripMeta?.initialEtaMinutes) ??
+    null;
+  const tripDistanceLabel = formatDistanceLabel(resolvedTripDistanceKm);
+  const pickupDistanceLabel = formatDistanceLabel(resolvedPickupDistanceKm);
   const fareLabel = Number.isFinite(resolvedFare) ? formatCurrency(resolvedFare) : '--';
   const routeQaStatus = String(route?.params?.qaStatus || '').trim();
   const normalizedStatus = normalizePassengerBookingStatus(
@@ -520,6 +627,13 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const isAccepted = normalizedStatus === 'accepted' || normalizedStatus === 'arrived';
   const isArrived = normalizedStatus === 'arrived';
   const isStarted = normalizedStatus === 'started';
+  const pickupLegDistanceLabel =
+    pickupDistanceLabel && pickupDistanceLabel !== '--'
+      ? pickupDistanceLabel
+      : tripDistanceLabel;
+  const distanceLabel = isAccepted && !isStarted
+    ? pickupLegDistanceLabel
+    : tripDistanceLabel;
   const extensionStatus = String(rideExtension?.status || 'idle').trim().toLowerCase();
   const operationalStatus = String(operationalContinuation?.status || 'idle').trim().toLowerCase();
   const isOperationalDecisionPending = operationalStatus === 'passenger_decision_pending';
@@ -570,14 +684,36 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     activeBooking?.driverLocation?.heading ??
     null;
   const tripRouteCoordinates = useMemo(() => {
-    const candidateRoute =
-      activeBooking?.routeCoordinates ||
-      activeBooking?.route ||
-      driverActiveRide?.routeCoordinates ||
-      driverActiveRide?.route;
-    const normalizedCandidate = Array.isArray(candidateRoute)
-      ? candidateRoute.map(normalizeMapCoordinate).filter(Boolean)
-      : [];
+    const pickupRouteCandidates = [
+      route?.params?.driverToPickupRouteCoordinates,
+      route?.params?.pickupRouteCoordinates,
+      activeBooking?.driverToPickupRouteCoordinates,
+      activeBooking?.pickupRouteCoordinates,
+      activeBooking?.routePlan?.pickupCoordinates,
+      activeBooking?.driverTripMeta?.routePlan?.pickupCoordinates,
+      driverActiveRide?.driverToPickupRouteCoordinates,
+      driverActiveRide?.pickupRouteCoordinates,
+      driverActiveRide?.routePlan?.pickupCoordinates,
+      driverActiveRide?.driverTripMeta?.routePlan?.pickupCoordinates,
+      driverTripMeta?.routePlan?.pickupCoordinates,
+    ];
+    const destinationRouteCandidates = [
+      activeBooking?.routeCoordinates,
+      activeBooking?.route,
+      activeBooking?.routePlan?.destinationCoordinates,
+      activeBooking?.driverTripMeta?.routePlan?.destinationCoordinates,
+      driverActiveRide?.routeCoordinates,
+      driverActiveRide?.route,
+      driverActiveRide?.routePlan?.destinationCoordinates,
+      driverActiveRide?.driverTripMeta?.routePlan?.destinationCoordinates,
+      driverTripMeta?.routePlan?.destinationCoordinates,
+    ];
+    const candidateRoutes = isAccepted || isArrived
+      ? pickupRouteCandidates
+      : destinationRouteCandidates;
+    const normalizedCandidate = candidateRoutes
+      .map(normalizeRouteCoordinateList)
+      .find(coordinates => coordinates.length >= 2) || [];
     if (normalizedCandidate.length >= 2) {
       return normalizedCandidate;
     }
@@ -599,9 +735,23 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   }, [
     activeBooking?.route,
     activeBooking?.routeCoordinates,
+    activeBooking?.driverToPickupRouteCoordinates,
+    activeBooking?.pickupRouteCoordinates,
+    activeBooking?.routePlan?.destinationCoordinates,
+    activeBooking?.routePlan?.pickupCoordinates,
+    activeBooking?.driverTripMeta?.routePlan?.destinationCoordinates,
+    activeBooking?.driverTripMeta?.routePlan?.pickupCoordinates,
     currentCoordinate,
     driverActiveRide?.route,
     driverActiveRide?.routeCoordinates,
+    driverActiveRide?.driverToPickupRouteCoordinates,
+    driverActiveRide?.pickupRouteCoordinates,
+    driverActiveRide?.routePlan?.destinationCoordinates,
+    driverActiveRide?.routePlan?.pickupCoordinates,
+    driverActiveRide?.driverTripMeta?.routePlan?.destinationCoordinates,
+    driverActiveRide?.driverTripMeta?.routePlan?.pickupCoordinates,
+    driverTripMeta?.routePlan?.destinationCoordinates,
+    driverTripMeta?.routePlan?.pickupCoordinates,
     isAccepted,
     isArrived,
     tripDestinationCoordinate,
@@ -612,19 +762,38 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     Array.isArray(tripRouteCoordinates) && tripRouteCoordinates.length >= 2
       ? tripRouteCoordinates[0]
       : tripPickupCoordinate;
-  const tripMapRegion = useMemo(
+  const tripRouteDestinationCoordinate =
+    isAccepted || isArrived
+      ? tripPickupCoordinate
+      : tripDestinationCoordinate || tripPickupCoordinate;
+  const mapFocusPoints = useMemo(
     () =>
-      buildFallbackTripRegion([
-        tripPickupCoordinate,
-        tripDestinationCoordinate,
-        tripDriverCoordinate,
-        ...tripRouteCoordinates,
-      ]),
+      isAccepted || isArrived
+        ? [
+            tripDriverCoordinate,
+            tripPickupCoordinate,
+            ...tripRouteCoordinates,
+          ]
+        : [
+            tripPickupCoordinate,
+            tripDestinationCoordinate,
+            tripDriverCoordinate,
+            ...tripRouteCoordinates,
+          ],
     [
+      isAccepted,
+      isArrived,
       tripDestinationCoordinate,
       tripDriverCoordinate,
       tripPickupCoordinate,
       tripRouteCoordinates,
+    ]
+  );
+  const tripMapRegion = useMemo(
+    () =>
+      buildFallbackTripRegion(mapFocusPoints),
+    [
+      mapFocusPoints,
     ]
   );
   const arrivalLabel =
@@ -690,9 +859,18 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     Number.isFinite(displayEtaMinutes) && displayEtaMinutes > 0
       ? `${displayEtaMinutes} min`
       : null;
+  const pickupEtaValue =
+    Number.isFinite(resolvedPickupEtaMin) && resolvedPickupEtaMin > 0
+      ? `${Math.max(1, Math.round(resolvedPickupEtaMin))} min`
+      : null;
   const compactEtaValue =
     isArrived && boardingCountdownLabel
       ? boardingCountdownLabel
+      : isAccepted && !isStarted
+        ? pickupEtaValue || stableEtaValue ||
+          (Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
+            ? `${resolvedTripDurationMin} min`
+            : '--')
       : stableEtaValue ||
         (Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
           ? `${resolvedTripDurationMin} min`
@@ -730,7 +908,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       : arrivalClockLabel || resolvedTripArrivalText || 'Viagem em andamento'
     : isArrived
       ? pickupPointLabel
-      : `${vehicleModel}${vehiclePlate ? ` · ${vehiclePlate}` : ''}`;
+      : '';
   const passengerIslandRightLabel = isStarted
     ? 'Em rota'
     : isArrived
@@ -1261,8 +1439,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           driverHeading={tripDriverHeading}
           routeCoordinates={tripRouteCoordinates}
           originCoordinate={tripRouteOriginCoordinate}
-          destinationCoordinate={tripDestinationCoordinate || tripPickupCoordinate}
-          destinationLabel={destination}
+          destinationCoordinate={tripRouteDestinationCoordinate}
+          destinationLabel={isAccepted || isArrived ? 'Embarque' : destination}
           destinationAddress={destinationAddress}
           originLabel="Partida"
           originAddress={currentAddress || 'Sua localização atual'}

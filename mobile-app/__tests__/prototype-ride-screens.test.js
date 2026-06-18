@@ -128,13 +128,16 @@ function buildPassengerRuntime(overrides = {}) {
   return {
     bookingStatus: 'accepted',
     selectedDestination: { name: 'Aeroporto Santos Dumont', address: 'Centro, Rio de Janeiro' },
-    activeBooking: null,
     selectedVehicle: 'Leaf Plus',
     selectedFare: 38.4,
     tripDistanceKm: 8.2,
     tripDurationMin: 14,
     tripArrivalText: 'Chegada em 14 min',
     boardingRemainingSec: 90,
+    activeBooking: {
+      driverDistanceToPickupKm: 8.2,
+      estimatedArrivalToPickupMin: 14,
+    },
     driverInfo: { id: 'driver_1', name: 'Motorista Leaf', model: 'Leaf Plus', plate: 'LEF-2042' },
     rideExtension: { status: 'idle' },
     operationalContinuation: { status: 'idle' },
@@ -607,6 +610,37 @@ describe('prototype ride screens', () => {
     expect(screen.getByText('Compartilhar')).toBeTruthy();
     expect(screen.getByLabelText('Cancelar corrida')).toBeTruthy();
     expect(screen.queryByText('Cancelar corrida')).toBeNull();
+  });
+
+  it('hydrates accepted passenger vehicle and pickup ETA from active ride aliases', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        driverInfo: { id: 'driver_1', name: 'Motorista Leaf' },
+        activeBooking: {
+          driverDistanceToPickupKm: 0.42,
+          estimatedArrivalToPickupMin: 3,
+          driver: {
+            vehicle: {
+              model: 'Honda City',
+              plate: 'RJA2D41',
+              color: 'Branco',
+            },
+          },
+        },
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getByText('3 min até o embarque')).toBeTruthy();
+    expect(screen.getByText('420 m até o embarque')).toBeTruthy();
+    expect(screen.getByText('RJA2D41')).toBeTruthy();
+    expect(screen.getByText('Honda City')).toBeTruthy();
+    expect(screen.getByText('Branco')).toBeTruthy();
+    expect(screen.queryByText('Placa pendente')).toBeNull();
+    expect(screen.queryByText('Cor a confirmar')).toBeNull();
   });
 
   it('updates passenger boarding timer copy as pickup urgency changes', () => {
