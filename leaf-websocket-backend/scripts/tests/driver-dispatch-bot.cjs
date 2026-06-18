@@ -10,6 +10,13 @@ const PICKUP = {
 const ESTIMATED_FARE = Number(process.env.TEST_FARE || 13.42);
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  }
+  return null;
+}
 function interpolatePoints(start, end, steps = 10) {
   const out = [];
   for (let i = 1; i <= steps; i += 1) {
@@ -95,7 +102,20 @@ async function main() {
     console.log('new_ride_request', JSON.stringify({ bookingId, pickup, destination }));
     const accepted = await driver.acceptRide(bookingId);
     console.log('ride_accepted', JSON.stringify(accepted || {}));
+    const completionFare = firstFiniteNumber(
+      accepted?.estimatedFare,
+      accepted?.fare,
+      accepted?.totalFare,
+      accepted?.grossAmount,
+      request?.estimatedFare,
+      request?.fare,
+      request?.totalFare,
+      ESTIMATED_FARE
+    );
     await sleep(2000);
+    const arrived = await driver.arrivedAtPickup(bookingId, { location: pickup, timeoutMs: 30000 });
+    console.log('arrived_at_pickup', JSON.stringify(arrived || {}));
+    await sleep(1000);
     const startWait = driver.waitForEvent('tripStarted', 30000, payload => (payload?.bookingId || payload?.rideId) === bookingId);
     driver.socket.emit('startTrip', { bookingId, startLocation: pickup });
     const started = await startWait;
@@ -111,7 +131,12 @@ async function main() {
       await sleep(1800);
     }
     const completeWait = driver.waitForEvent('tripCompleted', 30000, payload => (payload?.bookingId || payload?.rideId) === bookingId);
-    driver.socket.emit('completeTrip', { bookingId, endLocation: destination, distance: 4.7, fare: ESTIMATED_FARE, mockPayment: true, __mockPayment: true });
+    driver.socket.emit('completeTrip', {
+      bookingId,
+      endLocation: destination,
+      distance: 4.7,
+      fare: completionFare ?? ESTIMATED_FARE
+    });
     const completed = await completeWait;
     console.log('trip_completed', JSON.stringify(completed || {}));
   } finally {

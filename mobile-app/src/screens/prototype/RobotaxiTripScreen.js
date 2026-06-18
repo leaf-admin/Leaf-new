@@ -38,6 +38,13 @@ import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 292;
+const PROTECTED_PASSENGER_TRIP_STATUSES = new Set([
+  'accepted',
+  'arrived',
+  'started',
+  'operational_interrupted',
+  'searching_replacement',
+]);
 
 const PASSENGER_ACCEPTED_RENDERED_CARD_FIELD_IDS = Object.freeze([
   'driver_name',
@@ -758,6 +765,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   }, [currentAddress, operationalContinuation?.pickupLocation]);
 
   const handleDismiss = () => {
+    if (PROTECTED_PASSENGER_TRIP_STATUSES.has(normalizedStatus)) {
+      return;
+    }
+
     if (navigation.canGoBack()) {
       navigation.goBack();
       return;
@@ -780,7 +791,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
 
   useEffect(() => {
     if (bookingStatus === 'completed') {
-      navigation.navigate('RobotaxiPrototypeReceipt', { fromTrip: true });
+      navigation.replace('RobotaxiPrototypeReceipt', { fromTrip: true });
     }
   }, [bookingStatus, navigation]);
 
@@ -1273,6 +1284,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
+          backdropDismissEnabled={false}
+          dragEnabled={false}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
           <LeafRideSheet

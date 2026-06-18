@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
+const { getIdTokenForUid } = require('../../tests/e2e/backend/__helpers__/firebase-id-token');
 
 const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
 const API_BASE_URL = process.env.API_BASE_URL || 'https://api.leaf.app.br';
@@ -50,6 +51,7 @@ const DESTINATION = {
 };
 
 const ONLINE_MAX_ATTEMPTS = Number(process.env.ONLINE_MAX_ATTEMPTS || 5);
+let passengerIdToken = '';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -65,7 +67,10 @@ async function postJson(url, body, timeoutMs = 20000) {
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(passengerIdToken ? { authorization: `Bearer ${passengerIdToken}` } : {})
+      },
       body: JSON.stringify(body),
       signal: controller.signal
     });
@@ -295,6 +300,7 @@ async function run() {
 
     await driver.authenticate(DRIVER_UID, 'driver');
     await passenger.authenticate(PASSENGER_UID, 'customer');
+    passengerIdToken = await getIdTokenForUid(PASSENGER_UID);
 
     const online = await ensureDriverOnline(driver);
     if (!online.success) {

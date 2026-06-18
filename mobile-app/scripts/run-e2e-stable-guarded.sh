@@ -12,6 +12,8 @@ source "${SCRIPT_DIR}/source-local-build-env.sh"
 BACKEND_URL="${BACKEND_URL:-https://api.leaf.app.br}"
 APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
 SEED_TEST_USERS="${SEED_TEST_USERS:-true}"
+PAYMENT_RUNTIME_GUARD="${PAYMENT_RUNTIME_GUARD:-canary}"
+FIREBASE_TEST_PHONE="${FIREBASE_TEST_PHONE:-21102938475}"
 ADB_BIN="${ADB_BIN:-$(command -v adb || true)}"
 ANDROID_SERIAL_ENV="${ANDROID_SERIAL:-}"
 MAESTRO_MIN_VERSION="${MAESTRO_MIN_VERSION:-2.5.0}"
@@ -307,14 +309,54 @@ if ! curl -sS --max-time 12 "$BACKEND_URL/health" > "$ARTIFACTS_DIR/backend-heal
   exit 1
 fi
 
-if ! curl -sS --max-time 12 "$BACKEND_URL/socket.io/?EIO=4&transport=polling" > "$ARTIFACTS_DIR/backend-socketio-handshake.txt"; then
-  echo "[stable][error] Backend Socket.IO polling handshake failed."
+if ! node - "$BACKEND_URL" "$ARTIFACTS_DIR/backend-socketio-handshake.json" <<'NODE'; then
+const fs = require('fs');
+const io = require('socket.io-client');
+const [,, backendUrl, out] = process.argv;
+
+const socket = io(backendUrl, {
+  transports: ['websocket', 'polling'],
+  timeout: 12000,
+  reconnection: false,
+  forceNew: true
+});
+
+let done = false;
+const finish = (payload, code) => {
+  if (done) return;
+  done = true;
+  try { socket.disconnect(); } catch (_) {}
+  fs.writeFileSync(out, JSON.stringify(payload, null, 2));
+  process.exit(code);
+};
+
+socket.on('connect', () => finish({ ok: true, transport: socket.io.engine.transport.name }, 0));
+socket.on('connect_error', (error) => finish({ ok: false, error: error?.message || 'connect_error' }, 1));
+setTimeout(() => finish({ ok: false, error: 'timeout' }, 1), 13000);
+NODE
+  echo "[stable][error] Backend Socket.IO client handshake failed."
   exit 1
 fi
 
-if ! bash "${SCRIPT_DIR}/qa/assert-backend-real-sandbox.sh" "$BACKEND_URL" "$ARTIFACTS_DIR/backend-runtime-flags.json"; then
-  exit 1
-fi
+case "$PAYMENT_RUNTIME_GUARD" in
+  canary)
+    if ! FIREBASE_TEST_PHONE="$FIREBASE_TEST_PHONE" bash "${SCRIPT_DIR}/qa/assert-backend-payment-runtime-canary.sh" "$BACKEND_URL" "$ARTIFACTS_DIR/backend-payment-runtime-canary.json"; then
+      exit 1
+    fi
+    ;;
+  global)
+    if ! bash "${SCRIPT_DIR}/qa/assert-backend-real-sandbox.sh" "$BACKEND_URL" "$ARTIFACTS_DIR/backend-runtime-flags.json"; then
+      exit 1
+    fi
+    ;;
+  none)
+    echo "[stable][warn] PAYMENT_RUNTIME_GUARD=none; skipping payment runtime guard."
+    ;;
+  *)
+    echo "[stable][error] Unknown PAYMENT_RUNTIME_GUARD=$PAYMENT_RUNTIME_GUARD (expected canary, global, none)."
+    exit 1
+    ;;
+esac
 
 if [[ "$SEED_TEST_USERS" == "true" ]] && [[ -f "$BACKEND_DIR/scripts/criar-usuarios-teste-completo.js" ]]; then
   echo "[stable] Seeding test users in Firebase/RTDB..."

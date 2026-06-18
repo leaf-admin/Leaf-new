@@ -1351,6 +1351,13 @@ io.on('connection', async (socket) => {
             redisPool,
             logStructured
         });
+    } else {
+        const registerSocketRatingHandler = require('./bootstrap/register-socket-rating-handler');
+        registerSocketRatingHandler({
+            socket,
+            io,
+            logStructured
+        });
     }
     }); // Fecha io.on('connection')
 

@@ -139,7 +139,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       normalizedBookingStatus === "arrived" ||
       normalizedBookingStatus === "started"
     ) {
-      navigation.navigate("RobotaxiPrototypeTrip", {
+      navigation.replace("RobotaxiPrototypeTrip", {
         destination,
         destinationAddress: routeDestinationAddress || bookingDestinationAddress,
         destinationCoordinate,
@@ -227,7 +227,9 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     }
   }, [lastError, navigation, normalizedBookingStatus]);
 
-  const handleDismiss = () => {
+  const handleProtectedDismiss = useCallback(() => {}, []);
+
+  const handleCancelSearch = () => {
     if (
       normalizedBookingStatus === "searching" ||
       normalizedBookingStatus === "requesting"
@@ -275,7 +277,9 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
         />
 
         <PrototypeDismissibleSheet
-          onClose={handleDismiss}
+          onClose={handleProtectedDismiss}
+          backdropDismissEnabled={false}
+          dragEnabled={false}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
           <LeafRideSheet
@@ -335,7 +339,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                   : "Cancelar"
               }
               onPress={
-                normalizedBookingStatus === "requesting" ? undefined : handleDismiss
+                normalizedBookingStatus === "requesting" ? undefined : handleCancelSearch
               }
               icon={
                 normalizedBookingStatus === "requesting"

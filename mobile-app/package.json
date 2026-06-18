@@ -63,6 +63,7 @@
     "qa:run": "bash scripts/qa-run.sh",
     "qa:runtime:endpoints": "bash scripts/check-runtime-endpoints.sh",
     "qa:backend:real-sandbox": "bash scripts/qa/assert-backend-real-sandbox.sh",
+    "qa:android:real-smoke": "node scripts/qa/android-real-device-smoke.cjs",
     "qa:core:audit": "bash scripts/qa/run-core-audit-suite.sh",
     "qa:permissions": "bash scripts/check-permissions-hardening.sh",
     "qa:phase6:manual": "bash scripts/phase6-manual-evidence.sh",

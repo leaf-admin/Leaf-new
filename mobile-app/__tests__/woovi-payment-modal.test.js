@@ -125,6 +125,7 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
         passengerEmail="passageira@leaf.app.br"
         prefilledPaymentData={{
           chargeId: 'charge_123',
+          paymentIntentId: 'intent_123',
           rideId: 'temp_ride_123',
           amount: 13.42,
           amountInCents: 1342,
@@ -146,6 +147,7 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
       expect(WooviService.simulateTestWebhook).toHaveBeenCalledWith(
         expect.objectContaining({
           chargeId: 'charge_123',
+          paymentIntentId: 'intent_123',
           rideId: 'temp_ride_123',
           passengerId: 'passenger_1',
           amountInCents: 1342,

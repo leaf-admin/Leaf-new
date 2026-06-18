@@ -327,6 +327,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     tripHistory,
     lastReceipt,
     activeRole,
+    driverInfo,
     driverTripMeta,
     dismissCompletedReceipt,
   } =
@@ -425,16 +426,32 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     });
   }, [openRatingScreen, selected]);
 
+  const passengerRatingTargetDriverId =
+    selected?.driverId ||
+    (selected?.id && lastReceipt?.id === selected.id ? lastReceipt?.driverId : null) ||
+    driverInfo?.id ||
+    null;
+  const passengerRatingTargetDriverName =
+    selected?.driverName ||
+    (selected?.id && lastReceipt?.id === selected.id ? lastReceipt?.driverName : null) ||
+    driverInfo?.name ||
+    "Motorista Leaf";
+
   const openPassengerReceiptRating = useCallback(() => {
     openRatingScreen({
       fromReceipt: true,
       reviewerType: "passenger",
       tripId: selected?.id,
-      targetUserId: selected?.driverId || null,
-      targetName: selected?.driverName || "Motorista Leaf",
+      targetUserId: passengerRatingTargetDriverId,
+      targetName: passengerRatingTargetDriverName,
       receipt: selected,
     });
-  }, [openRatingScreen, selected]);
+  }, [
+    openRatingScreen,
+    passengerRatingTargetDriverId,
+    passengerRatingTargetDriverName,
+    selected,
+  ]);
 
   const rawBaseFare = toNumber(selected?.baseFare, NaN);
   const rawVariableFare = toNumber(selected?.variableFare, NaN);
@@ -514,7 +531,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const driverRatingSubmitted = Boolean(selected?.driverRatedPassengerAt);
   const canDriverRatePassenger = Boolean(selected?.passengerId);
   const passengerRatingSubmitted = Boolean(selected?.passengerRatedDriverAt);
-  const canPassengerRateDriver = Boolean(selected?.driverId);
+  const canPassengerRateDriver = Boolean(passengerRatingTargetDriverId);
   const pickupCoordinate = normalizeCoordinate(
     selected?.pickupCoordinate || driverTripMeta?.pickupCoordinate,
   );

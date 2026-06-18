@@ -55,6 +55,8 @@ const {
   completeWooviWebhookIdempotency,
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking,
+  validateSandboxTestWebhookPayload,
+  resolveSandboxPaymentIntentAsBooking,
   isRetryableWebhookEvent
 } = wooviRoutes.__private;
 const firebaseConfig = require('../../../firebase-config');
@@ -67,8 +69,35 @@ function createInMemoryFirestore() {
     docs.set(ref.path, options.merge ? { ...previous, ...data } : { ...data });
   };
 
+  const buildQuery = (path, filters = [], queryLimit = Infinity) => ({
+    where: (field, operator, value) => buildQuery(path, [...filters, { field, operator, value }], queryLimit),
+    limit: (limitValue) => buildQuery(path, filters, limitValue),
+    get: async () => {
+      const prefix = `${path}/`;
+      const matchingDocs = [...docs.entries()]
+        .filter(([docPath]) => docPath.startsWith(prefix))
+        .map(([docPath, data]) => ({
+          id: docPath.slice(prefix.length),
+          data: () => data
+        }))
+        .filter((entry) => filters.every((filter) => {
+          if (filter.operator !== '==') return false;
+          return entry.data()?.[filter.field] === filter.value;
+        }))
+        .slice(0, queryLimit);
+
+      return {
+        empty: matchingDocs.length === 0,
+        size: matchingDocs.length,
+        docs: matchingDocs
+      };
+    }
+  });
+
   const collection = (path) => ({
-    doc: (id) => doc(`${path}/${id}`)
+    doc: (id) => doc(`${path}/${id}`),
+    where: (field, operator, value) => buildQuery(path, [{ field, operator, value }]),
+    limit: (limitValue) => buildQuery(path, [], limitValue).limit(limitValue)
   });
 
   const doc = (path) => ({
@@ -456,5 +485,107 @@ describe('woovi webhook guards', () => {
 
     expect(result.ok).toBe(true);
     expect(result.code).toBe('PAYMENT_AMOUNT_MATCH');
+  });
+
+  it('allows production test webhook only for a matching sandbox payment intent', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    await firestore.collection('payment_intents').doc('intent-123').set({
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      chargeId: 'charge-123',
+      rideId: 'ride-123',
+      passengerId: 'passenger-123',
+      payableAmountInCents: 5511,
+      chargeCreatedAtIso: new Date().toISOString()
+    });
+
+    const result = await validateSandboxTestWebhookPayload({
+      charge: {
+        identifier: 'charge-123',
+        transactionID: 'charge-123',
+        status: 'COMPLETED',
+        value: 5511,
+        additionalInfo: [
+          { key: 'passenger_id', value: 'passenger-123' },
+          { key: 'ride_id', value: 'ride-123' },
+          { key: 'payment_intent_id', value: 'intent-123' },
+          { key: 'service', value: 'ride_sharing' }
+        ]
+      }
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toBe('SANDBOX_TEST_WEBHOOK_INTENT_VALIDATED');
+  });
+
+  it('rejects sandbox test webhook when amount differs from payment intent', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    await firestore.collection('payment_intents').doc('intent-amount').set({
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      chargeId: 'charge-amount',
+      rideId: 'ride-amount',
+      passengerId: 'passenger-amount',
+      payableAmountInCents: 5511,
+      chargeCreatedAtIso: new Date().toISOString()
+    });
+
+    const result = await validateSandboxTestWebhookPayload({
+      charge: {
+        identifier: 'charge-amount',
+        status: 'COMPLETED',
+        value: 5512,
+        additionalInfo: [
+          { key: 'passenger_id', value: 'passenger-amount' },
+          { key: 'ride_id', value: 'ride-amount' },
+          { key: 'payment_intent_id', value: 'intent-amount' }
+        ]
+      }
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('SANDBOX_TEST_WEBHOOK_AMOUNT_MISMATCH');
+    expect(result.expectedAmountInCents).toBe(5511);
+  });
+
+  it('resolves matching sandbox payment intent as booking data for pre-booking payment confirmation', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    await firestore.collection('payment_intents').doc('intent-prebooking').set({
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      chargeId: 'charge-prebooking',
+      rideId: 'ride-prebooking',
+      passengerId: 'passenger-prebooking',
+      payableAmountInCents: 5511,
+      chargeCreatedAtIso: new Date().toISOString()
+    });
+
+    const bookingData = await resolveSandboxPaymentIntentAsBooking({
+      chargeId: 'charge-prebooking',
+      rideId: 'ride-prebooking',
+      passengerId: 'passenger-prebooking',
+      amountInCents: 5511
+    });
+
+    expect(bookingData).toMatchObject({
+      rideId: 'ride-prebooking',
+      passengerId: 'passenger-prebooking',
+      paymentAmountInCents: 5511,
+      status: 'payment_intent_only',
+      source: 'sandbox_payment_intent'
+    });
+
+    expect(validateWebhookAmountAgainstBooking({
+      bookingData,
+      amountInCents: 5511,
+      rideId: 'ride-prebooking',
+      chargeId: 'charge-prebooking'
+    }).ok).toBe(true);
   });
 });

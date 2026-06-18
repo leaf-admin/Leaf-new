@@ -341,7 +341,8 @@ function PassengerHomeOverlay({
                     onPress={() => onDestinationResultPress?.(item)}
                     style={styles.destinationResultRow}
                     testID={`passenger-home-destination-result-${index}`}
-                    accessibilityLabel={`Escolher ${item?.name || "destino"}`}
+                    accessibilityLabel={`Resultado de destino ${index + 1}: ${item?.name || "destino"}`}
+                    accessibilityHint={item?.address || "Seleciona este destino para cotar a corrida"}
                   >
                     <Ionicons
                       name="time-outline"

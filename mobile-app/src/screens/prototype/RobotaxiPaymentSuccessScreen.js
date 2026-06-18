@@ -57,6 +57,15 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
     null;
   const vehicle = route?.params?.vehicle || selectedVehicle || "Leaf Plus";
   const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
+  const isRideLifecycleLocked = [
+    "requesting",
+    "searching",
+    "accepted",
+    "arrived",
+    "started",
+    "operational_interrupted",
+    "searching_replacement",
+  ].includes(normalizedBookingStatus);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -145,6 +154,10 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
   ]);
 
   const handleDismiss = () => {
+    if (isRideLifecycleLocked) {
+      return;
+    }
+
     navigation.navigate("RobotaxiPrototype");
   };
 
@@ -166,6 +179,8 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
 
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
+          backdropDismissEnabled={!isRideLifecycleLocked}
+          dragEnabled={!isRideLifecycleLocked}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
           <PrototypeCard onLayout={handleCardLayout} style={styles.card}>
@@ -205,12 +220,14 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
               accessibilityLabel="passenger-payment-success-continue-button"
             />
 
-            <PrototypePrimaryButton
-              label="Voltar ao mapa"
-              icon="map-outline"
-              onPress={() => navigation.navigate("RobotaxiPrototype")}
-              style={styles.secondaryButton}
-            />
+            {isRideLifecycleLocked ? null : (
+              <PrototypePrimaryButton
+                label="Voltar ao mapa"
+                icon="map-outline"
+                onPress={() => navigation.navigate("RobotaxiPrototype")}
+                style={styles.secondaryButton}
+              />
+            )}
           </PrototypeCard>
         </PrototypeDismissibleSheet>
       </View>

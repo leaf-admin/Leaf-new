@@ -1261,29 +1261,54 @@ function registerSocketCreateBookingHandler({
                             10
                         );
 
-                        paymentDispatchService.triggerDispatchAfterPayment({
-                            bookingId,
-                            io,
-                            pickupLocation,
-                            source: 'createBooking_paid_immediate',
-                            force: true,
-                            maxAttempts: paidDispatchMaxAttempts,
-                            retryDelayMs: paidDispatchRetryDelayMs
-                        }).then((dispatchResult) => {
-                            logStructured('info', 'createBooking: dispatch imediato para corrida paga processado', {
-                                bookingId,
-                                eventType: 'createBooking',
-                                success: Boolean(dispatchResult?.success),
-                                skipped: Boolean(dispatchResult?.skipped),
-                                reason: dispatchResult?.reason || null,
-                                attempts: dispatchResult?.attempts || 1
-                            });
-                        }).catch((dispatchError) => {
-                            logStructured('warn', 'createBooking: falha ao acionar dispatch imediato para corrida paga', {
-                                bookingId,
-                                eventType: 'createBooking',
-                                error: dispatchError.message
-                            });
+                        setImmediate(async () => {
+                            try {
+                                const materializeResult = await paymentDispatchService.materializePaymentForBooking({
+                                    bookingId,
+                                    chargeId: paymentChargeId,
+                                    temporaryRideId: paymentReferenceRideId,
+                                    amountInCents: resolvedPaymentAmountInCents,
+                                    passengerId: customerId,
+                                    paymentStatus: normalizedPaymentStatus || 'in_holding',
+                                    source: 'createBooking_paid_immediate'
+                                });
+
+                                logStructured('info', 'createBooking: pagamento materializado para booking canônico', {
+                                    bookingId,
+                                    eventType: 'createBooking',
+                                    success: Boolean(materializeResult?.success),
+                                    skipped: Boolean(materializeResult?.skipped),
+                                    reason: materializeResult?.reason || null,
+                                    temporaryRideId: paymentReferenceRideId || null,
+                                    chargeId: paymentChargeId || null,
+                                    amountInCents: materializeResult?.amountInCents || null
+                                });
+
+                                const dispatchResult = await paymentDispatchService.triggerDispatchAfterPayment({
+                                    bookingId,
+                                    io,
+                                    pickupLocation,
+                                    source: 'createBooking_paid_immediate',
+                                    force: true,
+                                    maxAttempts: paidDispatchMaxAttempts,
+                                    retryDelayMs: paidDispatchRetryDelayMs
+                                });
+
+                                logStructured('info', 'createBooking: dispatch imediato para corrida paga processado', {
+                                    bookingId,
+                                    eventType: 'createBooking',
+                                    success: Boolean(dispatchResult?.success),
+                                    skipped: Boolean(dispatchResult?.skipped),
+                                    reason: dispatchResult?.reason || null,
+                                    attempts: dispatchResult?.attempts || 1
+                                });
+                            } catch (dispatchError) {
+                                logStructured('warn', 'createBooking: falha ao materializar pagamento ou acionar dispatch imediato', {
+                                    bookingId,
+                                    eventType: 'createBooking',
+                                    error: dispatchError.message
+                                });
+                            }
                         });
                     }
 

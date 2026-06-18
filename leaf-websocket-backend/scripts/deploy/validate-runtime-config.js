@@ -155,7 +155,39 @@ function loadRuntimeEnv() {
 
   // Alinhado ao server.js: por padrão valida o mesmo .env carregado na inicialização.
   safeLoad(path.join(backendRoot, '.env'), false);
+  safeLoad(path.join(backendRoot, `.env.${String(process.env.NODE_ENV || 'production').toLowerCase()}`), false);
   return loadedFiles;
+}
+
+function resolveFirebaseDatabaseUrl({ allowDefault = false } = {}) {
+  return String(
+    process.env.FIREBASE_DATABASE_URL ||
+      (allowDefault ? 'https://leaf-reactnative-default-rtdb.firebaseio.com' : '')
+  ).trim();
+}
+
+function resolveFirebaseCredentialPath({ allowLocalDefault = false } = {}) {
+  const backendRoot = path.resolve(__dirname, '..', '..');
+  const configuredPath = String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim();
+  const candidates = [
+    configuredPath,
+    ...(allowLocalDefault
+      ? [
+          path.join(backendRoot, 'firebase-credentials.json'),
+          path.join(backendRoot, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json')
+        ]
+      : [])
+  ].filter(Boolean);
+
+  return candidates.find((candidate) => fs.existsSync(resolveEnvPath(candidate))) || '';
+}
+
+function hasFirebaseServiceAccountConfigured({ allowLocalDefault = false } = {}) {
+  return Boolean(
+    String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim() ||
+      String(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '').trim() ||
+      resolveFirebaseCredentialPath({ allowLocalDefault })
+  );
 }
 
 function main() {
@@ -165,6 +197,13 @@ function main() {
   const baseUrl = String(process.env.WOOVI_BASE_URL || '');
   const wooviBaseUrlIsSandbox = /sandbox/i.test(baseUrl);
   const runtimeRole = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+  const allowLocalFirebaseDefaults = !process.env.ENV_FILE;
+  const firebaseDatabaseUrl = resolveFirebaseDatabaseUrl({
+    allowDefault: allowLocalFirebaseDefaults
+  });
+  const firebaseServiceAccountConfigured = hasFirebaseServiceAccountConfigured({
+    allowLocalDefault: allowLocalFirebaseDefaults
+  });
   const paymentProviderConfigRequired = requiresPaymentProviderConfig(runtimeRole);
   const paymentProviderSandboxRuntime =
     paymentProviderConfigRequired && (wooviEnv === 'sandbox' || wooviBaseUrlIsSandbox);
@@ -349,14 +388,10 @@ function main() {
       blockers.push(`CORS_ORIGIN inseguro para produção: ${corsOrigin || '(vazio)'}`);
     }
 
-    if (!String(process.env.FIREBASE_DATABASE_URL || '').trim()) {
+    if (!firebaseDatabaseUrl) {
       warnings.push('FIREBASE_DATABASE_URL ausente: Realtime Database pode falhar em produção');
     }
-    if (
-      !String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim() &&
-      !String(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '').trim() &&
-      !String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim()
-    ) {
+    if (!firebaseServiceAccountConfigured) {
       warnings.push('Credenciais Firebase ausentes (FIREBASE_SERVICE_ACCOUNT_JSON ou GOOGLE_APPLICATION_CREDENTIALS): admin SDK pode falhar');
     }
     if (!String(process.env.GOOGLE_MAPS_API_KEY || '').trim()) {
@@ -434,15 +469,9 @@ function main() {
       paymentBypass: paymentBypassDiagnostics,
       legacyRuntime: legacyRuntimeDiagnostics,
       firebase: {
-        databaseUrlConfigured: presence(process.env.FIREBASE_DATABASE_URL),
-        serviceAccountConfigured:
-          presence(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) === 'present' ||
-          presence(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) === 'present' ||
-          presence(process.env.GOOGLE_APPLICATION_CREDENTIALS) === 'present',
-        configured: Boolean(String(process.env.FIREBASE_DATABASE_URL || '').trim()) ||
-          Boolean(String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim()) ||
-          Boolean(String(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '').trim()) ||
-          Boolean(String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim())
+        databaseUrlConfigured: presence(firebaseDatabaseUrl),
+        serviceAccountConfigured: firebaseServiceAccountConfigured,
+        configured: Boolean(firebaseDatabaseUrl) || firebaseServiceAccountConfigured
       },
       maps: {
         keyConfigured: Boolean(String(process.env.GOOGLE_MAPS_API_KEY || '').trim()),

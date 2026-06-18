@@ -103,8 +103,16 @@ class StartTripCommand extends Command {
                 return CommandResult.failure('Corrida não encontrada')
             }
 
-            // Verificar se motorista é o dono da corrida
-            if (bookingData.driverId !== this.driverId) {
+            // Verificar se motorista é o dono da corrida. Alguns caminhos de
+            // dispatch preenchem ownerDriverId antes do driverId no hash quente.
+            const assignedDriverId =
+                bookingData.driverId ||
+                bookingData.ownerDriverId ||
+                bookingData.dispatchWaveAcceptedDriverId ||
+                bookingData.awaitingResponseDriverId ||
+                null;
+
+            if (!assignedDriverId || assignedDriverId !== this.driverId) {
                 span.setStatus({ code: SpanStatusCode.ERROR, message: 'Motorista não autorizado' });
                 span.end();
                 metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
@@ -227,6 +235,8 @@ class StartTripCommand extends Command {
             span.addEvent('Updating booking in Redis');
             const bookingPatch = {
                 status: targetState,
+                driverId: this.driverId,
+                ownerDriverId: bookingData.ownerDriverId || this.driverId,
                 startLocation: JSON.stringify(this.startLocation),
                 startedAt: new Date().toISOString(),
                 arrivalRegisteredAt

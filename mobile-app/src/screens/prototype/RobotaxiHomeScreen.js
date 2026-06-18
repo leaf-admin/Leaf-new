@@ -82,6 +82,7 @@ import kycService from '../../services/KYCService';
 import nativeAwsLivenessService from '../../services/NativeAwsLivenessService';
 import { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } from '../../services/BackgroundLocationService';
 import { getDirectionsApi } from '../../services/runtime/locationRouteBridge';
+import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteService';
 import Logger from '../../utils/Logger';
 
 const { color } = robotaxiPrototypeTokens;
@@ -634,6 +635,19 @@ function buildHomeRoutePreviewKey(origin, destination) {
   return `${originKey}|${destinationKey}`;
 }
 
+function buildDestinationFareQuoteRouteKey(origin, destination) {
+  if (!isFiniteCoordinate(origin) || !isFiniteCoordinate(destination)) {
+    return '';
+  }
+
+  return [
+    Number(origin.latitude).toFixed(5),
+    Number(origin.longitude).toFixed(5),
+    Number(destination.latitude).toFixed(5),
+    Number(destination.longitude).toFixed(5),
+  ].join('|');
+}
+
 function decodeRoutePolyline(polylinePoints) {
   if (!polylinePoints) {
     return [];
@@ -652,6 +666,84 @@ function decodeRoutePolyline(polylinePoints) {
     Logger.warn('[PassengerHome] Falha ao decodificar polyline da rota:', error?.message || error);
     return [];
   }
+}
+
+const HOME_TRAFFIC_SEGMENT_COLORS = Object.freeze({
+  normal: '#198754',
+  moderate: '#F59E0B',
+  heavy: '#DC2626',
+});
+
+function resolveTrafficSegmentLevel(durationSecs, trafficDurationSecs) {
+  const baseDuration = Number(durationSecs);
+  const trafficDuration = Number(trafficDurationSecs);
+  if (
+    !Number.isFinite(baseDuration) ||
+    !Number.isFinite(trafficDuration) ||
+    baseDuration <= 0 ||
+    trafficDuration <= 0
+  ) {
+    return null;
+  }
+
+  const ratio = trafficDuration / baseDuration;
+  if (ratio >= 1.35) {
+    return 'heavy';
+  }
+  if (ratio >= 1.15) {
+    return 'moderate';
+  }
+  return 'normal';
+}
+
+function normalizeDirectionsCoordinate(value) {
+  const latitude = Number(value?.latitude ?? value?.lat);
+  const longitude = Number(value?.longitude ?? value?.lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+  return { latitude, longitude };
+}
+
+function resolveStepCoordinates(step) {
+  const decoded = decodeRoutePolyline(step?.polylinePoints);
+  if (decoded.length >= 2) {
+    return decoded;
+  }
+
+  const start = normalizeDirectionsCoordinate(step?.startLocation || step?.start_location);
+  const end = normalizeDirectionsCoordinate(step?.endLocation || step?.end_location);
+  return start && end ? [start, end] : [];
+}
+
+function buildTrafficSegmentsFromDirectionsRoute(route, routeCoordinates = []) {
+  const legs = Array.isArray(route?.legs) ? route.legs : [];
+  const segments = [];
+
+  legs.forEach((leg) => {
+    const level = resolveTrafficSegmentLevel(
+      leg?.time_in_secs ?? leg?.durationSeconds,
+      leg?.duration_in_traffic,
+    );
+    if (!level) {
+      return;
+    }
+
+    const color = HOME_TRAFFIC_SEGMENT_COLORS[level] || HOME_TRAFFIC_SEGMENT_COLORS.normal;
+    const steps = Array.isArray(leg?.steps) ? leg.steps : [];
+    steps.forEach((step) => {
+      const coordinates = resolveStepCoordinates(step);
+      if (coordinates.length >= 2) {
+        segments.push({ coordinates, level, color });
+      }
+    });
+
+    if (steps.length === 0 && Array.isArray(routeCoordinates) && routeCoordinates.length >= 2) {
+      segments.push({ coordinates: routeCoordinates, level, color });
+    }
+  });
+
+  return segments;
 }
 
 function distanceBetweenCoordinatesKm(origin, destination) {
@@ -1028,6 +1120,50 @@ function calculateHomeCategoryFare(distanceKm, durationMin, rateCard) {
   return Number(Math.max(subtotal, Number(rateCard?.min_fare) || 0).toFixed(2));
 }
 
+export function resolveHomeCategoryFarePresentation({
+  isSelectedCategory = false,
+  quotePending = false,
+  backendFare = null,
+  localFare = 0,
+} = {}) {
+  if (isSelectedCategory && quotePending) {
+    return {
+      fare: null,
+      priceLabel: 'Calculando',
+    };
+  }
+
+  const normalizedBackendFare = Number(backendFare);
+  const normalizedLocalFare = Number(localFare);
+  const fare =
+    Number.isFinite(normalizedBackendFare) && normalizedBackendFare > 0
+      ? normalizedBackendFare
+      : Number.isFinite(normalizedLocalFare)
+        ? normalizedLocalFare
+        : 0;
+
+  return {
+    fare,
+    priceLabel: formatCurrencyBRL(fare),
+  };
+}
+
+function createHomeQuoteSessionId(createdAt = Date.now()) {
+  const randomSuffix = Math.random().toString(36).slice(2, 10);
+  return `passenger_home_quote_${createdAt}_${randomSuffix}`;
+}
+
+function buildHomeBackendQuoteKey({
+  routeKey,
+  categoryId,
+  quoteSessionId,
+}) {
+  if (!routeKey || !categoryId || !quoteSessionId) {
+    return '';
+  }
+  return [routeKey, categoryId, quoteSessionId].join('|');
+}
+
 function formatHomeArrivalTime(durationMin) {
   const now = new Date();
   now.setMinutes(now.getMinutes() + Math.max(1, Math.round(Number(durationMin) || 1)));
@@ -1175,6 +1311,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [homeSelectedCategoryId, setHomeSelectedCategoryId] = useState('plus');
   const [homeLeafDelasEnabled, setHomeLeafDelasEnabled] = useState(false);
   const [homeRoutePreview, setHomeRoutePreview] = useState(null);
+  const [homeBackendQuote, setHomeBackendQuote] = useState(null);
+  const [, setHomeBackendQuoteLoading] = useState(false);
+  const [homeBackendQuoteError, setHomeBackendQuoteError] = useState('');
   const [homePickupCoordinate, setHomePickupCoordinate] = useState(null);
   const [homePickupAddress, setHomePickupAddress] = useState('');
   const [cachedHomePickupAddress, setCachedHomePickupAddress] = useState('');
@@ -1312,6 +1451,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     () => buildHomeRoutePreviewKey(effectiveHomePickupCoordinate, homeQuoteDestinationCoordinate),
     [effectiveHomePickupCoordinate, homeQuoteDestinationCoordinate],
   );
+  const homeDestinationFareQuoteRouteKey = useMemo(
+    () =>
+      buildDestinationFareQuoteRouteKey(
+        effectiveHomePickupCoordinate,
+        homeQuoteDestinationCoordinate,
+      ),
+    [effectiveHomePickupCoordinate, homeQuoteDestinationCoordinate],
+  );
   const homeQuoteDistanceKm = useMemo(() => {
     if (
       homeRoutePreview?.key === homeRoutePreviewKey &&
@@ -1373,15 +1520,167 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     () => formatHomeArrivalTime(homeQuoteDurationMin),
     [homeQuoteDurationMin],
   );
+  const homeBackendQuoteSessionId = useMemo(() => {
+    if (!homeRoutePreviewKey || !homeSelectedCategoryId) {
+      return '';
+    }
+    return createHomeQuoteSessionId();
+  }, [homeRoutePreviewKey, homeSelectedCategoryId]);
+  const homeBackendQuoteKey = useMemo(
+    () =>
+      buildHomeBackendQuoteKey({
+        routeKey: homeRoutePreviewKey,
+        categoryId: homeSelectedCategoryId,
+        quoteSessionId: homeBackendQuoteSessionId,
+      }),
+    [homeBackendQuoteSessionId, homeRoutePreviewKey, homeSelectedCategoryId],
+  );
+  const selectedHomeRateCard = HOME_CATEGORY_RATE_CARDS[homeSelectedCategoryId] || HOME_CATEGORY_RATE_CARDS.plus;
+  const selectedHomeFallbackFare = useMemo(
+    () =>
+      calculateHomeCategoryFare(
+        homeQuoteDistanceKm,
+        homeQuoteDurationMin,
+        selectedHomeRateCard,
+      ),
+    [homeQuoteDistanceKm, homeQuoteDurationMin, selectedHomeRateCard],
+  );
+
+  useEffect(() => {
+    if (
+      !homeSelectedDestination?.coordinate ||
+      !homeBackendQuoteKey ||
+      !isFiniteCoordinate(effectiveHomePickupCoordinate) ||
+      !isFiniteCoordinate(homeQuoteDestinationCoordinate)
+    ) {
+      setHomeBackendQuote(null);
+      setHomeBackendQuoteLoading(false);
+      setHomeBackendQuoteError('');
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    setHomeBackendQuote(null);
+    setHomeBackendQuoteLoading(true);
+    setHomeBackendQuoteError('');
+
+    fetchDynamicPricingQuote(
+      {
+        pickupLocation: {
+          lat: effectiveHomePickupCoordinate.latitude,
+          lng: effectiveHomePickupCoordinate.longitude,
+          add: effectiveHomePickupAddress,
+        },
+        destinationLocation: {
+          lat: homeQuoteDestinationCoordinate.latitude,
+          lng: homeQuoteDestinationCoordinate.longitude,
+          add:
+            homeSelectedDestination.address ||
+            homeSelectedDestination.description ||
+            homeSelectedDestination.name ||
+            'Destino',
+        },
+        carType: selectedHomeRateCard.title,
+        routeDistanceKm: homeQuoteDistanceKm,
+        routeDurationSecs: Math.max(60, Math.round(homeQuoteDurationMin * 60)),
+        clientEstimatedFare: selectedHomeFallbackFare,
+        quoteSessionId: homeBackendQuoteSessionId,
+      },
+      {
+        signal: controller.signal,
+        headers: homeBackendQuoteSessionId
+          ? { 'x-leaf-quote-session-id': homeBackendQuoteSessionId }
+          : undefined,
+      },
+    )
+      .then((quote) => {
+        if (cancelled) return;
+        setHomeBackendQuote({
+          key: homeBackendQuoteKey,
+          quoteSessionId: homeBackendQuoteSessionId,
+          quote: quote && typeof quote === 'object' ? quote : null,
+          distanceKm: homeQuoteDistanceKm,
+          durationMin: homeQuoteDurationMin,
+          arrivalTime: homeArrivalTime,
+          fallbackFare: selectedHomeFallbackFare,
+          expiresAt:
+            Number(quote?.expiresAt) ||
+            Date.now() + 120000,
+        });
+      })
+      .catch((error) => {
+        if (!cancelled && error?.name !== 'AbortError') {
+          setHomeBackendQuote(null);
+          setHomeBackendQuoteError(
+            error?.message || 'Não foi possível calcular a tarifa agora.',
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHomeBackendQuoteLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    effectiveHomePickupAddress,
+    effectiveHomePickupCoordinate,
+    homeArrivalTime,
+    homeBackendQuoteKey,
+    homeBackendQuoteSessionId,
+    homeQuoteDestinationCoordinate,
+    homeQuoteDistanceKm,
+    homeQuoteDurationMin,
+    homeSelectedDestination,
+    selectedHomeFallbackFare,
+    selectedHomeRateCard.title,
+  ]);
+
+  const selectedHomeBackendQuoteReady = Boolean(
+    homeBackendQuote?.key === homeBackendQuoteKey &&
+      homeBackendQuote?.quote &&
+      Number.isFinite(Number(homeBackendQuote.quote.estimatedFare)) &&
+      Number(homeBackendQuote.quote.estimatedFare) > 0,
+  );
+  const selectedHomeBackendFare = selectedHomeBackendQuoteReady
+    ? Number(homeBackendQuote.quote.estimatedFare)
+    : null;
+  const selectedHomeQuotePending = Boolean(
+    homeSelectedDestination?.coordinate &&
+      homeBackendQuoteKey &&
+      !selectedHomeBackendQuoteReady &&
+      !homeBackendQuoteError,
+  );
   const homeCategoryOptions = useMemo(
     () =>
       Object.entries(HOME_CATEGORY_RATE_CARDS).map(([id, rateCard]) => {
+        const localFare = calculateHomeCategoryFare(
+          homeQuoteDistanceKm,
+          homeQuoteDurationMin,
+          rateCard,
+        );
+        const backendFare =
+          id === homeSelectedCategoryId && selectedHomeBackendFare != null
+            ? selectedHomeBackendFare
+            : null;
         const pickupEta =
           id === 'elite'
             ? homePickupEtaBaseMin + 2
             : id === 'moto'
               ? Math.max(2, homePickupEtaBaseMin - 1)
               : homePickupEtaBaseMin;
+        const farePresentation = resolveHomeCategoryFarePresentation({
+          isSelectedCategory: id === homeSelectedCategoryId,
+          quotePending: selectedHomeQuotePending,
+          backendFare,
+          localFare,
+        });
         return {
           id,
           title: rateCard.title,
@@ -1389,9 +1688,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           description: rateCard.description,
           pickupEtaLabel: `${pickupEta} min`,
           arrivalLabel: homeArrivalTime,
-          priceLabel: formatCurrencyBRL(
-            calculateHomeCategoryFare(homeQuoteDistanceKm, homeQuoteDurationMin, rateCard),
-          ),
+          fare: farePresentation.fare,
+          priceLabel: farePresentation.priceLabel,
         };
       }),
     [
@@ -1399,6 +1697,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       homePickupEtaBaseMin,
       homeQuoteDistanceKm,
       homeQuoteDurationMin,
+      homeSelectedCategoryId,
+      selectedHomeBackendFare,
+      selectedHomeQuotePending,
     ],
   );
   const homeSelectedCategory =
@@ -4345,6 +4646,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         setPrototypeMapRoute({
           origin: effectiveHomePickupCoordinate,
           destination: resolvedDestination.coordinate,
+          allowFallback: false,
           destinationLabel: resolvedDestination.name || 'Destino',
           destinationAddress:
             resolvedDestination.address ||
@@ -4376,10 +4678,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    if (!selectedHomeBackendQuoteReady || !homeBackendQuote?.quote) {
+      return;
+    }
+
     navigation.navigate('RobotaxiPrototypeDestination', {
       ...destinationRoutePickupParams,
       initialSelectedDestination: homeSelectedDestination,
       initialSelectedPlan: homeSelectedCategory?.id || homeSelectedCategoryId || 'plus',
+      initialPricingQuote: {
+        quote: homeBackendQuote.quote,
+        quoteSessionId: homeBackendQuote.quoteSessionId,
+        routeKey: homeDestinationFareQuoteRouteKey,
+        distanceKm: homeBackendQuote.distanceKm,
+        durationMin: homeBackendQuote.durationMin,
+        arrivalTime: homeBackendQuote.arrivalTime,
+        fare: Number(homeBackendQuote.quote.estimatedFare),
+        grossEstimatedFare: Number(homeBackendQuote.quote.grossEstimatedFare),
+        expiresAt: homeBackendQuote.expiresAt,
+      },
       leafDelas: homeLeafDelasEnabled,
       startAtConfirmation: true,
       skipDestinationSearch: true,
@@ -4387,11 +4704,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     destinationRoutePickupParams,
     handleOpenPassengerDestination,
+    homeBackendQuote,
+    homeDestinationFareQuoteRouteKey,
     homeLeafDelasEnabled,
+    homeRoutePreviewKey,
     homeSelectedCategory?.id,
     homeSelectedCategoryId,
     homeSelectedDestination,
     navigation,
+    selectedHomeBackendQuoteReady,
   ]);
 
   useEffect(() => {
@@ -4413,6 +4734,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setPrototypeMapRoute({
       origin: effectiveHomePickupCoordinate,
       destination: homeSelectedDestination.coordinate,
+      allowFallback: false,
       destinationLabel: homeSelectedDestination.name || 'Destino',
       destinationAddress:
         homeSelectedDestination.address ||
@@ -4450,11 +4772,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         }
 
         const coordinates = decodeRoutePolyline(route?.polylinePoints);
+        const trafficSegments = buildTrafficSegmentsFromDirectionsRoute(route, coordinates);
         if (coordinates.length >= 2) {
           setPrototypeMapRoute({
             origin: effectiveHomePickupCoordinate,
             destination: homeSelectedDestination.coordinate,
             coordinates,
+            trafficSegments,
             destinationLabel: destinationName,
             destinationAddress,
           });
@@ -4470,7 +4794,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       })
       .catch(error => {
         if (!cancelled) {
-          Logger.warn('[PassengerHome] Rota real indisponível; mantendo fallback visual.', error?.message || error);
+          Logger.warn('[PassengerHome] Rota real indisponível; aguardando rota válida para exibir polyline.', error?.message || error);
         }
       });
 
@@ -5514,6 +5838,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       vehiclePlate: driverInfo?.plate || null,
     };
     const transitionPassengerRoute = (routeName, params) => {
+      if (typeof navigation.replace === 'function') {
+        navigation.replace(routeName, params);
+        return;
+      }
+
       const rootNavigation = globalThis?.navigationRef;
       if (rootNavigation?.isReady?.()) {
         rootNavigation.navigate(routeName, params);
@@ -5646,6 +5975,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           searchPreviewRadiusKm={presentedSearchingMode ? searchPreviewRadiusKm : null}
           nearbyVehicles={presentedNearbyVehicles}
           routeCoordinates={presentedRouteCoordinates}
+          routeTrafficSegments={activeRoute.trafficSegments}
           originCoordinate={activeRoute.origin}
           destinationCoordinate={presentedRouteDestination}
           destinationLabel={presentedRouteDestinationLabel}
@@ -5853,8 +6183,18 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             selectedCategoryId={homeSelectedCategoryId}
             onCategorySelect={setHomeSelectedCategoryId}
             onCategoryConfirm={handleConfirmHomeCategory}
-            categoryConfirmDisabled={!homeSelectedDestination?.coordinate}
-            categoryConfirmLabel="Confirmar"
+            categoryConfirmDisabled={
+              !homeSelectedDestination?.coordinate ||
+              selectedHomeQuotePending ||
+              !selectedHomeBackendQuoteReady
+            }
+            categoryConfirmLabel={
+              selectedHomeQuotePending
+                ? 'Calculando...'
+                : homeBackendQuoteError && !selectedHomeBackendQuoteReady
+                  ? 'Tarifa indisponível'
+                  : 'Confirmar'
+            }
             tariffStatusLabel="Tarifa normal"
             tariffHigh={false}
             leafDelasEnabled={homeLeafDelasEnabled}

@@ -50,8 +50,27 @@ jest.mock('../src/components/prototype/DriverSearchRadar', () => {
 
 jest.mock('../src/components/prototype/PrototypeDismissibleSheet', () => {
   const React = require('react');
-  const { View } = require('react-native');
-  return ({ children }) => <View>{children}</View>;
+  const { TouchableOpacity, View } = require('react-native');
+  return ({
+    children,
+    onClose,
+    backdropDismissEnabled = true,
+    dragEnabled = true,
+  }) => (
+    <View
+      testID="prototype-dismissible-sheet"
+      accessibilityLabel="prototype-dismissible-sheet"
+      backdropDismissEnabled={backdropDismissEnabled}
+      dragEnabled={dragEnabled}
+    >
+      <TouchableOpacity
+        testID="prototype-dismissible-sheet-backdrop"
+        accessibilityLabel="prototype-dismissible-sheet-backdrop"
+        onPress={backdropDismissEnabled ? onClose : undefined}
+      />
+      {children}
+    </View>
+  );
 });
 
 jest.mock('../src/components/prototype/PrototypeUI', () => {
@@ -542,12 +561,29 @@ describe('prototype ride screens', () => {
   it('moves the passenger trip surface to receipt when the trip is completed', async () => {
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'completed' }));
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
     render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
     await waitFor(() => {
-      expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototypeReceipt', { fromTrip: true });
+      expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototypeReceipt', { fromTrip: true });
     });
+  });
+
+  it('keeps the active passenger trip sheet from dismissing back to map-only state', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() };
+    const { getByTestId } = render(
+      <RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+    expect(getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+
+    fireEvent.press(getByTestId('prototype-dismissible-sheet-backdrop'));
+
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
   });
 
   it('renders the passenger trip as a compact summary while the driver is on the way', () => {
@@ -618,6 +654,52 @@ describe('prototype ride screens', () => {
         reviewerType: 'passenger',
         tripId: 'trip_1',
         targetUserId: 'driver_1',
+      })
+    );
+  });
+
+  it('keeps passenger rating available when the completed receipt is missing driverId but runtime still has it', () => {
+    const fallbackDriverId = 'driver_fallback_1';
+    const completedReceiptWithoutDriverId = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'trip_without_driver_id',
+      driverId: null,
+      driverName: 'Motorista Leaf',
+    };
+    const previousReceiptWithDriverId = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'trip_previous_with_driver_id',
+      driverId: fallbackDriverId,
+      driverName: 'Motorista Leaf',
+    };
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        lastReceipt: completedReceiptWithoutDriverId,
+        tripHistory: [previousReceiptWithDriverId],
+        driverInfo: { id: fallbackDriverId, name: 'Motorista Leaf' },
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId, getByText } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+    const rateButton = getByTestId('passenger-receipt-rate-trip-button');
+
+    expect(getByText('Avaliar viagem')).toBeTruthy();
+    expect(rateButton.props.accessibilityState?.disabled).toBe(false);
+    expect(rateButton.props.disabled).not.toBe(true);
+
+    fireEvent.press(rateButton);
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeRating',
+      expect.objectContaining({
+        fromReceipt: true,
+        reviewerType: 'passenger',
+        tripId: 'trip_without_driver_id',
+        targetUserId: fallbackDriverId,
       })
     );
   });
@@ -854,6 +936,38 @@ describe('prototype ride screens', () => {
     expect(getByText('Ferry Building')).toBeTruthy();
   });
 
+  it('keeps the passenger search surface locked against passive backdrop dismissal', () => {
+    const cancelRideSearch = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 12,
+        selectedVehicle: 'Leaf Plus',
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+        },
+        currentAddress: '1540 Mission St, San Francisco',
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() };
+    const { getByTestId } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+    expect(getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+
+    fireEvent.press(getByTestId('prototype-dismissible-sheet-backdrop'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
   it('uses persisted booking labels when the search screen is rehydrated without selectedDestination', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
@@ -923,6 +1037,43 @@ describe('prototype ride screens', () => {
       },
       { timeout: 2000 }
     );
+  });
+
+  it('does not expose map dismissal from payment success while the paid ride is active', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        selectedDestination: null,
+        currentAddress: '',
+        activeBooking: {
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+        },
+      })
+    );
+
+    const navigation = {
+      replace: jest.fn(),
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, queryByText } = render(
+      <RobotaxiPaymentSuccessScreen
+        navigation={navigation}
+        route={{ params: { destination: 'Destino', autoAdvance: false, vehicle: 'Leaf Plus' } }}
+      />
+    );
+
+    expect(queryByText('Voltar ao mapa')).toBeNull();
+    expect(getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+    expect(getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+
+    fireEvent.press(getByTestId('prototype-dismissible-sheet-backdrop'));
+
+    expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
   it('ignores generic placeholder labels when resolving an address', () => {

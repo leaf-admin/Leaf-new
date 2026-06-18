@@ -135,6 +135,20 @@ LOCAL_JAVA_HOME="${HOME}/.local/mobile-build-tools/jdk-17"
 if [[ -d "${LOCAL_JAVA_HOME}" ]]; then
   export JAVA_HOME="${JAVA_HOME:-${LOCAL_JAVA_HOME}}"
 fi
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  for candidate_java_home in \
+    "/opt/homebrew/opt/openjdk@17" \
+    "/usr/local/opt/openjdk@17" \
+    "/opt/homebrew/opt/openjdk@21" \
+    "/usr/local/opt/openjdk@21" \
+    "/opt/homebrew/opt/java" \
+    "/usr/local/opt/java"; do
+    if [[ -x "${candidate_java_home}/bin/java" ]]; then
+      export JAVA_HOME="${candidate_java_home}"
+      break
+    fi
+  done
+fi
 
 # CocoaPods installed via --user-install lives in Gem.user_dir/bin.
 GEM_USER_BIN="$(ruby -e 'print Gem.user_dir' 2>/dev/null || true)/bin"

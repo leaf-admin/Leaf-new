@@ -103,30 +103,37 @@ jest.mock("../src/components/prototype/PrototypeUI", () => {
 
 jest.mock("../src/components/payment/WooviPaymentModal", () => {
   const React = require("react");
-  const { Text, TouchableOpacity } = require("react-native");
-  return ({ visible, onPaymentConfirmed }) =>
+  const { Text, TouchableOpacity, View } = require("react-native");
+  return ({ visible, onPaymentConfirmed, estimates, tripData }) =>
     visible ? (
-      <TouchableOpacity
-        testID="mock-confirm-pix"
-        onPress={() =>
-          onPaymentConfirmed?.({
-            chargeId: "charge_test_1",
-            rideId: "ride_test_1",
-            amountInCents: 1777,
-          })
-        }
-      >
-        <Text>Mock Pix confirmado</Text>
-      </TouchableOpacity>
+      <View>
+        <Text testID="mock-pix-amount">
+          {Number(estimates?.estimateFare ?? tripData?.estimatedFare).toFixed(2)}
+        </Text>
+        <TouchableOpacity
+          testID="mock-confirm-pix"
+          onPress={() =>
+            onPaymentConfirmed?.({
+              chargeId: "charge_test_1",
+              rideId: "ride_test_1",
+              amountInCents: 1777,
+            })
+          }
+        >
+          <Text>Mock Pix confirmado</Text>
+        </TouchableOpacity>
+      </View>
     ) : null;
 });
 
 describe("RobotaxiDestinationScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    fetchDynamicPricingQuote.mockRejectedValue(
-      new Error("pricing quote unavailable in test default"),
-    );
+    fetchDynamicPricingQuote.mockResolvedValue({
+      estimatedFare: 13.42,
+      grossEstimatedFare: 13.42,
+      pricingPayload: {},
+    });
   });
 
   it("uses the pickup chosen before destination and goes straight to the quote", async () => {
@@ -254,8 +261,10 @@ describe("RobotaxiDestinationScreen", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Portaria 2, Taquara, Rio de Janeiro")).toBeTruthy();
-      expect(screen.getByText(/R\$ 18,55/)).toBeTruthy();
+      expect(screen.getByText(/R\$ 13,42/)).toBeTruthy();
     });
+
+    expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces category unavailability when regional quote availability blocks the selected plan", async () => {
@@ -272,7 +281,85 @@ describe("RobotaxiDestinationScreen", () => {
 
     const checkRideAvailability = jest.fn().mockResolvedValue({
       available: false,
-      message: "Categoria indisponível nesta região no momento.",
+      message: "Destino fora da area de cobertura da Leaf",
+    });
+
+    let runtimeSnapshot = {
+      bookingStatus: "idle",
+      currentAddress: "Rua das Pastorinhas, Taquara, Rio de Janeiro",
+      currentCoordinate: {
+        latitude: -22.9711,
+        longitude: -43.1822,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 13.42,
+      selectedDestination: destination,
+      tripDistanceKm: 4.7,
+      tripDurationMin: 9,
+      tripArrivalText: "01:36",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    };
+
+    usePrototypeRideRuntime.mockImplementation(() => runtimeSnapshot);
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{ params: {} }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Aeroporto Santos Dumont")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText("Aeroporto Santos Dumont"));
+
+    await waitFor(() => {
+      expect(checkRideAvailability).toHaveBeenCalled();
+      expect(
+        screen.getAllByText("Destino fora da area de cobertura da Leaf").length,
+      ).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Indisponível").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("does not hard-disable the category from a transient no-driver precheck", async () => {
+    const destination = {
+      id: "destination_santos_dumont",
+      name: "Aeroporto Santos Dumont",
+      address: "Praça Senador Salgado Filho, Centro, Rio de Janeiro, RJ",
+      coordinate: {
+        latitude: -22.9104,
+        longitude: -43.1631,
+      },
+      eta: "5",
+    };
+
+    const checkRideAvailability = jest.fn().mockResolvedValue({
+      available: false,
+      code: "NO_DRIVERS_AVAILABLE",
+      message: "Não há motoristas disponíveis",
     });
 
     usePrototypeRideRuntime.mockImplementation(() => ({
@@ -304,16 +391,14 @@ describe("RobotaxiDestinationScreen", () => {
       clearFlowPreview: jest.fn(),
     }));
 
-    const navigation = {
-      navigate: jest.fn(),
-      replace: jest.fn(),
-      canGoBack: jest.fn(() => false),
-      goBack: jest.fn(),
-    };
-
     const screen = render(
       <RobotaxiDestinationScreen
-        navigation={navigation}
+        navigation={{
+          navigate: jest.fn(),
+          replace: jest.fn(),
+          canGoBack: jest.fn(() => false),
+          goBack: jest.fn(),
+        }}
         route={{ params: {} }}
       />,
     );
@@ -326,10 +411,8 @@ describe("RobotaxiDestinationScreen", () => {
 
     await waitFor(() => {
       expect(checkRideAvailability).toHaveBeenCalled();
-      expect(
-        screen.getAllByText("Categoria indisponível nesta região no momento.").length,
-      ).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText("Indisponível").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+      expect(screen.queryByText("Categoria indisponível")).toBeNull();
     });
   });
 
@@ -354,7 +437,7 @@ describe("RobotaxiDestinationScreen", () => {
       eta: "5",
     };
 
-    usePrototypeRideRuntime.mockImplementation(() => ({
+    let runtimeSnapshot = {
       bookingStatus: "idle",
       currentAddress: "Rua das Pastorinhas, Taquara, Rio de Janeiro",
       currentCoordinate: {
@@ -381,7 +464,9 @@ describe("RobotaxiDestinationScreen", () => {
       requestRide: jest.fn(),
       requestTripExtension: jest.fn(),
       clearFlowPreview: jest.fn(),
-    }));
+    };
+
+    usePrototypeRideRuntime.mockImplementation(() => runtimeSnapshot);
 
     const navigation = {
       navigate: jest.fn(),
@@ -408,6 +493,7 @@ describe("RobotaxiDestinationScreen", () => {
         expect.objectContaining({
           carType: "Leaf Plus",
           clientEstimatedFare: expect.any(Number),
+          quoteSessionId: expect.stringMatching(/^passenger_quote_/),
           pickupLocation: expect.objectContaining({
             lat: -22.9711,
             lng: -43.1822,
@@ -417,12 +503,48 @@ describe("RobotaxiDestinationScreen", () => {
             lng: -43.1631,
           }),
         }),
-        expect.objectContaining({ signal: expect.any(Object) }),
+        expect.objectContaining({
+          signal: expect.any(Object),
+          headers: expect.objectContaining({
+            "x-leaf-quote-session-id": expect.stringMatching(/^passenger_quote_/),
+          }),
+        }),
       );
       expect(screen.getByText(/R\$ 17,77/)).toBeTruthy();
+      expect(screen.getByTestId("passenger-destination-quote-price-plus")).toBeTruthy();
       expect(screen.getByTestId("passenger-destination-dynamic-pricing-badge")).toBeTruthy();
       expect(screen.getByText("Tarifa alta")).toBeTruthy();
     });
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(runtimeSnapshot.checkRideAvailability).toHaveBeenCalled();
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("17.77");
+    });
+
+    runtimeSnapshot = {
+      ...runtimeSnapshot,
+      selectedDestination: {
+        ...destination,
+        address: "Endereço atualizado pela prévia de rota",
+      },
+      tripDistanceKm: 1.2,
+      tripDurationMin: 3,
+      tripArrivalText: "02:00",
+    };
+
+    screen.rerender(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{ params: {} }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/R\$ 17,77/)).toBeTruthy();
+    });
+    expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(1);
   });
 
   it("opens the post-PIX preference countdown before sending the ride request", async () => {
@@ -529,6 +651,7 @@ describe("RobotaxiDestinationScreen", () => {
             soundLabel: "Música baixa",
             soundPreference: "low_music",
           }),
+          fare: 17.77,
         }),
       );
       expect(navigation.replace).toHaveBeenCalledWith(

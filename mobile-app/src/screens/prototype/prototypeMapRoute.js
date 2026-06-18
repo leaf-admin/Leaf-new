@@ -2,6 +2,7 @@ const DEFAULT_ROUTE = Object.freeze({
   origin: null,
   destination: null,
   coordinates: [],
+  trafficSegments: [],
   destinationLabel: '',
   destinationAddress: ''
 });
@@ -57,6 +58,52 @@ function areCoordinateListsEqual(left = [], right = []) {
   return true;
 }
 
+function normalizeTrafficSegments(segments = []) {
+  if (!Array.isArray(segments)) {
+    return [];
+  }
+
+  return segments
+    .map(segment => {
+      const coordinates = Array.isArray(segment?.coordinates)
+        ? segment.coordinates.filter(isCoordinateValid)
+        : [];
+
+      if (coordinates.length < 2) {
+        return null;
+      }
+
+      return {
+        coordinates,
+        color: String(segment?.color || '').trim() || '#1A330E',
+        level: String(segment?.level || segment?.trafficLevel || '').trim() || 'normal'
+      };
+    })
+    .filter(Boolean);
+}
+
+function areTrafficSegmentsEqual(left = [], right = []) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (
+      String(left[index]?.color || '') !== String(right[index]?.color || '') ||
+      String(left[index]?.level || '') !== String(right[index]?.level || '') ||
+      !areCoordinateListsEqual(left[index]?.coordinates, right[index]?.coordinates)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function areRoutesEqual(left, right) {
   if (left === right) {
     return true;
@@ -70,6 +117,7 @@ function areRoutesEqual(left, right) {
     areCoordinatesEqual(left.origin, right.origin) &&
     areCoordinatesEqual(left.destination, right.destination) &&
     areCoordinateListsEqual(left.coordinates, right.coordinates) &&
+    areTrafficSegmentsEqual(left.trafficSegments, right.trafficSegments) &&
     String(left.destinationLabel || '') === String(right.destinationLabel || '') &&
     String(left.destinationAddress || '') === String(right.destinationAddress || '')
   );
@@ -113,6 +161,7 @@ export function setPrototypeMapRoute(payload) {
   const explicitCoordinates = Array.isArray(payload?.coordinates)
     ? payload.coordinates.filter(isCoordinateValid)
     : [];
+  const explicitTrafficSegments = normalizeTrafficSegments(payload?.trafficSegments);
   const canReuseCurrentRouteCoordinates = Boolean(
     explicitCoordinates.length < 2 &&
       currentRoute !== DEFAULT_ROUTE &&
@@ -121,17 +170,35 @@ export function setPrototypeMapRoute(payload) {
       Array.isArray(currentRoute.coordinates) &&
       currentRoute.coordinates.length >= 2
   );
+  const allowFallbackRoute = payload?.allowFallback !== false;
   const coordinates =
     explicitCoordinates.length >= 2
       ? explicitCoordinates
       : canReuseCurrentRouteCoordinates
         ? currentRoute.coordinates
-        : buildFallbackRouteCoordinates(origin, destination);
+        : allowFallbackRoute
+          ? buildFallbackRouteCoordinates(origin, destination)
+          : [];
+  const trafficSegments =
+    explicitTrafficSegments.length > 0
+      ? explicitTrafficSegments
+      : canReuseCurrentRouteCoordinates
+        ? currentRoute.trafficSegments || []
+        : [];
+
+  if (coordinates.length < 2) {
+    if (currentRoute !== DEFAULT_ROUTE) {
+      currentRoute = DEFAULT_ROUTE;
+      notify();
+    }
+    return;
+  }
 
   const nextRoute = {
     origin,
     destination,
     coordinates,
+    trafficSegments,
     destinationLabel: payload?.destinationLabel || '',
     destinationAddress: payload?.destinationAddress || ''
   };

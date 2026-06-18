@@ -5,9 +5,28 @@ import Logger from '../utils/Logger';
  * Serviço para buscar e gerenciar recibos de corridas
  */
 
-import database from '@react-native-firebase/database';
 import BACKEND_BASE_URL from '../config/backendBaseUrl';
 
+const ENABLE_RTDATABASE_RECEIPT_FALLBACK =
+    String(process.env.EXPO_PUBLIC_RECEIPT_RTDATABASE_FALLBACK || '')
+        .trim()
+        .toLowerCase() === 'true';
+
+let databaseModule = null;
+
+function getDatabaseModule() {
+    if (!ENABLE_RTDATABASE_RECEIPT_FALLBACK) {
+        return null;
+    }
+
+    if (!databaseModule) {
+        // Legacy fallback only. The supported production path is the Leaf API.
+        // eslint-disable-next-line global-require
+        databaseModule = require('@react-native-firebase/database').default;
+    }
+
+    return databaseModule;
+}
 
 class ReceiptService {
     /**
@@ -17,16 +36,6 @@ class ReceiptService {
      */
     async getReceiptByRideId(rideId) {
         try {
-            // Tentar buscar do Realtime Database primeiro
-            const receiptRef = database().ref(`receipts/${rideId}`);
-            const snapshot = await receiptRef.once('value');
-            
-            if (snapshot.exists()) {
-                return snapshot.val();
-            }
-
-            // Se não encontrou no Realtime Database, tentar buscar via API
-            // (fallback para recibos antigos que podem estar apenas no backend)
             try {
                 const response = await fetch(`${BACKEND_BASE_URL}/api/receipts/${rideId}`);
                 if (response.ok) {
@@ -37,6 +46,20 @@ class ReceiptService {
                 }
             } catch (apiError) {
                 Logger.warn('Erro ao buscar recibo via API:', apiError);
+            }
+
+            const database = getDatabaseModule();
+            if (database) {
+                try {
+                    const receiptRef = database().ref(`receipts/${rideId}`);
+                    const snapshot = await receiptRef.once('value');
+
+                    if (snapshot.exists()) {
+                        return snapshot.val();
+                    }
+                } catch (databaseError) {
+                    Logger.warn('Fallback RTDB de recibo indisponível:', databaseError);
+                }
             }
 
             throw new Error('Recibo não encontrado');

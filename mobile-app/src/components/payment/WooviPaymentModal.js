@@ -54,6 +54,7 @@ export default function WooviPaymentModal({
     passengerId,
     passengerName,
     passengerEmail,
+    passengerPhone,
     prefilledPaymentData = null,
     preserveChargeOnClose = false,
     paymentTitle = 'Pagamento PIX',
@@ -214,6 +215,7 @@ export default function WooviPaymentModal({
                 const amountInCentsValue = Number(prefilledPaymentData?.amountInCents);
                 const normalizedPaymentInfo = {
                     chargeId: prefilledPaymentData.chargeId,
+                    paymentIntentId: prefilledPaymentData.paymentIntentId || null,
                     rideId: prefilledPaymentData.rideId || tripData?.rideId || `prefilled-${Date.now()}`,
                     qrCodeImage: prefilledPaymentData.qrCodeImage || null,
                     qrCodeText:
@@ -402,6 +404,7 @@ export default function WooviPaymentModal({
                 setQaDebugStatus('confirming');
                 await WooviService.simulateTestWebhook({
                     chargeId: paymentData.chargeId,
+                    paymentIntentId: paymentData.paymentIntentId,
                     rideId: paymentData.rideId,
                     passengerId: paymentData.passengerId || passengerId,
                     amountInCents: paymentData.amountInCents
@@ -577,6 +580,9 @@ export default function WooviPaymentModal({
             // Preparar dados do pagamento
             paymentRequest = {
                 passengerId: resolvedPassengerId,
+                passengerPhone,
+                phone: passengerPhone,
+                phoneNumber: passengerPhone,
                 amount: amountInCents,
                 grossAmountInCents,
                 grossAmount: grossAmountInCents / 100,
@@ -602,6 +608,7 @@ export default function WooviPaymentModal({
             // Salvar dados do pagamento
             const paymentInfo = {
                 chargeId: result.chargeId,
+                paymentIntentId: result.paymentIntentId || null,
                 rideId: tempRideId,
                 qrCodeImage: result.qrCode,
                 qrCodeText: result.qrCodeText || result.paymentLink,
@@ -896,15 +903,30 @@ export default function WooviPaymentModal({
             <View
                 style={styles.paymentContainer}
                 testID="payment-modal-content"
-                accessibilityLabel="payment-modal-content"
+                accessibilityLabel="Modal de pagamento PIX"
+                accessibilityViewIsModal
             >
                 <View style={styles.paymentHeader}>
                     <View>
-                        <Text style={styles.paymentTitle}>
+                        <Text
+                            style={styles.paymentTitle}
+                            testID="payment-modal-title"
+                            accessibilityLabel="Pague com PIX"
+                        >
                             Pague com PIX
                         </Text>
                         <SecurePaymentBadge style={styles.securePaymentBadge} color={PIX_SURFACE.muted} />
-                        <View style={styles.statusChip}>
+                        <View
+                            style={styles.statusChip}
+                            testID="payment-modal-status"
+                            accessibilityLabel={
+                                paymentStatus === 'confirmed'
+                                    ? 'PIX confirmado'
+                                    : paymentStatus === 'expired'
+                                        ? 'Tempo esgotado'
+                                        : 'Aguardando PIX'
+                            }
+                        >
                             <Text style={styles.statusChipText}>
                                 {paymentStatus === 'confirmed'
                                     ? 'PIX confirmado'
@@ -915,7 +937,11 @@ export default function WooviPaymentModal({
                         </View>
                     </View>
                     <View style={styles.paymentRightColumn}>
-                        <Text style={styles.paymentAmount}>
+                        <Text
+                            style={styles.paymentAmount}
+                            testID="payment-modal-amount"
+                            accessibilityLabel={`Valor PIX ${formatCurrencyBRL(paymentData.amount)}`}
+                        >
                             {formatCurrencyBRL(paymentData.amount)}
                         </Text>
                         <Text
@@ -923,6 +949,14 @@ export default function WooviPaymentModal({
                                 styles.expiryText,
                                 countdown <= 60 && paymentStatus === 'pending' && styles.expiryTextDanger,
                             ]}
+                            testID="payment-modal-expiry"
+                            accessibilityLabel={
+                                paymentStatus === 'pending'
+                                    ? `PIX expira em ${formatTime(countdown)}`
+                                    : paymentStatus === 'confirmed'
+                                        ? 'PIX confirmado'
+                                        : 'PIX expirado'
+                            }
                         >
                             {paymentStatus === 'pending'
                                 ? `Expira em ${formatTime(countdown)}`
@@ -947,7 +981,11 @@ export default function WooviPaymentModal({
                     />
                 </View>
 
-                <View style={styles.qrContainer}>
+                <View
+                    style={styles.qrContainer}
+                    testID="payment-modal-qr-container"
+                    accessibilityLabel="QR Code PIX"
+                >
                     {paymentData?.qrCodeImage ? (
                         <Image
                             source={{ uri: paymentData.qrCodeImage }}
@@ -993,6 +1031,8 @@ export default function WooviPaymentModal({
                         style={styles.primaryAction}
                         onPress={copyPixCode}
                         activeOpacity={0.88}
+                        testID="payment-modal-copy-code-button"
+                        accessibilityLabel="Copiar código PIX"
                     >
                         <Text style={styles.primaryActionText}>Copiar código</Text>
                     </TouchableOpacity>
@@ -1000,6 +1040,8 @@ export default function WooviPaymentModal({
                         style={styles.secondaryAction}
                         onPress={openPaymentLink}
                         activeOpacity={0.88}
+                        testID="payment-modal-open-bank-button"
+                        accessibilityLabel="Abrir banco"
                     >
                         <Text style={styles.secondaryActionText}>Abrir banco</Text>
                     </TouchableOpacity>

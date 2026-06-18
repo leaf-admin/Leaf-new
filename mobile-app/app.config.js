@@ -42,6 +42,9 @@ const otaUpdatesEnabled = normalizeFlag(
     firstDefined(process.env.LEAF_ENABLE_OTA_UPDATES, process.env.EXPO_PUBLIC_LEAF_ENABLE_OTA_UPDATES),
     true
 );
+const runtimeVersion = String(
+    firstDefined(process.env.LEAF_RUNTIME_VERSION, process.env.EXPO_RUNTIME_VERSION, AppConfig.ios_app_version)
+).trim();
 const buildProfile = String(firstDefined(process.env.EAS_BUILD_PROFILE, process.env.LEAF_BUILD_PROFILE, '') || '')
     .trim()
     .toLowerCase();
@@ -157,7 +160,7 @@ module.exports = {
     description: AppConfig.app_description,
     owner: "leaf-app",
     slug: "leafapp-reactnative",
-    runtimeVersion: AppConfig.ios_app_version,
+    runtimeVersion,
     scheme: "leafapp",
     autolinking: productionAutolinkingExcludes.length
         ? {
