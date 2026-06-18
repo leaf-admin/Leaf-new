@@ -84,6 +84,13 @@ const PASSENGER_QUOTE_VALIDITY_MS = Math.max(
   Number.parseInt(process.env.EXPO_PUBLIC_QUOTE_VALIDITY_MS || "120000", 10) ||
     120000,
 );
+const PASSENGER_QUOTE_COORDINATE_PRECISION = Math.max(
+  2,
+  Number.parseInt(
+    process.env.EXPO_PUBLIC_QUOTE_LOCK_COORDINATE_PRECISION || "3",
+    10,
+  ) || 3,
+);
 const ORIGIN_ADDRESS = "Rua das Pastorinhas, Taquara, Rio de Janeiro";
 const TEMPERATURE_OPTIONS = Object.freeze([
   {
@@ -333,10 +340,10 @@ function buildPassengerFareQuoteRouteKey({
   }
 
   return [
-    Number(origin.latitude).toFixed(5),
-    Number(origin.longitude).toFixed(5),
-    Number(destination.latitude).toFixed(5),
-    Number(destination.longitude).toFixed(5),
+    Number(origin.latitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(origin.longitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(destination.latitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(destination.longitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
   ].join("|");
 }
 

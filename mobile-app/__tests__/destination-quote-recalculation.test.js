@@ -547,6 +547,113 @@ describe("RobotaxiDestinationScreen", () => {
     expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the quoted fare stable when GPS drifts inside the locked route bucket", async () => {
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 83.4,
+      grossEstimatedFare: 83.4,
+      pricingPayload: {},
+    });
+
+    const destination = {
+      id: "destination_barra",
+      name: "Barra Shopping",
+      address: "Av. das Américas, Barra da Tijuca, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9985,
+        longitude: -43.3594,
+      },
+      eta: "8",
+    };
+
+    const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+
+    let runtimeSnapshot = {
+      bookingStatus: "idle",
+      currentAddress: "Rua Araguaia, Taquara, Rio de Janeiro",
+      currentCoordinate: {
+        latitude: -22.920816,
+        longitude: -43.405979,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 83.4,
+      selectedDestination: destination,
+      tripDistanceKm: 20.7,
+      tripDurationMin: 38,
+      tripArrivalText: "12:48",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    };
+
+    usePrototypeRideRuntime.mockImplementation(() => runtimeSnapshot);
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{ params: {} }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Barra Shopping")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText("Barra Shopping"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/R\$ 83,40/)).toBeTruthy();
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+    });
+
+    runtimeSnapshot = {
+      ...runtimeSnapshot,
+      currentCoordinate: {
+        latitude: -22.920846,
+        longitude: -43.405949,
+      },
+      tripDistanceKm: 20.9,
+      tripDurationMin: 39,
+      tripArrivalText: "12:49",
+    };
+
+    screen.rerender(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{ params: {} }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/R\$ 83,40/)).toBeTruthy();
+    });
+
+    expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("83.40");
+    });
+  });
+
   it("opens the post-PIX preference countdown before sending the ride request", async () => {
     const destination = {
       id: "destination_shopping_leblon",
