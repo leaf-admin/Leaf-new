@@ -172,6 +172,9 @@ export ADB_BIN="${ADB_BIN}"
 export ANDROID_SERIAL="\${ANDROID_SERIAL:-${DEVICE_SERIAL:-}}"
 export PAYMENT_RUNTIME_PHONE="${PASSENGER_PHONE}"
 export FIREBASE_TEST_PHONE="${PASSENGER_PHONE}"
+export PASSENGER_UID="${PASSENGER_UID}"
+export REAL_SMOKE_PASSENGER_UID="${PASSENGER_UID}"
+export FIREBASE_TEST_UID="${PASSENGER_UID}"
 export TEST_DRIVER_UID="${DRIVER_UID}"
 export TEST_PICKUP_LAT="${PICKUP_LAT}"
 export TEST_PICKUP_LNG="${PICKUP_LNG}"
@@ -193,8 +196,8 @@ cat > "${ARTIFACTS_DIR}/run-android-smoke.sh" <<EOF
 set -euo pipefail
 source "$(printf '%q' "${ARTIFACTS_DIR}/smoke-env.sh")"
 
-# L0/L1 real-device smoke runner.
-STRICT_QUOTE=true REAL_SMOKE_OPEN_PAYMENT=true FIRST_LAUNCH_WAIT_MS=12000 SECOND_LAUNCH_WAIT_MS=10000 QUOTE_STABILITY_WAIT_MS=16000 REAL_SMOKE_PAYMENT_WAIT_MS=60000 \\
+# Real-device smoke runner with sandbox payment auto-confirmation for the canary passenger.
+STRICT_QUOTE=true REAL_SMOKE_OPEN_PAYMENT=true REAL_SMOKE_AUTO_CONFIRM_SANDBOX_PAYMENT=true FIRST_LAUNCH_WAIT_MS=12000 SECOND_LAUNCH_WAIT_MS=10000 QUOTE_STABILITY_WAIT_MS=16000 REAL_SMOKE_PAYMENT_WAIT_MS=60000 \\
   npm --prefix mobile-app run qa:android:real-smoke
 EOF
 chmod +x "${ARTIFACTS_DIR}/smoke-env.sh" "${ARTIFACTS_DIR}/start-driver-bot.sh" "${ARTIFACTS_DIR}/run-android-smoke.sh"
