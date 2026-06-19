@@ -102,6 +102,30 @@ describe('prototypeMapRoute', () => {
     expect(getPrototypeMapRoute().coordinates).toEqual([]);
   });
 
+  it('does not reuse a synthetic route when a real-route-only update is requested', () => {
+    const origin = { latitude: -22.9453, longitude: -43.3652 };
+    const destination = { latitude: -23.0008, longitude: -43.3658 };
+
+    setPrototypeMapRoute({
+      origin,
+      destination,
+      destinationLabel: 'Barra Shopping',
+    });
+
+    expect(getPrototypeMapRoute().coordinates).toHaveLength(4);
+    expect(getPrototypeMapRoute().synthetic).toBe(true);
+
+    setPrototypeMapRoute({
+      origin: { ...origin },
+      destination: { ...destination },
+      allowFallback: false,
+      destinationLabel: 'Barra Shopping',
+    });
+
+    expect(getPrototypeMapRoute().coordinates).toEqual([]);
+    expect(getPrototypeMapRoute().synthetic).toBe(false);
+  });
+
   it('clears the previous route while waiting for a real route with fallback disabled', () => {
     const origin = { latitude: -22.9453, longitude: -43.3652 };
     const firstDestination = { latitude: -23.0008, longitude: -43.3658 };

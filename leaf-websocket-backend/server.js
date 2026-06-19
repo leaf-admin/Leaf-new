@@ -1321,6 +1321,7 @@ io.on('connection', async (socket) => {
         socket,
         io,
         redisPool,
+        gradualExpander,
         logStructured,
         logError
     });

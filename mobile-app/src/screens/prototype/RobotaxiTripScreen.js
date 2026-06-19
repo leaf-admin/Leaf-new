@@ -452,7 +452,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [isBusy, setIsBusy] = useState(false);
   const [isExtensionPaymentVisible, setIsExtensionPaymentVisible] = useState(false);
-  const [isTripExpanded, setIsTripExpanded] = useState(false);
+  const [isTripExpanded, setIsTripExpanded] = useState(true);
   const qaAutoConfirmPix = true;
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
   const sheetBottom = SHEET_BOTTOM_OFFSET;
@@ -624,6 +624,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       route?.params?.status ||
       ''
   );
+  const passengerTripSheetExpansionLocked = [
+    'started',
+    'operational_interrupted',
+    'searching_replacement',
+  ].includes(normalizedStatus);
   const isAccepted = normalizedStatus === 'accepted' || normalizedStatus === 'arrived';
   const isArrived = normalizedStatus === 'arrived';
   const isStarted = normalizedStatus === 'started';
@@ -980,8 +985,14 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   }, [extensionPaymentData?.chargeId, extensionStatus]);
 
   useEffect(() => {
-    setIsTripExpanded(false);
-  }, [activeBookingId, extensionStatus, normalizedStatus, operationalStatus]);
+    setIsTripExpanded(passengerTripSheetExpansionLocked);
+  }, [
+    activeBookingId,
+    extensionStatus,
+    normalizedStatus,
+    operationalStatus,
+    passengerTripSheetExpansionLocked,
+  ]);
 
   const handleOpenExtensionFlow = useCallback(() => {
     navigation.navigate('RobotaxiPrototypeDestination', {
@@ -1470,17 +1481,22 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             onLayout={handleCardLayout}
             style={[
               styles.tripCard,
-              shouldUseCompactTripCard && !isTripExpanded && styles.compactCard,
+              shouldUseCompactTripCard &&
+                !passengerTripSheetExpansionLocked &&
+                !isTripExpanded &&
+                styles.compactCard,
               { paddingBottom: 12 + safeBottom },
             ]}
             testID="passenger-trip-screen"
             accessibilityLabel="passenger-trip-screen"
           >
-            {shouldUseCompactTripCard && !isTripExpanded ? (
+            {shouldUseCompactTripCard &&
+            !passengerTripSheetExpansionLocked &&
+            !isTripExpanded ? (
               renderCompactTripCard()
             ) : (
               <>
-            {shouldUseCompactTripCard ? (
+            {shouldUseCompactTripCard && !passengerTripSheetExpansionLocked ? (
               <TouchableOpacity
                 activeOpacity={0.82}
                 onPress={() => setIsTripExpanded(false)}
@@ -1505,8 +1521,16 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               </View>
               <Text
                 style={styles.arrivalText}
-                testID="passenger-trip-arrival-label"
-                accessibilityLabel="passenger-trip-arrival-label"
+                testID={
+                  isStarted
+                    ? passengerCardFieldTestIDs.eta_final
+                    : "passenger-trip-arrival-label"
+                }
+                accessibilityLabel={
+                  isStarted
+                    ? passengerCardFieldTestIDs.eta_final
+                    : "passenger-trip-arrival-label"
+                }
               >
                 {arrivalLabel}
               </Text>
@@ -1514,16 +1538,56 @@ export default function RobotaxiTripScreen({ navigation, route }) {
 
             <Text
               style={styles.destinationText}
-              testID="passenger-trip-destination-label"
-              accessibilityLabel="passenger-trip-destination-label"
+              testID={
+                isStarted
+                  ? passengerCardFieldTestIDs.destination_address
+                  : "passenger-trip-destination-label"
+              }
+              accessibilityLabel={
+                isStarted
+                  ? passengerCardFieldTestIDs.destination_address
+                  : "passenger-trip-destination-label"
+              }
             >
               {destination}
             </Text>
             {resolvedTripArrivalText ? (
               <Text style={styles.driverText}>{resolvedTripArrivalText}</Text>
             ) : null}
-            <Text style={styles.driverText}>{`Motorista: ${driverName}`}</Text>
-            <Text style={styles.driverText}>{`${vehicleModel}${vehiclePlate ? ` • ${vehiclePlate}` : ''}`}</Text>
+            <Text
+              style={styles.driverText}
+              testID={isStarted ? passengerCardFieldTestIDs.driver_name : undefined}
+            >
+              {`Motorista: ${driverName}`}
+            </Text>
+            <Text
+              style={styles.driverText}
+              testID={isStarted ? passengerCardFieldTestIDs.vehicle_model : undefined}
+            >
+              {`${vehicleModel}${vehiclePlate ? ` • ${vehiclePlate}` : ''}`}
+            </Text>
+            {isStarted ? (
+              <>
+                <Text
+                  style={styles.hiddenText}
+                  testID={passengerCardFieldTestIDs.route_progress}
+                >
+                  {String(routeProgress)}
+                </Text>
+                <Text
+                  style={styles.hiddenText}
+                  testID={passengerCardFieldTestIDs.driver_photo}
+                >
+                  {driverPhotoUri || driverInitial}
+                </Text>
+                <Text
+                  style={styles.hiddenText}
+                  testID={passengerCardFieldTestIDs.vehicle_plate}
+                >
+                  {plateLabel}
+                </Text>
+              </>
+            ) : null}
 
             <View style={styles.metaRow}>
               <View style={styles.metaBlock}>
@@ -1533,7 +1597,12 @@ export default function RobotaxiTripScreen({ navigation, route }) {
 
               <View style={styles.metaBlock}>
                 <Ionicons name="speedometer-outline" size={15} color={color.text.primary} />
-                <Text style={styles.metaLabel}>{distanceLabel}</Text>
+                <Text
+                  style={styles.metaLabel}
+                  testID={isStarted ? passengerCardFieldTestIDs.distance_remaining : undefined}
+                >
+                  {distanceLabel}
+                </Text>
               </View>
 
               <View style={styles.metaBlock}>
@@ -1700,6 +1769,21 @@ export default function RobotaxiTripScreen({ navigation, route }) {
 
             {isStarted ? (
               <View style={styles.actionsRow}>
+                <TouchableOpacity
+                  style={styles.secondaryAction}
+                  activeOpacity={0.86}
+                  onPress={handleShareTrip}
+                  testID={passengerCardFieldTestIDs.share_trip_action}
+                  accessibilityLabel={passengerCardFieldTestIDs.share_trip_action}
+                >
+                  <Ionicons
+                    name="share-social-outline"
+                    size={leafButtonMetrics.iconSize}
+                    color={color.text.primary}
+                  />
+                  <Text style={styles.secondaryActionText}>Compartilhar</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   style={styles.secondaryAction}
                   activeOpacity={0.86}

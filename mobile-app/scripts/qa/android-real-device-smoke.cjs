@@ -21,6 +21,8 @@ const OPEN_PAYMENT = process.env.REAL_SMOKE_OPEN_PAYMENT === "true";
 const AUTO_CONFIRM_SANDBOX_PAYMENT = process.env.REAL_SMOKE_AUTO_CONFIRM_SANDBOX_PAYMENT === "true";
 const COLLECT_DASHBOARD_EVIDENCE = process.env.REAL_SMOKE_COLLECT_DASHBOARD_EVIDENCE === "true";
 const ALLOW_EXISTING_QUOTE = process.env.REAL_SMOKE_ALLOW_EXISTING_QUOTE === "true";
+const ALLOW_EXISTING_ACTIVE_RIDE =
+  process.env.REAL_SMOKE_ALLOW_EXISTING_ACTIVE_RIDE === "true";
 const PAYMENT_RUNTIME_PHONE = process.env.PAYMENT_RUNTIME_PHONE || process.env.FIREBASE_TEST_PHONE || "";
 const PAYMENT_PASSENGER_UID =
   process.env.REAL_SMOKE_PASSENGER_UID ||
@@ -224,6 +226,12 @@ function extractPrices(nodes) {
   return [...values];
 }
 
+function extractDriverSearchElapsed(nodes) {
+  const node = findNode(nodes, ["passenger-driver-search-elapsed"]);
+  const value = String(node?.text || node?.["content-desc"] || "").trim();
+  return /^\d{2}:\d{2}$/.test(value) ? value : null;
+}
+
 function detectScreen(nodes) {
   const allText = nodes.map(combinedText).join("\n");
   if (allText.includes("payment-modal-confirmed")) return "payment_confirmed";
@@ -241,6 +249,13 @@ function detectScreen(nodes) {
   }
   if (allText.includes("payment-modal-loading") || allText.includes("processando pagamento")) {
     return "payment_loading";
+  }
+  if (
+    allText.includes("passenger-driver-search-sheet") ||
+    allText.includes("buscando motorista") ||
+    allText.includes("pagamento confirmado")
+  ) {
+    return "passenger_searching_driver";
   }
   if (allText.includes("passenger-destination-confirm-button")) return "passenger_quote";
   if (allText.includes("passenger-destination-search-input")) return "destination_search";
@@ -553,7 +568,16 @@ async function captureStep(name) {
   const nodes = parseNodes(xml);
   const prices = extractPrices(nodes);
   const screen = detectScreen(nodes);
-  return { name, screenshot, dump, nodes, prices, screen };
+  const driverSearchElapsed = extractDriverSearchElapsed(nodes);
+  return {
+    name,
+    screenshot,
+    dump,
+    nodes,
+    prices,
+    screen,
+    driverSearchElapsed,
+  };
 }
 
 function startLogcat() {
@@ -850,6 +874,19 @@ async function main() {
           }
         }
       }
+    } else if (current.screen === "passenger_searching_driver") {
+      quoteStatus = "blocked_existing_active_ride";
+      const elapsedLabel = current.driverSearchElapsed || "não identificado";
+      if (!ALLOW_EXISTING_ACTIVE_RIDE) {
+        failures.push("blocked_precondition:existing_active_ride");
+        warnings.push(
+          `App abriu com busca de motorista já ativa (${elapsedLabel}); smoke abortado sem alterar a corrida.`,
+        );
+      } else {
+        warnings.push(
+          `App abriu com busca de motorista já ativa (${elapsedLabel}); continuação permitida explicitamente, sem atribuição automática.`,
+        );
+      }
     } else if (current.screen === "auth") {
       warnings.push("App abriu na autenticação; smoke preservou a sessão e não tentou login/OTP automaticamente.");
     } else if (current.screen === "driver_home") {
@@ -869,7 +906,7 @@ async function main() {
   if (quoteStatus === "unstable_or_unreadable") {
     warnings.push("Cotação foi alcançada, mas o smoke não conseguiu provar estabilidade visual por texto acessível.");
   }
-  if (STRICT_QUOTE && quoteStatus !== "stable") {
+  if (STRICT_QUOTE && quoteStable !== true) {
     failures.push(`STRICT_QUOTE=true exige cotação estável; status atual: ${quoteStatus}.`);
   }
   if (OPEN_PAYMENT && !paymentOpened) {
@@ -898,7 +935,12 @@ async function main() {
       : null,
     app: {
       package: APP_PACKAGE,
-      detectedScreens: steps.map((step) => ({ name: step.name, screen: step.screen, prices: step.prices })),
+      detectedScreens: steps.map((step) => ({
+        name: step.name,
+        screen: step.screen,
+        prices: step.prices,
+        driverSearchElapsed: step.driverSearchElapsed,
+      })),
       quoteStatus,
       initialQuote,
       laterQuote,

@@ -3008,6 +3008,22 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const isLiveTripMapActive = ['accepted', 'arrived', 'started'].includes(
     normalizedBookingStatus
   );
+  const isPassengerRideLifecycleLocked = Boolean(
+    !isDriverRole &&
+      (
+        activeBookingId ||
+        passengerAutoRoute ||
+        [
+          'requesting',
+          'searching',
+          'searching_replacement',
+          'accepted',
+          'arrived',
+          'started',
+          'operational_interrupted',
+        ].includes(normalizedBookingStatus)
+      )
+  );
   const shouldShowTrafficLayer = Boolean(
     isDriverRole
     && shouldRenderRuntimeMapState
@@ -5276,6 +5292,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   };
 
   const handleBottomHomePress = () => {
+    if (isPassengerRideLifecycleLocked) {
+      return;
+    }
+
     if (isHomeRoute) {
       return;
     }
@@ -6010,12 +6030,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           interactionEnabled={
             (showHomeChrome || isDestinationRoute) &&
             shouldRenderRuntimeMapState &&
-            !homeSurfaceInteractionBlocked
+            !homeSurfaceInteractionBlocked &&
+            !isPassengerRideLifecycleLocked
           }
         />
 
         {showHomeChrome &&
         !homeSurfaceInteractionBlocked &&
+        !isPassengerRideLifecycleLocked &&
         !homePickupPickerVisible &&
         !hasDriverLiveRideOverlay ? (
           <PrototypeTopControls

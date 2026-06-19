@@ -612,6 +612,17 @@ describe('prototype ride screens', () => {
     expect(screen.queryByText('Cancelar corrida')).toBeNull();
   });
 
+  it('keeps the started passenger trip expanded instead of collapsing to compact summary', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.queryByLabelText('passenger-trip-compact-summary')).toBeNull();
+    expect(screen.queryByLabelText('passenger-trip-collapse-button')).toBeNull();
+    expect(screen.getByLabelText('passenger-trip-screen')).toBeTruthy();
+  });
+
   it('hydrates accepted passenger vehicle and pickup ETA from active ride aliases', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
@@ -1000,6 +1011,88 @@ describe('prototype ride screens', () => {
     expect(cancelRideSearch).not.toHaveBeenCalled();
     expect(navigation.goBack).not.toHaveBeenCalled();
     expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('waits for the canonical cancellation ACK before leaving the search screen', async () => {
+    let resolveCancellation;
+    const cancelRideSearch = jest.fn(() => new Promise((resolve) => {
+      resolveCancellation = resolve;
+    }));
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 44,
+        activeBooking: { bookingId: 'booking_cancel_ack' },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { getByTestId, getByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
+
+    expect(cancelRideSearch).toHaveBeenCalledTimes(1);
+    expect(getByText('Cancelando...')).toBeTruthy();
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+
+    resolveCancellation({ success: true });
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeCancellation',
+        { source: 'search' }
+      );
+    });
+  });
+
+  it('keeps the active search visible and exposes support when cancellation fails', async () => {
+    const cancelRideSearch = jest
+      .fn()
+      .mockRejectedValue(new Error('Servidor não confirmou o cancelamento.'));
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 180,
+        activeBooking: { bookingId: 'booking_cancel_failed' },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { getByTestId, getByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
+
+    await waitFor(() => {
+      expect(getByText('Servidor não confirmou o cancelamento.')).toBeTruthy();
+    });
+    expect(getByText('Buscando motorista')).toBeTruthy();
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+
+    fireEvent.press(getByTestId('passenger-driver-search-support-button'));
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiMenuHelp', {
+      source: 'driver_search',
+      bookingId: 'booking_cancel_failed',
+    });
   });
 
   it('uses persisted booking labels when the search screen is rehydrated without selectedDestination', () => {

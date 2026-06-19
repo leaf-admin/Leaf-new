@@ -4,7 +4,9 @@ const DEFAULT_ROUTE = Object.freeze({
   coordinates: [],
   trafficSegments: [],
   destinationLabel: '',
-  destinationAddress: ''
+  destinationAddress: '',
+  synthetic: false,
+  routeSource: ''
 });
 
 let currentRoute = DEFAULT_ROUTE;
@@ -119,7 +121,9 @@ function areRoutesEqual(left, right) {
     areCoordinateListsEqual(left.coordinates, right.coordinates) &&
     areTrafficSegmentsEqual(left.trafficSegments, right.trafficSegments) &&
     String(left.destinationLabel || '') === String(right.destinationLabel || '') &&
-    String(left.destinationAddress || '') === String(right.destinationAddress || '')
+    String(left.destinationAddress || '') === String(right.destinationAddress || '') &&
+    Boolean(left.synthetic) === Boolean(right.synthetic) &&
+    String(left.routeSource || '') === String(right.routeSource || '')
   );
 }
 
@@ -162,15 +166,16 @@ export function setPrototypeMapRoute(payload) {
     ? payload.coordinates.filter(isCoordinateValid)
     : [];
   const explicitTrafficSegments = normalizeTrafficSegments(payload?.trafficSegments);
+  const allowFallbackRoute = payload?.allowFallback !== false;
   const canReuseCurrentRouteCoordinates = Boolean(
     explicitCoordinates.length < 2 &&
       currentRoute !== DEFAULT_ROUTE &&
       areCoordinatesEqual(currentRoute.origin, origin) &&
       areCoordinatesEqual(currentRoute.destination, destination) &&
       Array.isArray(currentRoute.coordinates) &&
-      currentRoute.coordinates.length >= 2
+      currentRoute.coordinates.length >= 2 &&
+      (allowFallbackRoute || currentRoute.synthetic !== true)
   );
-  const allowFallbackRoute = payload?.allowFallback !== false;
   const coordinates =
     explicitCoordinates.length >= 2
       ? explicitCoordinates
@@ -185,6 +190,14 @@ export function setPrototypeMapRoute(payload) {
       : canReuseCurrentRouteCoordinates
         ? currentRoute.trafficSegments || []
         : [];
+  const routeSource =
+    explicitCoordinates.length >= 2
+      ? 'explicit'
+      : canReuseCurrentRouteCoordinates
+        ? currentRoute.routeSource || 'reused'
+        : allowFallbackRoute
+          ? 'fallback'
+          : '';
 
   if (coordinates.length < 2) {
     if (currentRoute !== DEFAULT_ROUTE) {
@@ -200,7 +213,9 @@ export function setPrototypeMapRoute(payload) {
     coordinates,
     trafficSegments,
     destinationLabel: payload?.destinationLabel || '',
-    destinationAddress: payload?.destinationAddress || ''
+    destinationAddress: payload?.destinationAddress || '',
+    synthetic: routeSource === 'fallback',
+    routeSource
   };
 
   if (areRoutesEqual(currentRoute, nextRoute)) {

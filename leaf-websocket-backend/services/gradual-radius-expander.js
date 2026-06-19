@@ -32,6 +32,14 @@ const ACTIVE_SEARCH_STATES = new Set([
     'REJECTED',
     'REASSIGNMENT_PENDING'
 ]);
+const TERMINAL_SEARCH_STATUSES = new Set([
+    'CANCELED',
+    'CANCELLED',
+    'NO_DRIVERS_AVAILABLE',
+    'NO_DRIVERS_FOUND',
+    'EXPIRED',
+    'SUPERSEDED'
+]);
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
 const parsePositiveNumber = (value, fallback) => {
@@ -97,6 +105,131 @@ class GradualRadiusExpander {
         } catch (error) {
             return defaultValue;
         }
+    }
+
+    parseTimestampMs(value) {
+        if (value === undefined || value === null || value === '') {
+            return null;
+        }
+
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && numeric > 0) {
+            return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+        }
+
+        const parsed = Date.parse(String(value));
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    async reconcileExpiredSearchForCustomer(customerId, { nowMs = Date.now() } = {}) {
+        const normalizedCustomerId = String(customerId || '').trim();
+        if (!normalizedCustomerId) {
+            return { reconciled: false, reason: 'CUSTOMER_ID_REQUIRED' };
+        }
+
+        const bookingId = await this.redis.get(`customer_active_booking:${normalizedCustomerId}`);
+        if (!bookingId) {
+            return { reconciled: false, reason: 'NO_ACTIVE_BOOKING' };
+        }
+
+        const bookingData = await this.redis.hgetall(`booking:${bookingId}`);
+        if (!bookingData || Object.keys(bookingData).length === 0) {
+            await this.redis.del(`customer_active_booking:${normalizedCustomerId}`);
+            return {
+                reconciled: true,
+                reason: 'STALE_ACTIVE_INDEX_CLEARED',
+                bookingId
+            };
+        }
+
+        const bookingStatus = String(bookingData.status || bookingData.state || '')
+            .trim()
+            .toUpperCase();
+        if (TERMINAL_SEARCH_STATUSES.has(bookingStatus)) {
+            const activeKey = `customer_active_booking:${normalizedCustomerId}`;
+            const indexedBookingId = await this.redis.get(activeKey);
+            if (indexedBookingId === bookingId) {
+                await this.redis.del(activeKey);
+            }
+            return {
+                reconciled: true,
+                reason: 'TERMINAL_ACTIVE_INDEX_CLEARED',
+                bookingId,
+                status: bookingStatus
+            };
+        }
+
+        if (String(bookingData.driverId || '').trim()) {
+            return {
+                reconciled: false,
+                reason: 'DRIVER_ALREADY_ASSIGNED',
+                bookingId
+            };
+        }
+
+        const currentState = await RideStateManager.getBookingState(this.redis, bookingId);
+        if (!ACTIVE_SEARCH_STATES.has(currentState)) {
+            return {
+                reconciled: false,
+                reason: 'STATE_NOT_SEARCHABLE',
+                bookingId,
+                state: currentState
+            };
+        }
+
+        const searchMeta = await this.redis.hgetall(`booking_search:${bookingId}`);
+        const searchStartedAt = [
+            searchMeta?.createdAt,
+            bookingData.searchStartedAt,
+            bookingData.requestedAt,
+            bookingData.createdAt,
+            bookingData.timestamp,
+            bookingData.paymentConfirmedAt
+        ]
+            .map((candidate) => this.parseTimestampMs(candidate))
+            .find((candidate) => Number.isFinite(candidate) && candidate > 0);
+
+        if (!searchStartedAt) {
+            logger.warn(`⚠️ [GradualExpander] Busca ${bookingId} sem timestamp canônico para reconciliação`);
+            return { reconciled: false, reason: 'SEARCH_STARTED_AT_MISSING', bookingId };
+        }
+
+        const elapsedMs = Math.max(0, Number(nowMs) - searchStartedAt);
+        const minimumDurationMs = this.config.minimumSearchDurationMs;
+        if (elapsedMs < minimumDurationMs) {
+            return {
+                reconciled: false,
+                reason: 'SEARCH_WINDOW_ACTIVE',
+                bookingId,
+                remainingMs: minimumDurationMs - elapsedMs
+            };
+        }
+
+        const forceFinalize =
+            elapsedMs >= minimumDurationMs + this.config.driverResponseWaitMs;
+        const pickupLocation = this.safeJSONParse(bookingData.pickupLocation, null);
+
+        logger.warn(
+            `⚠️ [GradualExpander] Reconciliando busca vencida ${bookingId} após ${elapsedMs}ms (state=${currentState}, force=${forceFinalize})`
+        );
+
+        await this.handleMaxRadiusReached(bookingId, {
+            reason: 'SEARCH_TIMEOUT',
+            searchedRadius: this.config.maxRadius,
+            pickupLocation,
+            limit: this.config.driversPerWave,
+            bookingData,
+            searchStartedAt,
+            skipMinimumSearchDuration: true,
+            forceFinalize
+        });
+
+        return {
+            reconciled: true,
+            bookingId,
+            elapsedMs,
+            forceFinalize
+        };
     }
 
     async getUniqueNotifiedDriversCount(bookingId) {
@@ -737,8 +870,11 @@ class GradualRadiusExpander {
         }
 
         if (
-            currentState === RideStateManager.STATES.NOTIFIED ||
-            currentState === RideStateManager.STATES.AWAITING_RESPONSE
+            options?.forceFinalize !== true &&
+            (
+                currentState === RideStateManager.STATES.NOTIFIED ||
+                currentState === RideStateManager.STATES.AWAITING_RESPONSE
+            )
         ) {
             logger.info(
                 `⏸️ [GradualExpander] Raio máximo atingido para ${bookingId}, mas ainda há motorista(s) em janela de resposta. Rechecando em ${this.config.driverResponseWaitMs}ms.`

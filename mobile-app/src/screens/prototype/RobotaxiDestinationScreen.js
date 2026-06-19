@@ -1475,11 +1475,18 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const selectedPlanData =
     plans.find((item) => item.id === selectedPlan) || plans[0];
   const selectedQuoteFare = Number(selectedPricingQuote?.estimatedFare);
+  const hasSelectedBackendQuote = Boolean(
+    selectedPricingQuote &&
+      Number.isFinite(selectedQuoteFare) &&
+      selectedQuoteFare > 0,
+  );
   const selectedPlanFare = routeGuardBlocked
     ? null
-    : Number.isFinite(selectedQuoteFare) && selectedQuoteFare > 0
+    : hasSelectedBackendQuote
       ? selectedQuoteFare
-      : selectedPlanData?.value;
+      : isExtensionFlow
+        ? selectedPlanData?.value
+        : null;
   const selectedDiscountBenefit =
     selectedPricingQuote?.discountBenefit && typeof selectedPricingQuote.discountBenefit === "object"
       ? selectedPricingQuote.discountBenefit
@@ -1490,7 +1497,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       ? selectedGrossQuoteFare
       : selectedPlanFare;
   const selectedBackendQuoteReady = Boolean(
-    selectedPricingQuote &&
+    hasSelectedBackendQuote &&
       Number.isFinite(Number(selectedPlanFare)) &&
       Number(selectedPlanFare) > 0,
   );
@@ -2385,6 +2392,40 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [submittingRide]);
 
   useEffect(() => {
+    if (!isPixModalVisible || submittingRide) {
+      return;
+    }
+
+    if (
+      routeGuardBlocked ||
+      hasCoverageBlockedPlan ||
+      selectedPlanUnavailable ||
+      paymentQuotePending
+    ) {
+      setPixModalVisible(false);
+      setPaymentQuoteLock(null);
+      setAvailabilityNotice(
+        routeGuardBlocked || hasCoverageBlockedPlan
+          ? OUT_OF_COVERAGE_MESSAGE
+          : paymentQuotePending
+            ? "Aguarde a cotação da tarifa antes de solicitar a corrida."
+            : normalizeCoverageMessage(
+                selectedPlanAvailability?.message ||
+                  "Categoria indisponível nesta região no momento.",
+              ),
+      );
+    }
+  }, [
+    hasCoverageBlockedPlan,
+    isPixModalVisible,
+    paymentQuotePending,
+    routeGuardBlocked,
+    selectedPlanAvailability?.message,
+    selectedPlanUnavailable,
+    submittingRide,
+  ]);
+
+  useEffect(() => {
     if (step === QUOTE_STEP || step === CONFIRM_STEP || step === PICKUP_STEP) {
       setAvailabilityNotice("");
     }
@@ -2981,6 +3022,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   disabled={
                     checkingAvailability ||
                     checkingPlanAvailability ||
+                    paymentQuotePending ||
                     submittingRide ||
                     routeGuardBlocked ||
                     hasCoverageBlockedPlan ||
@@ -2991,6 +3033,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     styles.pickupFloatingPrimaryButton,
                     (checkingAvailability ||
                       checkingPlanAvailability ||
+                      paymentQuotePending ||
                       submittingRide ||
                       routeGuardBlocked ||
                       hasCoverageBlockedPlan ||
@@ -3003,7 +3046,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   <Text style={styles.pickupFloatingPrimaryButtonText}>
                     {checkingAvailability || checkingPlanAvailability
                       ? "Verificando..."
-                      : routeGuardBlocked ||
+                      : paymentQuotePending
+                        ? "Calculando tarifa..."
+                        : routeGuardBlocked ||
                           hasCoverageBlockedPlan ||
                           selectedPlanUnavailable
                         ? "Indisponível"
@@ -3403,7 +3448,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         ? "Verificando..."
                         : checkingAvailability
                           ? "Verificando..."
-                        : routeGuardBlocked ||
+                          : paymentQuotePending
+                            ? "Calculando tarifa..."
+                            : routeGuardBlocked ||
                             hasCoverageBlockedPlan ||
                             selectedPlanUnavailable
                           ? "Indisponível"
@@ -3414,6 +3461,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     onPress={
                       checkingAvailability ||
                       checkingPlanAvailability ||
+                      paymentQuotePending ||
                       submittingRide ||
                       routeGuardBlocked ||
                       hasCoverageBlockedPlan ||
@@ -3601,6 +3649,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         ? "Verificando..."
                       : checkingAvailability
                         ? "Buscando motorista..."
+                      : paymentQuotePending
+                        ? "Calculando tarifa..."
                       : routeGuardBlocked || hasCoverageBlockedPlan || selectedPlanUnavailable
                           ? "Indisponível"
                         : "Confirmar"
@@ -3610,6 +3660,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   onPress={
                     checkingAvailability ||
                     checkingPlanAvailability ||
+                    paymentQuotePending ||
                     submittingRide ||
                     routeGuardBlocked ||
                     hasCoverageBlockedPlan ||
@@ -3806,7 +3857,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
         {preferenceModalVisible ? (
           <View
-            style={styles.preferenceModalLayer}
+            style={[
+              styles.preferenceModalLayer,
+              { paddingBottom: Math.max(insets.bottom + 18, 26) },
+            ]}
             testID="passenger-preference-countdown-modal"
           >
             <Animated.View
@@ -3851,14 +3905,32 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         testID={`passenger-temperature-option-${item.id}`}
                         accessibilityLabel={`Temperatura ${item.label}`}
                       >
-                        <Text
-                          style={[
-                            styles.preferenceModalOptionText,
-                            selected && styles.preferenceModalOptionTextSelected,
-                          ]}
-                        >
-                          {item.label}
-                        </Text>
+                        <View style={styles.preferenceModalOptionHeader}>
+                          <Text
+                            style={[
+                              styles.preferenceModalOptionText,
+                              selected &&
+                                styles.preferenceModalOptionTextSelected,
+                            ]}
+                          >
+                            {item.label}
+                          </Text>
+                          <View
+                            style={[
+                              styles.preferenceModalOptionCheck,
+                              selected &&
+                                styles.preferenceModalOptionCheckSelected,
+                            ]}
+                          >
+                            {selected ? (
+                              <Ionicons
+                                name="checkmark"
+                                size={13}
+                                color="#FFFFFF"
+                              />
+                            ) : null}
+                          </View>
+                        </View>
                         <Text
                           style={[
                             styles.preferenceModalOptionHint,
@@ -3868,20 +3940,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         >
                           {item.description}
                         </Text>
-                        {selected ? (
-                          <View style={styles.preferenceModalOptionTimer}>
-                            <View
-                              style={[
-                                styles.preferenceModalOptionTimerFill,
-                                {
-                                  width: `${Math.round(
-                                    preferenceProgress * 100,
-                                  )}%`,
-                                },
-                              ]}
-                            />
-                          </View>
-                        ) : null}
                       </TouchableOpacity>
                     );
                   })}
@@ -3907,14 +3965,32 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         testID={`passenger-sound-option-${item.id}`}
                         accessibilityLabel={`Som ${item.label}`}
                       >
-                        <Text
-                          style={[
-                            styles.preferenceModalOptionText,
-                            selected && styles.preferenceModalOptionTextSelected,
-                          ]}
-                        >
-                          {item.label}
-                        </Text>
+                        <View style={styles.preferenceModalOptionHeader}>
+                          <Text
+                            style={[
+                              styles.preferenceModalOptionText,
+                              selected &&
+                                styles.preferenceModalOptionTextSelected,
+                            ]}
+                          >
+                            {item.label}
+                          </Text>
+                          <View
+                            style={[
+                              styles.preferenceModalOptionCheck,
+                              selected &&
+                                styles.preferenceModalOptionCheckSelected,
+                            ]}
+                          >
+                            {selected ? (
+                              <Ionicons
+                                name="checkmark"
+                                size={13}
+                                color="#FFFFFF"
+                              />
+                            ) : null}
+                          </View>
+                        </View>
                         <Text
                           style={[
                             styles.preferenceModalOptionHint,
@@ -3924,24 +4000,29 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         >
                           {item.description}
                         </Text>
-                        {selected ? (
-                          <View style={styles.preferenceModalOptionTimer}>
-                            <View
-                              style={[
-                                styles.preferenceModalOptionTimerFill,
-                                {
-                                  width: `${Math.round(
-                                    preferenceProgress * 100,
-                                  )}%`,
-                                },
-                              ]}
-                            />
-                          </View>
-                        ) : null}
                       </TouchableOpacity>
                     );
                   })}
                 </View>
+              </View>
+
+              <View style={styles.preferenceModalProgressHeader}>
+                <Text style={styles.preferenceModalProgressLabel}>
+                  Confirmação automática
+                </Text>
+                <Text style={styles.preferenceModalProgressTime}>
+                  {Math.max(0, Math.ceil((1 - preferenceProgress) * 5))}s
+                </Text>
+              </View>
+              <View style={styles.preferenceModalProgressTrack}>
+                <View
+                  style={[
+                    styles.preferenceModalProgressFill,
+                    {
+                      width: `${Math.round(preferenceProgress * 100)}%`,
+                    },
+                  ]}
+                />
               </View>
 
               <TouchableOpacity
@@ -4964,23 +5045,23 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
     paddingHorizontal: 14,
-    paddingBottom: 22,
-    backgroundColor: "rgba(16,32,24,0.14)",
+    paddingBottom: 26,
+    backgroundColor: "rgba(14,24,18,0.18)",
     zIndex: 40,
     elevation: 40,
   },
   preferenceModalCard: {
-    borderRadius: 28,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.74)",
-    backgroundColor: "rgba(255,255,255,0.94)",
+    borderColor: "rgba(31,57,42,0.08)",
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 18,
     paddingTop: 18,
-    paddingBottom: 16,
+    paddingBottom: 18,
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.16,
-    shadowRadius: 34,
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.14,
+    shadowRadius: 28,
     elevation: 12,
   },
   preferenceModalHeader: {
@@ -5016,14 +5097,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   preferenceModalCountdown: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(34,139,84,0.12)",
+    backgroundColor: "#EFF7F2",
     borderWidth: 1,
-    borderColor: "rgba(34,139,84,0.16)",
+    borderColor: "rgba(34,139,84,0.18)",
   },
   preferenceModalCountdownText: {
     color: leafRideColors.leaf,
@@ -5032,71 +5113,107 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   preferenceModalSection: {
-    marginTop: 16,
+    marginTop: 18,
   },
   preferenceModalSectionLabel: {
     color: leafRideColors.secondary,
     fontFamily: fonts.SemiBold,
     fontSize: 11,
     lineHeight: 15,
-    marginBottom: 8,
+    marginBottom: 9,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
   preferenceModalOptions: {
-    flexDirection: "row",
     gap: 8,
   },
   preferenceModalOption: {
-    flex: 1,
-    minHeight: 64,
-    borderRadius: 18,
+    minHeight: 58,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(39,74,54,0.1)",
-    backgroundColor: "rgba(247,251,248,0.86)",
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 9,
+    borderColor: "#E7ECE8",
+    backgroundColor: "#FAFBFA",
+    paddingHorizontal: 13,
+    paddingVertical: 10,
     overflow: "hidden",
   },
   preferenceModalOptionSelected: {
-    borderColor: "rgba(23,74,43,0.2)",
-    backgroundColor: "rgba(236,247,240,0.98)",
+    borderColor: "rgba(23,74,43,0.38)",
+    backgroundColor: "#F0F7F2",
+  },
+  preferenceModalOptionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
   },
   preferenceModalOptionText: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 11.5,
-    lineHeight: 15,
+    fontSize: 13,
+    lineHeight: 17,
+    flex: 1,
   },
   preferenceModalOptionTextSelected: {
     color: leafRideColors.leaf,
   },
+  preferenceModalOptionCheck: {
+    width: 21,
+    height: 21,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "#D8E1DB",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  preferenceModalOptionCheckSelected: {
+    borderColor: leafRideColors.leaf,
+    backgroundColor: leafRideColors.leaf,
+  },
   preferenceModalOptionHint: {
-    marginTop: 3,
+    marginTop: 4,
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: 9.5,
-    lineHeight: 13,
+    fontSize: 11,
+    lineHeight: 15,
   },
   preferenceModalOptionHintSelected: {
     color: "#466755",
   },
-  preferenceModalOptionTimer: {
-    position: "absolute",
-    left: 10,
-    right: 10,
-    bottom: 7,
-    height: 3,
+  preferenceModalProgressHeader: {
+    marginTop: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  preferenceModalProgressLabel: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  preferenceModalProgressTime: {
+    color: leafRideColors.leaf,
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  preferenceModalProgressTrack: {
+    marginTop: 7,
+    height: 4,
     borderRadius: 999,
     backgroundColor: "rgba(23,74,43,0.1)",
     overflow: "hidden",
   },
-  preferenceModalOptionTimerFill: {
+  preferenceModalProgressFill: {
     height: "100%",
     borderRadius: 999,
     backgroundColor: leafRideColors.leaf,
   },
   preferenceModalConfirmButton: {
-    marginTop: 18,
+    marginTop: 16,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
     alignItems: "center",

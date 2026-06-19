@@ -63,6 +63,11 @@ import { dismissDriverOfferRuntimeState } from "./driverOfferState";
 import { formatCurrencyBRL, resolveTripTollAmount } from "./tripFinancialSummary";
 import { SEARCH_TOTAL_DURATION_SECONDS } from "./searchPresentation";
 import {
+  SEARCH_TIMEOUT_RECONCILING_MESSAGE,
+  isPassengerSearchExpired,
+  shouldPreservePassengerSearchOnIdleSync,
+} from "./passengerSearchLifecycle";
+import {
   advanceCoordinateAlongPath,
   buildPlaybackPath,
   resolvePlaybackStepMeters,
@@ -6106,6 +6111,9 @@ function startSearchingTimer({ preserveElapsed = false } = {}) {
 
       return {
         searchingElapsedSeconds: nextElapsed,
+        ...(nextElapsed >= SEARCH_TOTAL_DURATION_SECONDS
+          ? { lastError: SEARCH_TIMEOUT_RECONCILING_MESSAGE }
+          : {}),
       };
     });
   }, SEARCH_TIMER_INTERVAL_MS);
@@ -6763,26 +6771,25 @@ function attachSocketListeners() {
     const normalizedLocalBookingStatus = String(runtimeState.bookingStatus || "")
       .trim()
       .toLowerCase();
+    const hasExpiredPassengerSearch = isPassengerSearchExpired({
+      role: runtimeState.activeRole,
+      bookingStatus: normalizedLocalBookingStatus,
+      elapsedSeconds: runtimeState.searchingElapsedSeconds,
+    });
     const hasPendingDriverOfferContext =
       hasLocalPendingDriverOffer(runtimeState) &&
       (normalizedLocalBookingStatus === "searching" ||
         Boolean(runtimeState.activeBookingId));
     const shouldPreserveLocalPassengerSearch =
-      runtimeState.activeRole === "customer" &&
-      syncedStatus === "idle" &&
-      ["requesting", "searching", "searching_replacement"].includes(
-        normalizedLocalBookingStatus,
-      ) &&
-      (Boolean(runtimeState.activeBookingId) ||
-        Boolean(
-          runtimeState.activeBooking &&
-            typeof runtimeState.activeBooking === "object",
-        ) ||
-        ["processing", "confirmed"].includes(
-          String(runtimeState.paymentState?.status || "")
-            .trim()
-            .toLowerCase(),
-        ));
+      shouldPreservePassengerSearchOnIdleSync({
+        role: runtimeState.activeRole,
+        syncedStatus,
+        bookingStatus: normalizedLocalBookingStatus,
+        elapsedSeconds: runtimeState.searchingElapsedSeconds,
+        activeBookingId: runtimeState.activeBookingId,
+        activeBooking: runtimeState.activeBooking,
+        paymentStatus: runtimeState.paymentState?.status,
+      });
     const shouldPreserveLocalDriverOffer =
       runtimeState.activeRole === "driver" &&
       syncedStatus === "idle" &&
@@ -6823,6 +6830,15 @@ function attachSocketListeners() {
     }
 
     if (syncedStatus === "idle") {
+      if (hasExpiredPassengerSearch) {
+        handleNoDriversFound({
+          bookingId: runtimeState.activeBookingId || null,
+          code: "SEARCH_TIMEOUT_RECONCILED",
+          message: "Nenhum motorista ficou disponível no tempo de busca.",
+        });
+        return;
+      }
+
       const localPaymentStatus = String(runtimeState.paymentState?.status || "")
         .trim()
         .toLowerCase();
@@ -9975,7 +9991,12 @@ function applySyncedActiveRideSnapshot(snapshot) {
             ),
           )
         : previous.searchingElapsedSeconds,
-    lastError: "",
+    lastError:
+      bookingStatus === "searching" &&
+      Number(previous.searchingElapsedSeconds || 0) >=
+        SEARCH_TOTAL_DURATION_SECONDS
+        ? SEARCH_TIMEOUT_RECONCILING_MESSAGE
+        : "",
   }));
 
   if (bookingStatus === "searching") {
@@ -11970,26 +11991,36 @@ async function cancelPrototypeRide(options = {}) {
     "passenger_cancel_request",
   );
   const bookingId = runtimeState.activeBookingId;
-  if (bookingId) {
-    suppressBookingEvents(bookingId, suppressReason);
+  if (!bookingId) {
+    throw new Error("Nenhuma busca ativa para cancelar.");
   }
+
   let cancelResponse = null;
-  if (bookingId) {
-    try {
-      const socket = WebSocketManager.getInstance();
-      if (socket.isConnected()) {
-        cancelResponse = await socket.cancelRide(
-          bookingId,
-          reason,
-        );
-      }
-    } catch (error) {
-      Logger.warn(
-        "⚠️ [PrototypeRuntime] Falha ao cancelar corrida no backend:",
-        error?.message || error,
+  try {
+    const socket = WebSocketManager.getInstance();
+    if (!socket.isConnected()) {
+      throw new Error(
+        "Sem conexão com o servidor. A corrida continua ativa; tente novamente ou fale com o suporte.",
       );
     }
+    cancelResponse = await socket.cancelRide(
+      bookingId,
+      reason,
+    );
+  } catch (error) {
+    Logger.warn(
+      "⚠️ [PrototypeRuntime] Falha ao cancelar corrida no backend:",
+      error?.message || error,
+    );
+    setRuntimeState({
+      lastError:
+        error?.message ||
+        "Não foi possível cancelar no servidor. A corrida continua ativa.",
+    });
+    throw error;
   }
+
+  suppressBookingEvents(bookingId, suppressReason);
 
   const refundData = cancelResponse?.data || {};
   const refundAmount = Number(refundData?.refundAmount || 0);
@@ -12033,8 +12064,10 @@ async function cancelPrototypeRide(options = {}) {
       updatedAt: null,
     },
     searchingElapsedSeconds: 0,
-    lastError: "",
+    lastError: cancelResponse?.message || "Corrida cancelada.",
   });
+
+  return cancelResponse;
 }
 
 async function arrivePrototypePickup(profile, options = {}) {

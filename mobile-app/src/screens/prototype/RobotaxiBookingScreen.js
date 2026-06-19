@@ -22,7 +22,7 @@ import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SHEET_BOTTOM_OFFSET = 12;
+const SHEET_BOTTOM_OFFSET = 18;
 const FALLBACK_CARD_HEIGHT = 356;
 
 function normalizeCoordinateParam(value) {
@@ -53,7 +53,7 @@ export default function RobotaxiBookingScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [selectedVehicle, setSelectedVehicle] = useState(VEHICLE_OPTIONS[0].id);
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const sheetBottom = Math.max(insets.bottom + SHEET_BOTTOM_OFFSET, 28);
 
   const destination =
     route?.params?.destination ||
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     paddingHorizontal: 18,
     paddingTop: 14,
-    paddingBottom: 18,
+    paddingBottom: 24,
   },
   routeIsland: {
     position: "absolute",
@@ -506,6 +506,6 @@ const styles = StyleSheet.create({
     lineHeight: typography.micro.lineHeight,
   },
   reserveButton: {
-    marginTop: 14,
+    marginTop: 16,
   },
 });
