@@ -77,6 +77,8 @@ mobile-app/reports/
 mobile-app/qa-artifacts/
 .codex-artifacts/
 vehicle-image-bank/
+generated-assets/
+.venv_image/
 *.img
 *.iso
 *.qcow2
