@@ -189,6 +189,16 @@ async function main() {
   ];
   const failures = [];
   if (!reconciliation.ok) failures.push(`reconciliation_http_${reconciliation.status || "error"}`);
+  if (reconciliation.json?.report?.ok === false) {
+    const issueCodes = Array.isArray(reconciliation.json.report.issueCodes)
+      ? reconciliation.json.report.issueCodes
+      : [];
+    failures.push(
+      issueCodes.length > 0
+        ? `reconciliation_report_divergent:${issueCodes.join(",")}`
+        : "reconciliation_report_divergent",
+    );
+  }
   comparisons
     .filter((comparison) => comparison.status === "missing" || comparison.status === "mismatch")
     .forEach((comparison) => failures.push(`${comparison.label}_${comparison.status}`));
