@@ -6712,6 +6712,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             userId={profile?.uid}
             pickupLabel={homePickupDisplayLabel}
             pickupAddress={homePickupDisplayAddress}
+            pickupCoordinate={effectiveHomePickupCoordinate}
             destinationLabel={
               homeSelectedDestination?.name ||
               homeSelectedDestination?.address ||
