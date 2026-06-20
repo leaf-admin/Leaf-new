@@ -1,6 +1,6 @@
 const registerSocketSearchDriversHandler = require('../../../bootstrap/register-socket-search-drivers-handler');
 
-function buildHarness({ findAvailableDriversForPickup } = {}) {
+function buildHarness({ findAvailableDriversForPickup, checkRideAvailabilityForPickup } = {}) {
   const listeners = {};
   const socket = {
     id: 'socket-1',
@@ -28,6 +28,14 @@ function buildHarness({ findAvailableDriversForPickup } = {}) {
       success: true,
       drivers: [],
       summary: { radiusKm: 5, candidates: 0, eligible: 0 }
+    }),
+    checkRideAvailabilityForPickup: checkRideAvailabilityForPickup || jest.fn().mockResolvedValue({
+      success: true,
+      hasDrivers: false,
+      radiusKm: 5,
+      candidates: 0,
+      eligible: 0,
+      rejections: {}
     })
   });
 
@@ -41,12 +49,19 @@ function buildHarness({ findAvailableDriversForPickup } = {}) {
 
 describe('registerSocketSearchDriversHandler availability parity', () => {
   it('registers checkRideAvailability and emits the same success contract used by the VPS runtime', async () => {
-    const findAvailableDriversForPickup = jest.fn().mockResolvedValue({
+    const findAvailableDriversForPickup = jest.fn();
+    const checkRideAvailabilityForPickup = jest.fn().mockResolvedValue({
       success: true,
-      drivers: [{ id: 'driver-1' }],
-      summary: { radiusKm: 4, candidates: 2, eligible: 1 }
+      hasDrivers: true,
+      radiusKm: 4,
+      candidates: 2,
+      eligible: 1,
+      rejections: { locked: 1 }
     });
-    const { listeners, socket, logStructured } = buildHarness({ findAvailableDriversForPickup });
+    const { listeners, socket, logStructured } = buildHarness({
+      findAvailableDriversForPickup,
+      checkRideAvailabilityForPickup
+    });
 
     await listeners.checkRideAvailability({
       requestId: 'req-1',
@@ -56,7 +71,7 @@ describe('registerSocketSearchDriversHandler availability parity', () => {
       radiusKm: 4
     });
 
-    expect(findAvailableDriversForPickup).toHaveBeenCalledWith(
+    expect(checkRideAvailabilityForPickup).toHaveBeenCalledWith(
       { lat: -22.97, lng: -43.18 },
       expect.objectContaining({
         carType: 'plus',
@@ -64,6 +79,7 @@ describe('registerSocketSearchDriversHandler availability parity', () => {
         radiusKm: 4
       })
     );
+    expect(findAvailableDriversForPickup).not.toHaveBeenCalled();
     expect(socket.emit).toHaveBeenCalledWith(
       'rideAvailabilityResult',
       expect.objectContaining({
@@ -81,17 +97,20 @@ describe('registerSocketSearchDriversHandler availability parity', () => {
       'Pré-check de disponibilidade concluído',
       expect.objectContaining({
         eventType: 'checkRideAvailability',
-        hasDrivers: true
+        hasDrivers: true,
+        candidates: 2,
+        eligible: 1,
+        rejections: { locked: 1 }
       })
     );
   });
 
   it('emits the VPS-compatible error contract when availability lookup fails', async () => {
     const { listeners, socket } = buildHarness({
-      findAvailableDriversForPickup: jest.fn().mockResolvedValue({
+      checkRideAvailabilityForPickup: jest.fn().mockResolvedValue({
         success: false,
         error: 'pickup_location_invalid',
-        drivers: []
+        hasDrivers: false
       })
     });
 

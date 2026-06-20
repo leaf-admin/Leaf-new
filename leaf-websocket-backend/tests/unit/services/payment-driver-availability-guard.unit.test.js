@@ -60,7 +60,8 @@ describe('payment-driver-availability-guard', () => {
     expect(result).toMatchObject({
       success: true,
       hasDrivers: false,
-      code: 'NO_DRIVERS_AVAILABLE'
+      code: 'NO_DRIVERS_AVAILABLE',
+      rejections: {}
     });
   });
 
@@ -87,12 +88,58 @@ describe('payment-driver-availability-guard', () => {
       success: true,
       hasDrivers: true,
       code: 'DRIVERS_AVAILABLE',
-      driverId: 'driver-1'
+      driverId: 'driver-1',
+      rejections: {
+        locked: 0,
+        missingState: 0,
+        offlineOrIneligible: 0,
+        preferenceMismatch: 0,
+        categoryMismatch: 0
+      }
     });
     expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith(
       'driver-1',
       'Leaf Plus',
       expect.objectContaining({ status: 'AVAILABLE' })
     );
+  });
+
+  it('reports why nearby drivers were rejected without exposing driver identifiers', async () => {
+    mockRedis.georadius.mockResolvedValue([
+      ['driver-locked', '0.2', ['-43.31', '-22.85']],
+      ['driver-category', '0.3', ['-43.31', '-22.85']]
+    ]);
+    driverLockManager.isDriverLocked
+      .mockResolvedValueOnce({ isLocked: true })
+      .mockResolvedValueOnce({ isLocked: false });
+    mockRedis.hgetall.mockResolvedValue({
+      isOnline: 'true',
+      dispatchEligible: 'true',
+      status: 'AVAILABLE',
+      carType: 'Leaf Moto'
+    });
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({ eligible: false });
+
+    const result = await hasPaymentEligibleDriver({
+      pickupLocation: { lat: -22.85, lng: -43.31 },
+      carType: 'Leaf Plus'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      hasDrivers: false,
+      code: 'NO_DRIVERS_AVAILABLE',
+      candidates: 2,
+      eligible: 0,
+      rejections: {
+        locked: 1,
+        missingState: 0,
+        offlineOrIneligible: 0,
+        preferenceMismatch: 0,
+        categoryMismatch: 1
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain('driver-locked');
+    expect(JSON.stringify(result)).not.toContain('driver-category');
   });
 });

@@ -2,10 +2,27 @@ function registerSocketSearchDriversHandler({
     socket,
     rateLimiterService,
     logStructured,
-    findAvailableDriversForPickup
+    findAvailableDriversForPickup,
+    checkRideAvailabilityForPickup
 }) {
     const emitLegacyNoDriversFoundEvent =
         String(process.env.ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT || 'false').toLowerCase() === 'true';
+    const checkCanonicalPaymentAvailability = checkRideAvailabilityForPickup || (async (pickupLocation, options = {}) => {
+        const { hasPaymentEligibleDriver } = require('../services/payment-driver-availability-guard');
+        return hasPaymentEligibleDriver({
+            pickupLocation,
+            destinationLocation: options.destinationLocation || options.destination || null,
+            preferences: options.preferences || {},
+            carType: options.carType || null,
+            radiusKm: options.radiusKm,
+            limit: options.limit,
+            logStructured,
+            logContext: {
+                service: 'socket-search-drivers-handler',
+                eventType: 'checkRideAvailability'
+            }
+        });
+    });
 
     socket.on('checkRideAvailability', async (data = {}) => {
         const userId = socket.userId || data.customerId || socket.id;
@@ -21,7 +38,7 @@ function registerSocketSearchDriversHandler({
                 data?.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5'
             );
 
-            const availability = await findAvailableDriversForPickup(pickupLocation, {
+            const availability = await checkCanonicalPaymentAvailability(pickupLocation, {
                 carType: requestedCarType,
                 destinationLocation: data?.destinationLocation || data?.destination || null,
                 preferences: data?.preferences || {},
@@ -63,7 +80,11 @@ function registerSocketSearchDriversHandler({
                 eventType: 'checkRideAvailability',
                 requestedCarType,
                 hasDrivers,
-                radiusKm
+                radiusKm,
+                requestId,
+                candidates: availability.candidates ?? availability.summary?.candidates ?? null,
+                eligible: availability.eligible ?? availability.summary?.eligible ?? null,
+                rejections: availability.rejections || null
             });
         } catch (availabilityError) {
             logStructured('warn', 'Erro no pré-check de disponibilidade', {
