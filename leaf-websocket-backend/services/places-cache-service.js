@@ -38,6 +38,14 @@ const QUERY_CACHE_GLOBAL_FALLBACK_RADIUS_KM = Math.max(
   1,
   Number.parseFloat(process.env.PLACES_QUERY_CACHE_GLOBAL_FALLBACK_RADIUS_KM || '50') || 50,
 );
+const REVERSE_GEOCODE_CACHE_TTL_SECONDS = parseCacheTtlSeconds(
+  process.env.PLACES_REVERSE_GEOCODE_CACHE_TTL_SECONDS || '2592000',
+  30 * 24 * 60 * 60,
+);
+const REVERSE_GEOCODE_CACHE_PRECISION = Math.max(
+  4,
+  Math.min(6, Number.parseInt(process.env.PLACES_REVERSE_GEOCODE_CACHE_PRECISION || '5', 10) || 5),
+);
 const EARTH_RADIUS_KM = 6371;
 
 function normalizeCoordinateNumber(value) {
@@ -80,6 +88,45 @@ function normalizeCacheLocation(location = null) {
     return null;
   }
   return { lat, lng };
+}
+
+function buildReverseGeocodeCacheKey(location = null) {
+  const normalized = normalizeCacheLocation(location);
+  if (!normalized) {
+    return null;
+  }
+
+  return [
+    'place:reverse',
+    normalized.lat.toFixed(REVERSE_GEOCODE_CACHE_PRECISION),
+    normalized.lng.toFixed(REVERSE_GEOCODE_CACHE_PRECISION),
+  ].join(':');
+}
+
+function normalizeReverseGeocodeResult(location = null, addressData = {}) {
+  const normalizedLocation = normalizeCacheLocation(location);
+  if (!normalizedLocation) {
+    return null;
+  }
+
+  const address = String(
+    addressData.address ||
+      addressData.formatted_address ||
+      addressData.description ||
+      '',
+  ).trim();
+  if (!address) {
+    return null;
+  }
+
+  return {
+    address,
+    formatted_address: address,
+    name: String(addressData.name || address.split(',')[0] || address).trim(),
+    lat: normalizedLocation.lat,
+    lng: normalizedLocation.lng,
+    cached_at: addressData.cached_at || new Date().toISOString(),
+  };
 }
 
 function resolveQueryGeoScope(location = null) {
@@ -143,6 +190,28 @@ function resolveDirectionsCacheTtlSeconds({ trafficEnabled = false } = {}) {
     return 0;
   }
   return Math.min(DIRECTIONS_CACHE_TTL_SECONDS, DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS);
+}
+
+function hasDirectionsTrafficTiming(data = {}) {
+  const hasFiniteValue = (value) => (
+    value !== null &&
+    value !== undefined &&
+    String(value).trim() !== '' &&
+    Number.isFinite(Number(value))
+  );
+
+  if (
+    hasFiniteValue(data?.duration_without_traffic) &&
+    hasFiniteValue(data?.duration_in_traffic)
+  ) {
+    return true;
+  }
+
+  const legs = Array.isArray(data?.legs) ? data.legs : [];
+  return legs.length > 0 && legs.every((leg) => (
+    hasFiniteValue(leg?.duration_without_traffic) &&
+    hasFiniteValue(leg?.duration_in_traffic)
+  ));
 }
 
 function normalizePlaceCacheData(query, placeData = {}) {
@@ -651,6 +720,95 @@ class PlacesCacheService {
     }
   }
 
+  async reverseGeocode(lat, lng, options = {}) {
+    try {
+      const location = normalizeCacheLocation({ lat, lng });
+      const cacheKey = buildReverseGeocodeCacheKey(location);
+      if (!location || !cacheKey) {
+        return null;
+      }
+
+      if (this.isInitialized && options.forceFresh !== true) {
+        try {
+          const cached = await this.redis.get(cacheKey);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            const normalizedCached = normalizeReverseGeocodeResult(location, parsed);
+            if (normalizedCached) {
+              this.incrementHit();
+              return {
+                ...normalizedCached,
+                source: 'reverse_geocode_cache',
+                cached: true,
+                stats: {
+                  redisReads: 1,
+                  redisWrites: 0,
+                  googleRequests: 0,
+                },
+              };
+            }
+          }
+        } catch (redisError) {
+          logger.warn(`⚠️ [PlacesCache] Erro ao buscar reverse geocode no Redis: ${redisError.message}`);
+        }
+      }
+
+      this.incrementMiss();
+
+      if (!this.googleApiKey) {
+        logger.warn('⚠️ [PlacesCache] GOOGLE_MAPS_API_KEY ausente para reverse geocode');
+        return null;
+      }
+
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${encodeURIComponent(`${location.lat},${location.lng}`)}&key=${this.googleApiKey}&language=pt-BR&region=br`;
+      const response = await fetch(url);
+      const json = await response.json();
+
+      if (!response.ok || json.status !== 'OK' || !Array.isArray(json.results) || json.results.length === 0) {
+        logger.warn(`⚠️ [PlacesCache] Reverse geocode retornou status ${json.status || response.status || 'unknown'}`);
+        return null;
+      }
+
+      const firstResult = json.results[0];
+      const normalizedResult = normalizeReverseGeocodeResult(location, {
+        formatted_address: firstResult.formatted_address,
+        name: firstResult.address_components?.[0]?.long_name,
+      });
+      if (!normalizedResult) {
+        return null;
+      }
+
+      if (this.isInitialized && REVERSE_GEOCODE_CACHE_TTL_SECONDS > 0) {
+        try {
+          await this.redis.setex(
+            cacheKey,
+            REVERSE_GEOCODE_CACHE_TTL_SECONDS,
+            JSON.stringify(normalizedResult),
+          );
+          this.incrementSave();
+        } catch (redisError) {
+          logger.warn(`⚠️ [PlacesCache] Erro ao salvar reverse geocode no Redis: ${redisError.message}`);
+        }
+      }
+
+      return {
+        ...normalizedResult,
+        source: 'google_reverse_geocode',
+        cached: false,
+        place_id: firstResult.place_id || null,
+        stats: {
+          redisReads: this.isInitialized && options.forceFresh !== true ? 1 : 0,
+          redisWrites: this.isInitialized && REVERSE_GEOCODE_CACHE_TTL_SECONDS > 0 ? 1 : 0,
+          googleRequests: 1,
+        },
+      };
+    } catch (error) {
+      logger.error(`❌ [PlacesCache] Erro em reverse geocode: ${error.message}`);
+      this.incrementError();
+      return null;
+    }
+  }
+
   /**
    * Busca previsões no Google Places Autocomplete (Legacy)
    * @param {string} query - Texto de busca
@@ -787,16 +945,22 @@ class PlacesCacheService {
           if (cached) {
             const parsed = JSON.parse(cached);
             if (parsed?.data) {
-              return {
-                ...parsed,
-                cached: true,
-                cacheKey,
-                stats,
-                cachePolicy: parsed.cachePolicy || {
-                  forceFresh: false,
-                  ttlSeconds: directionsCacheTtlSeconds,
-                },
-              };
+              if (trafficEnabled && !hasDirectionsTrafficTiming(parsed.data)) {
+                stats.cacheBypasses += 1;
+                cachePolicy.staleTrafficCacheBypassed = true;
+                logger.warn('⚠️ [PlacesCache] Cache de directions com trânsito sem timings; buscando rota fresh.');
+              } else {
+                return {
+                  ...parsed,
+                  cached: true,
+                  cacheKey,
+                  stats,
+                  cachePolicy: parsed.cachePolicy || {
+                    forceFresh: false,
+                    ttlSeconds: directionsCacheTtlSeconds,
+                  },
+                };
+              }
             }
           }
         } catch (cacheError) {

@@ -8,6 +8,7 @@ const mockFetchAutocompletePredictions = jest.fn();
 const mockGetPlaceDetails = jest.fn();
 const mockFetchDirectionsRoute = jest.fn();
 const mockSavePlace = jest.fn();
+const mockReverseGeocode = jest.fn();
 const mockIngestGoogleSkuUsage = jest.fn();
 const mockIngestOperationalUsage = jest.fn();
 const mockGetReport = jest.fn();
@@ -18,6 +19,7 @@ jest.mock('../../../services/places-cache-service', () => ({
   getPlaceDetails: (...args) => mockGetPlaceDetails(...args),
   fetchDirectionsRoute: (...args) => mockFetchDirectionsRoute(...args),
   savePlace: (...args) => mockSavePlace(...args),
+  reverseGeocode: (...args) => mockReverseGeocode(...args),
 }));
 
 jest.mock('../../../services/ride-cost-telemetry-service', () => ({
@@ -52,6 +54,7 @@ describe('places routes', () => {
     mockGetPlaceDetails.mockResolvedValue(null);
     mockFetchDirectionsRoute.mockResolvedValue(null);
     mockSavePlace.mockResolvedValue(true);
+    mockReverseGeocode.mockResolvedValue(null);
     mockIngestGoogleSkuUsage.mockResolvedValue({});
     mockIngestOperationalUsage.mockResolvedValue({});
     mockGetReport.mockResolvedValue(null);
@@ -116,6 +119,92 @@ describe('places routes', () => {
     expect(response.body.cached).toBe(true);
     expect(response.body.telemetryCaptured).toBe(false);
     expect(mockIngestGoogleSkuUsage).not.toHaveBeenCalled();
+  });
+
+  it('returns cached reverse geocode without billing telemetry', async () => {
+    const app = createApp();
+    mockReverseGeocode.mockResolvedValue({
+      address: 'Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro - RJ',
+      formatted_address: 'Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro - RJ',
+      name: 'Av. Vicente de Carvalho',
+      lat: -22.849969,
+      lng: -43.311019,
+      cached: true,
+      source: 'reverse_geocode_cache',
+      stats: {
+        googleRequests: 0,
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/places/reverse-geocode')
+      .send({
+        location: {
+          lat: -22.8499687,
+          lng: -43.3110186,
+        },
+        telemetry: {
+          bookingId: 'booking_reverse_cached',
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('success');
+    expect(response.body.cached).toBe(true);
+    expect(response.body.telemetryCaptured).toBe(false);
+    expect(response.body.data.address).toContain('Av. Vicente de Carvalho');
+    expect(mockReverseGeocode).toHaveBeenCalledWith(-22.8499687, -43.3110186, {
+      forceFresh: false,
+    });
+    expect(mockIngestGoogleSkuUsage).not.toHaveBeenCalled();
+  });
+
+  it('records geocoding telemetry for non-cached reverse geocode when bookingId is provided', async () => {
+    const app = createApp();
+    mockReverseGeocode.mockResolvedValue({
+      address: 'Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro - RJ',
+      formatted_address: 'Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro - RJ',
+      name: 'Av. Vicente de Carvalho',
+      lat: -22.849969,
+      lng: -43.311019,
+      cached: false,
+      source: 'google_reverse_geocode',
+      stats: {
+        googleRequests: 1,
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/places/reverse-geocode')
+      .send({
+        lat: -22.8499687,
+        lng: -43.3110186,
+        telemetry: {
+          bookingId: 'booking_reverse_google',
+          sourceMeta: {
+            userId: 'customer_1',
+            userType: 'customer',
+            surface: 'pickup_pin_reverse_geocode',
+          },
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('success');
+    expect(response.body.cached).toBe(false);
+    expect(response.body.telemetryCaptured).toBe(true);
+    expect(mockIngestGoogleSkuUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_reverse_google',
+        skuKey: 'geocoding',
+        sourceMeta: expect.objectContaining({
+          surface: 'pickup_pin_reverse_geocode',
+        }),
+        metadata: expect.objectContaining({
+          routeScope: 'pickup_resolution',
+        }),
+      }),
+    );
   });
 
   it('returns place details and records booking telemetry', async () => {

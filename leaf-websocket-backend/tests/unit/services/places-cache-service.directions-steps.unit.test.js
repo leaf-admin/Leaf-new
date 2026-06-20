@@ -263,6 +263,82 @@ describe('places-cache-service directions steps', () => {
     );
   });
 
+  it('bypasses stale traffic directions cache without traffic timings', async () => {
+    const cachedPayload = {
+      cached: false,
+      routeCount: 1,
+      waypointsCount: 0,
+      data: {
+        distance_in_km: 1.4,
+        time_in_secs: 180,
+        duration_without_traffic: null,
+        duration_in_traffic: null,
+        polylinePoints: 'stale_overview',
+        legs: [
+          {
+            time_in_secs: 180,
+            duration_without_traffic: null,
+            duration_in_traffic: null,
+            steps: [],
+          },
+        ],
+        steps: [],
+      },
+    };
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(JSON.stringify(cachedPayload));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'OK',
+        routes: [
+          {
+            overview_polyline: { points: 'fresh_traffic_overview' },
+            legs: [
+              {
+                distance: { value: 2500 },
+                duration: { value: 420 },
+                duration_in_traffic: { value: 600 },
+                start_location: { lat: -22.9712, lng: -43.1822 },
+                end_location: { lat: -22.9673, lng: -43.179 },
+                start_address: 'Origem',
+                end_address: 'Destino',
+                steps: [],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await placesCacheService.fetchDirectionsRoute({
+      startLoc: '-22.9712,-43.1822',
+      destLoc: '-22.9673,-43.1790',
+      trafficEnabled: true,
+    });
+
+    expect(result.cached).toBe(false);
+    expect(result.data.polylinePoints).toBe('fresh_traffic_overview');
+    expect(result.data.duration_without_traffic).toBe(420);
+    expect(result.data.duration_in_traffic).toBe(600);
+    expect(result.cachePolicy).toEqual({
+      forceFresh: false,
+      ttlSeconds: 90,
+      staleTrafficCacheBypassed: true,
+    });
+    expect(result.stats.redisReads).toBe(1);
+    expect(result.stats.cacheBypasses).toBe(1);
+    expect(result.stats.googleRequests).toBe(1);
+    expect(mockRedisConnection.setex).toHaveBeenCalledWith(
+      expect.stringContaining('traffic:1'),
+      90,
+      expect.stringContaining('fresh_traffic_overview'),
+    );
+  });
+
   it('returns cached place details by place_id without calling Google', async () => {
     const cachedPlace = {
       place_id: 'place_cached_1',
@@ -327,6 +403,72 @@ describe('places-cache-service directions steps', () => {
       'place:id:place_google_1',
       placesCacheService.cacheTTL,
       expect.stringContaining('Copacabana Palace'),
+    );
+  });
+
+  it('returns cached reverse geocode without calling Google', async () => {
+    const cachedAddress = {
+      address: 'Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro - RJ',
+      formatted_address: 'Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro - RJ',
+      name: 'Av. Vicente de Carvalho',
+      lat: -22.84997,
+      lng: -43.31102,
+    };
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(JSON.stringify(cachedAddress));
+    global.fetch = jest.fn();
+
+    const result = await placesCacheService.reverseGeocode(-22.8499687, -43.3110186);
+
+    expect(result).toEqual(expect.objectContaining({
+      address: cachedAddress.address,
+      cached: true,
+      source: 'reverse_geocode_cache',
+    }));
+    expect(mockRedisConnection.get).toHaveBeenCalledWith('place:reverse:-22.84997:-43.31102');
+    expect(result.stats.googleRequests).toBe(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('caches Google reverse geocode after lookup', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(null);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'OK',
+        results: [
+          {
+            place_id: 'reverse_google_1',
+            formatted_address: 'Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro - RJ',
+            address_components: [
+              {
+                long_name: 'Av. Vicente de Carvalho',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await placesCacheService.reverseGeocode(-22.8499687, -43.3110186);
+
+    expect(result).toEqual(expect.objectContaining({
+      address: 'Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro - RJ',
+      cached: false,
+      place_id: 'reverse_google_1',
+      source: 'google_reverse_geocode',
+    }));
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/geocode/json?latlng=-22.8499687%2C-43.3110186'));
+    expect(mockRedisConnection.setex).toHaveBeenCalledWith(
+      'place:reverse:-22.84997:-43.31102',
+      2592000,
+      expect.stringContaining('Av. Vicente de Carvalho'),
     );
   });
 
