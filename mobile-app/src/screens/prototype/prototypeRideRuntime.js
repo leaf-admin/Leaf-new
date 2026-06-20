@@ -12454,7 +12454,7 @@ async function requestPrototypeRide(profile, payload) {
   }
 }
 
-async function checkPrototypeRideAvailability(profile, payload) {
+async function checkPrototypeRideAvailability(profile, payload, options = {}) {
   const telemetryContext = resolveRuntimeRideTelemetryContext({
     userId: profile?.uid,
     role: resolveRuntimeRole(profile),
@@ -12490,27 +12490,31 @@ async function checkPrototypeRideAvailability(profile, payload) {
   const operationalVehicleType = resolveOperationalVehicleType(vehicle);
   const socket = WebSocketManager.getInstance();
 
-  return socket.checkRideAvailability({
-    customerId: userId,
-    pickupLocation: {
-      lat: Number(origin.latitude),
-      lng: Number(origin.longitude),
-      add: originAddress,
+  return socket.checkRideAvailability(
+    {
+      customerId: userId,
+      pickupLocation: {
+        lat: Number(origin.latitude),
+        lng: Number(origin.longitude),
+        add: originAddress,
+      },
+      destinationLocation: destination?.coordinate
+        ? {
+            lat: Number(destination.coordinate.latitude),
+            lng: Number(destination.coordinate.longitude),
+          }
+        : null,
+      carType: operationalVehicleType,
+      preferences:
+        payload?.preferences && typeof payload.preferences === "object"
+          ? { ...payload.preferences }
+          : {},
     },
-    destinationLocation: destination?.coordinate
-      ? {
-          lat: Number(destination.coordinate.latitude),
-          lng: Number(destination.coordinate.longitude),
-        }
-      : null,
-    carType: operationalVehicleType,
-    preferences:
-      payload?.preferences && typeof payload.preferences === "object"
-        ? { ...payload.preferences }
-        : {},
-  }, {
-    telemetryContext,
-  });
+    {
+      ...options,
+      telemetryContext: options?.telemetryContext || telemetryContext,
+    },
+  );
 }
 
 async function cancelPrototypeRide(options = {}) {
@@ -17568,8 +17572,8 @@ export function usePrototypeRideRuntime() {
   );
 
   const checkRideAvailability = useCallback(
-    async (payload) => {
-      return checkPrototypeRideAvailability(profile, payload);
+    async (payload, options = {}) => {
+      return checkPrototypeRideAvailability(profile, payload, options);
     },
     [profile],
   );
