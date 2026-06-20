@@ -1286,14 +1286,16 @@ describe('prototype ride screens', () => {
     expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototypeDestination');
   });
 
-  it('submits the passenger rating and returns to receipt', async () => {
+  it('submits the passenger rating, closes the completed cycle, and returns to the map', async () => {
     const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
     usePrototypeRideRuntime.mockReturnValue({
       activeRole: 'customer',
       profile: { uid: 'customer_1' },
       driverInfo: { id: 'driver_1', name: 'Motorista Leaf' },
       lastReceipt: buildReceiptRuntime().lastReceipt,
       markTripRating,
+      dismissCompletedReceipt,
     });
 
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
@@ -1332,10 +1334,8 @@ describe('prototype ride screens', () => {
           passengerRatedDriverValue: 5,
         })
       );
-      expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototypeReceipt', {
-        fromTrip: true,
-        fromRating: true,
-      });
+      expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
+      expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
     });
   });
 
@@ -1343,12 +1343,14 @@ describe('prototype ride screens', () => {
     allowTestUserTools.mockReturnValue(true);
 
     const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
     usePrototypeRideRuntime.mockReturnValue({
       activeRole: 'customer',
       profile: { uid: 'customer_1' },
       driverInfo: { id: 'driver_1', name: 'Motorista Leaf' },
       lastReceipt: buildReceiptRuntime().lastReceipt,
       markTripRating,
+      dismissCompletedReceipt,
     });
 
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
@@ -1387,10 +1389,49 @@ describe('prototype ride screens', () => {
           passengerRatedDriverValue: 5,
         })
       );
-      expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototypeReceipt', {
-        fromTrip: true,
-        fromRating: true,
-      });
+      expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
+      expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
     });
+  });
+
+  it('keeps the completed cycle open when rating submission fails', async () => {
+    RatingService.submitRating.mockRejectedValueOnce(new Error('rating unavailable'));
+    const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'customer',
+      profile: { uid: 'customer_1' },
+      driverInfo: { id: 'driver_1', name: 'Motorista Leaf' },
+      lastReceipt: buildReceiptRuntime().lastReceipt,
+      markTripRating,
+      dismissCompletedReceipt,
+    });
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId } = render(
+      <RobotaxiRatingScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromReceipt: true,
+            reviewerType: 'passenger',
+            tripId: 'trip_1',
+            targetUserId: 'driver_1',
+            targetName: 'Motorista Leaf',
+            receipt: buildReceiptRuntime().lastReceipt,
+          },
+        }}
+      />
+    );
+
+    fireEvent.press(getByTestId('passenger-rating-air-conditioning-yes'));
+    fireEvent.press(getByTestId('passenger-rating-submit-button'));
+
+    await waitFor(() => {
+      expect(RatingService.submitRating).toHaveBeenCalled();
+    });
+    expect(markTripRating).not.toHaveBeenCalled();
+    expect(dismissCompletedReceipt).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
   });
 });
