@@ -94,7 +94,9 @@ describe('registerSocketSearchDriversHandler availability parity', () => {
     );
     expect(logStructured).toHaveBeenCalledWith(
       'info',
-      'Pré-check de disponibilidade concluído',
+      expect.stringContaining(
+        'requestId=req-1 result=available carType=plus pickupCell=-22.970,-43.180 candidates=2 eligible=1 rejections=locked:1'
+      ),
       expect.objectContaining({
         eventType: 'checkRideAvailability',
         hasDrivers: true,
