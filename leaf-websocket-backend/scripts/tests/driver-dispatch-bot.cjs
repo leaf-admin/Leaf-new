@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 const WebSocketTestClient = require('../../tests/e2e/backend/__helpers__/websocket-test-client');
+let Redis = null;
+try {
+  Redis = require('ioredis');
+} catch (_error) {
+  Redis = null;
+}
 
 const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
 const DRIVER_UID = process.env.TEST_DRIVER_UID || 'gl3uJkLwBjbeOtbbvVSryhziVBx1';
@@ -16,8 +22,107 @@ const ACCEPTED_HOLD_MS = Math.max(0, Number(process.env.DRIVER_ACCEPTED_HOLD_MS 
 const ARRIVED_HOLD_MS = Math.max(0, Number(process.env.DRIVER_ARRIVED_HOLD_MS || 1000));
 const TRIP_STEP_INTERVAL_MS = Math.max(250, Number(process.env.DRIVER_TRIP_STEP_INTERVAL_MS || 1800));
 const TRIP_STEPS = Math.max(2, Number(process.env.DRIVER_TRIP_STEPS || 10));
+const SEED_REDIS_ELIGIBLE = String(process.env.DRIVER_BOT_SEED_REDIS_ELIGIBLE || '').toLowerCase() === 'true';
+const DRIVER_TTL_SECONDS = Math.max(60, Number(process.env.DRIVER_BOT_REDIS_TTL_SECONDS || 300));
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function buildRedisOptionsFromEnv() {
+  if (!Redis) return null;
+  if (process.env.REDIS_URL) {
+    return { url: process.env.REDIS_URL, maxRetriesPerRequest: 1 };
+  }
+  if (process.env.REDIS_HOST || process.env.REDIS_PORT || process.env.REDIS_PASSWORD) {
+    return {
+      host: process.env.REDIS_HOST || '127.0.0.1',
+      port: Number.parseInt(process.env.REDIS_PORT || '6379', 10),
+      password: process.env.REDIS_PASSWORD || undefined,
+      db: Number.parseInt(process.env.REDIS_DB || '0', 10),
+      maxRetriesPerRequest: 1
+    };
+  }
+  return null;
+}
+function createRedisClient(options) {
+  if (!options) return null;
+  if (options.url) {
+    return new Redis(options.url, { maxRetriesPerRequest: options.maxRetriesPerRequest || 1 });
+  }
+  return new Redis(options);
+}
+async function seedDriverEligibleInRedis() {
+  if (!SEED_REDIS_ELIGIBLE) {
+    return { requested: false, ok: null, skippedReason: 'disabled' };
+  }
+  const redisOptions = buildRedisOptionsFromEnv();
+  if (!redisOptions) {
+    return { requested: true, ok: null, skippedReason: 'redis_not_configured' };
+  }
+  const redis = createRedisClient(redisOptions);
+  const timestamp = Date.now();
+  const lat = PICKUP.lat + 0.0002;
+  const lng = PICKUP.lng + 0.0002;
+  const driverStatus = {
+    id: DRIVER_UID,
+    driverId: DRIVER_UID,
+    name: process.env.DRIVER_BOT_NAME || 'Motorista Smoke Teste',
+    phone: process.env.DRIVER_BOT_PHONE || '+5521999999999',
+    photoUrl: '',
+    isOnline: 'true',
+    status: 'AVAILABLE',
+    lat: String(lat),
+    lng: String(lng),
+    heading: '88',
+    speed: '0',
+    lastUpdate: String(timestamp),
+    timestamp: String(timestamp),
+    lastSeen: new Date(timestamp).toISOString(),
+    rating: '5.0',
+    acceptanceRate: '98.0',
+    avgResponseTime: '3.0',
+    totalTrips: '42',
+    driverApproved: 'true',
+    vehicleApproved: 'true',
+    carType: 'leafplus',
+    vehicleCategory: 'plus',
+    acceptsPlusWithElite: 'true',
+    dispatchEligible: 'true',
+    dispatchEligibilityCode: 'QA_SMOKE_ELIGIBLE',
+    dispatchEligibilityCheckedAt: new Date(timestamp).toISOString(),
+    vehicleModel: process.env.DRIVER_BOT_VEHICLE_MODEL || 'Toyota Prius',
+    vehiclePlate: process.env.DRIVER_BOT_VEHICLE_PLATE || 'TES8888',
+    carColor: process.env.DRIVER_BOT_VEHICLE_COLOR || 'black'
+  };
+
+  try {
+    await redis.del(
+      `driver_lock:${DRIVER_UID}`,
+      `driver_active_notification:${DRIVER_UID}`,
+      `active_trip_by_driver:${DRIVER_UID}`,
+      `active_trip_customer_by_driver:${DRIVER_UID}`
+    );
+    await redis.hset(`driver:${DRIVER_UID}`, driverStatus);
+    await redis.geoadd('driver_locations', lng, lat, DRIVER_UID);
+    await redis.geoadd(process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible', lng, lat, DRIVER_UID);
+    await redis.sadd('online_drivers', DRIVER_UID);
+    await redis.zrem('driver_offline_locations', DRIVER_UID);
+    await redis.expire(`driver:${DRIVER_UID}`, DRIVER_TTL_SECONDS);
+    return {
+      requested: true,
+      ok: true,
+      driverId: DRIVER_UID,
+      ttlSeconds: DRIVER_TTL_SECONDS,
+      location: { lat, lng }
+    };
+  } catch (error) {
+    return { requested: true, ok: false, error: error.message || String(error) };
+  } finally {
+    try {
+      await redis.quit();
+    } catch (_error) {
+      // best-effort cleanup for QA redis client
+    }
+  }
+}
 function firstFiniteNumber(...values) {
   for (const value of values) {
     const numeric = Number(value);
@@ -68,7 +173,18 @@ function onceStatusAck(driverClient, payload, timeoutMs = 12000) {
     driverClient.socket.emit('setDriverStatus', payload);
   });
 }
+async function primeDriverLocation(driverClient, attempt = 0) {
+  driverClient.socket.emit('updateLocation', {
+    lat: PICKUP.lat + 0.0002 + attempt * 0.00001,
+    lng: PICKUP.lng + 0.0002 + attempt * 0.00001,
+    tripStatus: 'idle',
+    isInTrip: false,
+    seq: Date.now() % 100000
+  });
+  await sleep(1200);
+}
 async function ensureDriverOnline(driverClient) {
+  await primeDriverLocation(driverClient);
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     const ack = await onceStatusAck(driverClient, {
       status: 'online',
@@ -83,13 +199,7 @@ async function ensureDriverOnline(driverClient) {
     const retryAfter = Number(ack.error?.retryAfterSec || 1);
     console.log('driver_online_retry', JSON.stringify({ attempt, code, error: ack.error }));
     if (code === 'LOCATION_REQUIRED' || code === 'ONLINE_NOT_READY' || code === 'STATUS_TIMEOUT') {
-      driverClient.socket.emit('updateLocation', {
-        lat: PICKUP.lat + 0.0002,
-        lng: PICKUP.lng + 0.0002,
-        tripStatus: 'idle',
-        isInTrip: false,
-        seq: Date.now() % 100000
-      });
+      await primeDriverLocation(driverClient, attempt);
       await sleep(Math.max(700, retryAfter * 1000));
       continue;
     }
@@ -104,6 +214,8 @@ async function main() {
     await driver.connect();
     await driver.authenticate(DRIVER_UID, 'driver');
     console.log('driver_authenticated', JSON.stringify({ driverUid: DRIVER_UID }));
+    const redisSeed = await seedDriverEligibleInRedis();
+    console.log('driver_redis_seed', JSON.stringify(redisSeed || {}));
     const online = await ensureDriverOnline(driver);
     console.log('driver_online', JSON.stringify(online || {}));
     const sendLocation = () => {
