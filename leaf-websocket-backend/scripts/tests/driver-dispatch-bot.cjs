@@ -8,6 +8,10 @@ const PICKUP = {
   lng: Number(process.env.TEST_PICKUP_LNG || -122.419906)
 };
 const ESTIMATED_FARE = Number(process.env.TEST_FARE || 13.42);
+const RIDE_REQUEST_TIMEOUT_MS = Math.max(
+  180000,
+  Number(process.env.DRIVER_RIDE_REQUEST_TIMEOUT_MS || 180000)
+);
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function firstFiniteNumber(...values) {
@@ -95,7 +99,7 @@ async function main() {
     };
     sendLocation();
     heartbeatTimer = setInterval(sendLocation, 1200);
-    const request = await driver.waitForEvent('newRideRequest', 180000);
+    const request = await driver.waitForEvent('newRideRequest', RIDE_REQUEST_TIMEOUT_MS);
     const bookingId = request?.bookingId || request?.rideId;
     const pickup = request?.pickupLocation || PICKUP;
     const destination = request?.destinationLocation || { lat: PICKUP.lat - 0.01, lng: PICKUP.lng - 0.01 };

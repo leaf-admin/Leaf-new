@@ -6138,42 +6138,56 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
       ? incomingRouteCoordinates
       : existingRouteCoordinates;
 
+  const existingHasBackendFinalFinancials =
+    existingReceipt?.authoritativeSnapshot === true &&
+    existingReceipt?.financialSnapshotSource === "backend_final";
+  const incomingHasBackendFinalFinancials =
+    incomingReceipt?.authoritativeSnapshot === true &&
+    incomingReceipt?.financialSnapshotSource === "backend_final";
+  const preferredFinancialReceipt =
+    existingHasBackendFinalFinancials && !incomingHasBackendFinalFinancials
+      ? existingReceipt
+      : incomingReceipt;
+  const fallbackFinancialReceipt =
+    preferredFinancialReceipt === incomingReceipt
+      ? existingReceipt
+      : incomingReceipt;
   const finalFare = pickPreferredRuntimeMoney(
-    incomingReceipt?.finalFare,
-    incomingReceipt?.fare,
-    existingReceipt?.finalFare,
-    existingReceipt?.fare,
+    preferredFinancialReceipt?.finalFare,
+    preferredFinancialReceipt?.fare,
+    fallbackFinancialReceipt?.finalFare,
+    fallbackFinancialReceipt?.fare,
   );
   const rawDriverNetAmount = pickPreferredRuntimeMoney(
-    incomingReceipt?.driverNetAmount,
-    existingReceipt?.driverNetAmount,
-    incomingReceipt?.estimatedDriverNetAmount,
-    existingReceipt?.estimatedDriverNetAmount,
+    preferredFinancialReceipt?.driverNetAmount,
+    fallbackFinancialReceipt?.driverNetAmount,
+    preferredFinancialReceipt?.estimatedDriverNetAmount,
+    fallbackFinancialReceipt?.estimatedDriverNetAmount,
   );
   const operationalFee = pickPreferredRuntimeMoney(
-    incomingReceipt?.operationalFee,
-    existingReceipt?.operationalFee,
-    incomingReceipt?.estimatedOperationalFee,
-    existingReceipt?.estimatedOperationalFee,
+    preferredFinancialReceipt?.operationalFee,
+    fallbackFinancialReceipt?.operationalFee,
+    preferredFinancialReceipt?.estimatedOperationalFee,
+    fallbackFinancialReceipt?.estimatedOperationalFee,
   );
   const paymentIntermediationFee = pickPreferredRuntimeMoney(
-    incomingReceipt?.paymentIntermediationFee,
-    existingReceipt?.paymentIntermediationFee,
-    incomingReceipt?.estimatedPaymentIntermediationFee,
-    existingReceipt?.estimatedPaymentIntermediationFee,
+    preferredFinancialReceipt?.paymentIntermediationFee,
+    fallbackFinancialReceipt?.paymentIntermediationFee,
+    preferredFinancialReceipt?.estimatedPaymentIntermediationFee,
+    fallbackFinancialReceipt?.estimatedPaymentIntermediationFee,
   );
   const tollFee = pickPreferredRuntimeMoney(
-    incomingReceipt?.tollFee,
-    existingReceipt?.tollFee,
-    incomingReceipt?.estimatedTollFee,
-    existingReceipt?.estimatedTollFee,
+    preferredFinancialReceipt?.tollFee,
+    fallbackFinancialReceipt?.tollFee,
+    preferredFinancialReceipt?.estimatedTollFee,
+    fallbackFinancialReceipt?.estimatedTollFee,
   );
   const totalFees =
     pickPreferredRuntimeMoney(
-      incomingReceipt?.totalFees,
-      existingReceipt?.totalFees,
-      incomingReceipt?.estimatedTotalFees,
-      existingReceipt?.estimatedTotalFees,
+      preferredFinancialReceipt?.totalFees,
+      fallbackFinancialReceipt?.totalFees,
+      preferredFinancialReceipt?.estimatedTotalFees,
+      fallbackFinancialReceipt?.estimatedTotalFees,
     ) ??
     (finalFare !== null && rawDriverNetAmount !== null
       ? roundCurrencyValue(Math.max(0, finalFare - rawDriverNetAmount))
@@ -6251,12 +6265,12 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
       existingReceipt?.paymentMethod ||
       "pix",
     authoritativeSnapshot: Boolean(
-      existingReceipt?.authoritativeSnapshot ||
-        incomingReceipt?.authoritativeSnapshot,
+      preferredFinancialReceipt?.authoritativeSnapshot ||
+        fallbackFinancialReceipt?.authoritativeSnapshot,
     ),
     financialSnapshotSource:
-      incomingReceipt?.financialSnapshotSource ||
-      existingReceipt?.financialSnapshotSource ||
+      preferredFinancialReceipt?.financialSnapshotSource ||
+      fallbackFinancialReceipt?.financialSnapshotSource ||
       "local_fallback",
   };
 
@@ -8438,6 +8452,19 @@ function attachSocketListeners() {
       hasTerminalRideGuard(completedBookingId) &&
       normalizeRuntimeLifecycleStatus(runtimeState.bookingStatus) === "completed"
     ) {
+      if (hasAuthoritativeTripCompletedSnapshot(payload)) {
+        const enrichedReceipt = buildReceiptFromSyncedSnapshot(
+          payload,
+          runtimeState,
+        );
+        pushTripHistoryItem(enrichedReceipt);
+        writeRuntimeDebugProbe("event_trip_completed_enriched_terminal_receipt", {
+          bookingId: completedBookingId,
+          totalFees: enrichedReceipt?.totalFees ?? null,
+          driverNetAmount: enrichedReceipt?.driverNetAmount ?? null,
+          source: enrichedReceipt?.financialSnapshotSource || null,
+        });
+      }
       return;
     }
     clearDirectionsBudgetForBooking(completedBookingId);

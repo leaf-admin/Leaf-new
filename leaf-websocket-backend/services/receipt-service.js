@@ -253,13 +253,39 @@ class ReceiptService {
         const totalFare = parseFloat(rideData.finalPrice || rideData.customer_paid || rideData.estimate || 0);
         const tollFee = parseFloat(rideData.tollFee || rideData.toll_fee || rideData.pedagio || 0);
         const breakdown = this.paymentService.calculateFareBreakdownFromReais(totalFare, tollFee);
-        const operationalFee = Number.isFinite(Number(breakdown?.operationalFee)) ? Number(breakdown.operationalFee) : 0;
-        const wooviFee = Number.isFinite(Number(breakdown?.paymentIntermediationFee))
-            ? Number(breakdown.paymentIntermediationFee)
-            : 0;
-        const driverAmount = Number.isFinite(Number(breakdown?.driverNetAmount))
-            ? Number(breakdown.driverNetAmount)
-            : Math.max(0, totalFare - operationalFee - wooviFee);
+        const explicitBreakdown = rideData.fareBreakdown || rideData.paymentBreakdown || {};
+        const firstFinite = (...values) => {
+            for (const value of values) {
+                if (value === null || value === undefined || value === '') continue;
+                const numeric = Number(value);
+                if (Number.isFinite(numeric)) return numeric;
+            }
+            return null;
+        };
+        const operationalFee = firstFinite(
+            rideData.operationalFee,
+            explicitBreakdown.operationalFee,
+            breakdown?.operationalFee,
+            0
+        );
+        const wooviFee = firstFinite(
+            rideData.paymentIntermediationFee,
+            explicitBreakdown.paymentIntermediationFee,
+            breakdown?.paymentIntermediationFee,
+            0
+        );
+        const totalFees = firstFinite(
+            rideData.totalFees,
+            explicitBreakdown.totalFees,
+            Number(operationalFee || 0) + Number(wooviFee || 0)
+        );
+        const driverAmount = firstFinite(
+            rideData.driverNetAmount,
+            explicitBreakdown.driverNetAmount,
+            totalFees !== null ? Math.max(0, totalFare - totalFees) : null,
+            breakdown?.driverNetAmount,
+            Math.max(0, totalFare - operationalFee - wooviFee)
+        );
 
         return {
             // Valor pago pelo passageiro
@@ -296,7 +322,8 @@ class ReceiptService {
                 customerPaid: totalFare,
                 driverReceived: driverAmount,
                 leafOperational: operationalFee,
-                wooviFee: wooviFee
+                wooviFee: wooviFee,
+                retainedFees: totalFees
             }
         };
     }
