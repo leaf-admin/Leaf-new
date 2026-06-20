@@ -82,6 +82,7 @@ function PassengerHomeOverlay({
   userId = "",
   pickupLabel = "",
   pickupAddress = "",
+  pickupCoordinate = null,
   destinationLabel = "Para onde?",
   onPickupPress,
   pickupSearchActive = false,
@@ -118,6 +119,15 @@ function PassengerHomeOverlay({
   const { height: windowHeight } = useWindowDimensions();
   const screenHeight = Dimensions.get("screen").height;
   const resolvedPickupLabel = pickupLabel || pickupAddress || "Local atual";
+  const pickupLatitude = Number(pickupCoordinate?.latitude ?? pickupCoordinate?.lat);
+  const pickupLongitude = Number(pickupCoordinate?.longitude ?? pickupCoordinate?.lng);
+  const pickupQaCoordinateLabel =
+    Number.isFinite(pickupLatitude) && Number.isFinite(pickupLongitude)
+      ? [
+          `pickup:${pickupLatitude.toFixed(6)},${pickupLongitude.toFixed(6)}`,
+          `address:${pickupAddress || resolvedPickupLabel || ""}`,
+        ].join(";")
+      : "";
   const entrance = React.useRef(new Animated.Value(0)).current;
   const inputRef = React.useRef(null);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
@@ -453,6 +463,15 @@ function PassengerHomeOverlay({
           accessibilityLabel="Escolha a categoria da corrida"
         >
           <View style={styles.categoryHandle} />
+          {pickupQaCoordinateLabel ? (
+            <Text
+              style={styles.hiddenPickupAddress}
+              testID="passenger-destination-pickup-coordinate"
+              accessibilityLabel={`passenger-destination-pickup-coordinate ${pickupQaCoordinateLabel}`}
+            >
+              {pickupQaCoordinateLabel}
+            </Text>
+          ) : null}
           <Text style={styles.categoryEyebrow}>Escolha a categoria</Text>
           <View style={styles.categoryTabs}>
             {visibleCategoryOptions.map((item) => {
