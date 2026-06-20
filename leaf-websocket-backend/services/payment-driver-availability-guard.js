@@ -146,21 +146,38 @@ async function hasPaymentEligibleDriver({
         code: 'NO_DRIVERS_AVAILABLE',
         candidates: 0,
         eligible: 0,
+        rejections: {},
         radiusKm: safeRadiusKm
       };
     }
 
     let eligible = 0;
+    const rejections = {
+      locked: 0,
+      missingState: 0,
+      offlineOrIneligible: 0,
+      preferenceMismatch: 0,
+      categoryMismatch: 0
+    };
     for (const driverEntry of nearbyDrivers) {
       const driverId = Array.isArray(driverEntry) ? driverEntry[0] : driverEntry;
       if (!driverId) continue;
 
       const lockStatus = await driverLockManager.isDriverLocked(driverId);
-      if (lockStatus?.isLocked) continue;
+      if (lockStatus?.isLocked) {
+        rejections.locked += 1;
+        continue;
+      }
 
       const driverData = await redisClient.hgetall(`driver:${driverId}`);
-      if (!driverData || Object.keys(driverData).length === 0) continue;
-      if (!isDriverOnlineAvailable(driverData)) continue;
+      if (!driverData || Object.keys(driverData).length === 0) {
+        rejections.missingState += 1;
+        continue;
+      }
+      if (!isDriverOnlineAvailable(driverData)) {
+        rejections.offlineOrIneligible += 1;
+        continue;
+      }
 
       const preferenceMatch = driverMatchesRidePreferences(driverData, {
         pickupLocation: normalizedPickup,
@@ -168,14 +185,20 @@ async function hasPaymentEligibleDriver({
         preferences,
         carType
       });
-      if (!preferenceMatch.ok) continue;
+      if (!preferenceMatch.ok) {
+        rejections.preferenceMismatch += 1;
+        continue;
+      }
 
       const categoryEligibility = await driverEligibilityService.isDriverEligibleForRide(
         driverId,
         carType,
         driverData
       );
-      if (!categoryEligibility?.eligible) continue;
+      if (!categoryEligibility?.eligible) {
+        rejections.categoryMismatch += 1;
+        continue;
+      }
 
       eligible += 1;
       return {
@@ -184,6 +207,7 @@ async function hasPaymentEligibleDriver({
         code: 'DRIVERS_AVAILABLE',
         candidates: nearbyDrivers.length,
         eligible,
+        rejections,
         radiusKm: safeRadiusKm,
         driverId
       };
@@ -195,6 +219,7 @@ async function hasPaymentEligibleDriver({
       code: 'NO_DRIVERS_AVAILABLE',
       candidates: nearbyDrivers.length,
       eligible,
+      rejections,
       radiusKm: safeRadiusKm
     };
   } catch (error) {
