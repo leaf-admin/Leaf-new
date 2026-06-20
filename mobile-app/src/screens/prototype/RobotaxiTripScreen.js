@@ -6,6 +6,7 @@ import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
+import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import WooviPaymentModal from '../../components/payment/WooviPaymentModal';
 import SecurePaymentBadge from '../../components/payment/SecurePaymentBadge';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
@@ -442,6 +443,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     currentAddress,
     driverCoordinate,
     driverTripMeta,
+    rideLocalSync,
     profileUid,
     riderProfile,
     endTripEarlyFlow,
@@ -456,6 +458,49 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const qaAutoConfirmPix = true;
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
   const sheetBottom = SHEET_BOTTOM_OFFSET;
+  const rideLocalSyncIndicator = useMemo(() => {
+    const syncStatus = String(rideLocalSync?.status || '').toLowerCase();
+    const isProtectedStatus = PROTECTED_PASSENGER_TRIP_STATUSES.has(
+      normalizePassengerBookingStatus(bookingStatus),
+    );
+    if (
+      !isProtectedStatus ||
+      !['offline', 'pending', 'syncing', 'error'].includes(syncStatus)
+    ) {
+      return null;
+    }
+
+    if (syncStatus === 'offline') {
+      return {
+        tone: 'danger',
+        icon: 'cloud-offline-outline',
+        title: 'Sem conexão',
+        message:
+          rideLocalSync?.message ||
+          'Mantendo o último estado confirmado da corrida.',
+      };
+    }
+
+    if (syncStatus === 'syncing') {
+      return {
+        tone: 'warning',
+        icon: 'sync-outline',
+        title: 'Sincronizando corrida',
+        message:
+          rideLocalSync?.message ||
+          'Validando o estado da corrida com o servidor.',
+      };
+    }
+
+    return {
+      tone: syncStatus === 'error' ? 'danger' : 'warning',
+      icon: 'sync-outline',
+      title: 'Atualização pendente',
+      message:
+        rideLocalSync?.message ||
+        'Aguardando confirmação do servidor para mudar o estado da corrida.',
+    };
+  }, [bookingStatus, rideLocalSync]);
 
   const destination = route?.params?.destination || selectedDestination?.name || 'Destino';
   const destinationAddress = route?.params?.destinationAddress || selectedDestination?.address || destination;
@@ -1470,6 +1515,15 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           rightLabel={passengerIslandRightLabel}
           rightTone={isStarted ? 'dark' : 'leaf'}
           insetsTop={insets.top}
+        />
+        <PrototypeConnectionStatusPill
+          topOffset={insets.top + 76}
+          visible={Boolean(rideLocalSyncIndicator)}
+          tone={rideLocalSyncIndicator?.tone}
+          icon={rideLocalSyncIndicator?.icon}
+          title={rideLocalSyncIndicator?.title}
+          message={rideLocalSyncIndicator?.message}
+          testID="passenger-trip-local-sync-pill"
         />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}

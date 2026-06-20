@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
+import PrototypeConnectionStatusPill from "../../components/prototype/PrototypeConnectionStatusPill";
 import {
   LeafAnimatedPressable,
   LeafButton,
@@ -37,6 +38,11 @@ import {
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 318;
+const PROTECTED_DRIVER_TRIP_STATUSES = new Set([
+  "accepted",
+  "arrived",
+  "started",
+]);
 
 const DRIVER_TO_PICKUP_RENDERED_CARD_FIELD_IDS = Object.freeze([
   "passenger_name",
@@ -487,6 +493,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     markDriverArrived,
     startTripFlow,
     completeTripFlow,
+    rideLocalSync,
     lastError,
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
@@ -519,6 +526,46 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     hasActiveRide &&
     ["accepted", "arrived", "started"].includes(normalizedBookingStatus);
   const isCompactTripSurface = isActiveTripSurface && !detailsExpanded;
+  const rideLocalSyncIndicator = useMemo(() => {
+    const syncStatus = String(rideLocalSync?.status || "").toLowerCase();
+    if (
+      !PROTECTED_DRIVER_TRIP_STATUSES.has(normalizedBookingStatus) ||
+      !["offline", "pending", "syncing", "error"].includes(syncStatus)
+    ) {
+      return null;
+    }
+
+    if (syncStatus === "offline") {
+      return {
+        tone: "danger",
+        icon: "cloud-offline-outline",
+        title: "Sem conexão",
+        message:
+          rideLocalSync?.message ||
+          "Mantendo o último estado confirmado da corrida.",
+      };
+    }
+
+    if (syncStatus === "syncing") {
+      return {
+        tone: "warning",
+        icon: "sync-outline",
+        title: "Sincronizando corrida",
+        message:
+          rideLocalSync?.message ||
+          "Validando o estado da corrida com o servidor.",
+      };
+    }
+
+    return {
+      tone: syncStatus === "error" ? "danger" : "warning",
+      icon: "sync-outline",
+      title: "Atualização pendente",
+      message:
+        rideLocalSync?.message ||
+        "Aguardando confirmação do servidor para mudar o estado da corrida.",
+    };
+  }, [normalizedBookingStatus, rideLocalSync]);
   const visibleLastError =
     isActiveTripSurface && isActivationOrVehicleStatusError(lastError)
       ? ""
@@ -1556,6 +1603,15 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           translucent
           backgroundColor="transparent"
           barStyle="dark-content"
+        />
+        <PrototypeConnectionStatusPill
+          topOffset={insets.top + 18}
+          visible={Boolean(rideLocalSyncIndicator)}
+          tone={rideLocalSyncIndicator?.tone}
+          icon={rideLocalSyncIndicator?.icon}
+          title={rideLocalSyncIndicator?.title}
+          message={rideLocalSyncIndicator?.message}
+          testID="driver-trip-local-sync-pill"
         />
         {!isActiveTripSurface ? (
           <LeafStateHeader
