@@ -70,7 +70,10 @@ describe('driver-eligibility-service', () => {
         'vehicles/vehicle_1': {
           approved: true,
           carType: 'Leaf Plus',
-          plate: 'LEF1234'
+          plate: 'LEF1234',
+          make: 'Nissan',
+          model: 'Leaf',
+          color: 'Branco'
         },
         'vehicle_active_assignment/vehicle_1': {
           driverId: 'driver_1',
@@ -91,6 +94,9 @@ describe('driver-eligibility-service', () => {
     expect(profile.carType).toBe('Leaf Plus');
     expect(profile.vehicleCategory).toBe('plus');
     expect(profile.vehiclePlate).toBe('LEF1234');
+    expect(profile.vehicleMake).toBe('Nissan');
+    expect(profile.vehicleModel).toBe('Leaf');
+    expect(profile.vehicleColor).toBe('Branco');
   });
 
   it('normalizes visual vehicle models into operational carType labels', async () => {

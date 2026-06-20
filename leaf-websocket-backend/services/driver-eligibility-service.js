@@ -214,6 +214,9 @@ class DriverEligibilityService {
                 rating: Number.parseFloat(cached.rating || fallbackDriverData.rating || '5'),
                 activeVehicleId: cached.activeVehicleId || null,
                 vehiclePlate: cached.vehiclePlate || null,
+                vehicleMake: cached.vehicleMake || fallbackDriverData.vehicleMake || fallbackDriverData.carMake || null,
+                vehicleModel: cached.vehicleModel || fallbackDriverData.vehicleModel || fallbackDriverData.carModel || null,
+                vehicleColor: cached.vehicleColor || fallbackDriverData.vehicleColor || fallbackDriverData.carColor || null,
                 assignmentConflict: toBoolean(cached.assignmentConflict, false)
             };
         }
@@ -230,6 +233,9 @@ class DriverEligibilityService {
                 rating: Number.parseFloat(fallbackDriverData.rating || '5'),
                 activeVehicleId: null,
                 vehiclePlate: fallbackDriverData.vehicleNumber || fallbackDriverData.vehiclePlate || null,
+                vehicleMake: fallbackDriverData.vehicleMake || fallbackDriverData.carMake || null,
+                vehicleModel: fallbackDriverData.vehicleModel || fallbackDriverData.carModel || null,
+                vehicleColor: fallbackDriverData.vehicleColor || fallbackDriverData.carColor || null,
                 assignmentConflict: false
             };
 
@@ -244,6 +250,9 @@ class DriverEligibilityService {
                 rating: String(fallbackProfile.rating),
                 activeVehicleId: fallbackProfile.activeVehicleId || '',
                 vehiclePlate: fallbackProfile.vehiclePlate || '',
+                vehicleMake: fallbackProfile.vehicleMake || '',
+                vehicleModel: fallbackProfile.vehicleModel || '',
+                vehicleColor: fallbackProfile.vehicleColor || '',
                 assignmentConflict: String(fallbackProfile.assignmentConflict === true)
             });
             await this.redis.expire(cacheKey, PROFILE_CACHE_FALLBACK_TTL_SECONDS);
@@ -324,6 +333,33 @@ class DriverEligibilityService {
                 user?.vehicleNumber ||
                 user?.vehiclePlate ||
                 null,
+            vehicleMake:
+                vehicle?.make ||
+                vehicle?.brand ||
+                vehicle?.manufacturer ||
+                activeUserVehicle?.make ||
+                activeUserVehicle?.brand ||
+                user?.vehicleMake ||
+                user?.carMake ||
+                null,
+            vehicleModel:
+                vehicle?.model ||
+                vehicle?.vehicleModel ||
+                vehicle?.carModel ||
+                activeUserVehicle?.model ||
+                activeUserVehicle?.vehicleModel ||
+                user?.vehicleModel ||
+                user?.carModel ||
+                null,
+            vehicleColor:
+                vehicle?.color ||
+                vehicle?.vehicleColor ||
+                vehicle?.carColor ||
+                activeUserVehicle?.color ||
+                activeUserVehicle?.vehicleColor ||
+                user?.vehicleColor ||
+                user?.carColor ||
+                null,
             assignmentConflict
         };
 
@@ -337,6 +373,9 @@ class DriverEligibilityService {
             rating: String(profile.rating),
             activeVehicleId: profile.activeVehicleId || '',
             vehiclePlate: profile.vehiclePlate || '',
+            vehicleMake: profile.vehicleMake || '',
+            vehicleModel: profile.vehicleModel || '',
+            vehicleColor: profile.vehicleColor || '',
             assignmentConflict: String(profile.assignmentConflict === true)
         });
         await this.redis.expire(cacheKey, PROFILE_CACHE_TTL_SECONDS);

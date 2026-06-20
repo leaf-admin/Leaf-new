@@ -2,8 +2,10 @@ const PaymentService = require('../services/payment-service');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { resolveAcceptRidePayload, toFiniteNumber } = require('../utils/accept-ride-payload');
 const { ensureAcceptedRideCanonicalState } = require('../utils/accepted-ride-state');
+const { resolveAcceptedDriverIdentity } = require('../utils/accepted-driver-identity');
 const { metrics } = require('../utils/prometheus-metrics');
 const { recordDispatchWaveAcceptance } = require('../services/dispatch-wave-trace-service');
+const driverEligibilityService = require('../services/driver-eligibility-service');
 
 const paymentService = new PaymentService();
 
@@ -369,41 +371,26 @@ function registerSocketAcceptRideHandler({
                     driverRedisProfile = {};
                 }
 
-                const driverNamePayload = String(
-                    driverData?.driver?.name ||
-                    driverData?.driverName ||
-                    driverRedisProfile?.name ||
-                    driverRedisProfile?.driverName ||
-                    driverRedisProfile?.displayName ||
-                    socket?.driverName ||
-                    'Motorista Leaf'
-                ).trim();
-                const driverVehicleModel = String(
-                    driverData?.driver?.vehicle?.model ||
-                    driverData?.vehicle?.model ||
-                    driverData?.driver?.vehicle?.type ||
-                    driverData?.vehicle?.type ||
-                    driverData?.carType ||
-                    driverRedisProfile?.vehicleModel ||
-                    driverRedisProfile?.model ||
-                    driverRedisProfile?.carModel ||
-                    driverRedisProfile?.carType ||
-                    driverRedisProfile?.vehicleType ||
-                    driverRedisProfile?.vehicleCategory ||
-                    socket?.vehicleModel ||
-                    ''
-                ).trim();
-                const driverVehiclePlate = String(
-                    driverData?.driver?.vehicle?.plate ||
-                    driverData?.vehicle?.plate ||
-                    driverData?.vehiclePlate ||
-                    driverData?.carPlate ||
-                    driverRedisProfile?.vehiclePlate ||
-                    driverRedisProfile?.vehicleNumber ||
-                    driverRedisProfile?.carPlate ||
-                    socket?.vehiclePlate ||
-                    ''
-                ).trim();
+                let eligibilityProfile = {};
+                try {
+                    eligibilityProfile = await driverEligibilityService.resolveDriverProfile(
+                        driverId,
+                        driverRedisProfile
+                    );
+                } catch (driverIdentityError) {
+                    logStructured('warn', 'acceptRide continuou sem perfil de elegibilidade hidratado', {
+                        driverId,
+                        bookingId: bookingIdToUse,
+                        eventType: 'acceptRide',
+                        error: driverIdentityError.message
+                    });
+                }
+                const acceptedDriverIdentity = resolveAcceptedDriverIdentity({
+                    driverData,
+                    redisProfile: driverRedisProfile,
+                    eligibilityProfile,
+                    socket
+                });
                 const acceptedLat = toFiniteNumber(
                     driverData?.driver?.location?.lat ??
                     driverData?.location?.lat ??
@@ -447,18 +434,12 @@ function registerSocketAcceptRideHandler({
                     } : {}),
                     driver: {
                         id: driverId,
-                        name: driverNamePayload || 'Motorista Leaf',
-                        vehicle: {
-                            model: driverVehicleModel,
-                            plate: driverVehiclePlate
-                        },
+                        name: acceptedDriverIdentity.name,
+                        vehicle: acceptedDriverIdentity.vehicle,
                         ...(acceptedLocation ? { location: acceptedLocation } : {})
                     },
                     ...(acceptedLocation ? { location: acceptedLocation } : {}),
-                    vehicle: {
-                        model: driverVehicleModel,
-                        plate: driverVehiclePlate
-                    }
+                    vehicle: acceptedDriverIdentity.vehicle
                 };
 
                 const canonicalAcceptedAt = acceptRideResponse.timestamp;
@@ -469,6 +450,12 @@ function registerSocketAcceptRideHandler({
                         driverId,
                         acceptedAt: canonicalAcceptedAt,
                         extraPatch: {
+                            driverName: acceptedDriverIdentity.name,
+                            vehicleMake: acceptedDriverIdentity.vehicle.make || undefined,
+                            vehicleModel: acceptedDriverIdentity.vehicle.model || undefined,
+                            vehiclePlate: acceptedDriverIdentity.vehicle.plate || undefined,
+                            vehicleColor: acceptedDriverIdentity.vehicle.color || undefined,
+                            vehicleCategory: acceptedDriverIdentity.vehicle.category || undefined,
                             driverAcceptedLocation: acceptedLocation ? JSON.stringify(acceptedLocation) : undefined,
                             driverDistanceToPickupKm: Number.isFinite(driverDistanceToPickupKm)
                                 ? String(driverDistanceToPickupKm)

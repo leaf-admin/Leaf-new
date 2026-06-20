@@ -8,6 +8,7 @@ const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { PNG } = require("pngjs");
+const { resolvePostSandboxPaymentStatus } = require("./real-smoke-payment-status.cjs");
 
 const mobileDir = path.resolve(__dirname, "../..");
 const rootDir = path.resolve(mobileDir, "..");
@@ -257,6 +258,20 @@ function detectScreen(nodes) {
   ) {
     return "passenger_searching_driver";
   }
+  if (
+    allText.includes("passenger-trip-screen") ||
+    allText.includes("passenger-trip-compact-summary") ||
+    allText.includes("passenger-trip-driver-identity")
+  ) {
+    return "passenger_active_trip";
+  }
+  if (
+    allText.includes("passenger-receipt-rate-trip-button") ||
+    allText.includes("passenger-receipt-report-issue-button")
+  ) {
+    return "passenger_receipt";
+  }
+  if (allText.includes("passenger-rating-submit-button")) return "passenger_rating";
   if (allText.includes("passenger-destination-confirm-button")) return "passenger_quote";
   if (allText.includes("passenger-destination-search-input")) return "destination_search";
   if (allText.includes("passenger-home-destination-result-0")) return "destination_results";
@@ -824,7 +839,11 @@ async function main() {
                   await sleep(8000);
                   current = await captureStep("09-payment-after-sandbox-confirmation");
                   steps.push(current);
-                  paymentStatus = detectPaymentStatus(current.nodes);
+                  paymentStatus = resolvePostSandboxPaymentStatus({
+                    confirmationOk: sandboxPaymentConfirmation.ok,
+                    paymentStatus: detectPaymentStatus(current.nodes),
+                    screen: current.screen,
+                  });
                 }
               }
             }
@@ -868,7 +887,11 @@ async function main() {
                 await sleep(8000);
                 current = await captureStep("09-payment-after-sandbox-confirmation");
                 steps.push(current);
-                paymentStatus = detectPaymentStatus(current.nodes);
+                paymentStatus = resolvePostSandboxPaymentStatus({
+                  confirmationOk: sandboxPaymentConfirmation.ok,
+                  paymentStatus: detectPaymentStatus(current.nodes),
+                  screen: current.screen,
+                });
               }
             }
           }

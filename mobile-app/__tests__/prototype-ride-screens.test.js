@@ -601,7 +601,7 @@ describe('prototype ride screens', () => {
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
     expect(screen.getByText('LEF-2042')).toBeTruthy();
     expect(screen.getByText('Leaf Plus')).toBeTruthy();
-    expect(screen.getByText('Cor a confirmar')).toBeTruthy();
+    expect(screen.getByText('Cor não informada')).toBeTruthy();
     expect(screen.getByText('8 km até o embarque')).toBeTruthy();
     expect(screen.getByText('Rua A, 10')).toBeTruthy();
     expect(screen.getByText('Aeroporto Santos Dumont')).toBeTruthy();
@@ -651,7 +651,25 @@ describe('prototype ride screens', () => {
     expect(screen.getByText('Honda City')).toBeTruthy();
     expect(screen.getByText('Branco')).toBeTruthy();
     expect(screen.queryByText('Placa pendente')).toBeNull();
-    expect(screen.queryByText('Cor a confirmar')).toBeNull();
+    expect(screen.queryByText('Cor não informada')).toBeNull();
+  });
+
+  it('uses pickup ETA instead of the full trip distance when pickup distance is unavailable', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        tripDistanceKm: 8,
+        activeBooking: {
+          estimatedArrivalToPickupMin: 3,
+        },
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getAllByText('3 min até o embarque').length).toBeGreaterThan(0);
+    expect(screen.queryByText('8 km até o embarque')).toBeNull();
   });
 
   it('updates passenger boarding timer copy as pickup urgency changes', () => {
@@ -680,7 +698,7 @@ describe('prototype ride screens', () => {
     usePrototypeRideRuntime.mockReturnValue(buildReceiptRuntime());
 
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByTestId, getByText } = render(
+    const { getByTestId, getByText, queryByText } = render(
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
 
@@ -689,6 +707,10 @@ describe('prototype ride screens', () => {
     expect(getByText('Motorista')).toBeTruthy();
     expect(getByText('Motorista Leaf')).toBeTruthy();
     expect(getByText('Avaliar viagem')).toBeTruthy();
+    expect(getByText('Veículo não informado')).toBeTruthy();
+    expect(getByText('Placa não informada')).toBeTruthy();
+    expect(queryByText('Honda City branco · 4,9')).toBeNull();
+    expect(queryByText('RJA2D41')).toBeNull();
 
     fireEvent.press(getByTestId('passenger-receipt-rate-trip-button'));
 

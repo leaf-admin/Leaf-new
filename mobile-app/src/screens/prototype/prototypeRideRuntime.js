@@ -5397,6 +5397,86 @@ function resolveSyncedBookingStatus(snapshot = {}) {
   return snapshot?.hasActiveRide ? "searching" : "idle";
 }
 
+function resolveReceiptVehicleIdentity(snapshot = {}, previousState = runtimeState) {
+  const snapshotVehicle = snapshot?.driver?.vehicle || snapshot?.vehicle || {};
+  const bookingVehicle =
+    previousState?.activeBooking?.driver?.vehicle ||
+    previousState?.activeBooking?.vehicle ||
+    {};
+  const activeRideVehicle =
+    previousState?.driverActiveRide?.driver?.vehicle ||
+    previousState?.driverActiveRide?.vehicle ||
+    {};
+  const vehicleMake = sanitizeText(
+    snapshotVehicle?.make ||
+      snapshotVehicle?.brand ||
+      bookingVehicle?.make ||
+      bookingVehicle?.brand ||
+      activeRideVehicle?.make ||
+      activeRideVehicle?.brand ||
+      "",
+    "",
+  );
+  const vehicleModel = sanitizeText(
+    snapshot?.vehicleLabel ||
+      snapshot?.vehicleModel ||
+      snapshotVehicle?.model ||
+      snapshotVehicle?.category ||
+      previousState?.driverInfo?.model ||
+      previousState?.driverInfo?.vehicleModel ||
+      previousState?.activeBooking?.vehicleLabel ||
+      previousState?.activeBooking?.vehicleModel ||
+      bookingVehicle?.model ||
+      bookingVehicle?.category ||
+      previousState?.driverActiveRide?.vehicleLabel ||
+      previousState?.driverActiveRide?.vehicleModel ||
+      activeRideVehicle?.model ||
+      activeRideVehicle?.category ||
+      "",
+    "",
+  );
+  const vehicleLabel = sanitizeText(
+    vehicleMake &&
+      vehicleModel &&
+      !vehicleModel.toLowerCase().startsWith(vehicleMake.toLowerCase())
+      ? `${vehicleMake} ${vehicleModel}`
+      : vehicleModel || vehicleMake,
+    "",
+  );
+  const vehiclePlate = sanitizeText(
+    snapshot?.vehiclePlate ||
+      snapshot?.plate ||
+      snapshotVehicle?.plate ||
+      previousState?.driverInfo?.plate ||
+      previousState?.driverInfo?.vehiclePlate ||
+      previousState?.activeBooking?.vehiclePlate ||
+      bookingVehicle?.plate ||
+      previousState?.driverActiveRide?.vehiclePlate ||
+      activeRideVehicle?.plate ||
+      "",
+    "",
+  );
+  const vehicleColor = sanitizeText(
+    snapshot?.vehicleColor ||
+      snapshot?.carColor ||
+      snapshotVehicle?.color ||
+      previousState?.driverInfo?.color ||
+      previousState?.driverInfo?.vehicleColor ||
+      previousState?.activeBooking?.vehicleColor ||
+      bookingVehicle?.color ||
+      previousState?.driverActiveRide?.vehicleColor ||
+      activeRideVehicle?.color ||
+      "",
+    "",
+  );
+
+  return {
+    ...(vehicleLabel ? { vehicleLabel } : {}),
+    ...(vehiclePlate ? { vehiclePlate } : {}),
+    ...(vehicleColor ? { vehicleColor } : {}),
+  };
+}
+
 function buildReceiptFromSyncedSnapshot(
   snapshot = {},
   previousState = runtimeState,
@@ -5438,6 +5518,10 @@ function buildReceiptFromSyncedSnapshot(
     previousState,
   );
   const receiptParticipants = resolveReceiptParticipants(snapshot, previousState);
+  const receiptVehicleIdentity = resolveReceiptVehicleIdentity(
+    snapshot,
+    previousState,
+  );
   const receiptPickupCoordinate =
     normalizeRuntimeCoordinate(snapshot?.pickupCoordinate) ||
     normalizeRuntimeCoordinate(snapshot?.pickupLocation) ||
@@ -5542,6 +5626,7 @@ function buildReceiptFromSyncedSnapshot(
     driverName: receiptParticipants.driverName || null,
     passengerId: receiptParticipants.passengerId || null,
     passengerName: receiptParticipants.passengerName || null,
+    ...receiptVehicleIdentity,
     pickup: pickupLabel,
     pickupAddress: pickupLabel,
     drop: dropLabel,
@@ -7641,6 +7726,39 @@ function attachSocketListeners() {
       [acceptedVehicleMake, acceptedVehicleModel].filter(Boolean).join(" "),
       "",
     );
+    const acceptedVehiclePlate = sanitizeText(
+      driver?.vehicle?.plate ||
+        payload?.vehicle?.plate ||
+        acceptedRide?.vehiclePlate ||
+        acceptedRide?.carPlate ||
+        acceptedRide?.plate ||
+        "",
+      "",
+    );
+    const acceptedVehicleColor = sanitizeText(
+      driver?.vehicle?.color ||
+        payload?.vehicle?.color ||
+        acceptedRide?.vehicleColor ||
+        acceptedRide?.carColor ||
+        acceptedRide?.color ||
+        "",
+      "",
+    );
+    const acceptedVehicleCategory = sanitizeText(
+      driver?.vehicle?.category ||
+        payload?.vehicle?.category ||
+        acceptedRide?.vehicleCategory ||
+        acceptedRide?.carType ||
+        "",
+      "",
+    );
+    const acceptedVehicleSnapshot = {
+      ...(acceptedVehicleMake ? { make: acceptedVehicleMake } : {}),
+      ...(acceptedVehicleModel ? { model: acceptedVehicleModel } : {}),
+      ...(acceptedVehiclePlate ? { plate: acceptedVehiclePlate } : {}),
+      ...(acceptedVehicleColor ? { color: acceptedVehicleColor } : {}),
+      ...(acceptedVehicleCategory ? { category: acceptedVehicleCategory } : {}),
+    };
 
     const isDriverRuntime = runtimeRole === "driver";
     const sharedRoutePlanFromPayload = extractDriverRoutePlan({
@@ -7730,17 +7848,24 @@ function attachSocketListeners() {
       liveRoutePlanResult?.pickupMetrics?.durationMinutes ??
         pickupPreview?.durationMinutes,
     );
+    const payloadPickupDistanceKm = Number(
+      payload?.driverDistanceToPickupKm ??
+        payload?.pickupDistanceKm ??
+        payload?.driverToPickupDistanceKm,
+    );
     const directPickupDistanceKm =
       !isDriverRuntime && routeOriginCoordinate && pickupCoordinate
         ? Number(
             (
               calculateDistanceMeters(routeOriginCoordinate, pickupCoordinate) /
               1000
-            ).toFixed(1),
+            ).toFixed(3),
           )
         : null;
     const resolvedPickupDistanceKm =
-      Number.isFinite(previewDistanceKm) && previewDistanceKm > 0
+      Number.isFinite(payloadPickupDistanceKm) && payloadPickupDistanceKm > 0
+        ? payloadPickupDistanceKm
+        : Number.isFinite(previewDistanceKm) && previewDistanceKm > 0
         ? previewDistanceKm
         : Number.isFinite(directPickupDistanceKm) && directPickupDistanceKm > 0
           ? directPickupDistanceKm
@@ -7821,17 +7946,12 @@ function attachSocketListeners() {
       driverInfo: {
         id: driver?.id || payload?.driverId || null,
         name: driver?.name || payload?.driverName || "Motorista",
-        plate:
-          driver?.vehicle?.plate ||
-          payload?.vehicle?.plate ||
-          acceptedRide?.vehiclePlate ||
-          acceptedRide?.carPlate ||
-          acceptedRide?.plate ||
-          "",
+        plate: acceptedVehiclePlate,
         model:
           acceptedVehicleLabel ||
           acceptedVehicleModel ||
           "",
+        color: acceptedVehicleColor,
         rating: driver?.rating || payload?.rating || null,
       },
       tripDistanceKm:
@@ -7854,22 +7974,47 @@ function attachSocketListeners() {
         confirmationTimeoutSec: null,
         updatedAt: null,
       },
-      activeBooking:
-        runtimeState.activeBooking &&
+      activeBooking: {
+        ...(runtimeState.activeBooking &&
         typeof runtimeState.activeBooking === "object"
-          ? {
-              ...runtimeState.activeBooking,
-              ...(payload?.pickupLocation
-                ? { pickupLocation: payload.pickupLocation }
-                : {}),
-              ...(payload?.destinationLocation
-                ? { destinationLocation: payload.destinationLocation }
-                : {}),
-              ...(payload?.estimatedFare
-                ? { estimatedFare: Number(payload.estimatedFare) }
-                : {}),
-            }
-          : runtimeState.activeBooking,
+          ? runtimeState.activeBooking
+          : {}),
+        bookingId: bookingId || runtimeState.activeBookingId,
+        status: "accepted",
+        ...(payload?.pickupLocation
+          ? { pickupLocation: payload.pickupLocation }
+          : {}),
+        ...(payload?.destinationLocation
+          ? { destinationLocation: payload.destinationLocation }
+          : {}),
+        ...(Number.isFinite(Number(payload?.estimatedFare))
+          ? { estimatedFare: Number(payload.estimatedFare) }
+          : {}),
+        ...(Number.isFinite(resolvedPickupDistanceKm) &&
+        resolvedPickupDistanceKm > 0
+          ? { driverDistanceToPickupKm: resolvedPickupDistanceKm }
+          : {}),
+        ...(Number.isFinite(resolvedPickupDurationMin) &&
+        resolvedPickupDurationMin > 0
+          ? { estimatedArrivalToPickupMin: resolvedPickupDurationMin }
+          : {}),
+        driver: {
+          ...(runtimeState.activeBooking?.driver || {}),
+          ...driver,
+          id: driver?.id || payload?.driverId || null,
+          name: driver?.name || payload?.driverName || "Motorista",
+          vehicle: {
+            ...(runtimeState.activeBooking?.driver?.vehicle || {}),
+            ...(driver?.vehicle || {}),
+            ...acceptedVehicleSnapshot,
+          },
+        },
+        vehicle: {
+          ...(runtimeState.activeBooking?.vehicle || {}),
+          ...(payload?.vehicle || {}),
+          ...acceptedVehicleSnapshot,
+        },
+      },
       driverOffers: (runtimeState.driverOffers || []).filter(
         (item) => (item.bookingId || item.id) !== bookingId,
       ),
@@ -8486,6 +8631,10 @@ function attachSocketListeners() {
     );
     const finalFare = completedPricingSnapshot.finalFare;
     const receiptParticipants = resolveReceiptParticipants(payload);
+    const receiptVehicleIdentity = resolveReceiptVehicleIdentity(
+      payload,
+      runtimeState,
+    );
     const completedRoute = getPrototypeMapRoute();
     const receiptPickupCoordinate =
       resolvePickupCoordinateFromRide(
@@ -8555,6 +8704,7 @@ function attachSocketListeners() {
       driverName: receiptParticipants.driverName || null,
       passengerId: receiptParticipants.passengerId || null,
       passengerName: receiptParticipants.passengerName || null,
+      ...receiptVehicleIdentity,
       pickup: resolveCompletedReceiptPickupLabel(payload, runtimeState),
       drop: resolveCompletedReceiptDropoffLabel(payload, runtimeState),
       dropoffAddress: resolveCompletedReceiptDropoffLabel(payload, runtimeState),

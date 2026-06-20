@@ -862,9 +862,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     : selected?.vehicleLabel ||
       selected?.vehicle ||
       selected?.driverVehicle ||
-      "Honda City branco · 4,9";
+      "Veículo não informado";
   const receiptPlateLabel = !isDriverView
-    ? selected?.vehiclePlate || selected?.plate || "RJA2D41"
+    ? selected?.vehiclePlate || selected?.plate || "Placa não informada"
     : "";
   const receiptTotalLabel = isDriverView ? driverReceivedAmount : totalAmountLabel;
   const receiptPaymentPill = isDriverView ? "Concluída" : "PIX seguro";

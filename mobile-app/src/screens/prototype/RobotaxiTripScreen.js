@@ -217,7 +217,7 @@ function pickFirstNonEmptyString(...values) {
 
 function resolveVehicleColorLabel(...values) {
   const colorLabel = pickFirstNonEmptyString(...values);
-  return colorLabel || 'Cor a confirmar';
+  return colorLabel || 'Cor não informada';
 }
 
 function normalizeMapCoordinate(value) {
@@ -635,7 +635,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const pickupLegDistanceLabel =
     pickupDistanceLabel && pickupDistanceLabel !== '--'
       ? pickupDistanceLabel
-      : tripDistanceLabel;
+      : pickupEtaValue || '--';
   const distanceLabel = isAccepted && !isStarted
     ? pickupLegDistanceLabel
     : tripDistanceLabel;
@@ -899,8 +899,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const driverInitial = String(driverName || 'C').trim().charAt(0).toUpperCase() || 'C';
   const driverRatingLabel = driverInfo?.rating
     ? `${Number(driverInfo.rating).toFixed(1).replace('.', ',')} · parceiro Leaf`
-    : '4,9 · parceiro Leaf';
-  const plateLabel = vehiclePlate || 'Placa pendente';
+    : 'parceiro Leaf';
+  const plateLabel = vehiclePlate || 'Placa não informada';
   const driverFirstName = getFirstName(driverName);
   const passengerHeaderTitle = isStarted
     ? `A caminho de ${destination}`
