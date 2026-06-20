@@ -8,6 +8,10 @@ const paymentRuntimeProfileService = require('../services/payment-runtime-profil
 const kycPolicyService = require('../services/kyc-policy-service');
 const firebaseConfig = require('../firebase-config');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
+const {
+  buildPaymentAvailabilityInput,
+  hasPaymentEligibleDriver
+} = require('../services/payment-driver-availability-guard');
 const { logStructured, logError } = require('../utils/logger');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
@@ -569,7 +573,13 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       phoneNumber,
       paymentSessionId,
       paymentContextKey,
-      quoteSessionId
+      quoteSessionId,
+      pickupLocation,
+      destinationLocation,
+      preferences,
+      carType,
+      vehicle,
+      vehicleCategory
     } = req.body;
 
     // Validações básicas
@@ -585,6 +595,46 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       return res.status(400).json({
         success: false,
         error: 'Valor deve ser maior que zero'
+      });
+    }
+
+    const availabilityInput = buildPaymentAvailabilityInput({
+      pickupLocation,
+      destinationLocation,
+      preferences,
+      carType,
+      vehicle,
+      vehicleCategory,
+      rideDetails
+    });
+    const availability = await hasPaymentEligibleDriver({
+      ...availabilityInput,
+      logStructured,
+      logContext: {
+        service: 'payment-routes',
+        passengerId,
+        rideId: rideId || paymentSessionId || null,
+        quoteSessionId: quoteSessionId || null
+      }
+    });
+
+    if (!availability.success) {
+      const statusCode = availability.code === 'PICKUP_LOCATION_REQUIRED' ? 400 : 503;
+      return res.status(statusCode).json({
+        success: false,
+        error: statusCode === 400
+          ? 'Local de embarque obrigatório para validar motoristas antes do Pix.'
+          : 'Não foi possível validar motoristas disponíveis agora. Tente novamente em instantes.',
+        code: availability.code || 'PAYMENT_AVAILABILITY_CHECK_FAILED'
+      });
+    }
+
+    if (!availability.hasDrivers) {
+      return res.status(409).json({
+        success: false,
+        error: 'Não há motorista disponível para essa corrida agora.',
+        code: 'NO_DRIVERS_AVAILABLE',
+        radiusKm: availability.radiusKm || null
       });
     }
 
@@ -608,6 +658,10 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       paymentContextKey,
       quoteSessionId,
       rideDetails,
+      pickupLocation: availabilityInput.pickupLocation,
+      destinationLocation: availabilityInput.destinationLocation,
+      preferences: availabilityInput.preferences,
+      carType: availabilityInput.carType,
       passengerName,
       passengerEmail,
       driverId,

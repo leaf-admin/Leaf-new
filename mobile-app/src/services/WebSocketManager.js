@@ -2464,6 +2464,10 @@ class WebSocketManager {
     );
     const forceRefresh = options?.forceRefresh === true;
     const cacheKey = this._buildAvailabilityCacheKey(payload);
+    if (forceRefresh) {
+      this.availabilityRequestCache.delete(cacheKey);
+      this.availabilityInFlight.delete(cacheKey);
+    }
     const cachedResult = !forceRefresh
       ? this._getCachedAvailabilityResult(cacheKey)
       : null;

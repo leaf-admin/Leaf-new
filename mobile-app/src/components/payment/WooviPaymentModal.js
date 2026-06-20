@@ -669,8 +669,17 @@ export default function WooviPaymentModal({
                 quoteSessionId,
                 rideDetails: {
                     origin: tripData?.pickup?.add || 'Origem',
-                    destination: tripData?.drop?.add || 'Destino'
+                    destination: tripData?.drop?.add || 'Destino',
+                    pickupLocation: tripData?.pickup || null,
+                    destinationLocation: tripData?.drop || null,
+                    carType: tripData?.carType || null,
+                    preferences: tripData?.preferences || {}
                 },
+                pickupLocation: tripData?.pickup || null,
+                destinationLocation: tripData?.drop || null,
+                carType: tripData?.carType || null,
+                vehicle: tripData?.carType || null,
+                preferences: tripData?.preferences || {},
                 passengerName: passengerName || 'Passageiro',
                 passengerEmail: passengerEmail || 'passenger@leaf.com'
             };
