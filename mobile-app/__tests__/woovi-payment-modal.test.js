@@ -133,6 +133,19 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     await waitFor(() => {
       expect(WooviService.processAdvancePayment).toHaveBeenCalledTimes(1);
     });
+    expect(WooviService.processAdvancePayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pickupLocation: { add: 'Origem', lat: -22.920775, lng: -43.406003 },
+        destinationLocation: { add: 'Destino', lat: -22.9673111, lng: -43.1789541 },
+        carType: 'Leaf Plus',
+        vehicle: 'Leaf Plus',
+        rideDetails: expect.objectContaining({
+          pickupLocation: { add: 'Origem', lat: -22.920775, lng: -43.406003 },
+          destinationLocation: { add: 'Destino', lat: -22.9673111, lng: -43.1789541 },
+          carType: 'Leaf Plus'
+        })
+      })
+    );
     firstRender.unmount();
 
     render(<WooviPaymentModal {...props} />);

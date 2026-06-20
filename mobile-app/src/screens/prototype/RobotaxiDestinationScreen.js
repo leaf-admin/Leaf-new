@@ -3969,6 +3969,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               carType: selectedPlanData.title,
               estimatedFare: lockedPaymentFare,
               grossEstimatedFare: lockedGrossEstimatedFare,
+              preferences: ridePreferences,
             }}
             estimates={{ estimateFare: lockedPaymentFare }}
             grossEstimatedFare={lockedGrossEstimatedFare}
