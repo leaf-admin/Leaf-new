@@ -4403,10 +4403,10 @@ function PassengerUI(props) {
                 return;
             }
 
-            // ✅ Mudar UI imediatamente para "Procurando motorista..."
+            // Payment is confirmed, but the ride is not canonical until bookingCreated.
             isBookingInProgressRef.current = true;
             setBookModelLoading(true);
-            setTripStatus('searching'); // UI muda instantaneamente
+            setTripStatus('finalizing_booking');
 
             const estimate = carEstimates[selectedCarType.name];
 
@@ -4520,10 +4520,10 @@ function PassengerUI(props) {
                             webSocketManager.createBooking(bookingData).catch(err => {
                                 Logger.error('❌ [PASSENGER] Erro ao enviar booking:', err);
 
-                                // Em cenários de latência alta no backend, manter a corrida em SEARCHING
+                                // Em cenários de latência alta no backend, manter a solicitação pendente
                                 // e aguardar o evento bookingCreated em vez de abortar o fluxo.
                                 if (err?.code === 'BOOKING_TIMEOUT' || String(err?.message || '').toLowerCase().includes('create booking timeout')) {
-                                    Logger.warn('⏳ [PASSENGER] Timeout de confirmação do booking. Mantendo busca ativa e aguardando resposta do servidor...');
+                                    Logger.warn('⏳ [PASSENGER] Timeout de confirmação do booking. Mantendo solicitação pendente e aguardando resposta do servidor...');
                                     Alert.alert(
                                         'Finalizando solicitação',
                                         'Seu pagamento foi confirmado e estamos finalizando a criação da corrida. Aguarde alguns instantes.',
@@ -6664,6 +6664,52 @@ function PassengerUI(props) {
             );
         }
 
+        if (tripStatus === 'finalizing_booking' && !isPaymentModalVisible) {
+            return (
+                <BottomSheet
+                    key="finalizing-booking-bottom-sheet"
+                    ref={bottomSheetRef}
+                    index={0}
+                    snapPoints={searchingSnapPoints}
+                    enablePanDownToClose={false}
+                    enableDismissOnClose={false}
+                    enableContentPanningGesture={false}
+                    enableHandlePanningGesture={false}
+                    enableOverDrag={false}
+                    activeOffsetY={[-9999]}
+                    failOffsetY={[-9999]}
+                    backdropComponent={renderBackdrop}
+                    backgroundStyle={[styles.bottomSheetBackground, { backgroundColor: '#FFFFFF' }]}
+                    handleIndicatorStyle={styles.bottomSheetIndicator}
+                >
+                    <BottomSheetView style={styles.bottomSheetContent}>
+                        <View
+                            testID="passenger-booking-finalizing-sheet"
+                            accessibilityLabel="Pagamento confirmado. Finalizando solicitação da corrida."
+                            style={styles.searchingContainer}
+                        >
+                            <ActivityIndicator size="large" color="#41D274" />
+                            <Typography
+                                testID="passenger-booking-finalizing-title"
+                                variant="h2"
+                                color={theme.text}
+                                align="center"
+                            >
+                                Finalizando solicitação
+                            </Typography>
+                            <Typography
+                                variant="body"
+                                color={theme.textSecondary || '#666'}
+                                align="center"
+                            >
+                                Pagamento confirmado. Estamos criando sua corrida com segurança.
+                            </Typography>
+                        </View>
+                    </BottomSheetView>
+                </BottomSheet>
+            );
+        }
+
         // ✅ ESTADO 1: Procurando motoristas
         // ✅ NÃO mostrar bottom sheet se modal de pagamento estiver aberto
         if (tripStatus === 'searching' && !isPaymentModalVisible) {
@@ -7786,6 +7832,8 @@ function PassengerUI(props) {
             switch (tripStatus) {
                 case 'idle':
                     return `Solicitar ${selectedCarType?.name || 'Carro'} - ${settings?.symbol || 'R$'}${(carEstimates[selectedCarType?.name]?.estimateFare || 0).toFixed(2)}`;
+                case 'finalizing_booking':
+                    return 'Finalizando solicitação...';
                 case 'searching':
                     return 'Procurando motoristas...';
                 case 'accepted':
@@ -7820,7 +7868,7 @@ function PassengerUI(props) {
         };
 
         // ✅ Desabilitar botão se localização foi negada ou outras condições
-        const isDisabled = locationDenied || routeOutOfCoverage || geofenceStatus.isChecking || carTypesToUse.length === 0 || !canBook || bookModelLoading || tripStatus === 'accepted' || tripStatus === 'started';
+        const isDisabled = locationDenied || routeOutOfCoverage || geofenceStatus.isChecking || carTypesToUse.length === 0 || !canBook || bookModelLoading || tripStatus === 'finalizing_booking' || tripStatus === 'accepted' || tripStatus === 'started';
 
         return (
             <View
@@ -7852,6 +7900,7 @@ function PassengerUI(props) {
     // Funções auxiliares para status da viagem
     const getTripStatusIcon = () => {
         switch (tripStatus) {
+            case 'finalizing_booking': return 'time';
             case 'searching': return 'search';
             case 'accepted': return 'car';
             case 'started': return 'play';
@@ -7862,6 +7911,7 @@ function PassengerUI(props) {
 
     const getTripStatusColor = () => {
         switch (tripStatus) {
+            case 'finalizing_booking': return '#41D274';
             case 'searching': return '#FFA500'; // Laranja
             case 'accepted': return '#4CAF50'; // Verde
             case 'started': return '#2196F3'; // Azul
@@ -7872,6 +7922,7 @@ function PassengerUI(props) {
 
     const getTripStatusTitle = () => {
         switch (tripStatus) {
+            case 'finalizing_booking': return 'Finalizando Solicitação';
             case 'searching': return 'Procurando Motoristas';
             case 'accepted': return 'Motorista Confirmado';
             case 'started': return 'Viagem em Andamento';
@@ -7882,6 +7933,7 @@ function PassengerUI(props) {
 
     const getTripStatusMessage = () => {
         switch (tripStatus) {
+            case 'finalizing_booking': return 'Pagamento confirmado. Estamos criando sua corrida com segurança.';
             case 'searching': return 'Estamos procurando motoristas próximos para você...';
             case 'accepted': return 'Seu motorista está a caminho!';
             case 'started': return 'Acompanhe sua viagem em tempo real';
