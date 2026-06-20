@@ -128,6 +128,18 @@ describe('places-cache-service directions steps', () => {
         endLocation: { lat: -22.9701, lng: -43.1811 },
       }),
     );
+    expect(result.data).toMatchObject({
+      time_in_secs: 480,
+      duration_without_traffic: 420,
+      duration_in_traffic: 480,
+      legs: [
+        expect.objectContaining({
+          time_in_secs: 480,
+          duration_without_traffic: 420,
+          duration_in_traffic: 480,
+        }),
+      ],
+    });
   });
 
   it('preserves steps when returning a cached directions payload', async () => {

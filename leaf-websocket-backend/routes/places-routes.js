@@ -203,11 +203,16 @@ function buildApproximateDirectionsPayload({
   const steps = [];
   let totalDistanceKm = 0;
   let totalTimeSecs = 0;
+  let totalDurationWithoutTrafficSecs = 0;
 
   for (let index = 0; index < path.length - 1; index += 1) {
     const startPoint = path[index];
     const endPoint = path[index + 1];
     const distanceInKm = Number(computeHaversineDistanceKm(startPoint, endPoint).toFixed(3));
+    const durationWithoutTrafficSecs = Math.max(
+      60,
+      Math.round((distanceInKm / Math.max(8, configuredSpeed)) * 3600),
+    );
     const timeInSecs = Math.max(60, Math.round((distanceInKm / effectiveSpeed) * 3600));
     const step = {
       instruction: index === path.length - 2 ? 'Siga até o destino' : 'Siga até o próximo ponto da rota',
@@ -226,10 +231,12 @@ function buildApproximateDirectionsPayload({
 
     totalDistanceKm += distanceInKm;
     totalTimeSecs += timeInSecs;
+    totalDurationWithoutTrafficSecs += durationWithoutTrafficSecs;
     steps.push(step);
     legs.push({
       distance_in_km: distanceInKm,
       time_in_secs: timeInSecs,
+      duration_without_traffic: durationWithoutTrafficSecs,
       duration_in_traffic: trafficEnabled ? timeInSecs : null,
       start_location: {
         latitude: Number(startPoint.lat),
@@ -248,6 +255,7 @@ function buildApproximateDirectionsPayload({
   return {
     distance_in_km: Number(totalDistanceKm.toFixed(3)),
     time_in_secs: totalTimeSecs,
+    duration_without_traffic: totalDurationWithoutTrafficSecs,
     duration_in_traffic: trafficEnabled ? totalTimeSecs : null,
     polylinePoints: encodePolylinePath(path),
     legs,

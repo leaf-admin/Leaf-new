@@ -1185,12 +1185,16 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                     const legs = Array.isArray(route.legs) ? route.legs : [];
                     const normalizedLegs = legs.map((currentLeg) => {
                         const legDurationInTraffic = Number(currentLeg?.duration_in_traffic?.value);
+                        const legDurationWithoutTraffic = Number(currentLeg?.duration?.value);
                         const legTimeInSecs = Number(
                             currentLeg?.duration_in_traffic?.value ?? currentLeg?.duration?.value ?? 0
                         );
                         return {
                             distance_in_km: Number(currentLeg?.distance?.value || 0) / 1000,
                             time_in_secs: legTimeInSecs,
+                            duration_without_traffic: Number.isFinite(legDurationWithoutTraffic)
+                                ? legDurationWithoutTraffic
+                                : null,
                             duration_in_traffic: Number.isFinite(legDurationInTraffic)
                                 ? legDurationInTraffic
                                 : null,
@@ -1232,6 +1236,17 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                                 : total,
                         0
                     );
+                    const baseDurationLegs = normalizedLegs.filter((currentLeg) =>
+                        Number.isFinite(currentLeg.duration_without_traffic)
+                    );
+                    const totalDurationWithoutTraffic =
+                        baseDurationLegs.length === normalizedLegs.length && baseDurationLegs.length > 0
+                            ? baseDurationLegs.reduce(
+                                (total, currentLeg) =>
+                                    total + Number(currentLeg.duration_without_traffic || 0),
+                                0
+                              )
+                            : null;
                     const trafficLegs = normalizedLegs.filter((currentLeg) =>
                         Number.isFinite(currentLeg.duration_in_traffic)
                     );
@@ -1246,6 +1261,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                     const result = {
                         distance_in_km: totalDistanceKm, // Converter metros para km
                         time_in_secs: totalTimeInSecs, // Tempo em segundos (com trânsito se disponível)
+                        duration_without_traffic: totalDurationWithoutTraffic,
                         polylinePoints: route.overview_polyline.points,
                         duration_in_traffic: totalDurationInTraffic,
                         legs: normalizedLegs,

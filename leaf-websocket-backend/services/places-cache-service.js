@@ -888,6 +888,7 @@ class PlacesCacheService {
       const legs = Array.isArray(route.legs) ? route.legs : [];
       const normalizedLegs = legs.map((leg) => {
         const legDurationInTraffic = Number(leg?.duration_in_traffic?.value);
+        const legDurationWithoutTraffic = Number(leg?.duration?.value);
         const legDuration = Number(
           leg?.duration_in_traffic?.value ??
           leg?.duration?.value ??
@@ -896,6 +897,9 @@ class PlacesCacheService {
         return {
           distance_in_km: Number(leg?.distance?.value || 0) / 1000,
           time_in_secs: Number.isFinite(legDuration) ? legDuration : 0,
+          duration_without_traffic: Number.isFinite(legDurationWithoutTraffic)
+            ? legDurationWithoutTraffic
+            : null,
           duration_in_traffic: Number.isFinite(legDurationInTraffic) ? legDurationInTraffic : null,
           start_location:
             Number.isFinite(Number(leg?.start_location?.lat)) &&
@@ -930,6 +934,11 @@ class PlacesCacheService {
         (acc, leg) => acc + (Number.isFinite(leg.time_in_secs) ? leg.time_in_secs : 0),
         0,
       );
+      const baseDurationLegs = normalizedLegs.filter((leg) => Number.isFinite(leg.duration_without_traffic));
+      const duration_without_traffic =
+        baseDurationLegs.length === normalizedLegs.length && baseDurationLegs.length > 0
+          ? baseDurationLegs.reduce((acc, leg) => acc + Number(leg.duration_without_traffic || 0), 0)
+          : null;
       const trafficLegs = normalizedLegs.filter((leg) => Number.isFinite(leg.duration_in_traffic));
       const duration_in_traffic = trafficLegs.length === normalizedLegs.length && trafficLegs.length > 0
         ? trafficLegs.reduce((acc, leg) => acc + Number(leg.duration_in_traffic || 0), 0)
@@ -938,6 +947,7 @@ class PlacesCacheService {
       const data = {
         distance_in_km,
         time_in_secs,
+        duration_without_traffic,
         polylinePoints: route?.overview_polyline?.points || null,
         duration_in_traffic,
         legs: normalizedLegs,
