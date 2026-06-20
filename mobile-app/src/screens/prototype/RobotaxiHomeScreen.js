@@ -31,6 +31,11 @@ import {
   setPrototypeMapRoute,
   subscribePrototypeMapRoute,
 } from './prototypeMapRoute';
+import {
+  PROTOTYPE_TRAFFIC_SEGMENT_COLORS,
+  resolveTrafficBaseDurationSecs,
+  resolveTrafficSegmentLevel,
+} from './prototypeTrafficRoute';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { resolvePassengerAutoRoute, shouldAutoSyncPassengerRoute } from './passengerFlowRouting';
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
@@ -668,34 +673,6 @@ function decodeRoutePolyline(polylinePoints) {
   }
 }
 
-const HOME_TRAFFIC_SEGMENT_COLORS = Object.freeze({
-  normal: '#198754',
-  moderate: '#F59E0B',
-  heavy: '#DC2626',
-});
-
-function resolveTrafficSegmentLevel(durationSecs, trafficDurationSecs) {
-  const baseDuration = Number(durationSecs);
-  const trafficDuration = Number(trafficDurationSecs);
-  if (
-    !Number.isFinite(baseDuration) ||
-    !Number.isFinite(trafficDuration) ||
-    baseDuration <= 0 ||
-    trafficDuration <= 0
-  ) {
-    return null;
-  }
-
-  const ratio = trafficDuration / baseDuration;
-  if (ratio >= 1.35) {
-    return 'heavy';
-  }
-  if (ratio >= 1.15) {
-    return 'moderate';
-  }
-  return 'normal';
-}
-
 function normalizeDirectionsCoordinate(value) {
   const latitude = Number(value?.latitude ?? value?.lat);
   const longitude = Number(value?.longitude ?? value?.lng);
@@ -722,14 +699,16 @@ function buildTrafficSegmentsFromDirectionsRoute(route, routeCoordinates = []) {
 
   legs.forEach((leg) => {
     const level = resolveTrafficSegmentLevel(
-      leg?.time_in_secs ?? leg?.durationSeconds,
+      resolveTrafficBaseDurationSecs(leg),
       leg?.duration_in_traffic,
     );
     if (!level) {
       return;
     }
 
-    const color = HOME_TRAFFIC_SEGMENT_COLORS[level] || HOME_TRAFFIC_SEGMENT_COLORS.normal;
+    const color =
+      PROTOTYPE_TRAFFIC_SEGMENT_COLORS[level] ||
+      PROTOTYPE_TRAFFIC_SEGMENT_COLORS.normal;
     const steps = Array.isArray(leg?.steps) ? leg.steps : [];
     steps.forEach((step) => {
       const coordinates = resolveStepCoordinates(step);
