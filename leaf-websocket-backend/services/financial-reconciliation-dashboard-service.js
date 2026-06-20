@@ -37,6 +37,56 @@ class FinancialReconciliationDashboardService {
     return docs;
   }
 
+  resolveLedgerRideIds({ rideId, payment = null, holding = null } = {}) {
+    const rideIds = new Set();
+    const addRideId = (value) => {
+      const normalized = String(value || '').trim();
+      if (normalized) rideIds.add(normalized);
+    };
+    const addDocumentReferences = (document) => {
+      if (!document || typeof document !== 'object') return;
+      addRideId(document.rideId);
+      addRideId(document.canonicalRideId);
+      addRideId(document.paymentReferenceRideId);
+      addRideId(document.temporaryRideId);
+      addRideId(document.materializedFrom);
+
+      const additionalInfo = Array.isArray(document.metadata?.additionalInfo)
+        ? document.metadata.additionalInfo
+        : [];
+      additionalInfo.forEach((item) => {
+        if (String(item?.key || '').trim().toLowerCase() === 'ride_id') {
+          addRideId(item?.value);
+        }
+      });
+    };
+
+    addRideId(rideId);
+    addDocumentReferences(payment);
+    addDocumentReferences(holding);
+    return Array.from(rideIds);
+  }
+
+  async listLedgerEventsByRideIds(firestore, rideIds = []) {
+    const snapshots = await Promise.all(
+      rideIds.map((currentRideId) => firestore
+        .collection('financial_ledger_events')
+        .where('rideId', '==', currentRideId)
+        .limit(100)
+        .get())
+    );
+    const eventsById = new Map();
+    snapshots.forEach((snapshot) => {
+      this.getSnapshotDocs(snapshot).forEach((doc) => {
+        if (!eventsById.has(doc.id)) {
+          eventsById.set(doc.id, { id: doc.id, ...doc.data });
+        }
+      });
+    });
+    return Array.from(eventsById.values())
+      .sort((a, b) => String(a.createdAtIso || '').localeCompare(String(b.createdAtIso || '')));
+  }
+
   normalizeReport(id, data = {}) {
     const issues = Array.isArray(data.issues) ? data.issues : [];
     const rideId = data.rideId || id;
@@ -188,23 +238,19 @@ class FinancialReconciliationDashboardService {
         firestore.collection('payment_holdings').doc(rideId).get(),
         firestore.collection('payment_distributions').doc(rideId).get()
       ]);
-
-      const ledgerSnapshot = await firestore
-        .collection('financial_ledger_events')
-        .where('rideId', '==', rideId)
-        .limit(100)
-        .get();
-      const ledgerEvents = this.getSnapshotDocs(ledgerSnapshot)
-        .map((doc) => ({ id: doc.id, ...doc.data }))
-        .sort((a, b) => String(a.createdAtIso || '').localeCompare(String(b.createdAtIso || '')));
+      const payment = paymentDoc.exists ? paymentDoc.data() : null;
+      const holding = holdingDoc.exists ? holdingDoc.data() : null;
+      const ledgerRideIds = this.resolveLedgerRideIds({ rideId, payment, holding });
+      const ledgerEvents = await this.listLedgerEventsByRideIds(firestore, ledgerRideIds);
 
       return {
         success: true,
         report: reportDoc.exists ? this.normalizeReport(reportDoc.id, reportDoc.data()) : null,
         ledgerEvents,
+        ledgerRideIds,
         sourceDocuments: {
-          ridePayment: paymentDoc.exists ? paymentDoc.data() : null,
-          paymentHolding: holdingDoc.exists ? holdingDoc.data() : null,
+          ridePayment: payment,
+          paymentHolding: holding,
           paymentDistribution: distributionDoc.exists ? distributionDoc.data() : null
         }
       };

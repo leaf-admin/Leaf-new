@@ -296,6 +296,107 @@ describe('FinancialLedgerService', () => {
     });
   });
 
+  it('reconciles a canonical booking against the temporary payment ledger event', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    firestore.docs.set('ride_payments/booking_alias_1', {
+      rideId: 'booking_alias_1',
+      canonicalRideId: 'booking_alias_1',
+      paymentReferenceRideId: 'temp_ride_alias_1',
+      temporaryRideId: 'temp_ride_alias_1',
+      chargeId: 'charge_alias_1',
+      amount: 9792,
+      status: 'CONFIRMED'
+    });
+    firestore.docs.set('payment_holdings/booking_alias_1', {
+      rideId: 'booking_alias_1',
+      materializedFrom: 'temp_ride_alias_1',
+      chargeId: 'charge_alias_1',
+      amount: 9792,
+      status: 'distributed'
+    });
+    firestore.docs.set('payment_distributions/booking_alias_1', {
+      rideId: 'booking_alias_1',
+      calculation: {
+        totalAmount: 9792
+      }
+    });
+
+    await service.recordPaymentReceived({
+      rideId: 'temp_ride_alias_1',
+      chargeId: 'charge_alias_1',
+      amountCents: 9792,
+      passengerId: 'passenger_1'
+    });
+    await service.recordRideSettlement({
+      rideId: 'booking_alias_1',
+      driverId: 'driver_1',
+      totalAmountCents: 9792,
+      netAmountCents: 9420,
+      operationalFeeCents: 294,
+      wooviFeeCents: 78
+    });
+
+    const result = await service.reconcileRideFinancials({
+      rideId: 'booking_alias_1'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      report: {
+        rideId: 'booking_alias_1',
+        ok: true,
+        issues: [],
+        totals: {
+          paymentAmountCents: 9792,
+          distributionTotalCents: 9792,
+          ledgerEventCount: 2
+        },
+        references: {
+          ledgerRideIds: ['booking_alias_1', 'temp_ride_alias_1'],
+          paymentLedgerRideId: 'temp_ride_alias_1'
+        }
+      }
+    });
+  });
+
+  it('flags a temporary payment ledger event with a divergent amount', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    firestore.docs.set('ride_payments/booking_alias_mismatch', {
+      rideId: 'booking_alias_mismatch',
+      paymentReferenceRideId: 'temp_ride_alias_mismatch',
+      chargeId: 'charge_alias_mismatch',
+      amount: 9792,
+      status: 'CONFIRMED'
+    });
+    await service.recordPaymentReceived({
+      rideId: 'temp_ride_alias_mismatch',
+      chargeId: 'charge_alias_mismatch',
+      amountCents: 9500,
+      passengerId: 'passenger_1'
+    });
+
+    const result = await service.reconcileRideFinancials({
+      rideId: 'booking_alias_mismatch'
+    });
+
+    expect(result.report).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'PAYMENT_LEDGER_AMOUNT_MISMATCH',
+          ledgerAmountCents: 9500,
+          paymentAmountCents: 9792
+        })
+      ])
+    });
+  });
+
   it('reconciles a recent batch of ride payments into reports', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
