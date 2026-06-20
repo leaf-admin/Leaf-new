@@ -1,3 +1,43 @@
+function sanitizeDiagnosticToken(value, fallback = 'none') {
+    const normalized = String(value || '')
+        .trim()
+        .replace(/[^a-zA-Z0-9_.:-]+/g, '_')
+        .slice(0, 96);
+    return normalized || fallback;
+}
+
+function roundCoordinateForDiagnostic(value) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed.toFixed(3) : 'invalid';
+}
+
+function buildAvailabilityDiagnosticMessage({
+    requestId,
+    pickupLocation,
+    requestedCarType,
+    hasDrivers,
+    availability
+}) {
+    const rejections = availability?.rejections || {};
+    const rejectionSummary = Object.entries(rejections)
+        .filter(([, count]) => Number(count) > 0)
+        .map(([reason, count]) => `${sanitizeDiagnosticToken(reason)}:${Number(count)}`)
+        .join(',') || 'none';
+    const candidates = availability?.candidates ?? availability?.summary?.candidates ?? 0;
+    const eligible = availability?.eligible ?? availability?.summary?.eligible ?? 0;
+
+    return [
+        'Pré-check de disponibilidade concluído',
+        `requestId=${sanitizeDiagnosticToken(requestId)}`,
+        `result=${hasDrivers ? 'available' : 'blocked'}`,
+        `carType=${sanitizeDiagnosticToken(requestedCarType, 'default')}`,
+        `pickupCell=${roundCoordinateForDiagnostic(pickupLocation?.lat)},${roundCoordinateForDiagnostic(pickupLocation?.lng)}`,
+        `candidates=${Number(candidates) || 0}`,
+        `eligible=${Number(eligible) || 0}`,
+        `rejections=${rejectionSummary}`
+    ].join(' ');
+}
+
 function registerSocketSearchDriversHandler({
     socket,
     rateLimiterService,
@@ -75,7 +115,13 @@ function registerSocketSearchDriversHandler({
                 radiusKm
             });
 
-            logStructured('info', 'Pré-check de disponibilidade concluído', {
+            logStructured('info', buildAvailabilityDiagnosticMessage({
+                requestId,
+                pickupLocation,
+                requestedCarType,
+                hasDrivers,
+                availability
+            }), {
                 userId,
                 eventType: 'checkRideAvailability',
                 requestedCarType,
