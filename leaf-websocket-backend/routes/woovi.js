@@ -9,6 +9,7 @@ const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 const WOOVI_CONFIG = getWooviConfig();
 const WOOVI_ADMIN_ROLES = ['admin', 'super-admin', 'manager'];
+const WOOVI_SANDBOX_TEST_ROLES = [...WOOVI_ADMIN_ROLES, 'development'];
 const legacyWooviAliasRouteEnabled =
   String(process.env.ENABLE_LEGACY_WOOVI_ALIAS_ROUTE || 'false').toLowerCase() === 'true';
 
@@ -223,6 +224,105 @@ async function validateSandboxTestWebhookPayload(data = {}) {
       error: error.message
     };
   }
+}
+
+async function resolveSandboxTestWebhookPayload({ passengerId, paymentIntentId } = {}) {
+  const safePassengerId = String(passengerId || '').trim();
+  const safePaymentIntentId = String(paymentIntentId || '').trim();
+  if (!safePassengerId) {
+    return { found: false, reason: 'SANDBOX_PAYMENT_PASSENGER_REQUIRED' };
+  }
+
+  const firestore = require('../firebase-config').getFirestore();
+  if (!firestore) {
+    return { found: false, reason: 'SANDBOX_PAYMENT_FIRESTORE_UNAVAILABLE' };
+  }
+
+  let candidates = [];
+  if (safePaymentIntentId) {
+    const snapshot = await firestore.collection('payment_intents').doc(safePaymentIntentId).get();
+    if (snapshot.exists) {
+      candidates = [{ id: snapshot.id, ...(snapshot.data() || {}) }];
+    }
+  } else {
+    const snapshot = await firestore
+      .collection('payment_intents')
+      .where('passengerId', '==', safePassengerId)
+      .limit(50)
+      .get();
+    candidates = snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  }
+
+  const maxAgeMs = Math.max(
+    60 * 1000,
+    Number.parseInt(process.env.WOOVI_SANDBOX_TEST_CONFIRM_MAX_AGE_SECONDS || '3600', 10) * 1000
+  );
+  const nowMs = Date.now();
+  const intent = candidates
+    .filter((candidate) => {
+      const createdAtMs = Date.parse(
+        candidate.chargeCreatedAtIso || candidate.createdAtIso || candidate.updatedAtIso || ''
+      );
+      return (
+        String(candidate.passengerId || '').trim() === safePassengerId &&
+        String(candidate.providerEnvironment || '').trim().toLowerCase() === 'sandbox' &&
+        String(candidate.status || '').trim().toLowerCase() === 'charge_created' &&
+        String(candidate.chargeId || candidate.paymentId || '').trim() &&
+        String(candidate.rideId || '').trim() &&
+        Number.isFinite(createdAtMs) &&
+        nowMs - createdAtMs >= 0 &&
+        nowMs - createdAtMs <= maxAgeMs
+      );
+    })
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.chargeCreatedAtIso || left.createdAtIso || left.updatedAtIso || '') || 0;
+      const rightTime = Date.parse(right.chargeCreatedAtIso || right.createdAtIso || right.updatedAtIso || '') || 0;
+      return rightTime - leftTime;
+    })[0];
+
+  if (!intent) {
+    return { found: false, reason: 'SANDBOX_PAYMENT_INTENT_NOT_FOUND' };
+  }
+
+  const amountInCents = Math.round(
+    Number(intent.payableAmountInCents || intent.amountCents || intent.amount || 0)
+  );
+  if (amountInCents <= 0) {
+    return { found: false, reason: 'SANDBOX_PAYMENT_AMOUNT_INVALID' };
+  }
+
+  const resolvedIntentId = String(intent.paymentIntentId || intent.id || '').trim();
+  const chargeId = String(intent.chargeId || intent.paymentId || '').trim();
+  const rideId = String(intent.rideId || '').trim();
+  const paidAt = new Date().toISOString();
+  return {
+    found: true,
+    paymentIntentId: resolvedIntentId,
+    chargeId,
+    rideId,
+    passengerId: safePassengerId,
+    amountInCents,
+    payload: {
+      event: 'OPENPIX:CHARGE_COMPLETED',
+      charge: {
+        identifier: chargeId,
+        transactionID: chargeId,
+        correlationID: String(intent.correlationID || '').trim(),
+        status: 'COMPLETED',
+        value: amountInCents,
+        paidAt,
+        additionalInfo: [
+          { key: 'passenger_id', value: safePassengerId },
+          { key: 'ride_id', value: rideId },
+          { key: 'payment_type', value: 'advance_payment' },
+          { key: 'payment_intent_id', value: resolvedIntentId },
+          { key: 'service', value: 'ride_sharing' }
+        ]
+      },
+      pix: { status: 'COMPLETED' },
+      account: { environment: 'TESTING' }
+    }
+  };
 }
 
 async function resolveSandboxPaymentIntentAsBooking({ chargeId, rideId, passengerId, amountInCents }) {
@@ -1468,6 +1568,62 @@ router.post('/woovi/test-webhook', authenticateJWT, requireRole(WOOVI_ADMIN_ROLE
   }
 });
 
+router.post(
+  '/woovi/test-confirm-sandbox-payment',
+  authenticateJWT,
+  requireRole(WOOVI_SANDBOX_TEST_ROLES),
+  async (req, res) => {
+    try {
+      const resolved = await resolveSandboxTestWebhookPayload(req.body || {});
+      if (!resolved.found) {
+        return res.status(404).json({
+          success: false,
+          code: resolved.reason
+        });
+      }
+
+      const validation = await validateSandboxTestWebhookPayload(resolved.payload);
+      if (!validation.allowed) {
+        return res.status(409).json({
+          success: false,
+          code: validation.reason
+        });
+      }
+
+      const io = req.app.get('io');
+      const result = await handleChargeCompleted(resolved.payload, io);
+      logStructured('info', 'Pagamento sandbox de teste confirmado', {
+        service: 'woovi-routes',
+        actorId: req.user?.id || null,
+        actorRole: req.user?.role || null,
+        passengerId: resolved.passengerId,
+        rideId: resolved.rideId,
+        chargeId: resolved.chargeId,
+        paymentIntentId: resolved.paymentIntentId
+      });
+
+      return res.status(200).json({
+        success: true,
+        mode: 'sandbox_intent_confirmed',
+        rideId: resolved.rideId,
+        chargeId: resolved.chargeId,
+        paymentIntentId: resolved.paymentIntentId,
+        amountInCents: resolved.amountInCents,
+        result
+      });
+    } catch (error) {
+      logError(error, 'Erro ao confirmar pagamento sandbox de teste', {
+        service: 'woovi-routes',
+        actorId: req.user?.id || null
+      });
+      return res.status(500).json({
+        success: false,
+        error: 'Não foi possível confirmar o pagamento sandbox'
+      });
+    }
+  }
+);
+
 // Webhook principal para receber notificações da Woovi
 // Documentação: https://developers.woovi.com/docs/category/exemplos
 router.post('/woovi/webhook', async (req, res) => {
@@ -2508,6 +2664,7 @@ router.__private = {
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking,
   validateSandboxTestWebhookPayload,
+  resolveSandboxTestWebhookPayload,
   extractWebhookChargePayload,
   resolveSandboxPaymentIntentAsBooking,
   isRetryableWebhookEvent,

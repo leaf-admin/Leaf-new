@@ -56,6 +56,7 @@ const {
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking,
   validateSandboxTestWebhookPayload,
+  resolveSandboxTestWebhookPayload,
   resolveSandboxPaymentIntentAsBooking,
   isRetryableWebhookEvent
 } = wooviRoutes.__private;
@@ -518,6 +519,76 @@ describe('woovi webhook guards', () => {
 
     expect(result.allowed).toBe(true);
     expect(result.reason).toBe('SANDBOX_TEST_WEBHOOK_INTENT_VALIDATED');
+  });
+
+  it('builds a sandbox confirmation payload from the latest authoritative payment intent', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    await firestore.collection('payment_intents').doc('intent-production').set({
+      status: 'charge_created',
+      providerEnvironment: 'production',
+      chargeId: 'charge-production',
+      rideId: 'ride-production',
+      passengerId: 'passenger-latest',
+      payableAmountInCents: 9999,
+      chargeCreatedAtIso: new Date().toISOString()
+    });
+    await firestore.collection('payment_intents').doc('intent-older').set({
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      chargeId: 'charge-older',
+      rideId: 'ride-older',
+      passengerId: 'passenger-latest',
+      payableAmountInCents: 4400,
+      chargeCreatedAtIso: new Date(Date.now() - 60_000).toISOString()
+    });
+    await firestore.collection('payment_intents').doc('intent-latest').set({
+      paymentIntentId: 'intent-latest',
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      chargeId: 'charge-latest',
+      rideId: 'ride-latest',
+      passengerId: 'passenger-latest',
+      payableAmountInCents: 7690,
+      correlationID: 'correlation-latest',
+      chargeCreatedAtIso: new Date().toISOString()
+    });
+
+    const result = await resolveSandboxTestWebhookPayload({
+      passengerId: 'passenger-latest'
+    });
+
+    expect(result.found).toBe(true);
+    expect(result.paymentIntentId).toBe('intent-latest');
+    expect(result.chargeId).toBe('charge-latest');
+    expect(result.rideId).toBe('ride-latest');
+    expect(result.amountInCents).toBe(7690);
+    expect(result.payload.charge.value).toBe(7690);
+    expect(result.payload.account.environment).toBe('TESTING');
+  });
+
+  it('does not resolve an exact sandbox intent for a different passenger', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    await firestore.collection('payment_intents').doc('intent-owned').set({
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      chargeId: 'charge-owned',
+      rideId: 'ride-owned',
+      passengerId: 'passenger-owner',
+      payableAmountInCents: 5511,
+      chargeCreatedAtIso: new Date().toISOString()
+    });
+
+    const result = await resolveSandboxTestWebhookPayload({
+      passengerId: 'passenger-other',
+      paymentIntentId: 'intent-owned'
+    });
+
+    expect(result.found).toBe(false);
+    expect(result.reason).toBe('SANDBOX_PAYMENT_INTENT_NOT_FOUND');
   });
 
   it('rejects sandbox test webhook when amount differs from payment intent', async () => {
