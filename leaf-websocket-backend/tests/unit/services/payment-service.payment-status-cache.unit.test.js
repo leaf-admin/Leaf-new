@@ -327,6 +327,78 @@ describe('PaymentService payment status cache', () => {
     });
   });
 
+  it('derives one canonical ride reference from a persisted payment session', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const paymentData = {
+      passengerId: 'passenger_session',
+      amount: 7690,
+      rideId: 'client_temp_1',
+      paymentSessionId: 'pay_session_20260620_abcdef',
+      paymentContextKey: 'route-a|leaf-plus|7690',
+      quoteSessionId: 'quote_session_1',
+      rideDetails: {
+        origin: 'Origem',
+        destination: 'Destino'
+      }
+    };
+
+    const first = await service.processAdvancePayment(paymentData);
+    const second = await service.processAdvancePayment({
+      ...paymentData,
+      rideId: 'client_temp_2'
+    });
+    const canonicalRideId = service.resolveAdvancePaymentSession(paymentData).rideId;
+
+    expect(first).toMatchObject({
+      success: true,
+      rideId: canonicalRideId,
+      paymentSessionId: paymentData.paymentSessionId,
+      paymentContextKey: paymentData.paymentContextKey
+    });
+    expect(second).toMatchObject({
+      success: true,
+      idempotentReplay: true,
+      rideId: canonicalRideId,
+      chargeId: 'charge_default'
+    });
+    expect(mockCreateCharge).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a payment session after it has been linked to a booking', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const paymentData = {
+      passengerId: 'passenger_consumed',
+      amount: 7690,
+      paymentSessionId: 'pay_session_consumed_abcdef',
+      paymentContextKey: 'route-b|leaf-plus|7690',
+      rideDetails: {
+        origin: 'Origem',
+        destination: 'Destino'
+      }
+    };
+
+    const first = await service.processAdvancePayment(paymentData);
+    const consumed = await service.markAdvancePaymentIntentConsumed({
+      rideId: first.rideId,
+      bookingId: 'booking_consumed_1',
+      chargeId: first.chargeId
+    });
+    const replay = await service.processAdvancePayment(paymentData);
+
+    expect(consumed).toBe(true);
+    expect(replay).toMatchObject({
+      success: false,
+      code: 'PAYMENT_SESSION_CONSUMED',
+      bookingId: 'booking_consumed_1',
+      chargeId: first.chargeId
+    });
+    expect(mockCreateCharge).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects advance payment retries with changed financial parameters', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);

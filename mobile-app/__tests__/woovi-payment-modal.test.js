@@ -1,6 +1,7 @@
 import React from 'react';
 import { act } from 'react-test-renderer';
 import { render, waitFor } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import WooviPaymentModal from '../src/components/payment/WooviPaymentModal';
 import WooviService from '../src/services/WooviService';
@@ -85,8 +86,126 @@ jest.mock('../src/services/WooviService', () => ({
 }));
 
 describe('WooviPaymentModal qaAutoConfirm', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
+    await AsyncStorage.clear();
+  });
+
+  it('reopens the persisted charge without creating a second Pix charge', async () => {
+    WooviService.processAdvancePayment.mockResolvedValue({
+      success: true,
+      chargeId: 'charge_persisted_1',
+      paymentIntentId: 'intent_persisted_1',
+      rideId: 'temp_ride_canonical_1',
+      paymentSessionId: 'pay_session_persisted_1',
+      qrCodeText: 'pix-code',
+      paymentLink: 'https://pay.local/persisted',
+    });
+    WooviService.getPaymentStatus.mockResolvedValue({
+      success: true,
+      status: 'ACTIVE',
+    });
+
+    const props = {
+      visible: true,
+      onClose: jest.fn(),
+      onPaymentConfirmed: jest.fn(),
+      tripData: {
+        pickup: { add: 'Origem', lat: -22.920775, lng: -43.406003 },
+        drop: { add: 'Destino', lat: -22.9673111, lng: -43.1789541 },
+        carType: 'Leaf Plus',
+        estimatedFare: 76.9,
+        grossEstimatedFare: 76.9,
+      },
+      estimates: { estimateFare: 76.9 },
+      passengerId: 'passenger_1',
+      passengerName: 'Passageira Leaf',
+      passengerEmail: 'passageira@leaf.app.br',
+      quoteSessionId: 'quote_session_1',
+    };
+
+    const firstRender = render(<WooviPaymentModal {...props} />);
+    await act(async () => {
+      jest.advanceTimersByTime(200);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(WooviService.processAdvancePayment).toHaveBeenCalledTimes(1);
+    });
+    firstRender.unmount();
+
+    render(<WooviPaymentModal {...props} />);
+    await act(async () => {
+      jest.advanceTimersByTime(200);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(WooviService.getPaymentStatus).toHaveBeenCalledWith('charge_persisted_1');
+    });
+    expect(WooviService.processAdvancePayment).toHaveBeenCalledTimes(1);
+  });
+
+  it('advances with a confirmed persisted charge after the app missed the socket event', async () => {
+    WooviService.processAdvancePayment.mockResolvedValue({
+      success: true,
+      chargeId: 'charge_confirmed_recovery',
+      paymentIntentId: 'intent_confirmed_recovery',
+      rideId: 'temp_ride_confirmed_recovery',
+      paymentSessionId: 'pay_session_confirmed_recovery',
+      paymentLink: 'https://pay.local/confirmed-recovery',
+    });
+    WooviService.getPaymentStatus.mockResolvedValue({
+      success: true,
+      status: 'in_holding',
+    });
+    const onPaymentConfirmed = jest.fn();
+    const props = {
+      visible: true,
+      onClose: jest.fn(),
+      onPaymentConfirmed,
+      tripData: {
+        pickup: { add: 'Origem', lat: -22.920775, lng: -43.406003 },
+        drop: { add: 'Destino', lat: -22.9673111, lng: -43.1789541 },
+        carType: 'Leaf Plus',
+        estimatedFare: 76.9,
+        grossEstimatedFare: 76.9,
+      },
+      estimates: { estimateFare: 76.9 },
+      passengerId: 'passenger_1',
+      passengerName: 'Passageira Leaf',
+      passengerEmail: 'passageira@leaf.app.br',
+      quoteSessionId: 'quote_session_1',
+    };
+
+    const firstRender = render(<WooviPaymentModal {...props} />);
+    await act(async () => {
+      jest.advanceTimersByTime(200);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(WooviService.processAdvancePayment).toHaveBeenCalledTimes(1);
+    });
+    firstRender.unmount();
+
+    render(<WooviPaymentModal {...props} />);
+    await act(async () => {
+      jest.advanceTimersByTime(700);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(onPaymentConfirmed).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chargeId: 'charge_confirmed_recovery',
+          rideId: 'temp_ride_confirmed_recovery',
+          paymentSessionId: expect.stringMatching(/^pay_/),
+        }),
+      );
+    });
+    expect(WooviService.processAdvancePayment).toHaveBeenCalledTimes(1);
   });
 
   it('waits for backend payment confirmation before advancing the ride flow', async () => {

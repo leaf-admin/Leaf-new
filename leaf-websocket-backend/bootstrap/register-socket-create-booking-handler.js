@@ -387,6 +387,32 @@ function registerSocketCreateBookingHandler({
                             : null;
                     const requestedCarType = sanitizedCarType || data?.carType || null;
 
+                    if (paymentReferenceRideId) {
+                        const advancePaymentIntent =
+                            await paymentServiceSingleton.getAdvancePaymentIntent(paymentReferenceRideId);
+                        if (advancePaymentIntent?.unavailable) {
+                            socket.emit('bookingError', {
+                                error: 'Validação de pagamento indisponível',
+                                message: 'Não foi possível validar o vínculo deste pagamento agora. Tente novamente em alguns segundos.',
+                                code: advancePaymentIntent.code || 'PAYMENT_INTENT_VALIDATION_UNAVAILABLE',
+                                retryAfterSec: 2
+                            });
+                            recordFailure('active_guard', 'payment_intent_validation_unavailable');
+                            return;
+                        }
+                        if (String(advancePaymentIntent?.status || '').trim().toLowerCase() === 'consumed') {
+                            socket.emit('bookingError', {
+                                error: 'Pagamento já utilizado',
+                                message: 'Este pagamento já está vinculado a uma corrida. Sincronize a corrida ativa antes de tentar novamente.',
+                                code: 'PAYMENT_ALREADY_CONSUMED',
+                                activeBookingId: advancePaymentIntent?.bookingId || null,
+                                chargeId: advancePaymentIntent?.chargeId || paymentChargeId || null
+                            });
+                            recordFailure('active_guard', 'payment_already_consumed');
+                            return;
+                        }
+                    }
+
                     if (REQUIRE_PAYMENT_BEFORE_BOOKING && !clientRequestedConfirmedPayment) {
                         socket.emit('bookingError', {
                             error: 'Pagamento obrigatório',
@@ -1273,6 +1299,14 @@ function registerSocketCreateBookingHandler({
                                     source: 'createBooking_paid_immediate'
                                 });
 
+                                const intentConsumed = paymentReferenceRideId
+                                    ? await paymentServiceSingleton.markAdvancePaymentIntentConsumed({
+                                        rideId: paymentReferenceRideId,
+                                        bookingId,
+                                        chargeId: paymentChargeId
+                                    })
+                                    : false;
+
                                 logStructured('info', 'createBooking: pagamento materializado para booking canônico', {
                                     bookingId,
                                     eventType: 'createBooking',
@@ -1281,7 +1315,8 @@ function registerSocketCreateBookingHandler({
                                     reason: materializeResult?.reason || null,
                                     temporaryRideId: paymentReferenceRideId || null,
                                     chargeId: paymentChargeId || null,
-                                    amountInCents: materializeResult?.amountInCents || null
+                                    amountInCents: materializeResult?.amountInCents || null,
+                                    intentConsumed
                                 });
 
                                 const dispatchResult = await paymentDispatchService.triggerDispatchAfterPayment({

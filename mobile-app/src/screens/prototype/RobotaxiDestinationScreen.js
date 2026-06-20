@@ -62,6 +62,11 @@ import {
   subscribePrototypeMapCamera,
 } from "./prototypeMapRoute";
 import { fetchDynamicPricingQuote } from "../../services/runtime/pricingQuoteService";
+import {
+  buildRidePaymentRouteContextKey,
+  clearRidePaymentSession,
+  findRecoverableRidePaymentSession,
+} from "../../services/RidePaymentSessionService";
 
 const { motion } = robotaxiPrototypeTokens;
 const SEARCH_STEP = "search";
@@ -580,6 +585,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const connectionAutomationTimersRef = useRef([]);
   const latestRidePreferencesRef = useRef(null);
   const pendingPaymentConfirmationRef = useRef(null);
+  const paymentRecoveryAttemptedRef = useRef("");
   const initialSelectedDestinationHydratedRef = useRef(false);
   const loadRecentDestinationsRef = useRef(loadRecentDestinations);
   const checkRideAvailabilityRef = useRef(checkRideAvailability);
@@ -1520,6 +1526,88 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     paymentQuoteLock?.discountBenefit !== undefined
       ? paymentQuoteLock.discountBenefit
       : selectedDiscountBenefit;
+  const paymentRecoveryRouteContextKey = useMemo(
+    () =>
+      buildRidePaymentRouteContextKey({
+        tripData: {
+          pickup: {
+            lat: resolvedPickupCoordinate?.latitude,
+            lng: resolvedPickupCoordinate?.longitude,
+          },
+          drop: {
+            lat: destinationCoordinate?.latitude,
+            lng: destinationCoordinate?.longitude,
+          },
+          carType: selectedPlanData?.title,
+        },
+      }),
+    [
+      destinationCoordinate?.latitude,
+      destinationCoordinate?.longitude,
+      resolvedPickupCoordinate?.latitude,
+      resolvedPickupCoordinate?.longitude,
+      selectedPlanData?.title,
+    ],
+  );
+
+  useEffect(() => {
+    const passengerId = profileUid || riderProfile?.uid || riderProfile?.id || "";
+    if (
+      paymentRecoveryAttemptedRef.current === paymentRecoveryRouteContextKey ||
+      isExtensionFlow ||
+      !canRequestRide ||
+      !passengerId ||
+      !paymentRecoveryRouteContextKey ||
+      routeGuardBlocked
+    ) {
+      return undefined;
+    }
+
+    paymentRecoveryAttemptedRef.current = paymentRecoveryRouteContextKey;
+    let cancelled = false;
+    findRecoverableRidePaymentSession({
+      passengerId,
+      routeContextKey: paymentRecoveryRouteContextKey,
+    })
+      .then((session) => {
+        const recovered = session?.paymentData;
+        const amountInCents = Number(recovered?.amountInCents);
+        if (
+          cancelled ||
+          !recovered?.chargeId ||
+          !Number.isFinite(amountInCents) ||
+          amountInCents <= 0
+        ) {
+          return;
+        }
+
+        const grossAmountInCents = Number(recovered?.grossAmountInCents);
+        setPaymentQuoteLock({
+          fare: amountInCents / 100,
+          grossEstimatedFare:
+            Number.isFinite(grossAmountInCents) && grossAmountInCents > 0
+              ? grossAmountInCents / 100
+              : amountInCents / 100,
+          discountBenefit: recovered.discountBenefit || null,
+          quoteSessionId: recovered.quoteSessionId || null,
+          pricingQuoteRequestKey: null,
+        });
+        setPixModalVisible(true);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canRequestRide,
+    isExtensionFlow,
+    paymentRecoveryRouteContextKey,
+    profileUid,
+    riderProfile?.id,
+    riderProfile?.uid,
+    routeGuardBlocked,
+  ]);
   const selectedPricingPayload = selectedPricingQuote?.pricingPayload || null;
   const selectedDynamicPercentage = Number(
     selectedPricingPayload?.dynamic_percentage ?? 0,
@@ -2551,6 +2639,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             {},
         });
 
+        await clearRidePaymentSession({
+          passengerId: profileUid || riderProfile?.uid || riderProfile?.id || "",
+          paymentSessionId: paymentConfirmation?.paymentSessionId,
+          contextKey: paymentConfirmation?.paymentContextKey,
+          chargeId: confirmedChargeId,
+        }).catch(() => false);
+
         pendingPaymentConfirmationRef.current = null;
         navigation.replace("RobotaxiPrototypePaymentSuccess", {
           destination: destinationRoutePayload?.name || destinationInfo?.name || "Destino",
@@ -2601,9 +2696,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       destinationRoutePayload,
       navigation,
       paymentQuoteLock?.fare,
+      profileUid,
       pickupAdjustedOnMap,
       pickupLocationPayload,
       requestRide,
+      riderProfile?.id,
+      riderProfile?.uid,
       resolvedPickupAddress,
       resolvedPickupCoordinate,
       routeGuardBlocked,
@@ -3841,6 +3939,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             estimates={{ estimateFare: lockedPaymentFare }}
             grossEstimatedFare={lockedGrossEstimatedFare}
             discountBenefit={lockedDiscountBenefit}
+            quoteSessionId={paymentQuoteLock?.quoteSessionId || fareQuoteLock?.quoteSessionId || null}
             passengerId={profileUid || riderProfile?.uid || riderProfile?.id || ""}
             passengerName={riderProfile?.name || "Passageira Leaf"}
             passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}

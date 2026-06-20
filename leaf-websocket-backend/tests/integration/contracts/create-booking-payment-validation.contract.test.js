@@ -15,6 +15,9 @@ describe('createBooking payment validation contract', () => {
     expect(handler).toContain("code: 'PAYMENT_REQUIRED'");
     expect(handler).toContain("code: 'PAYMENT_REFERENCE_REQUIRED'");
     expect(handler).toContain("code: 'PAYMENT_NOT_CONFIRMED'");
+    expect(handler).toContain("code: 'PAYMENT_ALREADY_CONSUMED'");
+    expect(handler).toContain('getAdvancePaymentIntent');
+    expect(handler).toContain('markAdvancePaymentIntentConsumed');
     expect(handler).toContain('paymentServiceSingleton.getPaymentStatus');
     expect(handler).toContain('paymentServerValidated = true');
     expect(handler).toContain('commandPaymentData.serverValidated');
