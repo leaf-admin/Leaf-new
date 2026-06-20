@@ -1,7 +1,10 @@
 import {
   PROTOTYPE_TRAFFIC_SEGMENT_COLORS,
+  resolveTrafficFareStatusPresentation,
   resolveTrafficBaseDurationSecs,
+  resolveTrafficSegmentLevelForLeg,
   resolveTrafficSegmentLevel,
+  resolveWorstTrafficSegmentLevel,
 } from '../src/screens/prototype/prototypeTrafficRoute';
 
 describe('prototypeTrafficRoute', () => {
@@ -27,11 +30,45 @@ describe('prototypeTrafficRoute', () => {
     expect(resolveTrafficSegmentLevel(baseDuration, trafficDuration)).toBe(expected);
   });
 
+  it('falls back to route totals when a single leg lacks traffic timings', () => {
+    expect(resolveTrafficSegmentLevelForLeg(
+      { steps: [] },
+      {
+        duration_without_traffic: 887,
+        duration_in_traffic: 1354,
+      },
+      1,
+    )).toBe('heavy');
+  });
+
   it('exposes stable route colors for each traffic level', () => {
     expect(PROTOTYPE_TRAFFIC_SEGMENT_COLORS).toEqual({
       normal: '#198754',
       moderate: '#F59E0B',
       heavy: '#DC2626',
+    });
+  });
+
+  it('resolves the worst segment level for passenger route status', () => {
+    expect(resolveWorstTrafficSegmentLevel([
+      { level: 'normal' },
+      { level: 'heavy' },
+      { level: 'moderate' },
+    ])).toBe('heavy');
+  });
+
+  it('maps traffic levels to passenger fare status labels', () => {
+    expect(resolveTrafficFareStatusPresentation('moderate')).toEqual({
+      label: 'Trânsito moderado',
+      tariffHigh: true,
+    });
+    expect(resolveTrafficFareStatusPresentation('heavy')).toEqual({
+      label: 'Trânsito intenso',
+      tariffHigh: true,
+    });
+    expect(resolveTrafficFareStatusPresentation()).toEqual({
+      label: 'Tarifa normal',
+      tariffHigh: false,
     });
   });
 });

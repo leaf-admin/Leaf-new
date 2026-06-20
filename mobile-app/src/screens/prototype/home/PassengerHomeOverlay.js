@@ -84,6 +84,14 @@ function PassengerHomeOverlay({
   pickupAddress = "",
   destinationLabel = "Para onde?",
   onPickupPress,
+  pickupSearchActive = false,
+  pickupSearchQuery = "",
+  pickupSearchResults = [],
+  pickupSearchSearching = false,
+  onPickupSearchChange,
+  onPickupSearchClose,
+  onPickupResultPress,
+  onPickupMapPress,
   onDestinationPress,
   onCardLayout,
   onMicrophonePress,
@@ -113,12 +121,23 @@ function PassengerHomeOverlay({
   const entrance = React.useRef(new Animated.Value(0)).current;
   const inputRef = React.useRef(null);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+  const activeSearchKind = pickupSearchActive ? "pickup" : destinationSearchActive ? "destination" : "";
   const visibleResults = Array.isArray(destinationSearchResults)
     ? destinationSearchResults.slice(0, 3)
     : [];
-  const shouldShowDestinationDropdown = Boolean(
-    destinationSearchActive &&
-      (destinationSearchSearching || visibleResults.length > 0)
+  const visiblePickupResults = Array.isArray(pickupSearchResults)
+    ? pickupSearchResults.slice(0, 3)
+    : [];
+  const activeResults = pickupSearchActive ? visiblePickupResults : visibleResults;
+  const activeSearchSearching = pickupSearchActive
+    ? pickupSearchSearching
+    : destinationSearchSearching;
+  const shouldShowPickupMapRow =
+    pickupSearchActive && typeof onPickupMapPress === "function";
+  const activeResultCount = activeResults.length + (shouldShowPickupMapRow ? 1 : 0);
+  const shouldShowSearchDropdown = Boolean(
+    activeSearchKind &&
+      (activeSearchSearching || activeResultCount > 0)
   );
   const visibleCategoryOptions = Array.isArray(categoryOptions)
     ? categoryOptions.slice(0, 3)
@@ -129,30 +148,30 @@ function PassengerHomeOverlay({
     null;
   const shouldShowCategoryCard =
     categoryVisible && !destinationSearchActive && Boolean(selectedCategory);
-  const searchDropdownHeight = shouldShowDestinationDropdown
+  const searchDropdownHeight = shouldShowSearchDropdown
     ? Math.min(
         HOME_SEARCH_DROPDOWN_MAX_HEIGHT,
-        destinationSearchSearching
+        activeSearchSearching
           ? HOME_SEARCH_DROPDOWN_MIN_HEIGHT
-          : visibleResults.length * HOME_SEARCH_DROPDOWN_ROW_HEIGHT +
+          : activeResultCount * HOME_SEARCH_DROPDOWN_ROW_HEIGHT +
               HOME_SEARCH_DROPDOWN_VERTICAL_PADDING,
       )
     : 0;
-  const activeSearchCardHeight = destinationSearchActive && shouldShowDestinationDropdown
+  const activeSearchCardHeight = activeSearchKind && shouldShowSearchDropdown
     ? HOME_CARD_HEIGHT + HOME_SEARCH_DROPDOWN_TOP_GAP + searchDropdownHeight
     : HOME_CARD_HEIGHT;
   const lowerPanelHeight = shouldShowCategoryCard
     ? HOME_CATEGORY_CARD_HEIGHT
     : HOME_PROMO_CARD_HEIGHT;
   const activeStackGap = shouldShowCategoryCard ? 16 : HOME_STACK_GAP;
-  const stackHeight = destinationSearchActive
+  const stackHeight = activeSearchKind
     ? activeSearchCardHeight
     : activeSearchCardHeight + activeStackGap + lowerPanelHeight;
   const androidKeyboardFallbackHeight =
-    Platform.OS === "android" && destinationSearchActive
+    Platform.OS === "android" && activeSearchKind
       ? Math.max(300, Math.round(Math.max(windowHeight, screenHeight) * 0.42))
       : 0;
-  const effectiveKeyboardHeight = destinationSearchActive
+  const effectiveKeyboardHeight = activeSearchKind
     ? Math.max(keyboardHeight, androidKeyboardFallbackHeight)
     : keyboardHeight;
 
@@ -174,7 +193,7 @@ function PassengerHomeOverlay({
   }, []);
 
   React.useEffect(() => {
-    if (!destinationSearchActive) {
+    if (!activeSearchKind) {
       return undefined;
     }
 
@@ -183,7 +202,7 @@ function PassengerHomeOverlay({
     }, 80);
 
     return () => clearTimeout(timer);
-  }, [destinationSearchActive]);
+  }, [activeSearchKind]);
 
   React.useEffect(() => {
     const animation = Animated.timing(entrance, {
@@ -203,7 +222,7 @@ function PassengerHomeOverlay({
         styles.homeStack,
         {
           height: stackHeight,
-          bottom: destinationSearchActive
+          bottom: activeSearchKind
             ? Math.max(
                 safeBottom + HOME_CARD_BOTTOM_OFFSET,
                 effectiveKeyboardHeight - safeBottom + HOME_SEARCH_KEYBOARD_CLEARANCE,
@@ -232,7 +251,7 @@ function PassengerHomeOverlay({
             styles.searchCardInStack,
             shouldShowCategoryCard && styles.searchCardReviewMode,
             {
-              bottom: destinationSearchActive ? 0 : lowerPanelHeight + activeStackGap,
+              bottom: activeSearchKind ? 0 : lowerPanelHeight + activeStackGap,
               height: activeSearchCardHeight,
             },
           ]}
@@ -246,16 +265,43 @@ function PassengerHomeOverlay({
 
             <View style={styles.copyColumn}>
               <TouchableOpacity
-                activeOpacity={0.88}
+                activeOpacity={pickupSearchActive ? 1 : 0.88}
                 style={styles.pickupInput}
-                onPress={onPickupPress}
+                onPress={pickupSearchActive ? undefined : onPickupPress}
                 testID="passenger-home-pickup-input"
                 accessibilityLabel="Alterar local de partida"
               >
                 <Text style={styles.label}>Partida</Text>
-                <Text style={styles.pickupText} numberOfLines={1}>
-                  {resolvedPickupLabel}
-                </Text>
+                {pickupSearchActive ? (
+                  <View style={styles.inlineSearchRow}>
+                    <TextInput
+                      ref={inputRef}
+                      value={pickupSearchQuery}
+                      onChangeText={onPickupSearchChange}
+                      placeholder=""
+                      placeholderTextColor={TEXT_MUTED}
+                      autoCorrect={false}
+                      returnKeyType="search"
+                      style={styles.pickupSearchInput}
+                      testID="passenger-home-pickup-search-input"
+                      accessibilityLabel="Buscar partida"
+                    />
+                    <TouchableOpacity
+                      activeOpacity={0.84}
+                      onPress={onPickupSearchClose}
+                      style={styles.inlineSearchCloseButton}
+                      testID="passenger-home-pickup-search-close"
+                      accessibilityRole="button"
+                      accessibilityLabel="Fechar busca de partida"
+                    >
+                      <Ionicons name="close" size={17} color={TEXT_PRIMARY} />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <Text style={styles.pickupText} numberOfLines={1}>
+                    {resolvedPickupLabel}
+                  </Text>
+                )}
                 {pickupAddress ? (
                   <Text style={styles.hiddenPickupAddress}>{pickupAddress}</Text>
                 ) : null}
@@ -274,7 +320,7 @@ function PassengerHomeOverlay({
                   <Text style={styles.destinationLabel}>Destino</Text>
                   {destinationSearchActive ? (
                     <TextInput
-                      ref={inputRef}
+                      ref={pickupSearchActive ? null : inputRef}
                       value={destinationSearchQuery}
                       onChangeText={onDestinationSearchChange}
                       placeholder=""
@@ -323,45 +369,80 @@ function PassengerHomeOverlay({
             accessibilityLabel="Ditar destino por voz"
           />
 
-          {shouldShowDestinationDropdown ? (
+          {shouldShowSearchDropdown ? (
             <View
               style={[styles.dropdownInline, { height: searchDropdownHeight }]}
-              testID="passenger-home-destination-dropdown"
+              testID={
+                pickupSearchActive
+                  ? "passenger-home-pickup-dropdown"
+                  : "passenger-home-destination-dropdown"
+              }
             >
-              {destinationSearchSearching ? (
+              {activeSearchSearching ? (
                 <View style={styles.destinationResultStatus}>
                   <ActivityIndicator size="small" color={LEAF_GREEN} />
                   <Text style={styles.destinationResultStatusText}>Buscando...</Text>
                 </View>
-              ) : visibleResults.length > 0 ? (
-                visibleResults.map((item, index) => (
-                  <TouchableOpacity
-                    key={item?.id || `${item?.name || "destino"}-${index}`}
-                    activeOpacity={0.86}
-                    onPress={() => onDestinationResultPress?.(item)}
-                    style={styles.destinationResultRow}
-                    testID={`passenger-home-destination-result-${index}`}
-                    accessibilityLabel={`Resultado de destino ${index + 1}: ${item?.name || "destino"}`}
-                    accessibilityHint={item?.address || "Seleciona este destino para cotar a corrida"}
-                  >
-                    <Ionicons
-                      name="time-outline"
-                      size={15}
-                      color={TEXT_MUTED}
-                      style={styles.destinationResultClockIcon}
-                    />
-                    <View style={styles.destinationResultCopyPlain}>
-                      <Text numberOfLines={1} style={styles.destinationResultTitle}>
-                        {item?.name || "Destino"}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))
+              ) : activeResultCount > 0 ? (
+                <>
+                  {activeResults.map((item, index) => (
+                    <TouchableOpacity
+                      key={item?.id || `${item?.name || activeSearchKind}-${index}`}
+                      activeOpacity={0.86}
+                      onPress={() => (
+                        pickupSearchActive
+                          ? onPickupResultPress?.(item)
+                          : onDestinationResultPress?.(item)
+                      )}
+                      style={styles.destinationResultRow}
+                      testID={
+                        pickupSearchActive
+                          ? `passenger-home-pickup-result-${index}`
+                          : `passenger-home-destination-result-${index}`
+                      }
+                      accessibilityLabel={`Resultado de ${pickupSearchActive ? "partida" : "destino"} ${index + 1}: ${item?.name || "local"}`}
+                      accessibilityHint={item?.address || `Seleciona este ${pickupSearchActive ? "local de partida" : "destino"}`}
+                    >
+                      <Ionicons
+                        name={pickupSearchActive ? "location-outline" : "time-outline"}
+                        size={15}
+                        color={TEXT_MUTED}
+                        style={styles.destinationResultClockIcon}
+                      />
+                      <View style={styles.destinationResultCopyPlain}>
+                        <Text numberOfLines={1} style={styles.destinationResultTitle}>
+                          {item?.name || (pickupSearchActive ? "Partida" : "Destino")}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                  {shouldShowPickupMapRow ? (
+                    <TouchableOpacity
+                      activeOpacity={0.86}
+                      onPress={onPickupMapPress}
+                      style={styles.destinationResultRow}
+                      testID="passenger-home-pickup-map-option"
+                      accessibilityLabel="Ajustar partida no mapa"
+                    >
+                      <Ionicons
+                        name="map-outline"
+                        size={15}
+                        color={TEXT_MUTED}
+                        style={styles.destinationResultClockIcon}
+                      />
+                      <View style={styles.destinationResultCopyPlain}>
+                        <Text numberOfLines={1} style={styles.destinationResultTitle}>
+                          Ajustar no mapa
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : null}
+                </>
               ) : null}
             </View>
           ) : null}
         </View>
-      {destinationSearchActive ? null : shouldShowCategoryCard ? (
+      {activeSearchKind ? null : shouldShowCategoryCard ? (
         <View
           style={[
             styles.categoryCard,
@@ -436,6 +517,8 @@ function PassengerHomeOverlay({
                   styles.categoryMetaLabel,
                   tariffHigh && styles.categoryMetaLabelHigh,
                 ]}
+                testID="passenger-home-traffic-status"
+                accessibilityLabel={`Status da tarifa: ${tariffStatusLabel}`}
               >
                 {tariffStatusLabel}
               </Text>
@@ -676,6 +759,30 @@ const styles = StyleSheet.create({
     fontFamily: fonts.SemiBold,
     fontSize: 14,
     lineHeight: 18,
+  },
+  inlineSearchRow: {
+    marginTop: 1,
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  pickupSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    color: TEXT_PRIMARY,
+    fontFamily: fonts.SemiBold,
+    fontSize: 15,
+    lineHeight: 20,
+    paddingVertical: 0,
+  },
+  inlineSearchCloseButton: {
+    marginLeft: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8F5",
   },
   hiddenPickupAddress: {
     position: "absolute",

@@ -33,8 +33,9 @@ import {
 } from './prototypeMapRoute';
 import {
   PROTOTYPE_TRAFFIC_SEGMENT_COLORS,
-  resolveTrafficBaseDurationSecs,
-  resolveTrafficSegmentLevel,
+  resolveTrafficFareStatusPresentation,
+  resolveTrafficSegmentLevelForLeg,
+  resolveWorstTrafficSegmentLevel,
 } from './prototypeTrafficRoute';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { resolvePassengerAutoRoute, shouldAutoSyncPassengerRoute } from './passengerFlowRouting';
@@ -86,7 +87,11 @@ import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 import kycService from '../../services/KYCService';
 import nativeAwsLivenessService from '../../services/NativeAwsLivenessService';
 import { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } from '../../services/BackgroundLocationService';
-import { getDirectionsApi } from '../../services/runtime/locationRouteBridge';
+import {
+  fetchCoordsfromPlace,
+  fetchPlacesAutocomplete,
+  getDirectionsApi,
+} from '../../services/runtime/locationRouteBridge';
 import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteService';
 import Logger from '../../utils/Logger';
 
@@ -106,6 +111,10 @@ const HOME_MAP_READY_FROM_READY_MS = Platform.OS === 'android' ? 2600 : 320;
 const HOME_MAP_READY_FALLBACK_MS = Platform.OS === 'android' ? 9000 : 4500;
 const SHOULD_BLOCK_HOME_FIRST_PAINT_FOR_MAP = true;
 const PLACES_CACHE_LOOKUP_TIMEOUT_MS = 2500;
+const HOME_PICKUP_SEARCH_DEBOUNCE_MS = 360;
+const HOME_PICKUP_REVERSE_GEOCODE_DEBOUNCE_MS = 900;
+const HOME_PICKUP_REVERSE_GEOCODE_TIMEOUT_MS = 5500;
+const HOME_PICKUP_REVERSE_GEOCODE_PRECISION = 5;
 let hasPrototypeHomeSurfaceHydratedInSession = IS_TEST_ENV;
 const DEFAULT_USER_COORDINATE = {
   latitude: PROTOTYPE_REGION.latitude,
@@ -693,15 +702,18 @@ function resolveStepCoordinates(step) {
   return start && end ? [start, end] : [];
 }
 
-function buildTrafficSegmentsFromDirectionsRoute(route, routeCoordinates = []) {
-  const legs = Array.isArray(route?.legs) ? route.legs : [];
+export function buildTrafficSegmentsFromDirectionsRoute(route, routeCoordinates = []) {
+  const routeSteps = Array.isArray(route?.steps) ? route.steps : [];
+  const explicitLegs = Array.isArray(route?.legs) ? route.legs : [];
+  const legs = explicitLegs.length > 0
+    ? explicitLegs
+    : routeSteps.length > 0 || route?.duration_in_traffic || route?.duration_without_traffic
+      ? [route]
+      : [];
   const segments = [];
 
   legs.forEach((leg) => {
-    const level = resolveTrafficSegmentLevel(
-      resolveTrafficBaseDurationSecs(leg),
-      leg?.duration_in_traffic,
-    );
+    const level = resolveTrafficSegmentLevelForLeg(leg, route, legs.length);
     if (!level) {
       return;
     }
@@ -709,7 +721,12 @@ function buildTrafficSegmentsFromDirectionsRoute(route, routeCoordinates = []) {
     const color =
       PROTOTYPE_TRAFFIC_SEGMENT_COLORS[level] ||
       PROTOTYPE_TRAFFIC_SEGMENT_COLORS.normal;
-    const steps = Array.isArray(leg?.steps) ? leg.steps : [];
+    const legSteps = Array.isArray(leg?.steps) ? leg.steps : [];
+    const steps = legSteps.length > 0
+      ? legSteps
+      : legs.length === 1
+        ? routeSteps
+        : [];
     steps.forEach((step) => {
       const coordinates = resolveStepCoordinates(step);
       if (coordinates.length >= 2) {
@@ -721,6 +738,19 @@ function buildTrafficSegmentsFromDirectionsRoute(route, routeCoordinates = []) {
       segments.push({ coordinates: routeCoordinates, level, color });
     }
   });
+
+  if (segments.length === 0 && Array.isArray(routeCoordinates) && routeCoordinates.length >= 2) {
+    const routeLevel = resolveTrafficSegmentLevelForLeg(route, route, 1);
+    if (routeLevel) {
+      segments.push({
+        coordinates: routeCoordinates,
+        level: routeLevel,
+        color:
+          PROTOTYPE_TRAFFIC_SEGMENT_COLORS[routeLevel] ||
+          PROTOTYPE_TRAFFIC_SEGMENT_COLORS.normal,
+      });
+    }
+  }
 
   return segments;
 }
@@ -1017,6 +1047,143 @@ async function fetchCachedPickupPlaceOnly(query, location = null) {
   }
 }
 
+function createHomePickupSearchSessionToken(createdAt = Date.now()) {
+  const randomSuffix = Math.random().toString(36).slice(2, 10);
+  return `pickup_search_${createdAt}_${randomSuffix}`;
+}
+
+function normalizeHomePlaceSearchLocation(coordinate = null) {
+  const latitude = Number(coordinate?.latitude ?? coordinate?.lat);
+  const longitude = Number(coordinate?.longitude ?? coordinate?.lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    lat: latitude,
+    lng: longitude,
+  };
+}
+
+function parsePlaceNameFromDescription(description = '') {
+  const normalized = normalizePickupAddressText(description);
+  if (!normalized) {
+    return '';
+  }
+
+  return normalizePickupAddressText(normalized.split(',')[0]) || normalized;
+}
+
+function parsePlaceAddressFromDescription(description = '') {
+  const normalized = normalizePickupAddressText(description);
+  if (!normalized) {
+    return '';
+  }
+
+  const [, ...addressParts] = normalized.split(',');
+  return normalizePickupAddressText(addressParts.join(',')) || normalized;
+}
+
+function normalizeHomePickupSearchResult(item = {}, fallbackQuery = '', sessionToken = null) {
+  const description = normalizePickupAddressText(item.description || item.address || item.name || fallbackQuery);
+  const name = normalizePickupAddressText(
+    item.name ||
+      item.structured_formatting?.main_text ||
+      parsePlaceNameFromDescription(description) ||
+      fallbackQuery,
+  );
+  const address = normalizePickupAddressText(
+    item.address ||
+      item.formatted_address ||
+      item.structured_formatting?.secondary_text ||
+      parsePlaceAddressFromDescription(description),
+  );
+  const lat = Number(item?.coordinate?.latitude ?? item?.location?.lat ?? item?.lat);
+  const lng = Number(item?.coordinate?.longitude ?? item?.location?.lng ?? item?.lng);
+  const coordinate = Number.isFinite(lat) && Number.isFinite(lng)
+    ? {
+        latitude: lat,
+        longitude: lng,
+      }
+    : null;
+  const placeId = normalizePickupAddressText(item.place_id || item.placeId || '');
+
+  return {
+    id: placeId || item.id || description || `${name}-${address}`,
+    place_id: placeId || null,
+    name: name || address || description || 'Partida',
+    address: address || description || name || '',
+    description: description || address || name || '',
+    coordinate,
+    searchSessionToken: item.searchSessionToken || sessionToken || null,
+  };
+}
+
+function buildHomePickupReverseCacheKey(coordinate = null) {
+  const latitude = Number(coordinate?.latitude ?? coordinate?.lat);
+  const longitude = Number(coordinate?.longitude ?? coordinate?.lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return '';
+  }
+
+  return [
+    '@pickup_reverse_geocode',
+    latitude.toFixed(HOME_PICKUP_REVERSE_GEOCODE_PRECISION),
+    longitude.toFixed(HOME_PICKUP_REVERSE_GEOCODE_PRECISION),
+  ].join(':');
+}
+
+async function fetchHomePickupReverseGeocode(coordinate, telemetry = null) {
+  const location = normalizeHomePlaceSearchLocation(coordinate);
+  if (!location || typeof fetch !== 'function') {
+    return null;
+  }
+
+  const canAbort = typeof AbortController !== 'undefined';
+  const controller = canAbort ? new AbortController() : null;
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(), HOME_PICKUP_REVERSE_GEOCODE_TIMEOUT_MS)
+    : null;
+
+  try {
+    const response = await fetch(getSelfHostedApiUrl('/api/places/reverse-geocode'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location,
+        telemetry,
+      }),
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (!response?.ok) {
+      return null;
+    }
+
+    const payload = await response.json();
+    const data = payload?.data || {};
+    const address = resolvePickupAddressCandidate(
+      data.address,
+      data.formatted_address,
+      data.name,
+    );
+    return address
+      ? {
+          address,
+          name: data.name || compactPlaceLabel(address, 'Partida'),
+          lat: Number(data.lat),
+          lng: Number(data.lng),
+          cached: payload.cached === true,
+        }
+      : null;
+  } catch (_error) {
+    return null;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 function resolveProfileInitial(profile = {}) {
   const nameCandidate =
     profile?.name ||
@@ -1102,9 +1269,13 @@ function calculateHomeCategoryFare(distanceKm, durationMin, rateCard) {
 export function resolveHomeCategoryFarePresentation({
   isSelectedCategory = false,
   quotePending = false,
+  backendQuoteRequired = false,
+  quoteUnavailable = false,
   backendFare = null,
   localFare = 0,
 } = {}) {
+  const normalizedBackendFare = Number(backendFare);
+
   if (isSelectedCategory && quotePending) {
     return {
       fare: null,
@@ -1112,7 +1283,17 @@ export function resolveHomeCategoryFarePresentation({
     };
   }
 
-  const normalizedBackendFare = Number(backendFare);
+  if (
+    isSelectedCategory &&
+    backendQuoteRequired &&
+    !(Number.isFinite(normalizedBackendFare) && normalizedBackendFare > 0)
+  ) {
+    return {
+      fare: null,
+      priceLabel: quoteUnavailable ? '--' : 'Calculando',
+    };
+  }
+
   const normalizedLocalFare = Number(localFare);
   const fare =
     Number.isFinite(normalizedBackendFare) && normalizedBackendFare > 0
@@ -1260,6 +1441,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const hasConnectionSnapshotRef = useRef(false);
   const lastDriverAutomationWatchdogCommandRef = useRef('');
   const homeRoutePreviewRequestRef = useRef('');
+  const homePickupSearchSessionTokenRef = useRef('');
+  const homePickupReverseRequestKeyRef = useRef('');
   const latestPrototypeHomeAutomationPayload = useMemo(
     () => getLatestPrototypeHomeAutomationPayload(),
     []
@@ -1282,6 +1465,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const connectionAutomationTimersRef = useRef([]);
   const [homeCardHeight, setHomeCardHeight] = useState(HOME_CARD_FALLBACK_HEIGHT);
   const [homePickupPickerVisible, setHomePickupPickerVisible] = useState(false);
+  const [homePickupSearchActive, setHomePickupSearchActive] = useState(false);
+  const [homePickupSearchQuery, setHomePickupSearchQuery] = useState('');
+  const [homePickupSearchResults, setHomePickupSearchResults] = useState([]);
+  const [homePickupSearching, setHomePickupSearching] = useState(false);
   const [homeDestinationSearchActive, setHomeDestinationSearchActive] = useState(false);
   const [homeDestinationQuery, setHomeDestinationQuery] = useState('');
   const [homeDestinationResults, setHomeDestinationResults] = useState([]);
@@ -1657,6 +1844,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         const farePresentation = resolveHomeCategoryFarePresentation({
           isSelectedCategory: id === homeSelectedCategoryId,
           quotePending: selectedHomeQuotePending,
+          backendQuoteRequired: Boolean(
+            id === homeSelectedCategoryId &&
+              homeSelectedDestination?.coordinate &&
+              homeBackendQuoteKey
+          ),
+          quoteUnavailable: Boolean(homeBackendQuoteError),
           backendFare,
           localFare,
         });
@@ -1676,7 +1869,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       homePickupEtaBaseMin,
       homeQuoteDistanceKm,
       homeQuoteDurationMin,
+      homeBackendQuoteError,
+      homeBackendQuoteKey,
       homeSelectedCategoryId,
+      homeSelectedDestination?.coordinate,
       selectedHomeBackendFare,
       selectedHomeQuotePending,
     ],
@@ -1788,6 +1984,35 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   );
   const activeTab = isSettingsRoute ? 'settings' : isProfileRoute ? 'profile' : 'home';
   const hasActiveRoute = Array.isArray(activeRoute.coordinates) && activeRoute.coordinates.length >= 2;
+  const homeRoutePreviewReady = Boolean(
+    homeRoutePreview?.key === homeRoutePreviewKey &&
+      Number.isFinite(homeRoutePreview?.distanceKm) &&
+      Number.isFinite(homeRoutePreview?.durationMin)
+  );
+  const passengerHomeRoutePending = Boolean(
+    homeSelectedDestination?.coordinate &&
+      homeRoutePreviewKey &&
+      !homeRoutePreviewReady
+  );
+  const activeRouteTrafficLevel = useMemo(
+    () => resolveWorstTrafficSegmentLevel(activeRoute?.trafficSegments),
+    [activeRoute?.trafficSegments],
+  );
+  const passengerHomeEffectiveTrafficLevel =
+    homeRoutePreviewReady && homeRoutePreview?.trafficLevel
+      ? homeRoutePreview.trafficLevel
+      : activeRouteTrafficLevel;
+  const activeRouteTrafficPresentation = useMemo(
+    () => resolveTrafficFareStatusPresentation(passengerHomeEffectiveTrafficLevel),
+    [passengerHomeEffectiveTrafficLevel],
+  );
+  const passengerHomeTrafficStatusLabel = selectedHomeQuotePending || passengerHomeRoutePending
+    ? 'Calculando rota'
+    : activeRouteTrafficPresentation.label;
+  const passengerHomeTrafficHigh =
+    !selectedHomeQuotePending &&
+    !passengerHomeRoutePending &&
+    activeRouteTrafficPresentation.tariffHigh;
   const effectiveRouteParams = useMemo(
     () => ({
       ...(route?.params || {}),
@@ -2876,16 +3101,99 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   );
 
   useEffect(() => {
-    if (canShowPassengerHomeOverlay || !homeDestinationSearchActive) {
+    if (
+      canShowPassengerHomeOverlay ||
+      (!homeDestinationSearchActive && !homePickupSearchActive)
+    ) {
       return;
     }
 
+    setHomePickupSearchActive(false);
+    setHomePickupSearchQuery('');
+    setHomePickupSearchResults([]);
+    setHomePickupSearching(false);
+    homePickupSearchSessionTokenRef.current = '';
     setHomeDestinationSearchActive(false);
     setHomeDestinationQuery('');
     setHomeDestinationResults([]);
     setHomeDestinationSearching(false);
     Keyboard.dismiss();
-  }, [canShowPassengerHomeOverlay, homeDestinationSearchActive]);
+  }, [canShowPassengerHomeOverlay, homeDestinationSearchActive, homePickupSearchActive]);
+
+  useEffect(() => {
+    if (!homePickupSearchActive) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const trimmedQuery = homePickupSearchQuery.trim();
+
+    const loadResults = async () => {
+      if (trimmedQuery.length < 3) {
+        setHomePickupSearching(false);
+        setHomePickupSearchResults([]);
+        return;
+      }
+
+      const sessionToken =
+        homePickupSearchSessionTokenRef.current ||
+        createHomePickupSearchSessionToken();
+      homePickupSearchSessionTokenRef.current = sessionToken;
+      const location = normalizeHomePlaceSearchLocation(effectiveHomePickupCoordinate);
+      const telemetryContext = {
+        sourceKey: `mobile:pickup_search:${profileUid || profile?.uid || 'anonymous'}`,
+        sourceMeta: {
+          userId: profileUid || profile?.uid || null,
+          userType: normalizeHomeRole(activeRole) || 'customer',
+          platform: Platform.OS,
+          flow: 'passenger_home',
+          surface: 'pickup_search',
+        },
+      };
+
+      setHomePickupSearching(true);
+      try {
+        const predictions = await fetchPlacesAutocomplete(
+          trimmedQuery,
+          sessionToken,
+          location,
+          telemetryContext,
+        );
+        if (!cancelled) {
+          setHomePickupSearchResults(
+            Array.isArray(predictions)
+              ? predictions
+                  .map((item) => normalizeHomePickupSearchResult(item, trimmedQuery, sessionToken))
+                  .filter((item) => item.name || item.address || item.description)
+                  .slice(0, 3)
+              : [],
+          );
+        }
+      } catch (_error) {
+        if (!cancelled) {
+          setHomePickupSearchResults([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setHomePickupSearching(false);
+        }
+      }
+    };
+
+    const timer = setTimeout(loadResults, HOME_PICKUP_SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    activeRole,
+    effectiveHomePickupCoordinate,
+    homePickupSearchActive,
+    homePickupSearchQuery,
+    profile?.uid,
+    profileUid,
+  ]);
 
   useEffect(() => {
     if (!homeDestinationSearchActive) {
@@ -2986,6 +3294,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     : '';
   const isLiveTripMapActive = ['accepted', 'arrived', 'started'].includes(
     normalizedBookingStatus
+  );
+  const isPassengerPreBookingRoutePreview = Boolean(
+    !isDriverRole &&
+      !activeBookingId &&
+      normalizedBookingStatus === 'idle' &&
+      !passengerAutoRoute
   );
   const isPassengerRideLifecycleLocked = Boolean(
     !isDriverRole &&
@@ -3118,9 +3432,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     shouldRenderRuntimeMapState && isDriverRole && isPickupPhase
       ? 'avatar'
       : 'place';
-  const routeAnimate = !(shouldRenderRuntimeMapState && isLiveTripMapActive);
+  const routeAnimate =
+    !isPassengerPreBookingRoutePreview &&
+    !(shouldRenderRuntimeMapState && isLiveTripMapActive);
   const routeMainColor =
-    shouldRenderRuntimeMapState && hasActiveRoute ? '#2B5B21' : null;
+    shouldRenderRuntimeMapState && hasActiveRoute && !isPassengerPreBookingRoutePreview
+      ? '#2B5B21'
+      : hasActiveRoute
+        ? PROTOTYPE_TRAFFIC_SEGMENT_COLORS[passengerHomeEffectiveTrafficLevel] || null
+        : null;
   const routeShadowColor =
     shouldRenderRuntimeMapState && hasActiveRoute
       ? '#FFFFFF'
@@ -4478,7 +4798,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     if (homePickupPickerVisible && source === 'gesture' && isFiniteCoordinate(visibleCenterCoordinate)) {
       setHomePickupCoordinate(visibleCenterCoordinate);
-      setHomePickupAddress('Ponto ajustado no mapa');
+      setHomePickupAddress('Localizando endereço...');
       setHomePickupAdjustedOnMap(true);
     }
 
@@ -4496,6 +4816,87 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homePickupPickerVisible,
     resolveVisibleMapCenterCoordinate,
     showDriverH3Overlay,
+  ]);
+
+  useEffect(() => {
+    if (
+      !homePickupAdjustedOnMap ||
+      !isFiniteCoordinate(homePickupCoordinate) ||
+      (!homePickupPickerVisible && homePickupAddress !== 'Localizando endereço...')
+    ) {
+      return undefined;
+    }
+
+    const cacheKey = buildHomePickupReverseCacheKey(homePickupCoordinate);
+    if (!cacheKey) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    homePickupReverseRequestKeyRef.current = cacheKey;
+
+    const resolveAddress = async () => {
+      try {
+        const cached = await AsyncStorage.getItem(cacheKey);
+        if (cancelled || homePickupReverseRequestKeyRef.current !== cacheKey) {
+          return;
+        }
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          const cachedAddress = resolvePickupAddressCandidate(parsed?.address, parsed?.formatted_address);
+          if (cachedAddress) {
+            setHomePickupAddress(cachedAddress);
+            return;
+          }
+        }
+      } catch (_error) {
+        // Local cache failure should not block address resolution.
+      }
+
+      const telemetryContext = {
+        sourceKey: `mobile:pickup_reverse:${profileUid || profile?.uid || 'anonymous'}`,
+        sourceMeta: {
+          userId: profileUid || profile?.uid || null,
+          userType: normalizeHomeRole(activeRole) || 'customer',
+          platform: Platform.OS,
+          flow: 'passenger_home',
+          surface: 'pickup_pin_reverse_geocode',
+        },
+      };
+      const resolved = await fetchHomePickupReverseGeocode(
+        homePickupCoordinate,
+        telemetryContext,
+      );
+      if (cancelled || homePickupReverseRequestKeyRef.current !== cacheKey) {
+        return;
+      }
+      if (resolved?.address) {
+        setHomePickupAddress(resolved.address);
+        AsyncStorage.setItem(cacheKey, JSON.stringify(resolved)).catch(() => {});
+        return;
+      }
+
+      setHomePickupAddress(previous => (
+        previous && previous !== 'Localizando endereço...'
+          ? previous
+          : 'Ponto ajustado no mapa'
+      ));
+    };
+
+    const timer = setTimeout(resolveAddress, HOME_PICKUP_REVERSE_GEOCODE_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    activeRole,
+    homePickupAdjustedOnMap,
+    homePickupAddress,
+    homePickupCoordinate,
+    homePickupPickerVisible,
+    profile?.uid,
+    profileUid,
   ]);
 
   const handleMapLayout = useCallback(event => {
@@ -4537,6 +4938,36 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     );
   }, [effectiveHomePickupCoordinate, homeMapInteractiveReady]);
 
+  const handleOpenHomePickupSearch = useCallback(() => {
+    setHomeDestinationSearchActive(false);
+    setHomeDestinationQuery('');
+    setHomeDestinationResults([]);
+    setHomeDestinationSearching(false);
+    setHomePickupSearchQuery(
+      homePickupAdjustedOnMap
+        ? homePickupAddress || ''
+        : effectiveHomePickupAddress || homePickupDisplayLabel || '',
+    );
+    setHomePickupSearchResults([]);
+    setHomePickupSearching(false);
+    homePickupSearchSessionTokenRef.current = createHomePickupSearchSessionToken();
+    setHomePickupSearchActive(true);
+  }, [
+    effectiveHomePickupAddress,
+    homePickupAddress,
+    homePickupAdjustedOnMap,
+    homePickupDisplayLabel,
+  ]);
+
+  const handleCloseHomePickupSearch = useCallback(() => {
+    setHomePickupSearchActive(false);
+    setHomePickupSearchQuery('');
+    setHomePickupSearchResults([]);
+    setHomePickupSearching(false);
+    homePickupSearchSessionTokenRef.current = '';
+    Keyboard.dismiss();
+  }, []);
+
   const handleOpenHomePickupPicker = useCallback(() => {
     const nextCoordinate = isFiniteCoordinate(homePickupCoordinate)
       ? homePickupCoordinate
@@ -4549,6 +4980,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setHomePickupCoordinate(nextCoordinate);
     setHomePickupAddress(effectiveHomePickupAddress);
     setHomePickupPickerVisible(true);
+    setHomePickupSearchActive(false);
+    setHomePickupSearchQuery('');
+    setHomePickupSearchResults([]);
+    setHomePickupSearching(false);
+    homePickupSearchSessionTokenRef.current = '';
+    Keyboard.dismiss();
     setMapFollowingUser(false);
     requestAnimationFrame(() => focusHomePickupCoordinate(nextCoordinate));
   }, [
@@ -4559,6 +4996,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homePickupAdjustedOnMap,
     homePickupCoordinate
   ]);
+
+  const handleOpenHomePickupPickerFromSearch = useCallback(() => {
+    handleCloseHomePickupSearch();
+    requestAnimationFrame(() => handleOpenHomePickupPicker());
+  }, [handleCloseHomePickupSearch, handleOpenHomePickupPicker]);
 
   const handleUseCurrentHomePickup = useCallback(() => {
     const nextCoordinate = isFiniteCoordinate(currentCoordinate)
@@ -4573,6 +5015,108 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     effectiveHomePickupAddress,
     focusHomePickupCoordinate,
   ]);
+
+  const handleSelectHomePickupResult = useCallback(
+    async (item) => {
+      const query = String(homePickupSearchQuery || '').trim();
+      const fallbackPickup = {
+        name: query,
+        address: query,
+        description: query,
+      };
+      const normalizedPickup = normalizeHomePickupSearchResult(
+        item || fallbackPickup,
+        query,
+        homePickupSearchSessionTokenRef.current,
+      );
+      const telemetryContext = {
+        sourceKey: `mobile:pickup_details:${profileUid || profile?.uid || 'anonymous'}`,
+        sourceMeta: {
+          userId: profileUid || profile?.uid || null,
+          userType: normalizeHomeRole(activeRole) || 'customer',
+          platform: Platform.OS,
+          flow: 'passenger_home',
+          surface: 'pickup_details',
+        },
+      };
+
+      try {
+        setHomePickupSearching(true);
+        let resolvedCoordinate = normalizedPickup.coordinate;
+        let resolvedAddress = resolvePickupAddressCandidate(
+          normalizedPickup.address,
+          normalizedPickup.description,
+          normalizedPickup.name,
+        );
+
+        if (!resolvedCoordinate && normalizedPickup.place_id) {
+          const details = await fetchCoordsfromPlace(
+            normalizedPickup.place_id,
+            telemetryContext,
+            normalizedPickup.searchSessionToken,
+            {
+              query,
+              description: normalizedPickup.description,
+              name: normalizedPickup.name,
+              address: normalizedPickup.address,
+              location: normalizeHomePlaceSearchLocation(effectiveHomePickupCoordinate),
+            },
+          );
+          const lat = Number(details?.lat);
+          const lng = Number(details?.lng);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            resolvedCoordinate = {
+              latitude: lat,
+              longitude: lng,
+            };
+          }
+          resolvedAddress = resolvePickupAddressCandidate(
+            details?.formatted_address,
+            resolvedAddress,
+            details?.name,
+          );
+        }
+
+        if (!resolvedCoordinate) {
+          Alert.alert(
+            'Partida indisponível',
+            'Não consegui confirmar esse local de partida agora. Tente buscar de novo.',
+          );
+          return;
+        }
+
+        const finalAddress =
+          resolvedAddress ||
+          normalizedPickup.description ||
+          normalizedPickup.name ||
+          'Ponto de partida';
+        setHomePickupCoordinate(resolvedCoordinate);
+        setHomePickupAddress(finalAddress);
+        setHomePickupAdjustedOnMap(true);
+        setHomePickupSearchActive(false);
+        setHomePickupSearchQuery('');
+        setHomePickupSearchResults([]);
+        homePickupSearchSessionTokenRef.current = '';
+        Keyboard.dismiss();
+        focusHomePickupCoordinate(resolvedCoordinate);
+      } catch (_error) {
+        Alert.alert(
+          'Partida indisponível',
+          'Não consegui confirmar esse local de partida agora. Tente buscar de novo.',
+        );
+      } finally {
+        setHomePickupSearching(false);
+      }
+    },
+    [
+      activeRole,
+      effectiveHomePickupCoordinate,
+      focusHomePickupCoordinate,
+      homePickupSearchQuery,
+      profile?.uid,
+      profileUid,
+    ],
+  );
 
   const handleConfirmHomePickup = useCallback(() => {
     homePickupDraftBeforePickerRef.current = null;
@@ -4592,6 +5136,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   const handleOpenPassengerDestination = useCallback(
     (_extraParams = {}) => {
+      setHomePickupSearchActive(false);
+      setHomePickupSearchQuery('');
+      setHomePickupSearchResults([]);
+      setHomePickupSearching(false);
+      homePickupSearchSessionTokenRef.current = '';
       setHomeDestinationQuery(
         homeSelectedDestination?.name ||
           homeSelectedDestination?.address ||
@@ -4781,10 +5330,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
         const distanceKm = Number(route?.distance_in_km);
         const durationMin = Number(route?.time_in_secs) / 60;
+        const trafficLevel =
+          resolveTrafficSegmentLevelForLeg(route, route, 1) ||
+          resolveWorstTrafficSegmentLevel(trafficSegments);
         setHomeRoutePreview({
           key: routeKey,
           distanceKm: Number.isFinite(distanceKm) && distanceKm > 0 ? distanceKm : null,
           durationMin: Number.isFinite(durationMin) && durationMin > 0 ? durationMin : null,
+          trafficLevel,
         });
       })
       .catch(error => {
@@ -6057,7 +6610,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 <View style={styles.homePickupFloatingCopy}>
                   <Text style={styles.homePickupEyebrow}>Partida</Text>
                   <Text style={styles.homePickupFloatingTitle}>
-                    {homePickupAdjustedOnMap ? 'Ponto ajustado no mapa' : homePickupDisplayLabel}
+                    {homePickupDisplayLabel}
                   </Text>
                   <Text style={styles.homePickupFloatingAddress} numberOfLines={2}>
                     {effectiveHomePickupAddress}
@@ -6165,7 +6718,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               destination
             }
             onCardLayout={handleSearchCardLayout}
-            onPickupPress={handleOpenHomePickupPicker}
+            onPickupPress={handleOpenHomePickupSearch}
+            pickupSearchActive={homePickupSearchActive}
+            pickupSearchQuery={homePickupSearchQuery}
+            pickupSearchResults={homePickupSearchResults}
+            pickupSearchSearching={homePickupSearching}
+            onPickupSearchChange={setHomePickupSearchQuery}
+            onPickupSearchClose={handleCloseHomePickupSearch}
+            onPickupResultPress={handleSelectHomePickupResult}
+            onPickupMapPress={handleOpenHomePickupPickerFromSearch}
             onDestinationPress={() => handleOpenPassengerDestination()}
             onMicrophonePress={() =>
               handleOpenPassengerDestination({
@@ -6196,8 +6757,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   ? 'Tarifa indisponível'
                   : 'Confirmar'
             }
-            tariffStatusLabel="Tarifa normal"
-            tariffHigh={false}
+            tariffStatusLabel={passengerHomeTrafficStatusLabel}
+            tariffHigh={passengerHomeTrafficHigh}
             leafDelasEnabled={homeLeafDelasEnabled}
             onLeafDelasToggle={() =>
               setHomeLeafDelasEnabled((current) => !current)
