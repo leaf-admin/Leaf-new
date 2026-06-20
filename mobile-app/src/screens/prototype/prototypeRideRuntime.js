@@ -88,6 +88,7 @@ import {
   markRideEventIntentAcked,
   markRideEventIntentRejected,
 } from "../../services/RideEventOutboxService";
+import { replayPendingRideLifecycleIntents } from "../../services/RideLifecycleOutboxReplayService";
 import { saveCanonicalRideLocalSnapshot } from "../../services/RideLocalSnapshotService";
 import { getApiURL } from "../../config/NetworkConfig";
 import { getPrototypePlaybackConfigSnapshot } from "../../config/prototypePlaybackConfig";
@@ -572,6 +573,7 @@ let runtimeDeferredSocketBootstrapTimer = null;
 let runtimeQALockUntil = 0;
 let runtimeDriverOnlineEnablePromise = null;
 let runtimeLastSocketConnectAt = 0;
+let runtimeLifecycleOutboxFlushPromise = null;
 let runtimeLastDriverCoordinateUpdateAt = 0;
 let runtimeLastSharedDriverRoutePlanKey = "";
 let runtimeLastSharedDriverRoutePlanAt = 0;
@@ -2557,6 +2559,58 @@ function markRuntimeLifecycleIntentRejected(eventType, bookingId, error = null) 
       storageError?.message || storageError,
     );
   });
+}
+
+function flushRuntimeLifecycleOutbox(reason = "socket_reconnect") {
+  if (runtimeLifecycleOutboxFlushPromise) {
+    return runtimeLifecycleOutboxFlushPromise;
+  }
+
+  const socket = WebSocketManager.getInstance();
+  runtimeLifecycleOutboxFlushPromise = replayPendingRideLifecycleIntents({
+    state: runtimeState,
+    socket,
+    actorId: getRuntimeLifecycleActorId(),
+    logger: Logger,
+    onSyncState: (rideLocalSync) => {
+      setRuntimeState({
+        rideLocalSync: cloneDefaultRideLocalSyncState(rideLocalSync),
+      });
+    },
+  })
+    .then((report) => {
+      if (
+        report.replayed ||
+        report.acked ||
+        report.rejected ||
+        report.failed
+      ) {
+        writeRuntimeDebugProbe("ride_lifecycle_outbox_flush", {
+          reason,
+          ...report,
+        });
+      }
+      return report;
+    })
+    .catch((error) => {
+      Logger.warn(
+        "⚠️ [PrototypeRuntime] Falha ao sincronizar ações pendentes da corrida:",
+        error?.message || error,
+      );
+      return {
+        replayed: 0,
+        acked: 0,
+        rejected: 0,
+        held: 0,
+        failed: 1,
+        error: error?.message || String(error),
+      };
+    })
+    .finally(() => {
+      runtimeLifecycleOutboxFlushPromise = null;
+    });
+
+  return runtimeLifecycleOutboxFlushPromise;
 }
 
 function setRuntimeState(next) {
@@ -6968,6 +7022,7 @@ function attachSocketListeners() {
           }
         : {}),
     });
+    flushRuntimeLifecycleOutbox("socket_connect");
   };
 
   const handleDisconnect = () => {
@@ -7089,6 +7144,7 @@ function attachSocketListeners() {
       isSocketAuthenticated: true,
       socketError: "",
     });
+    flushRuntimeLifecycleOutbox("socket_authenticated");
   };
 
   const handleActiveRideSync = (payload) => {

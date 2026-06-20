@@ -9,6 +9,7 @@ function registerSocketCompleteTripHandler({
     getSocketMetadata,
     auditService,
     redisPool,
+    idempotencyService,
     getTracer,
     createCommandSpan,
     runInSpan,
@@ -22,6 +23,7 @@ function registerSocketCompleteTripHandler({
 }) {
     const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+    const rideIdempotencyService = idempotencyService || require('../services/idempotency-service');
     const {
         recordDriverDestinationDailyRideCompletion
     } = require('../services/driver-destination-mode-service');
@@ -29,6 +31,8 @@ function registerSocketCompleteTripHandler({
     socket.on('completeTrip', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
+        let outerIdempotencyKey = null;
+        let outerIdempotencyOwner = false;
         await traceContext.runWithTraceId(traceId, async () => {
             try {
                 const driverId = socket.userId || socket.id;
@@ -88,6 +92,38 @@ function registerSocketCompleteTripHandler({
 
                 // Usar dados sanitizados
                 const { bookingId, endLocation, distance, fare } = validation.sanitized;
+                const idempotencyKey = data.idempotencyKey || rideIdempotencyService.generateKey(
+                    driverId,
+                    'completeTrip',
+                    bookingId
+                );
+                outerIdempotencyKey = idempotencyKey;
+
+                const idempotencyCheck = await rideIdempotencyService.beginRequest(idempotencyKey, {
+                    joinWaitMs: Number.parseInt(
+                        process.env.IDEMPOTENCY_COMPLETE_TRIP_JOIN_WAIT_MS
+                        || process.env.IDEMPOTENCY_JOIN_WAIT_MS
+                        || '10000',
+                        10
+                    )
+                });
+
+                if (!idempotencyCheck.isNew) {
+                    if (idempotencyCheck.cachedResult) {
+                        socket.emit('tripCompleted', idempotencyCheck.cachedResult);
+                        return;
+                    }
+
+                    socket.emit('tripCompleteError', {
+                        error: 'Requisição duplicada',
+                        message: 'Esta ação já está sendo processada. Aguarde...',
+                        code: 'DUPLICATE_REQUEST',
+                        retryAfterSec: 1
+                    });
+                    return;
+                }
+                outerIdempotencyOwner = true;
+
                 const paymentMockEnabled =
                     data?.mockPayment === true ||
                     data?.__mockPayment === true ||
@@ -163,6 +199,10 @@ function registerSocketCompleteTripHandler({
                         eventType: 'completeTrip',
                         error: result.error
                     });
+                    if (outerIdempotencyOwner && outerIdempotencyKey) {
+                        outerIdempotencyOwner = false;
+                        await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                    }
                     socket.emit('tripCompleteError', {
                         error: result.error || 'Erro ao finalizar viagem'
                     });
@@ -263,6 +303,8 @@ function registerSocketCompleteTripHandler({
                         : null,
                     persistence: 'accepted_background'
                 });
+                await rideIdempotencyService.cacheResult(idempotencyKey, tripCompletedData);
+                outerIdempotencyOwner = false;
 
                 io.to(`driver_${driverId}`).emit('tripCompleted', tripCompletedData);
                 scheduleMapH3Refresh(io, {
@@ -418,6 +460,10 @@ function registerSocketCompleteTripHandler({
                 });
 
             } catch (error) {
+                if (outerIdempotencyOwner && outerIdempotencyKey) {
+                    outerIdempotencyOwner = false;
+                    await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                }
                 logStructured('error', 'Erro ao finalizar viagem', {
                     service: 'websocket',
                     operation: 'completeTrip',

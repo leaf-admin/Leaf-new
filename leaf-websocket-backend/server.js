@@ -1212,6 +1212,7 @@ io.on('connection', async (socket) => {
         getSocketMetadata,
         auditService,
         redisPool,
+        idempotencyService,
         getTracer,
         createCommandSpan,
         runInSpan,
@@ -1299,6 +1300,7 @@ io.on('connection', async (socket) => {
         eventBus,
         logEvent,
         PaymentService,
+        idempotencyService,
         fcmService
     });
     // =========================================================================================
@@ -1331,6 +1333,7 @@ io.on('connection', async (socket) => {
         io,
         redisPool,
         logStructured,
+        idempotencyService,
         enforceSubscriptionForOnline,
         enforceDailyKYCForOnline
     });

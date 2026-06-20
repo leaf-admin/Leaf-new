@@ -83,17 +83,71 @@ function registerSocketDriverControlHandlers({
     io,
     redisPool,
     logStructured,
+    idempotencyService = null,
     enforceSubscriptionForOnline = null,
     enforceDailyKYCForOnline = null
 }) {
     const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
+    const rideIdempotencyService = idempotencyService;
 
     const handleArriveAtPickup = async (data = {}, transport = 'arriveAtPickup') => {
+        let outerIdempotencyKey = null;
+        let outerIdempotencyOwner = false;
         try {
             const rideId = data.rideId || data.bookingId || null;
             const location = data.location || null;
 
             if (!rideId) return;
+
+            if (rideIdempotencyService) {
+                const driverId = socket.userId || data.driverId || 'driver';
+                const idempotencyKey = data.idempotencyKey || rideIdempotencyService.generateKey(
+                    driverId,
+                    'arriveAtPickup',
+                    rideId
+                );
+                outerIdempotencyKey = idempotencyKey;
+
+                const idempotencyCheck = await rideIdempotencyService.beginRequest(idempotencyKey, {
+                    joinWaitMs: Number.parseInt(
+                        process.env.IDEMPOTENCY_ARRIVE_PICKUP_JOIN_WAIT_MS
+                        || process.env.IDEMPOTENCY_JOIN_WAIT_MS
+                        || '8000',
+                        10
+                    )
+                });
+
+                if (!idempotencyCheck.isNew) {
+                    if (idempotencyCheck.cachedResult) {
+                        socket.emit('arrivedAtPickup', idempotencyCheck.cachedResult);
+                        if (transport === 'notificationAction') {
+                            socket.emit('notificationActionSuccess', {
+                                ...idempotencyCheck.cachedResult,
+                                action: 'arrived_at_pickup'
+                            });
+                        }
+                        return;
+                    }
+
+                    const duplicatePayload = {
+                        success: false,
+                        error: 'Requisição duplicada',
+                        message: 'Esta ação já está sendo processada. Aguarde...',
+                        code: 'DUPLICATE_REQUEST',
+                        bookingId: rideId,
+                        retryAfterSec: 1
+                    };
+                    socket.emit('arrivedAtPickup', duplicatePayload);
+                    if (transport === 'notificationAction') {
+                        socket.emit('notificationActionError', {
+                            ...duplicatePayload,
+                            action: 'arrived_at_pickup'
+                        });
+                    }
+                    return;
+                }
+                outerIdempotencyOwner = true;
+            }
 
             const redis = redisPool.getConnection();
             const bookingData = await redis.hgetall(`booking:${rideId}`);
@@ -121,6 +175,10 @@ function registerSocketDriverControlHandlers({
                         ...errorPayload,
                         action: 'arrived_at_pickup'
                     });
+                }
+                if (outerIdempotencyOwner && outerIdempotencyKey && rideIdempotencyService) {
+                    outerIdempotencyOwner = false;
+                    await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
                 }
                 return;
             }
@@ -238,8 +296,13 @@ function registerSocketDriverControlHandlers({
                 toleranceMeters: arrivalAssessment.toleranceMeters,
                 boardingWindowSec: DRIVER_BOARDING_WINDOW_SECONDS,
                 boardingDeadlineAt,
+                ...(outerIdempotencyKey ? { idempotencyKey: outerIdempotencyKey } : {}),
                 timestamp: new Date().toISOString()
             };
+            if (outerIdempotencyKey && rideIdempotencyService) {
+                await rideIdempotencyService.cacheResult(outerIdempotencyKey, successPayload);
+                outerIdempotencyOwner = false;
+            }
             socket.emit('arrivedAtPickup', successPayload);
             if (transport === 'notificationAction') {
                 socket.emit('notificationActionSuccess', {
@@ -253,6 +316,10 @@ function registerSocketDriverControlHandlers({
                 driverId: socket.userId || null
             });
         } catch (error) {
+            if (outerIdempotencyOwner && outerIdempotencyKey && rideIdempotencyService) {
+                outerIdempotencyOwner = false;
+                await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+            }
             const errorPayload = {
                 success: false,
                 error: error.message || 'Erro ao processar chegada no pickup'

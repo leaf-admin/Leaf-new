@@ -20,12 +20,16 @@ function registerSocketCancelRideHandler({
     eventBus,
     logEvent,
     PaymentService,
+    idempotencyService,
     fcmService
 }) {
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+    const rideIdempotencyService = idempotencyService || require('../services/idempotency-service');
     socket.on('cancelRide', async (data) => {
         // ✅ OBSERVABILIDADE: Gerar traceId no início do handler
         const traceId = extractTraceIdFromEvent(data, socket);
+        let outerIdempotencyKey = null;
+        let outerIdempotencyOwner = false;
         await traceContext.runWithTraceId(traceId, async () => {
             try {
                 const { bookingId, reason, cancellationFee } = data;
@@ -72,6 +76,38 @@ function registerSocketCancelRideHandler({
                     return;
                 }
 
+                const idempotencyKey = data.idempotencyKey || rideIdempotencyService.generateKey(
+                    userId,
+                    'cancelRide',
+                    bookingId
+                );
+                outerIdempotencyKey = idempotencyKey;
+
+                const idempotencyCheck = await rideIdempotencyService.beginRequest(idempotencyKey, {
+                    joinWaitMs: Number.parseInt(
+                        process.env.IDEMPOTENCY_CANCEL_RIDE_JOIN_WAIT_MS
+                        || process.env.IDEMPOTENCY_JOIN_WAIT_MS
+                        || '10000',
+                        10
+                    )
+                });
+
+                if (!idempotencyCheck.isNew) {
+                    if (idempotencyCheck.cachedResult) {
+                        socket.emit('rideCancelled', idempotencyCheck.cachedResult);
+                        return;
+                    }
+
+                    socket.emit('rideCancellationError', {
+                        error: 'Requisição duplicada',
+                        message: 'Esta ação já está sendo processada. Aguarde...',
+                        code: 'DUPLICATE_REQUEST',
+                        retryAfterSec: 1
+                    });
+                    return;
+                }
+                outerIdempotencyOwner = true;
+
                 // ✅ NOVO: Marcar corrida como cancelada no Firestore
                 try {
                     const ridePersistenceService = require('../services/ride-persistence-service');
@@ -96,6 +132,10 @@ function registerSocketCancelRideHandler({
                         eventType: 'cancelRide'
                     });
                     socket.emit('rideCancellationError', { error: 'Corrida não encontrada' });
+                    if (outerIdempotencyOwner && outerIdempotencyKey) {
+                        outerIdempotencyOwner = false;
+                        await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                    }
                     return;
                 }
 
@@ -221,6 +261,10 @@ function registerSocketCancelRideHandler({
                     socket.emit('rideCancellationError', {
                         error: result.error || 'Erro ao cancelar corrida'
                     });
+                    if (outerIdempotencyOwner && outerIdempotencyKey) {
+                        outerIdempotencyOwner = false;
+                        await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                    }
                     return;
                 }
 
@@ -299,6 +343,10 @@ function registerSocketCancelRideHandler({
                 if (paymentRecord) {
                     if (paymentRecord.status === 'CREDITED' || paymentRecord.credited) {
                         socket.emit('rideCancellationError', { error: 'Pagamento já foi repassado ao motorista. Entre em contato com o suporte.' });
+                        if (outerIdempotencyOwner && outerIdempotencyKey) {
+                            outerIdempotencyOwner = false;
+                            await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                        }
                         return;
                     }
 
@@ -314,6 +362,10 @@ function registerSocketCancelRideHandler({
                             const refundResult = await paymentService.processRefund(chargeId, refundAmountCents, refundReason);
                             if (!refundResult.success) {
                                 socket.emit('rideCancellationError', { error: 'Falha ao processar reembolso PIX' });
+                                if (outerIdempotencyOwner && outerIdempotencyKey) {
+                                    outerIdempotencyOwner = false;
+                                    await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                                }
                                 return;
                             }
 
@@ -376,6 +428,8 @@ function registerSocketCancelRideHandler({
                     initiatedById: socket.userId || null,
                     data: cancellationData
                 };
+                await rideIdempotencyService.cacheResult(idempotencyKey, cancellationResponse);
+                outerIdempotencyOwner = false;
 
                 // 8. Emitir confirmação
                 // ✅ Padronizar uso de rooms para alta escalabilidade
@@ -482,6 +536,10 @@ function registerSocketCancelRideHandler({
                 }
 
             } catch (error) {
+                if (outerIdempotencyOwner && outerIdempotencyKey) {
+                    outerIdempotencyOwner = false;
+                    await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                }
                 logStructured('error', 'Erro ao cancelar corrida', {
                     service: 'websocket',
                     operation: 'cancelRide',

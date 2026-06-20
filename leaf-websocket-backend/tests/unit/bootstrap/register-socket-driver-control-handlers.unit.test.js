@@ -69,12 +69,23 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
   let socket;
   let io;
   let redis;
+  let idempotencyService;
 
   beforeEach(() => {
     jest.clearAllMocks();
     socket = createSocket();
     io = createIo();
     redis = createRedis();
+    idempotencyService = {
+      generateKey: jest.fn(() => 'idem_arrive'),
+      beginRequest: jest.fn().mockResolvedValue({
+        isNew: true,
+        disposition: 'started',
+        cachedResult: null,
+      }),
+      cacheResult: jest.fn().mockResolvedValue(undefined),
+      releaseInflight: jest.fn().mockResolvedValue(undefined),
+    };
 
     registerSocketDriverControlHandlers({
       socket,
@@ -83,6 +94,7 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
         getConnection: jest.fn(() => redis),
       },
       logStructured: jest.fn(),
+      idempotencyService,
     });
   });
 
@@ -148,6 +160,39 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
         action: 'arrived_at_pickup',
         bookingId: 'booking_3',
         code: 'OUTSIDE_PICKUP_RADIUS',
+      })
+    );
+  });
+
+  it('returns cached arrival result without reapplying arrival state', async () => {
+    const cachedResult = {
+      success: true,
+      bookingId: 'booking_1',
+      rideId: 'booking_1',
+      cached: true,
+    };
+    idempotencyService.beginRequest.mockResolvedValueOnce({
+      isNew: false,
+      disposition: 'cached',
+      cachedResult,
+    });
+
+    await socket.trigger('notificationAction', {
+      action: 'arrived_at_pickup',
+      bookingId: 'booking_1',
+      idempotencyKey: 'idem_arrive',
+    });
+
+    expect(assessDriverArrivalAtPickup).not.toHaveBeenCalled();
+    expect(redis.hgetall).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith('arrivedAtPickup', cachedResult);
+    expect(socket.emit).toHaveBeenCalledWith(
+      'notificationActionSuccess',
+      expect.objectContaining({
+        success: true,
+        action: 'arrived_at_pickup',
+        bookingId: 'booking_1',
+        cached: true,
       })
     );
   });
