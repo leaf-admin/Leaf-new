@@ -519,7 +519,22 @@ describe("RobotaxiDestinationScreen", () => {
     fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
 
     await waitFor(() => {
-      expect(runtimeSnapshot.checkRideAvailability).toHaveBeenCalled();
+      expect(runtimeSnapshot.checkRideAvailability).toHaveBeenCalledWith(
+        expect.objectContaining({
+          vehicle: "Leaf Plus",
+          pickupLocation: expect.objectContaining({
+            lat: -22.9711,
+            lng: -43.1822,
+          }),
+          originCoordinate: expect.objectContaining({
+            latitude: -22.9711,
+            longitude: -43.1822,
+          }),
+        }),
+        expect.objectContaining({
+          forceRefresh: true,
+        }),
+      );
       expect(screen.getByTestId("mock-pix-amount").props.children).toBe("17.77");
     });
 

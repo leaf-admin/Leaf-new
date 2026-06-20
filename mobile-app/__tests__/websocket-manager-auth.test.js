@@ -482,6 +482,64 @@ describe('WebSocketManager auth QA bypass', () => {
     );
   });
 
+  it('bypasses cached availability when forceRefresh is requested', async () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      emit: jest.fn(),
+      on: jest.fn(),
+    };
+    manager.isAuthenticated = true;
+    manager.authenticatedUserId = 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
+    manager.authenticatedUserType = 'customer';
+
+    const payload = {
+      customerId: 'OjML1wSzdNRaynjqMRlSW1Y0LVy2',
+      carType: 'Leaf Plus',
+      pickupLocation: { lat: -22.91, lng: -43.17 },
+      destinationLocation: { lat: -22.90, lng: -43.20 },
+    };
+
+    const cachedPromise = manager.checkRideAvailability(payload);
+    const [, cachedPayload] = manager.socket.emit.mock.calls[0];
+
+    manager.emit('rideAvailabilityResult', {
+      success: true,
+      available: false,
+      code: 'NO_DRIVERS_AVAILABLE',
+      requestId: cachedPayload.requestId,
+    });
+
+    await expect(cachedPromise).resolves.toEqual(
+      expect.objectContaining({
+        success: true,
+        available: false,
+      }),
+    );
+
+    const freshPromise = manager.checkRideAvailability(payload, {
+      forceRefresh: true,
+    });
+
+    expect(manager.socket.emit).toHaveBeenCalledTimes(2);
+
+    const [, freshPayload] = manager.socket.emit.mock.calls[1];
+    expect(freshPayload.requestId).not.toBe(cachedPayload.requestId);
+
+    manager.emit('rideAvailabilityResult', {
+      success: true,
+      available: true,
+      requestId: freshPayload.requestId,
+    });
+
+    await expect(freshPromise).resolves.toEqual(
+      expect.objectContaining({
+        success: true,
+        available: true,
+      }),
+    );
+  });
+
   it('registers sessionTerminated as a first-class server event', () => {
     const manager = WebSocketManager.getInstance();
     manager.socket = {
