@@ -522,6 +522,50 @@ class FinancialLedgerService {
     return events;
   }
 
+  resolveLedgerRideIds({ rideId, payment = null, holding = null } = {}) {
+    const rideIds = new Set();
+    const addRideId = (value) => {
+      const normalized = String(value || '').trim();
+      if (normalized) rideIds.add(normalized);
+    };
+    const addDocumentReferences = (document) => {
+      if (!document || typeof document !== 'object') return;
+      addRideId(document.rideId);
+      addRideId(document.canonicalRideId);
+      addRideId(document.paymentReferenceRideId);
+      addRideId(document.temporaryRideId);
+      addRideId(document.materializedFrom);
+
+      const additionalInfo = Array.isArray(document.metadata?.additionalInfo)
+        ? document.metadata.additionalInfo
+        : [];
+      additionalInfo.forEach((item) => {
+        if (String(item?.key || '').trim().toLowerCase() === 'ride_id') {
+          addRideId(item?.value);
+        }
+      });
+    };
+
+    addRideId(rideId);
+    addDocumentReferences(payment);
+    addDocumentReferences(holding);
+    return Array.from(rideIds);
+  }
+
+  async listLedgerEventsByRideIds(firestore, rideIds = []) {
+    const eventGroups = await Promise.all(
+      rideIds.map((currentRideId) => this.listLedgerEventsByRide(firestore, currentRideId))
+    );
+    const eventsById = new Map();
+    eventGroups.flat().forEach((event) => {
+      const key = event.id || event.eventId;
+      if (key && !eventsById.has(key)) {
+        eventsById.set(key, event);
+      }
+    });
+    return Array.from(eventsById.values());
+  }
+
   async listLedgerEventsByWithdrawal(firestore, withdrawalId) {
     const snapshot = await firestore
       .collection('financial_ledger_events')
@@ -669,22 +713,37 @@ class FinancialLedgerService {
         firestore.collection('payment_holdings').doc(rideId).get(),
         firestore.collection('payment_distributions').doc(rideId).get()
       ]);
-      const ledgerEvents = await this.listLedgerEventsByRide(firestore, rideId);
       const issues = [];
       const payment = paymentDoc.exists ? paymentDoc.data() : null;
       const holding = holdingDoc.exists ? holdingDoc.data() : null;
       const distribution = distributionDoc.exists ? distributionDoc.data() : null;
+      const ledgerRideIds = this.resolveLedgerRideIds({ rideId, payment, holding });
+      const ledgerEvents = await this.listLedgerEventsByRideIds(firestore, ledgerRideIds);
 
       const paymentAmount = this.toCents(payment?.amount || holding?.amount || 0);
       const distributionTotal = this.toCents(distribution?.calculation?.totalAmount || distribution?.totalAmount || 0);
       const settlementEvent = ledgerEvents.find((event) => event.eventType === 'ride_settlement');
-      const paymentEvent = ledgerEvents.find((event) => event.eventType === 'payment_received');
+      const paymentChargeId = String(payment?.chargeId || holding?.chargeId || '').trim();
+      const paymentEvent = ledgerEvents.find((event) => (
+        event.eventType === 'payment_received'
+        && (!paymentChargeId || String(event.chargeId || '').trim() === paymentChargeId)
+      ));
 
       if (payment && paymentAmount > 0 && !paymentEvent) {
         issues.push({
           code: 'PAYMENT_WITHOUT_LEDGER_EVENT',
           severity: 'high',
           message: 'Pagamento confirmado sem evento payment_received no ledger'
+        });
+      }
+
+      if (paymentEvent && paymentAmount > 0 && this.toCents(paymentEvent.totalDebitCents) !== paymentAmount) {
+        issues.push({
+          code: 'PAYMENT_LEDGER_AMOUNT_MISMATCH',
+          severity: 'high',
+          message: 'Valor do pagamento no ledger diverge do pagamento confirmado',
+          ledgerAmountCents: this.toCents(paymentEvent.totalDebitCents),
+          paymentAmountCents: paymentAmount
         });
       }
 
@@ -715,6 +774,10 @@ class FinancialLedgerService {
           paymentAmountCents: paymentAmount,
           distributionTotalCents: distributionTotal,
           ledgerEventCount: ledgerEvents.length
+        },
+        references: {
+          ledgerRideIds,
+          paymentLedgerRideId: paymentEvent?.rideId || null
         },
         checkedAt: admin.firestore.FieldValue.serverTimestamp(),
         checkedAtIso: new Date().toISOString()

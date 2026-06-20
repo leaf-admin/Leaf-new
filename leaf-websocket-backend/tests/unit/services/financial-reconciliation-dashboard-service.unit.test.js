@@ -291,6 +291,51 @@ describe('FinancialReconciliationDashboardService', () => {
     ]);
   });
 
+  it('includes temporary payment ledger events in canonical ride detail', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    firestore.docs.set('financial_reconciliation_reports/booking_detail', {
+      rideId: 'booking_detail',
+      ok: true,
+      issues: [],
+      checkedAtIso: '2026-06-20T16:00:54.580Z'
+    });
+    firestore.docs.set('financial_ledger_events/event_payment_temp', {
+      rideId: 'temp_ride_detail',
+      eventType: 'payment_received',
+      createdAtIso: '2026-06-20T16:00:11.665Z'
+    });
+    firestore.docs.set('financial_ledger_events/event_settlement_booking', {
+      rideId: 'booking_detail',
+      eventType: 'ride_settlement',
+      createdAtIso: '2026-06-20T16:00:50.755Z'
+    });
+    firestore.docs.set('ride_payments/booking_detail', {
+      rideId: 'booking_detail',
+      paymentReferenceRideId: 'temp_ride_detail',
+      amount: 9792,
+      status: 'CONFIRMED'
+    });
+    firestore.docs.set('payment_holdings/booking_detail', {
+      rideId: 'booking_detail',
+      materializedFrom: 'temp_ride_detail',
+      amount: 9792,
+      status: 'distributed'
+    });
+
+    const service = new FinancialReconciliationDashboardService();
+    const result = await service.getRideDetail('booking_detail');
+
+    expect(result).toMatchObject({
+      success: true,
+      ledgerRideIds: ['booking_detail', 'temp_ride_detail']
+    });
+    expect(result.ledgerEvents.map((event) => event.eventType)).toEqual([
+      'payment_received',
+      'ride_settlement'
+    ]);
+  });
+
   it('fails cleanly when Firestore is unavailable', async () => {
     firebaseConfig.getFirestore.mockReturnValue(null);
     const service = new FinancialReconciliationDashboardService();
