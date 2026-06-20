@@ -1175,6 +1175,22 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     pickupAdjustedOnMap && pickupAddress
       ? pickupAddress
       : resolveMeaningfulAddress(pickupAddress, originAddress) || originAddress;
+  const pickupQaCoordinateLabel = useMemo(() => {
+    const latitude = Number(resolvedPickupCoordinate?.latitude);
+    const longitude = Number(resolvedPickupCoordinate?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return "";
+    }
+
+    return [
+      `pickup:${latitude.toFixed(6)},${longitude.toFixed(6)}`,
+      `address:${resolvedPickupAddress || ""}`,
+    ].join(";");
+  }, [
+    resolvedPickupAddress,
+    resolvedPickupCoordinate?.latitude,
+    resolvedPickupCoordinate?.longitude,
+  ]);
 
   useEffect(() => {
     if (
@@ -3863,6 +3879,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   markerTone="leaf"
                 />
                 <SecurePaymentBadge style={styles.quoteSecurePaymentBadge} />
+                {pickupQaCoordinateLabel ? (
+                  <Text
+                    style={styles.hiddenText}
+                    testID="passenger-destination-pickup-coordinate"
+                    accessibilityLabel={`passenger-destination-pickup-coordinate ${pickupQaCoordinateLabel}`}
+                  >
+                    {pickupQaCoordinateLabel}
+                  </Text>
+                ) : null}
 
                 {selectedPlanUnavailable || routeGuardBlocked ? (
                   <View style={styles.unavailableWrap}>

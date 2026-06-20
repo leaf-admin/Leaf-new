@@ -25,6 +25,10 @@ const COLLECT_DASHBOARD_EVIDENCE = process.env.REAL_SMOKE_COLLECT_DASHBOARD_EVID
 const ALLOW_EXISTING_QUOTE = process.env.REAL_SMOKE_ALLOW_EXISTING_QUOTE === "true";
 const ALLOW_EXISTING_ACTIVE_RIDE =
   process.env.REAL_SMOKE_ALLOW_EXISTING_ACTIVE_RIDE === "true";
+const SYNC_DRIVER_TO_APP_PICKUP =
+  process.env.REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP === "true";
+const REQUIRE_CANONICAL_PICKUP =
+  process.env.REAL_SMOKE_REQUIRE_CANONICAL_PICKUP !== "false";
 const PAYMENT_RUNTIME_PHONE = process.env.PAYMENT_RUNTIME_PHONE || process.env.FIREBASE_TEST_PHONE || "";
 const PAYMENT_PASSENGER_UID =
   process.env.REAL_SMOKE_PASSENGER_UID ||
@@ -32,6 +36,10 @@ const PAYMENT_PASSENGER_UID =
   process.env.FIREBASE_TEST_UID ||
   process.env.PAYMENT_RUNTIME_UID ||
   "";
+const TEST_DRIVER_UID = process.env.TEST_DRIVER_UID || "";
+const MANAGED_DRIVER_RIDE_REQUEST_TIMEOUT_MS = String(
+  Math.max(180000, Number(process.env.DRIVER_RIDE_REQUEST_TIMEOUT_MS || 600000)),
+);
 const FIRST_LAUNCH_WAIT_MS = Number(process.env.FIRST_LAUNCH_WAIT_MS || 15000);
 const SECOND_LAUNCH_WAIT_MS = Number(process.env.SECOND_LAUNCH_WAIT_MS || 12000);
 const QUOTE_STABILITY_WAIT_MS = Number(process.env.QUOTE_STABILITY_WAIT_MS || 18000);
@@ -232,6 +240,37 @@ function extractDriverSearchElapsed(nodes) {
   const node = findNode(nodes, ["passenger-driver-search-elapsed"]);
   const value = String(node?.text || node?.["content-desc"] || "").trim();
   return /^\d{2}:\d{2}$/.test(value) ? value : null;
+}
+
+function extractCanonicalPickup(nodes) {
+  const node = nodes.find((item) => {
+    const resourceId = String(item["resource-id"] || "");
+    const text = `${item.text || ""} ${item["content-desc"] || ""}`;
+    return (
+      resourceId.includes("passenger-destination-pickup-coordinate") ||
+      text.includes("passenger-destination-pickup-coordinate") ||
+      text.includes("pickup:")
+    );
+  });
+  const raw = [node?.text, node?.["content-desc"]].filter(Boolean).join(" ");
+  const match = /pickup:\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?:;address:\s*(.*))?/i.exec(raw);
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    lat,
+    lng,
+    address: String(match[3] || "").trim(),
+    raw,
+  };
+}
+
+function extractSelectedCarType(nodes) {
+  const allText = nodes.map((node) => [node.text, node["content-desc"]].filter(Boolean).join(" ")).join("\n");
+  if (/Leaf\s+Elite/i.test(allText)) return "Leaf Elite";
+  if (/Leaf\s+Moto/i.test(allText)) return "Leaf Moto";
+  return "Leaf Plus";
 }
 
 function detectScreen(nodes) {
@@ -443,6 +482,235 @@ function runFinalReportBuilder() {
     evidence.push(reportPath);
   }
   return result;
+}
+
+function tailTextFile(filePath, maxChars = 5000) {
+  try {
+    const text = fs.readFileSync(filePath, "utf8");
+    return text.slice(Math.max(0, text.length - maxChars));
+  } catch (_) {
+    return "";
+  }
+}
+
+async function waitForFilePattern(filePath, pattern, timeoutMs = 30000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const text = tailTextFile(filePath);
+    if (pattern.test(text)) {
+      return { ok: true, tail: text };
+    }
+    await sleep(800);
+  }
+  return { ok: false, tail: tailTextFile(filePath) };
+}
+
+async function startManagedDriverBotAtPickup(pickup) {
+  if (!SYNC_DRIVER_TO_APP_PICKUP) {
+    return { requested: false, ok: null, skippedReason: "disabled" };
+  }
+
+  if (!TEST_DRIVER_UID) {
+    return { requested: true, ok: false, error: "TEST_DRIVER_UID is required" };
+  }
+
+  if (!Number.isFinite(Number(pickup?.lat)) || !Number.isFinite(Number(pickup?.lng))) {
+    return { requested: true, ok: false, error: "canonical pickup is invalid" };
+  }
+
+  const scriptPath = path.join(rootDir, "leaf-websocket-backend", "scripts", "tests", "driver-dispatch-bot.cjs");
+  const logPath = path.join(artifactsDir, "managed-driver-bot.log");
+  const output = fs.openSync(logPath, "w");
+  evidence.push(logPath);
+  const child = spawn("node", [scriptPath], {
+    cwd: rootDir,
+    detached: true,
+    stdio: ["ignore", output, output],
+    env: {
+      ...process.env,
+      WS_URL: SOCKET_URL,
+      TEST_DRIVER_UID,
+      TEST_PICKUP_LAT: String(pickup.lat),
+      TEST_PICKUP_LNG: String(pickup.lng),
+      DRIVER_RIDE_REQUEST_TIMEOUT_MS: MANAGED_DRIVER_RIDE_REQUEST_TIMEOUT_MS,
+      DRIVER_ACCEPTED_HOLD_MS: process.env.DRIVER_ACCEPTED_HOLD_MS || "2500",
+      DRIVER_ARRIVED_HOLD_MS: process.env.DRIVER_ARRIVED_HOLD_MS || "1800",
+      DRIVER_TRIP_STEP_INTERVAL_MS: process.env.DRIVER_TRIP_STEP_INTERVAL_MS || "2200",
+      DRIVER_TRIP_STEPS: process.env.DRIVER_TRIP_STEPS || "10",
+    },
+  });
+  child.unref();
+
+  const online = await waitForFilePattern(logPath, /driver_online\s+\{[^}]*"dispatchEligible":true/i, 45000);
+  const result = {
+    requested: true,
+    ok: online.ok,
+    pid: child.pid,
+    logPath,
+    pickup,
+    tail: online.tail,
+  };
+  writeArtifact("managed-driver-bot.json", JSON.stringify(result, null, 2));
+  return result;
+}
+
+async function checkSocketAvailabilityAtPickup(pickup, carType) {
+  if (!PAYMENT_PASSENGER_UID) {
+    return { requested: true, ok: false, error: "REAL_SMOKE_PASSENGER_UID or FIREBASE_TEST_UID is required" };
+  }
+
+  if (!Number.isFinite(Number(pickup?.lat)) || !Number.isFinite(Number(pickup?.lng))) {
+    return { requested: true, ok: false, error: "canonical pickup is invalid" };
+  }
+
+  let WebSocketTestClient;
+  try {
+    WebSocketTestClient = require(path.join(
+      rootDir,
+      "leaf-websocket-backend",
+      "tests",
+      "e2e",
+      "backend",
+      "__helpers__",
+      "websocket-test-client",
+    ));
+  } catch (error) {
+    return { requested: true, ok: false, error: `websocket test client unavailable: ${error.message}` };
+  }
+
+  const requestId = `real_smoke_app_pickup_${Date.now()}`;
+  const client = new WebSocketTestClient(SOCKET_URL, {
+    transports: ["websocket"],
+    timeout: 30000,
+    reconnection: false,
+  });
+
+  try {
+    await client.connect();
+    await client.authenticate(PAYMENT_PASSENGER_UID, "customer");
+    const result = await new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve({ timeout: true }), 25000);
+      client.socket.once("rideAvailabilityResult", (payload) => {
+        clearTimeout(timeout);
+        resolve(payload);
+      });
+      client.socket.once("rideAvailabilityError", (payload) => {
+        clearTimeout(timeout);
+        resolve({ errorEvent: true, ...payload });
+      });
+      client.socket.emit("checkRideAvailability", {
+        requestId,
+        pickupLocation: {
+          lat: Number(pickup.lat),
+          lng: Number(pickup.lng),
+          add: pickup.address || "Origem do app",
+        },
+        carType,
+      });
+    });
+    const payload = {
+      requested: true,
+      ok: result?.available === true || result?.hasDrivers === true,
+      requestId,
+      pickup,
+      carType,
+      result,
+    };
+    writeArtifact("canonical-app-pickup-availability.json", JSON.stringify(payload, null, 2));
+    return payload;
+  } catch (error) {
+    const payload = {
+      requested: true,
+      ok: false,
+      requestId,
+      pickup,
+      carType,
+      error: error.message || String(error),
+    };
+    writeArtifact("canonical-app-pickup-availability.json", JSON.stringify(payload, null, 2));
+    return payload;
+  } finally {
+    try {
+      await client.disconnect();
+    } catch (_) {
+      // best-effort cleanup for QA socket
+    }
+  }
+}
+
+async function prepareCanonicalPickupForPayment(current) {
+  const pickup = extractCanonicalPickup(current.nodes);
+  const carType = extractSelectedCarType(current.nodes);
+  const pickupPayload = {
+    ok: Boolean(pickup),
+    pickup,
+    carType,
+    requireCanonicalPickup: REQUIRE_CANONICAL_PICKUP,
+    syncDriverToAppPickup: SYNC_DRIVER_TO_APP_PICKUP,
+  };
+  writeArtifact("app-canonical-pickup.json", JSON.stringify(pickupPayload, null, 2));
+
+  if (!pickup) {
+    const message =
+      "blocked_precondition:app_canonical_pickup_unavailable";
+    if (REQUIRE_CANONICAL_PICKUP) {
+      failures.push(message);
+      warnings.push(
+        "Smoke não encontrou a coordenada canônica da origem do app; pagamento bloqueado para evitar validar motorista em outro ponto.",
+      );
+      return {
+        ok: false,
+        pickup: null,
+        carType,
+        managedDriverBot: null,
+        availability: null,
+      };
+    }
+    warnings.push(`${message}; continuando porque REAL_SMOKE_REQUIRE_CANONICAL_PICKUP=false.`);
+    return {
+      ok: true,
+      pickup: null,
+      carType,
+      managedDriverBot: null,
+      availability: null,
+    };
+  }
+
+  const managedDriverBot = await startManagedDriverBotAtPickup(pickup);
+  if (managedDriverBot.requested && !managedDriverBot.ok) {
+    failures.push(
+      `blocked_precondition:managed_driver_not_online:${managedDriverBot.error || "driver_online_timeout"}`,
+    );
+    return {
+      ok: false,
+      pickup,
+      carType,
+      managedDriverBot,
+      availability: null,
+    };
+  }
+
+  const availability = await checkSocketAvailabilityAtPickup(pickup, carType);
+  if (!availability.ok) {
+    failures.push(
+      `blocked_precondition:canonical_app_pickup_no_driver:${availability.result?.code || availability.error || "unknown"}`,
+    );
+    return {
+      ok: false,
+      pickup,
+      carType,
+      managedDriverBot,
+      availability,
+    };
+  }
+
+  return {
+    ok: true,
+    pickup,
+    carType,
+    managedDriverBot,
+    availability,
+  };
 }
 
 function looksLikePixModalScreenshot(filePath) {
@@ -781,6 +1049,9 @@ async function main() {
   let paymentPrices = null;
   let sandboxPaymentConfirmation = { requested: AUTO_CONFIRM_SANDBOX_PAYMENT, ok: null, skippedReason: "not_reached" };
   let dashboardEvidenceCollection = { requested: COLLECT_DASHBOARD_EVIDENCE, ok: null, skippedReason: "not_reached" };
+  let appCanonicalPickup = null;
+  let appPickupAvailability = null;
+  let managedDriverBot = { requested: SYNC_DRIVER_TO_APP_PICKUP, ok: null, skippedReason: "not_reached" };
 
   try {
     log("abrindo app em duas passagens para permitir aplicação OTA quando disponível");
@@ -880,10 +1151,18 @@ async function main() {
             JSON.stringify(initialQuote) === JSON.stringify(laterQuote);
           quoteStatus = quoteStable ? "stable" : "unstable_or_unreadable";
           if (OPEN_PAYMENT) {
-            const paymentOpen = await tapConfirmUntilPayment(current, steps);
-            current = paymentOpen.current;
-            paymentOpened = paymentOpen.opened;
-            paymentStatus = paymentOpen.status;
+            const canonicalReadiness = await prepareCanonicalPickupForPayment(current);
+            appCanonicalPickup = canonicalReadiness.pickup;
+            appPickupAvailability = canonicalReadiness.availability;
+            managedDriverBot = canonicalReadiness.managedDriverBot || managedDriverBot;
+            if (!canonicalReadiness.ok) {
+              paymentStatus = "blocked_precondition_canonical_pickup";
+            } else {
+              const paymentOpen = await tapConfirmUntilPayment(current, steps);
+              current = paymentOpen.current;
+              paymentOpened = paymentOpen.opened;
+              paymentStatus = paymentOpen.status;
+            }
             if (paymentOpened) {
               const paymentReady = await waitForPaymentReady(current, steps);
               current = paymentReady.current;
@@ -928,10 +1207,18 @@ async function main() {
           JSON.stringify(initialQuote) === JSON.stringify(laterQuote);
         quoteStatus = quoteStable ? "stable" : "unstable_or_unreadable";
         if (OPEN_PAYMENT) {
-          const paymentOpen = await tapConfirmUntilPayment(current, steps);
-          current = paymentOpen.current;
-          paymentOpened = paymentOpen.opened;
-          paymentStatus = paymentOpen.status;
+          const canonicalReadiness = await prepareCanonicalPickupForPayment(current);
+          appCanonicalPickup = canonicalReadiness.pickup;
+          appPickupAvailability = canonicalReadiness.availability;
+          managedDriverBot = canonicalReadiness.managedDriverBot || managedDriverBot;
+          if (!canonicalReadiness.ok) {
+            paymentStatus = "blocked_precondition_canonical_pickup";
+          } else {
+            const paymentOpen = await tapConfirmUntilPayment(current, steps);
+            current = paymentOpen.current;
+            paymentOpened = paymentOpen.opened;
+            paymentStatus = paymentOpen.status;
+          }
           if (paymentOpened) {
             const paymentReady = await waitForPaymentReady(current, steps);
             current = paymentReady.current;
@@ -1030,6 +1317,9 @@ async function main() {
         opened: paymentOpened,
         status: paymentStatus,
         prices: paymentPrices,
+        appCanonicalPickup,
+        appPickupAvailability,
+        managedDriverBot,
         sandboxConfirmation: sandboxPaymentConfirmation,
         dashboardEvidence: dashboardEvidenceCollection,
       },
@@ -1062,6 +1352,9 @@ async function main() {
     `- Payment opened: ${paymentOpened ? "yes" : "no"}`,
     `- Payment status: ${paymentStatus}`,
     `- Payment prices: ${(paymentPrices || []).join(", ") || "not captured"}`,
+    `- App canonical pickup: ${appCanonicalPickup ? `${appCanonicalPickup.lat}, ${appCanonicalPickup.lng}` : "not captured"}`,
+    `- App pickup availability: ${appPickupAvailability ? (appPickupAvailability.ok ? "OK" : "FAIL") : "not captured"}`,
+    `- Managed driver bot: ${managedDriverBot?.requested ? (managedDriverBot.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Sandbox payment auto-confirm: ${AUTO_CONFIRM_SANDBOX_PAYMENT ? (sandboxPaymentConfirmation.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Dashboard evidence: ${COLLECT_DASHBOARD_EVIDENCE ? (dashboardEvidenceCollection.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Pricing quote log lines: ${logAnalysis.pricingQuote.length}`,
