@@ -7723,7 +7723,13 @@ function attachSocketListeners() {
       "",
     );
     const acceptedVehicleLabel = sanitizeText(
-      [acceptedVehicleMake, acceptedVehicleModel].filter(Boolean).join(" "),
+      acceptedVehicleMake &&
+        acceptedVehicleModel &&
+        !acceptedVehicleModel
+          .toLowerCase()
+          .startsWith(acceptedVehicleMake.toLowerCase())
+        ? `${acceptedVehicleMake} ${acceptedVehicleModel}`
+        : acceptedVehicleModel || acceptedVehicleMake,
       "",
     );
     const acceptedVehiclePlate = sanitizeText(

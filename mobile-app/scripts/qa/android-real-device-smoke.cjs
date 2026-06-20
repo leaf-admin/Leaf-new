@@ -8,6 +8,7 @@ const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { PNG } = require("pngjs");
+const { extractCriticalAppLines } = require("./real-smoke-logcat.cjs");
 const { resolvePostSandboxPaymentStatus } = require("./real-smoke-payment-status.cjs");
 
 const mobileDir = path.resolve(__dirname, "../..");
@@ -273,7 +274,12 @@ function detectScreen(nodes) {
   }
   if (allText.includes("passenger-rating-submit-button")) return "passenger_rating";
   if (allText.includes("passenger-destination-confirm-button")) return "passenger_quote";
-  if (allText.includes("passenger-destination-search-input")) return "destination_search";
+  if (
+    allText.includes("passenger-destination-search-input") ||
+    allText.includes("passenger-home-destination-search-input")
+  ) {
+    return "destination_search";
+  }
   if (allText.includes("passenger-home-destination-result-0")) return "destination_results";
   if (allText.includes("passenger-home-destination-input") || allText.includes("para onde")) return "passenger_home";
   if (allText.includes("support-screen") || allText.includes("support-tab-")) return "support";
@@ -482,6 +488,25 @@ function inputText(value) {
   adbRun(["shell", "input", "text", escaped]);
 }
 
+function clearFocusedText(maxCharacters = 80) {
+  adbRun([
+    "shell",
+    "input",
+    "keyevent",
+    "123",
+    ...Array.from({ length: maxCharacters }, () => "67"),
+  ]);
+}
+
+function normalizeInputText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function pressKey(keyCode) {
   adbRun(["shell", "input", "keyevent", String(keyCode)]);
 }
@@ -615,11 +640,7 @@ function startLogcat() {
 function analyzeLogcat(logcatPath) {
   const text = fs.existsSync(logcatPath) ? fs.readFileSync(logcatPath, "utf8") : "";
   const lines = text.split(/\r?\n/);
-  const critical = lines.filter((line) =>
-    /FATAL EXCEPTION|No bundle URL present|Unable to load script|ReactNativeJS.*(TypeError|ReferenceError|Unhandled)|Cannot read propert|Network Error/i.test(
-      line,
-    ),
-  );
+  const critical = extractCriticalAppLines(text, APP_PACKAGE);
   const pricingQuote = lines.filter((line) => /pricing\/quote|fetchDynamicPricingQuote|pricing_quote/i.test(line));
   const routing = lines.filter((line) => /route|routes|directions|google maps/i.test(line));
   writeArtifact(
@@ -789,7 +810,30 @@ async function main() {
           "buscar destino",
         ]);
         tapNode(searchInput, "campo de busca de destino");
-        inputText(DESTINATION_QUERY);
+        let destinationQueryEntered = false;
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          await sleep(500);
+          clearFocusedText();
+          inputText(DESTINATION_QUERY);
+          await sleep(900);
+          current = await captureStep(`03b-destination-query-entered-${attempt}`);
+          steps.push(current);
+          const typedSearchInput = findNode(current.nodes, [
+            "passenger-destination-search-input",
+            "passenger-home-destination-search-input",
+            "buscar destino",
+          ]);
+          destinationQueryEntered =
+            normalizeInputText(typedSearchInput?.text) ===
+            normalizeInputText(DESTINATION_QUERY);
+          if (destinationQueryEntered) break;
+        }
+        if (!destinationQueryEntered) {
+          failures.push("blocked_precondition:destination_query_input_failed");
+          warnings.push(
+            `Campo de destino não preservou a consulta completa: ${DESTINATION_QUERY}.`,
+          );
+        }
         pressKey(66);
         await sleep(7000);
         current = await captureStep("04-destination-results");
