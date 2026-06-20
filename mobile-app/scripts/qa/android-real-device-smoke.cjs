@@ -56,6 +56,7 @@ const evidence = [];
 const commands = [];
 const warnings = [];
 const failures = [];
+let lastCanonicalPickup = null;
 
 function log(message) {
   console.log(`[real-smoke] ${message}`);
@@ -242,7 +243,23 @@ function extractDriverSearchElapsed(nodes) {
   return /^\d{2}:\d{2}$/.test(value) ? value : null;
 }
 
-function extractCanonicalPickup(nodes) {
+function parseCanonicalPickup(raw, source) {
+  const text = String(raw || "");
+  const match = /pickup:\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?:;address:\s*([^;\r\n]*))?/i.exec(text);
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    lat,
+    lng,
+    address: String(match[3] || "").trim(),
+    raw: text.slice(Math.max(0, match.index - 80), match.index + match[0].length + 80),
+    source,
+  };
+}
+
+function extractCanonicalPickup(nodes, fallbackSources = []) {
   const node = nodes.find((item) => {
     const resourceId = String(item["resource-id"] || "");
     const text = `${item.text || ""} ${item["content-desc"] || ""}`;
@@ -253,17 +270,15 @@ function extractCanonicalPickup(nodes) {
     );
   });
   const raw = [node?.text, node?.["content-desc"]].filter(Boolean).join(" ");
-  const match = /pickup:\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?:;address:\s*(.*))?/i.exec(raw);
-  if (!match) return null;
-  const lat = Number(match[1]);
-  const lng = Number(match[2]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return {
-    lat,
-    lng,
-    address: String(match[3] || "").trim(),
-    raw,
-  };
+  const fromNode = parseCanonicalPickup(raw, "uiautomator_xml");
+  if (fromNode) return fromNode;
+
+  for (const fallback of fallbackSources) {
+    const parsed = parseCanonicalPickup(fallback?.text, fallback?.source || "fallback");
+    if (parsed) return parsed;
+  }
+
+  return null;
 }
 
 function extractSelectedCarType(nodes) {
@@ -505,6 +520,43 @@ async function waitForFilePattern(filePath, pattern, timeoutMs = 30000) {
   return { ok: false, tail: tailTextFile(filePath) };
 }
 
+function parseLatestDriverOnlineEvent(text) {
+  const matches = [...String(text || "").matchAll(/^driver_online\s+(.+)$/gim)];
+  const latest = matches[matches.length - 1];
+  if (!latest) return null;
+  try {
+    return JSON.parse(latest[1]);
+  } catch (error) {
+    return { parseError: error.message, raw: latest[1] };
+  }
+}
+
+async function waitForManagedDriverReadiness(logPath, timeoutMs = 45000) {
+  const startedAt = Date.now();
+  let latestOnline = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    const tail = tailTextFile(logPath);
+    if (/driver_online\s+\{[^}]*"dispatchEligible":true/i.test(tail)) {
+      return { ok: true, tail, latestOnline: parseLatestDriverOnlineEvent(tail) };
+    }
+    latestOnline = parseLatestDriverOnlineEvent(tail) || latestOnline;
+    await sleep(800);
+  }
+
+  const tail = tailTextFile(logPath);
+  latestOnline = parseLatestDriverOnlineEvent(tail) || latestOnline;
+  if (latestOnline && latestOnline.dispatchEligible !== true) {
+    return {
+      ok: false,
+      error: "driver_not_dispatch_eligible",
+      latestOnline,
+      tail,
+    };
+  }
+
+  return { ok: false, error: "driver_online_timeout", latestOnline, tail };
+}
+
 async function startManagedDriverBotAtPickup(pickup) {
   if (!SYNC_DRIVER_TO_APP_PICKUP) {
     return { requested: false, ok: null, skippedReason: "disabled" };
@@ -537,17 +589,20 @@ async function startManagedDriverBotAtPickup(pickup) {
       DRIVER_ARRIVED_HOLD_MS: process.env.DRIVER_ARRIVED_HOLD_MS || "1800",
       DRIVER_TRIP_STEP_INTERVAL_MS: process.env.DRIVER_TRIP_STEP_INTERVAL_MS || "2200",
       DRIVER_TRIP_STEPS: process.env.DRIVER_TRIP_STEPS || "10",
+      DRIVER_BOT_SEED_REDIS_ELIGIBLE: process.env.DRIVER_BOT_SEED_REDIS_ELIGIBLE || "true",
     },
   });
   child.unref();
 
-  const online = await waitForFilePattern(logPath, /driver_online\s+\{[^}]*"dispatchEligible":true/i, 45000);
+  const online = await waitForManagedDriverReadiness(logPath, 45000);
   const result = {
     requested: true,
     ok: online.ok,
+    error: online.error || null,
     pid: child.pid,
     logPath,
     pickup,
+    latestOnline: online.latestOnline || null,
     tail: online.tail,
   };
   writeArtifact("managed-driver-bot.json", JSON.stringify(result, null, 2));
@@ -639,7 +694,12 @@ async function checkSocketAvailabilityAtPickup(pickup, carType) {
 }
 
 async function prepareCanonicalPickupForPayment(current) {
-  const pickup = extractCanonicalPickup(current.nodes);
+  const pickup =
+    current.canonicalPickup ||
+    extractCanonicalPickup(current.nodes, [
+      { source: "uiautomator_logcat", text: current.accessibilityDumpLog },
+    ]) ||
+    lastCanonicalPickup;
   const carType = extractSelectedCarType(current.nodes);
   const pickupPayload = {
     ok: Boolean(pickup),
@@ -887,6 +947,23 @@ async function captureStep(name) {
   const xml = fs.existsSync(dump) ? fs.readFileSync(dump, "utf8") : "";
   if (xml) evidence.push(dump);
   const nodes = parseNodes(xml);
+  const accessibilityLogResult = adbRun(
+    ["logcat", "-d", "-v", "time", "-t", "500", "-s", "AccessibilityNodeInfoDumper:I"],
+    { allowFailure: true },
+  );
+  const accessibilityDumpLog =
+    accessibilityLogResult.status === 0 ? String(accessibilityLogResult.stdout || "") : "";
+  const canonicalPickup = extractCanonicalPickup(nodes, [
+    { source: "uiautomator_logcat", text: accessibilityDumpLog },
+  ]);
+  if (canonicalPickup) {
+    lastCanonicalPickup = canonicalPickup;
+  }
+  if (canonicalPickup && canonicalPickup.source === "uiautomator_logcat") {
+    const fallbackPath = path.join(artifactsDir, `${name}-canonical-pickup-uiautomator-logcat.txt`);
+    fs.writeFileSync(fallbackPath, accessibilityDumpLog);
+    evidence.push(fallbackPath);
+  }
   const prices = extractPrices(nodes);
   const screen = detectScreen(nodes);
   const driverSearchElapsed = extractDriverSearchElapsed(nodes);
@@ -895,6 +972,8 @@ async function captureStep(name) {
     screenshot,
     dump,
     nodes,
+    canonicalPickup,
+    accessibilityDumpLog,
     prices,
     screen,
     driverSearchElapsed,
@@ -1156,7 +1235,10 @@ async function main() {
             appPickupAvailability = canonicalReadiness.availability;
             managedDriverBot = canonicalReadiness.managedDriverBot || managedDriverBot;
             if (!canonicalReadiness.ok) {
-              paymentStatus = "blocked_precondition_canonical_pickup";
+              paymentStatus =
+                canonicalReadiness.managedDriverBot?.error === "driver_not_dispatch_eligible"
+                  ? "blocked_precondition_driver_not_dispatch_eligible"
+                  : "blocked_precondition_canonical_pickup";
             } else {
               const paymentOpen = await tapConfirmUntilPayment(current, steps);
               current = paymentOpen.current;
@@ -1212,7 +1294,10 @@ async function main() {
           appPickupAvailability = canonicalReadiness.availability;
           managedDriverBot = canonicalReadiness.managedDriverBot || managedDriverBot;
           if (!canonicalReadiness.ok) {
-            paymentStatus = "blocked_precondition_canonical_pickup";
+            paymentStatus =
+              canonicalReadiness.managedDriverBot?.error === "driver_not_dispatch_eligible"
+                ? "blocked_precondition_driver_not_dispatch_eligible"
+                : "blocked_precondition_canonical_pickup";
           } else {
             const paymentOpen = await tapConfirmUntilPayment(current, steps);
             current = paymentOpen.current;
@@ -1307,6 +1392,14 @@ async function main() {
         screen: step.screen,
         prices: step.prices,
         driverSearchElapsed: step.driverSearchElapsed,
+        canonicalPickup: step.canonicalPickup
+          ? {
+              lat: step.canonicalPickup.lat,
+              lng: step.canonicalPickup.lng,
+              address: step.canonicalPickup.address,
+              source: step.canonicalPickup.source,
+            }
+          : null,
       })),
       quoteStatus,
       initialQuote,
