@@ -154,6 +154,28 @@ const LEGACY_ROUTE_GUARD_MESSAGE_REGEX =
   /origem e destino inconsistentes para a (área|area) de opera(ç|c)ão da leaf/i;
 const REGION_UNAVAILABLE_MESSAGE_REGEX = /regi(ã|a)o indispon(i|í)vel/i;
 const stepEasing = Easing.bezier(...motion.bezier.snappy);
+const FINAL_AVAILABILITY_RECHECK_DELAY_MS = 900;
+
+const waitForFinalAvailabilityRecheck = () =>
+  new Promise((resolve) =>
+    setTimeout(resolve, FINAL_AVAILABILITY_RECHECK_DELAY_MS),
+  );
+
+function isNoDriversAvailabilityResult(availability) {
+  const code = String(availability?.code || "").toUpperCase();
+  const message = String(
+    availability?.message || availability?.error || "",
+  ).toLowerCase();
+  return (
+    code === "NO_DRIVERS_AVAILABLE" ||
+    code === "NO_DRIVERS_FOUND" ||
+    /não há motoristas|nao ha motoristas|sem motoristas/.test(message)
+  );
+}
+
+function buildFinalAvailabilityRequestId(planId, attempt) {
+  return `passenger_confirm_${String(planId || "plan")}_${attempt}_${Date.now().toString(36)}`;
+}
 
 function resolveLeafDelasRequested(params = {}) {
   return (
@@ -2370,7 +2392,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
-      const availability = await checkRideAvailabilityRef.current({
+      const availabilityPayload = {
         destination: {
           name: destinationInfo?.name || "Destino",
           address: destinationInfo?.address || "",
@@ -2380,9 +2402,21 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         pickupLocation: pickupLocationPayload,
         originCoordinate: resolvedPickupCoordinate,
         preferences: ridePreferences,
-      }, {
-        forceRefresh: true,
-      });
+      };
+      const checkFinalAvailability = (attempt) =>
+        checkRideAvailabilityRef.current(availabilityPayload, {
+          forceRefresh: true,
+          requestId: buildFinalAvailabilityRequestId(
+            selectedPlanData.id,
+            attempt,
+          ),
+        });
+
+      let availability = await checkFinalAvailability(1);
+      if (!availability?.available && isNoDriversAvailabilityResult(availability)) {
+        await waitForFinalAvailabilityRecheck();
+        availability = await checkFinalAvailability(2);
+      }
 
       if (!availability?.available) {
         const normalizedMessage = normalizeCoverageMessage(

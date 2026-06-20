@@ -783,6 +783,118 @@ describe("RobotaxiDestinationScreen", () => {
     });
   });
 
+  it("rechecks final availability once before blocking payment on no-driver result", async () => {
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 17.77,
+      pricingPayload: {},
+    });
+
+    const destination = {
+      id: "destination_santos_dumont",
+      name: "Aeroporto Santos Dumont",
+      address: "Praça Senador Salgado Filho, Centro, Rio de Janeiro, RJ",
+      coordinate: {
+        latitude: -22.9104,
+        longitude: -43.1631,
+      },
+      eta: "5",
+    };
+
+    const finalAvailabilityResponses = [
+      {
+        available: false,
+        code: "NO_DRIVERS_AVAILABLE",
+        message: "Não há motoristas disponíveis",
+      },
+      { available: true },
+    ];
+    const checkRideAvailability = jest.fn((_payload, options = {}) => {
+      if (options?.forceRefresh) {
+        return Promise.resolve(finalAvailabilityResponses.shift());
+      }
+      return Promise.resolve({ available: true });
+    });
+
+    const runtimeSnapshot = {
+      bookingStatus: "idle",
+      currentAddress: "Rua das Pastorinhas, Taquara, Rio de Janeiro",
+      currentCoordinate: {
+        latitude: -22.9711,
+        longitude: -43.1822,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 13.42,
+      selectedDestination: destination,
+      tripDistanceKm: 4.7,
+      tripDurationMin: 9,
+      tripArrivalText: "01:36",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    };
+
+    usePrototypeRideRuntime.mockImplementation(() => runtimeSnapshot);
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={{
+          navigate: jest.fn(),
+          replace: jest.fn(),
+          canGoBack: jest.fn(() => false),
+          goBack: jest.fn(),
+        }}
+        route={{ params: {} }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Aeroporto Santos Dumont")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText("Aeroporto Santos Dumont"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+      expect(screen.getByText(/R\$ 17,77/)).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(
+      () => {
+        const finalChecks = checkRideAvailability.mock.calls.filter(
+          ([, options]) => options?.forceRefresh === true,
+        );
+        expect(finalChecks).toHaveLength(2);
+        expect(finalChecks[0][1]).toEqual(
+          expect.objectContaining({
+            forceRefresh: true,
+            requestId: expect.stringMatching(/^passenger_confirm_plus_1_/),
+          }),
+        );
+        expect(finalChecks[1][1]).toEqual(
+          expect.objectContaining({
+            forceRefresh: true,
+            requestId: expect.stringMatching(/^passenger_confirm_plus_2_/),
+          }),
+        );
+        expect(screen.getByTestId("mock-pix-amount").props.children).toBe("17.77");
+      },
+      { timeout: 3000 },
+    );
+  });
+
   it("sends Leaf Delas preferences when the route starts with the option enabled", async () => {
     const destination = {
       id: "destination_shopping_leblon",
