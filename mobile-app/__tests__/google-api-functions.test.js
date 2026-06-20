@@ -490,4 +490,81 @@ describe('GoogleAPIFunctions address search', () => {
       telemetryContext,
     );
   });
+
+  it('bypasses stale passenger preview cache when cached route has no traffic timings', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'success',
+          cached: false,
+          data: {
+            distance_in_km: 6.287,
+            time_in_secs: 887,
+            polylinePoints: 'route_without_traffic',
+            legs: [],
+            steps: [],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'success',
+          cached: false,
+          data: {
+            distance_in_km: 6.287,
+            time_in_secs: 1354,
+            duration_without_traffic: 887,
+            duration_in_traffic: 1354,
+            polylinePoints: 'route_with_traffic',
+            legs: [],
+            steps: [],
+          },
+        }),
+      });
+
+    const telemetryContext = {
+      sourceKey: 'customer:test-user:passenger-home-preview',
+      sourceMeta: {
+        userId: 'test-user',
+        userType: 'customer',
+        platform: 'android',
+        flow: 'passenger_home',
+        surface: 'passenger_home_category_preview',
+      },
+      cacheMode: 'exact',
+      routeScope: 'passenger_home_preview',
+      routeFamily: 'passenger_home_preview',
+    };
+
+    const first = await getDirectionsApi(
+      '-22.84997,-43.31102',
+      '-22.87107,-43.33609',
+      null,
+      telemetryContext,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = await getDirectionsApi(
+      '-22.84997,-43.31102',
+      '-22.87107,-43.33609',
+      null,
+      telemetryContext,
+    );
+
+    expect(first.polylinePoints).toBe('route_without_traffic');
+    expect(second.polylinePoints).toBe('route_with_traffic');
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(rideCostTelemetryService.recordGoogleCache).toHaveBeenCalledWith(
+      'directionsMemoryStaleTrafficBypass',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          routeScope: 'passenger_home_preview',
+        }),
+      }),
+      telemetryContext,
+    );
+  });
 });

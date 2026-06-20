@@ -3,6 +3,7 @@ import { Alert, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiHomeScreen, {
+  buildTrafficSegmentsFromDirectionsRoute,
   resolveHomeCategoryFarePresentation,
 } from '../src/screens/prototype/RobotaxiHomeScreen';
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
@@ -302,6 +303,57 @@ describe('driver online toggle', () => {
       fare: 54.73,
       priceLabel: 'R$ 54,73',
     });
+  });
+
+  it('does not show a local fare while the selected backend quote is required', () => {
+    expect(
+      resolveHomeCategoryFarePresentation({
+        isSelectedCategory: true,
+        quotePending: false,
+        backendQuoteRequired: true,
+        backendFare: null,
+        localFare: 83.42,
+      }),
+    ).toEqual({
+      fare: null,
+      priceLabel: 'Calculando',
+    });
+  });
+
+  it('does not fall back to a local fare when the selected quote is unavailable', () => {
+    expect(
+      resolveHomeCategoryFarePresentation({
+        isSelectedCategory: true,
+        quotePending: false,
+        backendQuoteRequired: true,
+        quoteUnavailable: true,
+        backendFare: null,
+        localFare: 83.42,
+      }),
+    ).toEqual({
+      fare: null,
+      priceLabel: '--',
+    });
+  });
+
+  it('renders full-route traffic when only route totals carry congestion timing', () => {
+    const coordinates = [
+      { latitude: -22.8537, longitude: -43.3096 },
+      { latitude: -22.8702, longitude: -43.3401 },
+      { latitude: -22.8771, longitude: -43.3432 },
+    ];
+
+    expect(buildTrafficSegmentsFromDirectionsRoute({
+      duration_without_traffic: 756,
+      duration_in_traffic: 1130,
+      steps: [{ polylinePoints: '' }],
+    }, coordinates)).toEqual([
+      {
+        coordinates,
+        level: 'heavy',
+        color: '#DC2626',
+      },
+    ]);
   });
 
   beforeEach(async () => {
@@ -682,6 +734,55 @@ describe('driver online toggle', () => {
     const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
     expect(latestMapProps.routeCoordinates).toHaveLength(2);
     expect(latestMapProps.showTraffic).toBe(false);
+  });
+
+  it('colors the passenger pre-booking preview route with the worst traffic level', async () => {
+    const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+    subscribePrototypeMapRoute.mockImplementation((callback) => {
+      callback({
+        coordinates: [
+          { latitude: -22.8499687, longitude: -43.3110186 },
+          { latitude: -22.8710707, longitude: -43.3360867 },
+        ],
+        trafficSegments: [
+          {
+            coordinates: [
+              { latitude: -22.8499687, longitude: -43.3110186 },
+              { latitude: -22.8710707, longitude: -43.3360867 },
+            ],
+            level: 'heavy',
+            color: '#DC2626',
+          },
+        ],
+        destination: { latitude: -22.8710707, longitude: -43.3360867 },
+        destinationLabel: 'Mercadão de Madureira',
+        destinationAddress: 'Madureira',
+      });
+      return jest.fn();
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+    });
+
+    const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+    expect(latestMapProps.routeMainColor).toBe('#DC2626');
+    expect(latestMapProps.animateRoute).toBe(false);
+    expect(latestMapProps.routeTrafficSegments).toEqual([
+      expect.objectContaining({
+        level: 'heavy',
+        color: '#DC2626',
+      }),
+    ]);
   });
 
   it('keeps the traffic layer off while the passenger has an active ride search', async () => {

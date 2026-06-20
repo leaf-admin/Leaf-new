@@ -518,6 +518,81 @@ router.post('/api/places/search', async (req, res) => {
 });
 
 /**
+ * POST /api/places/reverse-geocode
+ * Resolve endereço por coordenada com cache backend.
+ */
+router.post('/api/places/reverse-geocode', async (req, res) => {
+  try {
+    const location = normalizeLatLng(req.body?.location || req.body);
+    const forceFresh = normalizeBoolean(req.body?.forceFresh, false);
+    const telemetry = normalizeTelemetry(req.body?.telemetry || {});
+
+    if (!location) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'location.lat e location.lng são obrigatórios.',
+      });
+    }
+
+    const result = await placesCacheService.reverseGeocode(location.lat, location.lng, {
+      forceFresh,
+    });
+
+    if (!result) {
+      return res.status(404).json({
+        status: 'not_found',
+        message: 'Não foi possível resolver o endereço para as coordenadas.',
+      });
+    }
+
+    const billedGoogleRequest = Number(result?.stats?.googleRequests || 0) > 0;
+    const telemetryCaptured = result.cached !== true && billedGoogleRequest
+      ? await captureBookingGoogleTelemetry({
+        bookingId: telemetry.bookingId,
+        sourceKey: telemetry.sourceKey || 'backend:places:reverse-geocode',
+        sourceMeta: {
+          ...telemetry.sourceMeta,
+          surface: telemetry.sourceMeta?.surface || 'places_reverse_geocode_backend',
+        },
+        requestMeta: telemetry.requestMeta,
+        skuKey: 'geocoding',
+        requestCount: 1,
+        billableUnits: 1,
+        metadata: {
+          telemetrySurface: telemetry.sourceMeta?.surface || 'places_reverse_geocode_backend',
+          routeScope: 'pickup_resolution',
+          cacheMode: result.cached ? 'cache' : 'none',
+          forceFresh,
+          lat: Number(location.lat.toFixed(5)),
+          lng: Number(location.lng.toFixed(5)),
+        },
+      })
+      : false;
+
+    return res.json({
+      status: 'success',
+      source: result.cached ? 'cache' : 'google',
+      cached: result.cached === true,
+      telemetryCaptured,
+      data: {
+        address: result.address,
+        formatted_address: result.formatted_address || result.address,
+        name: result.name || result.address,
+        lat: result.lat,
+        lng: result.lng,
+        place_id: result.place_id || null,
+      },
+    });
+  } catch (error) {
+    logger.error(`❌ [PlacesRoute] Erro em reverse geocode backend: ${error.message}`);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Erro ao resolver endereço por coordenada.',
+    });
+  }
+});
+
+/**
  * POST /api/places/autocomplete
  * Busca autocomplete com cache backend + fallback Google no servidor
  */

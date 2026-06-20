@@ -319,6 +319,35 @@ const buildRideTelemetryMetadata = (telemetryContext = null, extras = {}) => ({
     ...extras
 });
 
+const routeHasTrafficTiming = (route = null) => {
+    const baseDuration = Number(route?.duration_without_traffic ?? route?.durationWithoutTraffic);
+    const trafficDuration = Number(route?.duration_in_traffic ?? route?.durationInTraffic);
+    return (
+        Number.isFinite(baseDuration) &&
+        Number.isFinite(trafficDuration) &&
+        baseDuration > 0 &&
+        trafficDuration > 0
+    );
+};
+
+const shouldBypassStaleTrafficDirectionsCache = (cachedRoute, telemetryContext = null) => {
+    if (!cachedRoute || routeHasTrafficTiming(cachedRoute)) {
+        return false;
+    }
+
+    const routeContext = [
+        telemetryContext?.routeScope,
+        telemetryContext?.routeFamily,
+        telemetryContext?.sourceMeta?.surface,
+        telemetryContext?.surface,
+    ]
+        .filter(Boolean)
+        .join('|')
+        .toLowerCase();
+
+    return routeContext.includes('passenger_home_preview');
+};
+
 const haversineKm = (aLat, aLng, bLat, bLng) => {
     const toRad = (deg) => (deg * Math.PI) / 180;
     const R = 6371;
@@ -1042,18 +1071,31 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
             ? null
             : getCached(cacheKey, MAPS_CACHE_TTL_MS.directions);
         if (cached) {
-            rideCostTelemetryService.recordGoogleCache('directionsMemoryHit', {
-                metadata: buildRideTelemetryMetadata(telemetryContext, {
-                    waypointsCount: waypoints ? String(waypoints).split('|').filter(Boolean).length : 0,
-                    trafficEnabled,
-                    alternativesEnabled,
-                    cacheMode: cachePolicy.mode,
-                    forceFresh: cachePolicy.forceFresh,
-                    callerFrame
-                })
-            }, telemetryContext);
-            resolve(cached);
-            return;
+            if (shouldBypassStaleTrafficDirectionsCache(cached, telemetryContext)) {
+                rideCostTelemetryService.recordGoogleCache('directionsMemoryStaleTrafficBypass', {
+                    metadata: buildRideTelemetryMetadata(telemetryContext, {
+                        waypointsCount: waypoints ? String(waypoints).split('|').filter(Boolean).length : 0,
+                        trafficEnabled,
+                        alternativesEnabled,
+                        cacheMode: cachePolicy.mode,
+                        forceFresh: cachePolicy.forceFresh,
+                        callerFrame
+                    })
+                }, telemetryContext);
+            } else {
+                rideCostTelemetryService.recordGoogleCache('directionsMemoryHit', {
+                    metadata: buildRideTelemetryMetadata(telemetryContext, {
+                        waypointsCount: waypoints ? String(waypoints).split('|').filter(Boolean).length : 0,
+                        trafficEnabled,
+                        alternativesEnabled,
+                        cacheMode: cachePolicy.mode,
+                        forceFresh: cachePolicy.forceFresh,
+                        callerFrame
+                    })
+                }, telemetryContext);
+                resolve(cached);
+                return;
+            }
         }
         
         Logger.log('🌐 URL da API Google Directions:', sanitizeSensitiveUrl(url));
