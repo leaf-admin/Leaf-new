@@ -186,7 +186,8 @@ cat > "${ARTIFACTS_DIR}/start-driver-bot.sh" <<EOF
 set -euo pipefail
 source "$(printf '%q' "${ARTIFACTS_DIR}/smoke-env.sh")"
 
-# Start this immediately before opening payment, so the 180s bot timeout is useful.
+# Manual fallback: the Android smoke runner normally starts a managed driver bot
+# after it extracts the canonical pickup coordinate from the app.
 TEST_DRIVER_UID="\${TEST_DRIVER_UID}" TEST_PICKUP_LAT="\${TEST_PICKUP_LAT}" TEST_PICKUP_LNG="\${TEST_PICKUP_LNG}" TEST_FARE="\${TEST_FARE}" WS_URL="${SOCKET_URL}" \\
   node leaf-websocket-backend/scripts/tests/driver-dispatch-bot.cjs
 EOF
@@ -197,7 +198,7 @@ set -euo pipefail
 source "$(printf '%q' "${ARTIFACTS_DIR}/smoke-env.sh")"
 
 # Real-device smoke runner with sandbox payment auto-confirmation for the canary passenger.
-STRICT_QUOTE=true REAL_SMOKE_OPEN_PAYMENT=true REAL_SMOKE_AUTO_CONFIRM_SANDBOX_PAYMENT=true FIRST_LAUNCH_WAIT_MS=12000 SECOND_LAUNCH_WAIT_MS=10000 QUOTE_STABILITY_WAIT_MS=16000 REAL_SMOKE_PAYMENT_WAIT_MS=60000 \\
+STRICT_QUOTE=true REAL_SMOKE_OPEN_PAYMENT=true REAL_SMOKE_AUTO_CONFIRM_SANDBOX_PAYMENT=true REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP=true REAL_SMOKE_REQUIRE_CANONICAL_PICKUP=true FIRST_LAUNCH_WAIT_MS=12000 SECOND_LAUNCH_WAIT_MS=10000 QUOTE_STABILITY_WAIT_MS=16000 REAL_SMOKE_PAYMENT_WAIT_MS=60000 \\
   npm --prefix mobile-app run qa:android:real-smoke
 EOF
 chmod +x "${ARTIFACTS_DIR}/smoke-env.sh" "${ARTIFACTS_DIR}/start-driver-bot.sh" "${ARTIFACTS_DIR}/run-android-smoke.sh"
