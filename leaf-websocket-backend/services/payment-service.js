@@ -232,6 +232,53 @@ class PaymentService {
     return `advance_${hash}`;
   }
 
+  resolveAdvancePaymentSession(paymentData = {}) {
+    const paymentSessionId = String(paymentData.paymentSessionId || '').trim();
+    const suppliedRideId = String(paymentData.rideId || '').trim();
+    if (!paymentSessionId) {
+      return {
+        success: Boolean(suppliedRideId),
+        rideId: suppliedRideId,
+        paymentSessionId: null,
+        paymentContextKey: null,
+        quoteSessionId: null,
+        code: suppliedRideId ? null : 'PAYMENT_RIDE_REFERENCE_REQUIRED',
+        error: suppliedRideId ? null : 'Referência da corrida obrigatória'
+      };
+    }
+
+    if (!/^[a-zA-Z0-9_-]{12,128}$/.test(paymentSessionId)) {
+      return {
+        success: false,
+        code: 'PAYMENT_SESSION_INVALID',
+        error: 'Sessão de pagamento inválida'
+      };
+    }
+
+    const passengerId = String(paymentData.passengerId || '').trim();
+    if (!passengerId) {
+      return {
+        success: false,
+        code: 'PAYMENT_PASSENGER_REQUIRED',
+        error: 'Passageiro obrigatório para a sessão de pagamento'
+      };
+    }
+
+    const hash = crypto
+      .createHash('sha256')
+      .update(`advance_payment_session:${passengerId}:${paymentSessionId}`)
+      .digest('hex')
+      .slice(0, 28);
+
+    return {
+      success: true,
+      rideId: `temp_ride_session_${hash}`,
+      paymentSessionId,
+      paymentContextKey: String(paymentData.paymentContextKey || '').trim().slice(0, 512) || null,
+      quoteSessionId: String(paymentData.quoteSessionId || '').trim().slice(0, 160) || null
+    };
+  }
+
   buildAdvanceChargeCorrelationID(paymentData = {}) {
     const rideId = String(paymentData.rideId || '').trim() || 'unknown-ride';
     const quoteVersion = this.normalizeQuoteVersion(paymentData);
@@ -261,6 +308,9 @@ class PaymentService {
       provider: existing.provider || 'woovi',
       providerEnvironment: existing.providerEnvironment || existing.wooviEnvironment || null,
       paymentProfileId: existing.paymentProfileId || null,
+      paymentSessionId: existing.paymentSessionId || null,
+      paymentContextKey: existing.paymentContextKey || null,
+      quoteSessionId: existing.quoteSessionId || null,
       splitApplied: false,
       splitDeferred: true,
       settlementPolicy: 'post_ride_ledger',
@@ -283,6 +333,9 @@ class PaymentService {
       paymentData.payableAmountInCents || amountCents
     );
     const quoteVersion = this.normalizeQuoteVersion(paymentData);
+    const paymentSessionId = String(paymentData.paymentSessionId || '').trim() || null;
+    const paymentContextKey = String(paymentData.paymentContextKey || '').trim() || null;
+    const quoteSessionId = String(paymentData.quoteSessionId || '').trim() || null;
     const paymentIntentId = this.buildAdvancePaymentIntentId(rideId);
     const correlationID = this.buildAdvanceChargeCorrelationID(paymentData);
     const nowIso = new Date().toISOString();
@@ -312,6 +365,9 @@ class PaymentService {
         providerEnvironment: paymentProfile.environment || 'production',
         paymentProfileId: paymentProfile.profileId || null,
         paymentProfileSource: paymentProfile.source || null,
+        paymentSessionId,
+        paymentContextKey,
+        quoteSessionId,
         quoteVersion
       };
     }
@@ -328,11 +384,15 @@ class PaymentService {
           const existingRideId = String(existing.rideId || '').trim();
           const existingProviderEnvironment = String(existing.providerEnvironment || '').trim().toLowerCase();
           const incomingProviderEnvironment = String(paymentProfile.environment || '').trim().toLowerCase();
+          const existingPaymentSessionId = String(existing.paymentSessionId || '').trim();
+          const existingPaymentContextKey = String(existing.paymentContextKey || '').trim();
 
           if (
             existingRideId !== rideId ||
             existingAmountCents !== amountCents ||
             (existingPassengerId && existingPassengerId !== passengerId) ||
+            (existingPaymentSessionId && paymentSessionId && existingPaymentSessionId !== paymentSessionId) ||
+            (existingPaymentContextKey && paymentContextKey && existingPaymentContextKey !== paymentContextKey) ||
             (existingProviderEnvironment && incomingProviderEnvironment && existingProviderEnvironment !== incomingProviderEnvironment)
           ) {
             return {
@@ -344,6 +404,17 @@ class PaymentService {
               incomingAmountCents: amountCents,
               existingProviderEnvironment: existingProviderEnvironment || null,
               incomingProviderEnvironment: incomingProviderEnvironment || null
+            };
+          }
+
+          if (existing.status === 'consumed') {
+            return {
+              success: false,
+              code: 'PAYMENT_SESSION_CONSUMED',
+              error: 'Este pagamento já está vinculado a uma corrida',
+              paymentIntentId,
+              bookingId: existing.bookingId || null,
+              chargeId: existing.chargeId || null
             };
           }
 
@@ -391,6 +462,9 @@ class PaymentService {
           grossAmountInCents,
           payableAmountInCents,
           discountBenefit: paymentData.discountBenefit || null,
+          paymentSessionId,
+          paymentContextKey,
+          quoteSessionId,
           quoteVersion,
           correlationID,
           status: 'creating_charge',
@@ -423,6 +497,9 @@ class PaymentService {
           grossAmountInCents,
           payableAmountInCents,
           discountBenefit: paymentData.discountBenefit || null,
+          paymentSessionId,
+          paymentContextKey,
+          quoteSessionId,
           provider: 'woovi',
           providerEnvironment: paymentProfile.environment || 'production',
           paymentProfileId: paymentProfile.profileId || null,
@@ -463,6 +540,9 @@ class PaymentService {
         paymentProfileId: paymentProfile.profileId || null,
         paymentProfileSource: paymentProfile.source || null,
         paymentProfileReason: paymentProfile.reason || null,
+        paymentSessionId,
+        paymentContextKey,
+        quoteSessionId,
         quoteVersion,
         intentPersistenceError: error.message
       };
@@ -532,6 +612,91 @@ class PaymentService {
         error: error.message
       });
       return false;
+    }
+  }
+
+  async markAdvancePaymentIntentConsumed({ rideId, bookingId, chargeId } = {}) {
+    const safeRideId = String(rideId || '').trim();
+    const safeBookingId = String(bookingId || '').trim();
+    if (!safeRideId || !safeBookingId) return false;
+
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) return false;
+      const paymentIntentId = this.buildAdvancePaymentIntentId(safeRideId);
+      const intentRef = firestore.collection('payment_intents').doc(paymentIntentId);
+      const intentDoc = await intentRef.get();
+      if (!intentDoc.exists) return false;
+
+      const existing = intentDoc.data() || {};
+      const existingChargeId = String(existing.chargeId || '').trim();
+      const safeChargeId = String(chargeId || '').trim();
+      if (existingChargeId && safeChargeId && existingChargeId !== safeChargeId) {
+        logStructured('warn', 'Payment intent não consumida por divergência de chargeId', {
+          service: 'PaymentService',
+          paymentIntentId,
+          bookingId: safeBookingId,
+          existingChargeId,
+          incomingChargeId: safeChargeId
+        });
+        return false;
+      }
+
+      const nowIso = new Date().toISOString();
+      await intentRef.set({
+        status: 'consumed',
+        bookingId: safeBookingId,
+        canonicalRideId: safeBookingId,
+        consumedChargeId: safeChargeId || existingChargeId || null,
+        consumedAt: admin.firestore.FieldValue.serverTimestamp(),
+        consumedAtIso: nowIso,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAtIso: nowIso
+      }, { merge: true });
+      return true;
+    } catch (error) {
+      logStructured('warn', 'Falha ao marcar payment intent como consumida', {
+        service: 'PaymentService',
+        rideId: safeRideId,
+        bookingId: safeBookingId,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  async getAdvancePaymentIntent(rideId) {
+    const safeRideId = String(rideId || '').trim();
+    if (!safeRideId) return { found: false };
+
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) {
+        return {
+          found: false,
+          unavailable: true,
+          code: 'PAYMENT_INTENT_STORE_UNAVAILABLE'
+        };
+      }
+      const paymentIntentId = this.buildAdvancePaymentIntentId(safeRideId);
+      const intentDoc = await firestore.collection('payment_intents').doc(paymentIntentId).get();
+      if (!intentDoc.exists) return { found: false, paymentIntentId };
+      return {
+        found: true,
+        paymentIntentId,
+        ...(intentDoc.data() || {})
+      };
+    } catch (error) {
+      logStructured('warn', 'Falha ao consultar payment intent', {
+        service: 'PaymentService',
+        rideId: safeRideId,
+        error: error.message
+      });
+      return {
+        found: false,
+        unavailable: true,
+        code: 'PAYMENT_INTENT_LOOKUP_FAILED'
+      };
     }
   }
 
@@ -872,6 +1037,18 @@ class PaymentService {
    */
   async processAdvancePayment(paymentData) {
     try {
+      const paymentSession = this.resolveAdvancePaymentSession(paymentData);
+      if (!paymentSession.success) {
+        return paymentSession;
+      }
+      paymentData = {
+        ...paymentData,
+        rideId: paymentSession.rideId,
+        paymentSessionId: paymentSession.paymentSessionId,
+        paymentContextKey: paymentSession.paymentContextKey,
+        quoteSessionId: paymentSession.quoteSessionId
+      };
+
       logStructured('info', 'Processando pagamento antecipado', {
         service: 'PaymentService',
         passengerId: paymentData.passengerId,
@@ -938,6 +1115,8 @@ class PaymentService {
           error: paymentIntent.error || 'Não foi possível criar a cobrança Pix',
           code: paymentIntent.code || 'PAYMENT_INTENT_ERROR',
           paymentIntentId: paymentIntent.paymentIntentId || null,
+          bookingId: paymentIntent.bookingId || null,
+          chargeId: paymentIntent.chargeId || null,
           details: paymentIntent
         };
       }
@@ -981,6 +1160,8 @@ class PaymentService {
           { key: 'discount_benefit_id', value: String(paymentData.discountBenefit?.benefitId || '') },
           { key: 'discount_amount_cents', value: String(paymentData.discountBenefit?.discountAmountInCents || 0) },
           { key: 'payment_intent_id', value: paymentIntent.paymentIntentId || '' },
+          { key: 'payment_session_id', value: paymentIntent.paymentSessionId || '' },
+          { key: 'quote_session_id', value: paymentIntent.quoteSessionId || '' },
           { key: 'quote_version', value: paymentIntent.quoteVersion || this.normalizeQuoteVersion(paymentData) },
           { key: 'payment_type', value: 'advance_payment' },
           { key: 'provider_environment', value: paymentIntent.providerEnvironment || paymentProfile.environment || 'production' },
@@ -1124,6 +1305,9 @@ class PaymentService {
         provider: paymentIntent.provider || 'woovi',
         providerEnvironment: paymentIntent.providerEnvironment || paymentProfile.environment,
         paymentProfileId: paymentIntent.paymentProfileId || paymentProfile.profileId || null,
+        paymentSessionId: paymentIntent.paymentSessionId || null,
+        paymentContextKey: paymentIntent.paymentContextKey || null,
+        quoteSessionId: paymentIntent.quoteSessionId || null,
         splitApplied: false,
         splitDeferred: true,
         settlementPolicy: 'post_ride_ledger',

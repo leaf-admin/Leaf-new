@@ -7,6 +7,7 @@ import polyline from "@mapbox/polyline";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Logger from "../../utils/Logger";
+import { requestForegroundLocationPermissionWithDisclosure } from "../../services/AndroidPermissionDisclosure";
 import WebSocketManager from "../../services/WebSocketManager";
 import realtimeConnectionOrchestrator from "../../services/RealtimeConnectionOrchestrator";
 import receiptService from "../../services/ReceiptService";
@@ -38,6 +39,7 @@ import {
   resolvePrototypeProfilePhone,
 } from "./prototypeProfileIdentity";
 import {
+  buildFallbackRouteCoordinates,
   clearPrototypeMapRoute,
   getPrototypeMapRoute,
   setPrototypeMapRoute,
@@ -60,6 +62,11 @@ import {
 import { dismissDriverOfferRuntimeState } from "./driverOfferState";
 import { formatCurrencyBRL, resolveTripTollAmount } from "./tripFinancialSummary";
 import { SEARCH_TOTAL_DURATION_SECONDS } from "./searchPresentation";
+import {
+  SEARCH_TIMEOUT_RECONCILING_MESSAGE,
+  isPassengerSearchExpired,
+  shouldPreservePassengerSearchOnIdleSync,
+} from "./passengerSearchLifecycle";
 import {
   advanceCoordinateAlongPath,
   buildPlaybackPath,
@@ -247,6 +254,7 @@ const RUNTIME_PERSISTED_FIELDS = Object.freeze([
   "chatMessages",
   "tripHistory",
   "lastReceipt",
+  "terminalRideGuards",
   "paymentState",
   "rideExtension",
   "driverExtensionRequest",
@@ -369,6 +377,20 @@ const DEFAULT_DRIVER_TRANSIENT_CARD = Object.freeze({
 const runtimeRoutePlanCache = new Map();
 const runtimeRoutePlanInFlight = new Map();
 const runtimeDirectionsRequestsByBooking = new Map();
+const RUNTIME_TERMINAL_RIDE_GUARD_LIMIT = 12;
+const RUNTIME_TERMINAL_STATUSES = new Set(["completed", "canceled"]);
+const RUNTIME_LIFECYCLE_ORDER = Object.freeze({
+  idle: 0,
+  requesting: 1,
+  searching: 2,
+  searching_replacement: 2,
+  accepted: 3,
+  arrived: 4,
+  started: 5,
+  operational_interrupted: 6,
+  completed: 100,
+  canceled: 100,
+});
 
 function createDefaultDriverTripMeta(overrides = {}) {
   return {
@@ -491,6 +513,7 @@ const DEFAULT_RUNTIME_STATE = Object.freeze({
   lastError: "",
   tripHistory: [],
   lastReceipt: null,
+  terminalRideGuards: [],
 });
 
 let runtimeState = { ...DEFAULT_RUNTIME_STATE };
@@ -657,6 +680,150 @@ function shouldIgnoreDuplicateLifecycleEvent(eventName, bookingId, status) {
   runtimeAppliedLifecycleEventKeysByBooking.set(normalizedBookingId, eventKey);
   runtimeLastLifecycleEventKey = eventKey;
   runtimeLastLifecycleEventAt = now;
+  return false;
+}
+
+function normalizeTerminalRideGuardStatus(status) {
+  const normalized = normalizeRuntimeLifecycleStatus(status);
+  if (normalized === "canceled") {
+    return "canceled";
+  }
+  return "completed";
+}
+
+function normalizeTerminalRideGuardEntry(entry) {
+  const bookingId = String(
+    entry?.bookingId || entry?.rideId || entry?.id || "",
+  ).trim();
+  if (!bookingId) {
+    return null;
+  }
+
+  const guardedAt = String(
+    entry?.guardedAt || entry?.completedAt || entry?.cancelledAt || entry?.at || "",
+  ).trim();
+
+  return {
+    bookingId,
+    status: normalizeTerminalRideGuardStatus(entry?.status),
+    guardedAt: guardedAt || new Date().toISOString(),
+  };
+}
+
+function normalizeTerminalRideGuards(value) {
+  const guards = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  return guards
+    .map(normalizeTerminalRideGuardEntry)
+    .filter(Boolean)
+    .filter((entry) => {
+      if (seen.has(entry.bookingId)) {
+        return false;
+      }
+      seen.add(entry.bookingId);
+      return true;
+    })
+    .slice(0, RUNTIME_TERMINAL_RIDE_GUARD_LIMIT);
+}
+
+function mergeTerminalRideGuard(previousGuards, bookingId, status = "completed") {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) {
+    return normalizeTerminalRideGuards(previousGuards);
+  }
+
+  return normalizeTerminalRideGuards([
+    {
+      bookingId: normalizedBookingId,
+      status,
+      guardedAt: new Date().toISOString(),
+    },
+    ...normalizeTerminalRideGuards(previousGuards),
+  ]);
+}
+
+function getRuntimeLifecycleOrder(status) {
+  const normalized = normalizeRuntimeLifecycleStatus(status);
+  return RUNTIME_LIFECYCLE_ORDER[normalized] ?? -1;
+}
+
+function getKnownRuntimeBookingIdForGuard(bookingId = "") {
+  return String(
+    bookingId ||
+      runtimeState.activeBookingId ||
+      runtimeState.driverActiveRide?.bookingId ||
+      runtimeState.activeBooking?.bookingId ||
+      runtimeState.lastRideBookingId ||
+      "",
+  ).trim();
+}
+
+function hasTerminalRideGuard(bookingId = "") {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) {
+    return false;
+  }
+
+  if (
+    normalizeTerminalRideGuards(runtimeState.terminalRideGuards).some(
+      (entry) => entry.bookingId === normalizedBookingId,
+    )
+  ) {
+    return true;
+  }
+
+  const lastReceiptId = String(runtimeState.lastReceipt?.id || "").trim();
+  const lastRideBookingId = String(runtimeState.lastRideBookingId || "").trim();
+  const localStatus = normalizeRuntimeLifecycleStatus(runtimeState.bookingStatus);
+  return (
+    RUNTIME_TERMINAL_STATUSES.has(localStatus) &&
+    (normalizedBookingId === lastReceiptId || normalizedBookingId === lastRideBookingId)
+  );
+}
+
+function shouldIgnoreLifecycleRegression(eventName, bookingId, nextStatus) {
+  const normalizedBookingId = getKnownRuntimeBookingIdForGuard(bookingId);
+  const normalizedNextStatus = normalizeRuntimeLifecycleStatus(nextStatus);
+  if (!normalizedBookingId || !normalizedNextStatus) {
+    return false;
+  }
+
+  if (
+    hasTerminalRideGuard(normalizedBookingId) &&
+    !RUNTIME_TERMINAL_STATUSES.has(normalizedNextStatus)
+  ) {
+    writeRuntimeDebugProbe("event_lifecycle_regression_ignored_terminal_guard", {
+      eventName,
+      bookingId: normalizedBookingId,
+      nextStatus: normalizedNextStatus,
+      localStatus: runtimeState.bookingStatus || null,
+    });
+    return true;
+  }
+
+  const activeBookingId = String(
+    runtimeState.activeBookingId ||
+      runtimeState.driverActiveRide?.bookingId ||
+      runtimeState.activeBooking?.bookingId ||
+      "",
+  ).trim();
+  if (activeBookingId && activeBookingId !== normalizedBookingId) {
+    return false;
+  }
+
+  const currentStatus = normalizeRuntimeLifecycleStatus(runtimeState.bookingStatus);
+  const currentOrder = getRuntimeLifecycleOrder(currentStatus);
+  const nextOrder = getRuntimeLifecycleOrder(normalizedNextStatus);
+  if (currentOrder > nextOrder && !RUNTIME_TERMINAL_STATUSES.has(normalizedNextStatus)) {
+    writeRuntimeDebugProbe("event_lifecycle_regression_ignored_order", {
+      eventName,
+      bookingId: normalizedBookingId,
+      currentStatus,
+      nextStatus: normalizedNextStatus,
+    });
+    return true;
+  }
+
   return false;
 }
 
@@ -1715,6 +1882,9 @@ function sanitizePersistedRuntimeSessionForProfile(session, profile = null) {
     .trim()
     .toLowerCase();
   restored.quoteLock = normalizePersistedQuoteLock(restored.quoteLock);
+  restored.terminalRideGuards = normalizeTerminalRideGuards(
+    restored.terminalRideGuards,
+  );
   if (normalizedBookingStatus !== "idle") {
     restored.quoteLock = null;
   }
@@ -1848,6 +2018,17 @@ function sanitizePersistedRuntimeSessionForProfile(session, profile = null) {
     restored.searchingElapsedSeconds = Math.min(
       SEARCH_TOTAL_DURATION_SECONDS,
       Math.max(0, Math.floor(Number(restored.searchingElapsedSeconds) || 0)),
+    );
+  }
+
+  if (
+    RUNTIME_TERMINAL_STATUSES.has(normalizedBookingStatus) &&
+    (restored.lastRideBookingId || restored.lastReceipt?.id)
+  ) {
+    restored.terminalRideGuards = mergeTerminalRideGuard(
+      restored.terminalRideGuards,
+      restored.lastRideBookingId || restored.lastReceipt?.id,
+      normalizedBookingStatus,
     );
   }
 
@@ -2176,6 +2357,12 @@ function setRuntimeState(next) {
   let patch = rawPatch;
   if (!patch || typeof patch !== "object") {
     return;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "terminalRideGuards")) {
+    patch = {
+      ...patch,
+      terminalRideGuards: normalizeTerminalRideGuards(patch.terminalRideGuards),
+    };
   }
   if (patch.driverTripMeta && typeof patch.driverTripMeta === "object") {
     const mergedStateForRouteHydration = {
@@ -3347,7 +3534,9 @@ function buildFixedRouteCoordinates(
   const nextCoordinates =
     normalizedCoordinates.length >= 2
       ? [...normalizedCoordinates]
-      : [normalizedStart, normalizedEnd].filter(Boolean);
+      : normalizedStart && normalizedEnd
+        ? buildFallbackRouteCoordinates(normalizedStart, normalizedEnd)
+        : [normalizedStart, normalizedEnd].filter(Boolean);
 
   if (nextCoordinates.length === 0) {
     return [];
@@ -5208,6 +5397,86 @@ function resolveSyncedBookingStatus(snapshot = {}) {
   return snapshot?.hasActiveRide ? "searching" : "idle";
 }
 
+function resolveReceiptVehicleIdentity(snapshot = {}, previousState = runtimeState) {
+  const snapshotVehicle = snapshot?.driver?.vehicle || snapshot?.vehicle || {};
+  const bookingVehicle =
+    previousState?.activeBooking?.driver?.vehicle ||
+    previousState?.activeBooking?.vehicle ||
+    {};
+  const activeRideVehicle =
+    previousState?.driverActiveRide?.driver?.vehicle ||
+    previousState?.driverActiveRide?.vehicle ||
+    {};
+  const vehicleMake = sanitizeText(
+    snapshotVehicle?.make ||
+      snapshotVehicle?.brand ||
+      bookingVehicle?.make ||
+      bookingVehicle?.brand ||
+      activeRideVehicle?.make ||
+      activeRideVehicle?.brand ||
+      "",
+    "",
+  );
+  const vehicleModel = sanitizeText(
+    snapshot?.vehicleLabel ||
+      snapshot?.vehicleModel ||
+      snapshotVehicle?.model ||
+      snapshotVehicle?.category ||
+      previousState?.driverInfo?.model ||
+      previousState?.driverInfo?.vehicleModel ||
+      previousState?.activeBooking?.vehicleLabel ||
+      previousState?.activeBooking?.vehicleModel ||
+      bookingVehicle?.model ||
+      bookingVehicle?.category ||
+      previousState?.driverActiveRide?.vehicleLabel ||
+      previousState?.driverActiveRide?.vehicleModel ||
+      activeRideVehicle?.model ||
+      activeRideVehicle?.category ||
+      "",
+    "",
+  );
+  const vehicleLabel = sanitizeText(
+    vehicleMake &&
+      vehicleModel &&
+      !vehicleModel.toLowerCase().startsWith(vehicleMake.toLowerCase())
+      ? `${vehicleMake} ${vehicleModel}`
+      : vehicleModel || vehicleMake,
+    "",
+  );
+  const vehiclePlate = sanitizeText(
+    snapshot?.vehiclePlate ||
+      snapshot?.plate ||
+      snapshotVehicle?.plate ||
+      previousState?.driverInfo?.plate ||
+      previousState?.driverInfo?.vehiclePlate ||
+      previousState?.activeBooking?.vehiclePlate ||
+      bookingVehicle?.plate ||
+      previousState?.driverActiveRide?.vehiclePlate ||
+      activeRideVehicle?.plate ||
+      "",
+    "",
+  );
+  const vehicleColor = sanitizeText(
+    snapshot?.vehicleColor ||
+      snapshot?.carColor ||
+      snapshotVehicle?.color ||
+      previousState?.driverInfo?.color ||
+      previousState?.driverInfo?.vehicleColor ||
+      previousState?.activeBooking?.vehicleColor ||
+      bookingVehicle?.color ||
+      previousState?.driverActiveRide?.vehicleColor ||
+      activeRideVehicle?.color ||
+      "",
+    "",
+  );
+
+  return {
+    ...(vehicleLabel ? { vehicleLabel } : {}),
+    ...(vehiclePlate ? { vehiclePlate } : {}),
+    ...(vehicleColor ? { vehicleColor } : {}),
+  };
+}
+
 function buildReceiptFromSyncedSnapshot(
   snapshot = {},
   previousState = runtimeState,
@@ -5249,6 +5518,10 @@ function buildReceiptFromSyncedSnapshot(
     previousState,
   );
   const receiptParticipants = resolveReceiptParticipants(snapshot, previousState);
+  const receiptVehicleIdentity = resolveReceiptVehicleIdentity(
+    snapshot,
+    previousState,
+  );
   const receiptPickupCoordinate =
     normalizeRuntimeCoordinate(snapshot?.pickupCoordinate) ||
     normalizeRuntimeCoordinate(snapshot?.pickupLocation) ||
@@ -5353,6 +5626,7 @@ function buildReceiptFromSyncedSnapshot(
     driverName: receiptParticipants.driverName || null,
     passengerId: receiptParticipants.passengerId || null,
     passengerName: receiptParticipants.passengerName || null,
+    ...receiptVehicleIdentity,
     pickup: pickupLabel,
     pickupAddress: pickupLabel,
     drop: dropLabel,
@@ -5647,6 +5921,11 @@ async function recoverCompletedRideFromStoredReceipt({
         bookingStatus: "completed",
         activeBooking: null,
         activeBookingId: null,
+        terminalRideGuards: mergeTerminalRideGuard(
+          runtimeState.terminalRideGuards,
+          bookingId,
+          "completed",
+        ),
         driverOffers: [],
         driverActiveRide: null,
         tripArrivalText: "",
@@ -5749,7 +6028,11 @@ function dismissCompletedReceiptState() {
   stopPassengerLocationHeartbeat();
 
   const bookingIdToClear = String(
-    runtimeState.activeBookingId || runtimeState.driverActiveRide?.bookingId || "",
+    runtimeState.activeBookingId ||
+      runtimeState.driverActiveRide?.bookingId ||
+      runtimeState.lastReceipt?.id ||
+      runtimeState.lastRideBookingId ||
+      "",
   ).trim();
   if (bookingIdToClear) {
     runtimeAppliedLifecycleEventKeysByBooking.delete(bookingIdToClear);
@@ -5760,6 +6043,11 @@ function dismissCompletedReceiptState() {
     searchingElapsedSeconds: 0,
     activeBookingId: null,
     activeBooking: null,
+    terminalRideGuards: mergeTerminalRideGuard(
+      previous.terminalRideGuards,
+      bookingIdToClear,
+      "completed",
+    ),
     driverOffers: [],
     driverActiveRide: null,
     driverCoordinate: null,
@@ -5908,6 +6196,9 @@ function startSearchingTimer({ preserveElapsed = false } = {}) {
 
       return {
         searchingElapsedSeconds: nextElapsed,
+        ...(nextElapsed >= SEARCH_TOTAL_DURATION_SECONDS
+          ? { lastError: SEARCH_TIMEOUT_RECONCILING_MESSAGE }
+          : {}),
       };
     });
   }, SEARCH_TIMER_INTERVAL_MS);
@@ -5932,42 +6223,56 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
       ? incomingRouteCoordinates
       : existingRouteCoordinates;
 
+  const existingHasBackendFinalFinancials =
+    existingReceipt?.authoritativeSnapshot === true &&
+    existingReceipt?.financialSnapshotSource === "backend_final";
+  const incomingHasBackendFinalFinancials =
+    incomingReceipt?.authoritativeSnapshot === true &&
+    incomingReceipt?.financialSnapshotSource === "backend_final";
+  const preferredFinancialReceipt =
+    existingHasBackendFinalFinancials && !incomingHasBackendFinalFinancials
+      ? existingReceipt
+      : incomingReceipt;
+  const fallbackFinancialReceipt =
+    preferredFinancialReceipt === incomingReceipt
+      ? existingReceipt
+      : incomingReceipt;
   const finalFare = pickPreferredRuntimeMoney(
-    incomingReceipt?.finalFare,
-    incomingReceipt?.fare,
-    existingReceipt?.finalFare,
-    existingReceipt?.fare,
+    preferredFinancialReceipt?.finalFare,
+    preferredFinancialReceipt?.fare,
+    fallbackFinancialReceipt?.finalFare,
+    fallbackFinancialReceipt?.fare,
   );
   const rawDriverNetAmount = pickPreferredRuntimeMoney(
-    incomingReceipt?.driverNetAmount,
-    existingReceipt?.driverNetAmount,
-    incomingReceipt?.estimatedDriverNetAmount,
-    existingReceipt?.estimatedDriverNetAmount,
+    preferredFinancialReceipt?.driverNetAmount,
+    fallbackFinancialReceipt?.driverNetAmount,
+    preferredFinancialReceipt?.estimatedDriverNetAmount,
+    fallbackFinancialReceipt?.estimatedDriverNetAmount,
   );
   const operationalFee = pickPreferredRuntimeMoney(
-    incomingReceipt?.operationalFee,
-    existingReceipt?.operationalFee,
-    incomingReceipt?.estimatedOperationalFee,
-    existingReceipt?.estimatedOperationalFee,
+    preferredFinancialReceipt?.operationalFee,
+    fallbackFinancialReceipt?.operationalFee,
+    preferredFinancialReceipt?.estimatedOperationalFee,
+    fallbackFinancialReceipt?.estimatedOperationalFee,
   );
   const paymentIntermediationFee = pickPreferredRuntimeMoney(
-    incomingReceipt?.paymentIntermediationFee,
-    existingReceipt?.paymentIntermediationFee,
-    incomingReceipt?.estimatedPaymentIntermediationFee,
-    existingReceipt?.estimatedPaymentIntermediationFee,
+    preferredFinancialReceipt?.paymentIntermediationFee,
+    fallbackFinancialReceipt?.paymentIntermediationFee,
+    preferredFinancialReceipt?.estimatedPaymentIntermediationFee,
+    fallbackFinancialReceipt?.estimatedPaymentIntermediationFee,
   );
   const tollFee = pickPreferredRuntimeMoney(
-    incomingReceipt?.tollFee,
-    existingReceipt?.tollFee,
-    incomingReceipt?.estimatedTollFee,
-    existingReceipt?.estimatedTollFee,
+    preferredFinancialReceipt?.tollFee,
+    fallbackFinancialReceipt?.tollFee,
+    preferredFinancialReceipt?.estimatedTollFee,
+    fallbackFinancialReceipt?.estimatedTollFee,
   );
   const totalFees =
     pickPreferredRuntimeMoney(
-      incomingReceipt?.totalFees,
-      existingReceipt?.totalFees,
-      incomingReceipt?.estimatedTotalFees,
-      existingReceipt?.estimatedTotalFees,
+      preferredFinancialReceipt?.totalFees,
+      fallbackFinancialReceipt?.totalFees,
+      preferredFinancialReceipt?.estimatedTotalFees,
+      fallbackFinancialReceipt?.estimatedTotalFees,
     ) ??
     (finalFare !== null && rawDriverNetAmount !== null
       ? roundCurrencyValue(Math.max(0, finalFare - rawDriverNetAmount))
@@ -6045,12 +6350,12 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
       existingReceipt?.paymentMethod ||
       "pix",
     authoritativeSnapshot: Boolean(
-      existingReceipt?.authoritativeSnapshot ||
-        incomingReceipt?.authoritativeSnapshot,
+      preferredFinancialReceipt?.authoritativeSnapshot ||
+        fallbackFinancialReceipt?.authoritativeSnapshot,
     ),
     financialSnapshotSource:
-      incomingReceipt?.financialSnapshotSource ||
-      existingReceipt?.financialSnapshotSource ||
+      preferredFinancialReceipt?.financialSnapshotSource ||
+      fallbackFinancialReceipt?.financialSnapshotSource ||
       "local_fallback",
   };
 
@@ -6268,7 +6573,11 @@ function decodePolylineToCoordinates(polylinePoints) {
 }
 
 async function ensureCurrentLocation(options = {}) {
-  const { allowCurrentPosition = true, resolveAddress = true } = options;
+  const {
+    allowCurrentPosition = true,
+    resolveAddress = true,
+    forceCurrentPosition = false,
+  } = options;
 
   try {
     let permission = await Location.getForegroundPermissionsAsync();
@@ -6280,7 +6589,7 @@ async function ensureCurrentLocation(options = {}) {
         });
         return;
       }
-      permission = await Location.requestForegroundPermissionsAsync();
+      permission = await requestForegroundLocationPermissionWithDisclosure();
     }
 
     if (permission.status !== "granted") {
@@ -6288,12 +6597,16 @@ async function ensureCurrentLocation(options = {}) {
     }
 
     let position = null;
-    if (Platform.OS === "android") {
+    let positionSource = null;
+    if (Platform.OS === "android" && !forceCurrentPosition) {
       try {
         position = await Location.getLastKnownPositionAsync({
           maxAge: 60000,
           requiredAccuracy: 250,
         });
+        if (position) {
+          positionSource = "last_known";
+        }
       } catch (lastKnownError) {
         Logger.warn(
           "⚠️ [PrototypeRuntime] Última localização indisponível:",
@@ -6310,9 +6623,11 @@ async function ensureCurrentLocation(options = {}) {
       const currentPositionOptions =
         Platform.OS === "android"
           ? {
-              accuracy: Location.Accuracy.Balanced,
-              maximumAge: 15000,
-              timeout: 8000,
+              accuracy: forceCurrentPosition
+                ? Location.Accuracy.High
+                : Location.Accuracy.Balanced,
+              maximumAge: forceCurrentPosition ? 0 : 15000,
+              timeout: forceCurrentPosition ? 12000 : 8000,
             }
           : {
               accuracy: Location.Accuracy.Balanced,
@@ -6321,6 +6636,7 @@ async function ensureCurrentLocation(options = {}) {
             };
 
       position = await Location.getCurrentPositionAsync(currentPositionOptions);
+      positionSource = forceCurrentPosition ? "current_forced" : "current";
     }
 
     const latitude = Number(position?.coords?.latitude);
@@ -6331,6 +6647,17 @@ async function ensureCurrentLocation(options = {}) {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
       return;
     }
+
+    await writeRuntimeDebugProbe("location_current_resolved", {
+      allowCurrentPosition,
+      forceCurrentPosition,
+      positionSource,
+      platform: Platform.OS,
+      latitude,
+      longitude,
+      accuracy: Number(position?.coords?.accuracy) || null,
+      timestamp: Number(position?.timestamp) || null,
+    });
 
     let currentAddress = runtimeState.currentAddress || "";
     if (resolveAddress) {
@@ -6530,29 +6857,38 @@ function attachSocketListeners() {
     }
 
     const syncedStatus = resolveSyncedBookingStatus(payload);
+    if (
+      syncedBookingId &&
+      shouldIgnoreLifecycleRegression(
+        "activeRideSync",
+        syncedBookingId,
+        syncedStatus,
+      )
+    ) {
+      return;
+    }
     const normalizedLocalBookingStatus = String(runtimeState.bookingStatus || "")
       .trim()
       .toLowerCase();
+    const hasExpiredPassengerSearch = isPassengerSearchExpired({
+      role: runtimeState.activeRole,
+      bookingStatus: normalizedLocalBookingStatus,
+      elapsedSeconds: runtimeState.searchingElapsedSeconds,
+    });
     const hasPendingDriverOfferContext =
       hasLocalPendingDriverOffer(runtimeState) &&
       (normalizedLocalBookingStatus === "searching" ||
         Boolean(runtimeState.activeBookingId));
     const shouldPreserveLocalPassengerSearch =
-      runtimeState.activeRole === "customer" &&
-      syncedStatus === "idle" &&
-      ["requesting", "searching", "searching_replacement"].includes(
-        normalizedLocalBookingStatus,
-      ) &&
-      (Boolean(runtimeState.activeBookingId) ||
-        Boolean(
-          runtimeState.activeBooking &&
-            typeof runtimeState.activeBooking === "object",
-        ) ||
-        ["processing", "confirmed"].includes(
-          String(runtimeState.paymentState?.status || "")
-            .trim()
-            .toLowerCase(),
-        ));
+      shouldPreservePassengerSearchOnIdleSync({
+        role: runtimeState.activeRole,
+        syncedStatus,
+        bookingStatus: normalizedLocalBookingStatus,
+        elapsedSeconds: runtimeState.searchingElapsedSeconds,
+        activeBookingId: runtimeState.activeBookingId,
+        activeBooking: runtimeState.activeBooking,
+        paymentStatus: runtimeState.paymentState?.status,
+      });
     const shouldPreserveLocalDriverOffer =
       runtimeState.activeRole === "driver" &&
       syncedStatus === "idle" &&
@@ -6593,6 +6929,15 @@ function attachSocketListeners() {
     }
 
     if (syncedStatus === "idle") {
+      if (hasExpiredPassengerSearch) {
+        handleNoDriversFound({
+          bookingId: runtimeState.activeBookingId || null,
+          code: "SEARCH_TIMEOUT_RECONCILED",
+          message: "Nenhum motorista ficou disponível no tempo de busca.",
+        });
+        return;
+      }
+
       const localPaymentStatus = String(runtimeState.paymentState?.status || "")
         .trim()
         .toLowerCase();
@@ -6633,6 +6978,11 @@ function attachSocketListeners() {
           bookingStatus: "completed",
           activeBooking: null,
           activeBookingId: null,
+          terminalRideGuards: mergeTerminalRideGuard(
+            runtimeState.terminalRideGuards,
+            runtimeState.activeBookingId,
+            "completed",
+          ),
           driverOffers: [],
           driverActiveRide: null,
           tripArrivalText: "",
@@ -6710,6 +7060,11 @@ function attachSocketListeners() {
         bookingStatus: "completed",
         activeBooking: null,
         activeBookingId: null,
+        terminalRideGuards: mergeTerminalRideGuard(
+          runtimeState.terminalRideGuards,
+          payload?.bookingId || runtimeState.activeBookingId,
+          "completed",
+        ),
         driverOffers: [],
         driverActiveRide: null,
         tripArrivalText: "",
@@ -6751,6 +7106,9 @@ function attachSocketListeners() {
       payload?.data?.bookingId ||
       payload?.booking?.bookingId ||
       null;
+    if (shouldIgnoreLifecycleRegression("bookingCreated", bookingId, "searching")) {
+      return;
+    }
     const serverBooking = payload?.booking || payload?.data || null;
     const nextActiveBooking =
       serverBooking && typeof serverBooking === "object"
@@ -7202,6 +7560,10 @@ function attachSocketListeners() {
       return;
     }
 
+    if (shouldIgnoreLifecycleRegression("rideAccepted", bookingId, "accepted")) {
+      return;
+    }
+
     if (
       runtimeRole === "driver" &&
       bookingId &&
@@ -7361,9 +7723,48 @@ function attachSocketListeners() {
       "",
     );
     const acceptedVehicleLabel = sanitizeText(
-      [acceptedVehicleMake, acceptedVehicleModel].filter(Boolean).join(" "),
+      acceptedVehicleMake &&
+        acceptedVehicleModel &&
+        !acceptedVehicleModel
+          .toLowerCase()
+          .startsWith(acceptedVehicleMake.toLowerCase())
+        ? `${acceptedVehicleMake} ${acceptedVehicleModel}`
+        : acceptedVehicleModel || acceptedVehicleMake,
       "",
     );
+    const acceptedVehiclePlate = sanitizeText(
+      driver?.vehicle?.plate ||
+        payload?.vehicle?.plate ||
+        acceptedRide?.vehiclePlate ||
+        acceptedRide?.carPlate ||
+        acceptedRide?.plate ||
+        "",
+      "",
+    );
+    const acceptedVehicleColor = sanitizeText(
+      driver?.vehicle?.color ||
+        payload?.vehicle?.color ||
+        acceptedRide?.vehicleColor ||
+        acceptedRide?.carColor ||
+        acceptedRide?.color ||
+        "",
+      "",
+    );
+    const acceptedVehicleCategory = sanitizeText(
+      driver?.vehicle?.category ||
+        payload?.vehicle?.category ||
+        acceptedRide?.vehicleCategory ||
+        acceptedRide?.carType ||
+        "",
+      "",
+    );
+    const acceptedVehicleSnapshot = {
+      ...(acceptedVehicleMake ? { make: acceptedVehicleMake } : {}),
+      ...(acceptedVehicleModel ? { model: acceptedVehicleModel } : {}),
+      ...(acceptedVehiclePlate ? { plate: acceptedVehiclePlate } : {}),
+      ...(acceptedVehicleColor ? { color: acceptedVehicleColor } : {}),
+      ...(acceptedVehicleCategory ? { category: acceptedVehicleCategory } : {}),
+    };
 
     const isDriverRuntime = runtimeRole === "driver";
     const sharedRoutePlanFromPayload = extractDriverRoutePlan({
@@ -7453,17 +7854,24 @@ function attachSocketListeners() {
       liveRoutePlanResult?.pickupMetrics?.durationMinutes ??
         pickupPreview?.durationMinutes,
     );
+    const payloadPickupDistanceKm = Number(
+      payload?.driverDistanceToPickupKm ??
+        payload?.pickupDistanceKm ??
+        payload?.driverToPickupDistanceKm,
+    );
     const directPickupDistanceKm =
       !isDriverRuntime && routeOriginCoordinate && pickupCoordinate
         ? Number(
             (
               calculateDistanceMeters(routeOriginCoordinate, pickupCoordinate) /
               1000
-            ).toFixed(1),
+            ).toFixed(3),
           )
         : null;
     const resolvedPickupDistanceKm =
-      Number.isFinite(previewDistanceKm) && previewDistanceKm > 0
+      Number.isFinite(payloadPickupDistanceKm) && payloadPickupDistanceKm > 0
+        ? payloadPickupDistanceKm
+        : Number.isFinite(previewDistanceKm) && previewDistanceKm > 0
         ? previewDistanceKm
         : Number.isFinite(directPickupDistanceKm) && directPickupDistanceKm > 0
           ? directPickupDistanceKm
@@ -7544,17 +7952,12 @@ function attachSocketListeners() {
       driverInfo: {
         id: driver?.id || payload?.driverId || null,
         name: driver?.name || payload?.driverName || "Motorista",
-        plate:
-          driver?.vehicle?.plate ||
-          payload?.vehicle?.plate ||
-          acceptedRide?.vehiclePlate ||
-          acceptedRide?.carPlate ||
-          acceptedRide?.plate ||
-          "",
+        plate: acceptedVehiclePlate,
         model:
           acceptedVehicleLabel ||
           acceptedVehicleModel ||
           "",
+        color: acceptedVehicleColor,
         rating: driver?.rating || payload?.rating || null,
       },
       tripDistanceKm:
@@ -7577,22 +7980,47 @@ function attachSocketListeners() {
         confirmationTimeoutSec: null,
         updatedAt: null,
       },
-      activeBooking:
-        runtimeState.activeBooking &&
+      activeBooking: {
+        ...(runtimeState.activeBooking &&
         typeof runtimeState.activeBooking === "object"
-          ? {
-              ...runtimeState.activeBooking,
-              ...(payload?.pickupLocation
-                ? { pickupLocation: payload.pickupLocation }
-                : {}),
-              ...(payload?.destinationLocation
-                ? { destinationLocation: payload.destinationLocation }
-                : {}),
-              ...(payload?.estimatedFare
-                ? { estimatedFare: Number(payload.estimatedFare) }
-                : {}),
-            }
-          : runtimeState.activeBooking,
+          ? runtimeState.activeBooking
+          : {}),
+        bookingId: bookingId || runtimeState.activeBookingId,
+        status: "accepted",
+        ...(payload?.pickupLocation
+          ? { pickupLocation: payload.pickupLocation }
+          : {}),
+        ...(payload?.destinationLocation
+          ? { destinationLocation: payload.destinationLocation }
+          : {}),
+        ...(Number.isFinite(Number(payload?.estimatedFare))
+          ? { estimatedFare: Number(payload.estimatedFare) }
+          : {}),
+        ...(Number.isFinite(resolvedPickupDistanceKm) &&
+        resolvedPickupDistanceKm > 0
+          ? { driverDistanceToPickupKm: resolvedPickupDistanceKm }
+          : {}),
+        ...(Number.isFinite(resolvedPickupDurationMin) &&
+        resolvedPickupDurationMin > 0
+          ? { estimatedArrivalToPickupMin: resolvedPickupDurationMin }
+          : {}),
+        driver: {
+          ...(runtimeState.activeBooking?.driver || {}),
+          ...driver,
+          id: driver?.id || payload?.driverId || null,
+          name: driver?.name || payload?.driverName || "Motorista",
+          vehicle: {
+            ...(runtimeState.activeBooking?.driver?.vehicle || {}),
+            ...(driver?.vehicle || {}),
+            ...acceptedVehicleSnapshot,
+          },
+        },
+        vehicle: {
+          ...(runtimeState.activeBooking?.vehicle || {}),
+          ...(payload?.vehicle || {}),
+          ...acceptedVehicleSnapshot,
+        },
+      },
       driverOffers: (runtimeState.driverOffers || []).filter(
         (item) => (item.bookingId || item.id) !== bookingId,
       ),
@@ -7669,8 +8097,11 @@ function attachSocketListeners() {
         payload?.rideId ||
         runtimeState.activeBookingId ||
         runtimeState.driverActiveRide?.bookingId ||
-        "",
+      "",
     ).trim();
+    if (shouldIgnoreLifecycleRegression("driverArrived", bookingId, "arrived")) {
+      return;
+    }
     const alreadyArrivedForSameBooking =
       Boolean(bookingId) &&
       String(runtimeState.activeBookingId || "").trim() === bookingId &&
@@ -7782,8 +8213,11 @@ function attachSocketListeners() {
         payload?.rideId ||
         runtimeState.activeBookingId ||
         runtimeState.driverActiveRide?.bookingId ||
-        "",
+      "",
     ).trim();
+    if (shouldIgnoreLifecycleRegression("tripStarted", bookingId, "started")) {
+      return;
+    }
     const alreadyStartedForSameBooking =
       Boolean(bookingId) &&
       String(runtimeState.activeBookingId || "").trim() === bookingId &&
@@ -8041,6 +8475,12 @@ function attachSocketListeners() {
     const payloadBookingId = String(
       payload?.bookingId || payload?.tripId || payload?.rideId || "",
     ).trim();
+    if (
+      payloadBookingId &&
+      shouldIgnoreLifecycleRegression("driverLocation", payloadBookingId, "started")
+    ) {
+      return;
+    }
 
     if (payloadBookingId && activeBookingId && payloadBookingId !== activeBookingId) {
       writeRuntimeDebugProbe("event_driver_location_ignored_stale_booking", {
@@ -8158,6 +8598,26 @@ function attachSocketListeners() {
     const completedBookingId = String(
       payload?.bookingId || runtimeState.activeBookingId || "",
     ).trim();
+    if (
+      completedBookingId &&
+      hasTerminalRideGuard(completedBookingId) &&
+      normalizeRuntimeLifecycleStatus(runtimeState.bookingStatus) === "completed"
+    ) {
+      if (hasAuthoritativeTripCompletedSnapshot(payload)) {
+        const enrichedReceipt = buildReceiptFromSyncedSnapshot(
+          payload,
+          runtimeState,
+        );
+        pushTripHistoryItem(enrichedReceipt);
+        writeRuntimeDebugProbe("event_trip_completed_enriched_terminal_receipt", {
+          bookingId: completedBookingId,
+          totalFees: enrichedReceipt?.totalFees ?? null,
+          driverNetAmount: enrichedReceipt?.driverNetAmount ?? null,
+          source: enrichedReceipt?.financialSnapshotSource || null,
+        });
+      }
+      return;
+    }
     clearDirectionsBudgetForBooking(completedBookingId);
     writeRuntimeDebugProbe("event_trip_completed", {
       bookingId:
@@ -8177,6 +8637,10 @@ function attachSocketListeners() {
     );
     const finalFare = completedPricingSnapshot.finalFare;
     const receiptParticipants = resolveReceiptParticipants(payload);
+    const receiptVehicleIdentity = resolveReceiptVehicleIdentity(
+      payload,
+      runtimeState,
+    );
     const completedRoute = getPrototypeMapRoute();
     const receiptPickupCoordinate =
       resolvePickupCoordinateFromRide(
@@ -8246,6 +8710,7 @@ function attachSocketListeners() {
       driverName: receiptParticipants.driverName || null,
       passengerId: receiptParticipants.passengerId || null,
       passengerName: receiptParticipants.passengerName || null,
+      ...receiptVehicleIdentity,
       pickup: resolveCompletedReceiptPickupLabel(payload, runtimeState),
       drop: resolveCompletedReceiptDropoffLabel(payload, runtimeState),
       dropoffAddress: resolveCompletedReceiptDropoffLabel(payload, runtimeState),
@@ -8275,6 +8740,11 @@ function attachSocketListeners() {
       bookingStatus: "completed",
       activeBooking: null,
       activeBookingId: null,
+      terminalRideGuards: mergeTerminalRideGuard(
+        runtimeState.terminalRideGuards,
+        completedBookingId || payload?.bookingId,
+        "completed",
+      ),
       driverOffers: [],
       driverActiveRide: null,
       tripDistanceKm: receipt.distanceKm,
@@ -8325,10 +8795,21 @@ function attachSocketListeners() {
     );
 
     pushTripHistoryItem(receipt);
+    clearPrototypeMapRoute();
   };
 
   const handleRideOperationalInterruption = (payload) => {
     const role = resolveRuntimeRole();
+    const bookingId = payload?.bookingId || payload?.interruption?.bookingId;
+    if (
+      shouldIgnoreLifecycleRegression(
+        "rideOperationalInterruption",
+        bookingId,
+        "operational_interrupted",
+      )
+    ) {
+      return;
+    }
     const message =
       payload?.message ||
       "A corrida foi interrompida e precisa da sua decisão para continuar.";
@@ -8357,6 +8838,16 @@ function attachSocketListeners() {
   };
 
   const handleRideOperationalContinuationSearching = (payload) => {
+    const bookingId = payload?.bookingId || payload?.interruption?.bookingId;
+    if (
+      shouldIgnoreLifecycleRegression(
+        "rideOperationalContinuationSearching",
+        bookingId,
+        "searching_replacement",
+      )
+    ) {
+      return;
+    }
     const message =
       payload?.message ||
       "Estamos procurando outro motorista para continuar a corrida.";
@@ -8385,6 +8876,12 @@ function attachSocketListeners() {
   };
 
   const handleRideOperationalReleased = (payload) => {
+    const bookingId = payload?.bookingId || payload?.interruption?.bookingId;
+    if (
+      shouldIgnoreLifecycleRegression("rideOperationalReleased", bookingId, "idle")
+    ) {
+      return;
+    }
     const message =
       payload?.message || "A corrida seguirá com outro motorista parceiro.";
 
@@ -8442,6 +8939,11 @@ function attachSocketListeners() {
         bookingStatus: "idle",
         activeBooking: null,
         activeBookingId: null,
+        terminalRideGuards: mergeTerminalRideGuard(
+          previous.terminalRideGuards,
+          cancelledBookingId,
+          "cancelled",
+        ),
         driverOffers: [],
         driverActiveRide: null,
         driverTripMeta: createDefaultDriverTripMeta(),
@@ -8499,6 +9001,7 @@ function attachSocketListeners() {
         scope: "both",
       }),
     );
+    clearPrototypeMapRoute();
   };
 
   const handleRideExtensionRequestAccepted = (payload) => {
@@ -9287,6 +9790,15 @@ function applySyncedActiveRideSnapshot(snapshot) {
   if (bookingStatus === "idle") {
     return false;
   }
+  if (
+    shouldIgnoreLifecycleRegression(
+      "applySyncedActiveRideSnapshot",
+      snapshot?.bookingId,
+      bookingStatus,
+    )
+  ) {
+    return false;
+  }
   const { fingerprint, skip } = shouldSkipSyncedActiveRideSnapshot(
     snapshot,
     bookingStatus,
@@ -9662,7 +10174,12 @@ function applySyncedActiveRideSnapshot(snapshot) {
             ),
           )
         : previous.searchingElapsedSeconds,
-    lastError: "",
+    lastError:
+      bookingStatus === "searching" &&
+      Number(previous.searchingElapsedSeconds || 0) >=
+        SEARCH_TOTAL_DURATION_SECONDS
+        ? SEARCH_TIMEOUT_RECONCILING_MESSAGE
+        : "",
   }));
 
   if (bookingStatus === "searching") {
@@ -10044,10 +10561,13 @@ async function bootstrapRuntime(profile) {
     setRuntimeState({ initializing: true });
     try {
       const bootstrapRole = resolveRuntimeRole(profile);
-      const shouldForceFreshBootstrapLocation = bootstrapRole === "driver";
+      const shouldForceFreshBootstrapLocation =
+        bootstrapRole === "driver" || bootstrapRole === "customer";
       const initialLocationPromise = ensureCurrentLocation({
         allowCurrentPosition:
           shouldForceFreshBootstrapLocation || Platform.OS !== "android",
+        forceCurrentPosition:
+          Platform.OS === "android" && shouldForceFreshBootstrapLocation,
       }).catch((error) => {
         Logger.warn(
           "⚠️ [PrototypeRuntime] Falha ao resolver localização no bootstrap:",
@@ -10285,12 +10805,20 @@ async function previewDestinationOnMap(destination, payload = {}) {
       }
     } catch (error) {
       Logger.warn(
-        "⚠️ [PrototypeRuntime] Não foi possível calcular rota real, usando fallback curvo.",
+        "⚠️ [PrototypeRuntime] Não foi possível calcular rota real para preview de destino.",
       );
     }
   }
 
   if (!coordinates || coordinates.length < 2) {
+    if (isCustomerPreBookingPreview) {
+      clearPrototypeMapRoute();
+      setRuntimeState({
+        quoteLock: null,
+      });
+      return null;
+    }
+
     coordinates = buildFixedRouteCoordinates([], origin, destination.coordinate);
     const fallbackMetrics = resolveRouteLegMetrics(null, coordinates);
     distanceKm =
@@ -10319,7 +10847,10 @@ async function previewDestinationOnMap(destination, payload = {}) {
       ? Math.max(1, Math.round(Number(durationMinutes)))
       : null;
   const shouldPersistQuoteLock =
-    isCustomerPreBookingPreview && Boolean(quoteRouteKey);
+    isCustomerPreBookingPreview &&
+    Boolean(quoteRouteKey) &&
+    Array.isArray(coordinates) &&
+    coordinates.length >= 2;
   const nextQuoteLock = shouldPersistQuoteLock
     ? buildQuoteLockSnapshot({
         originCoordinate: origin,
@@ -10353,6 +10884,7 @@ async function previewDestinationOnMap(destination, payload = {}) {
     destinationLabel: destination.name,
     destinationAddress: destination.address,
     coordinates,
+    allowFallback: !isCustomerPreBookingPreview,
   });
 
   return {
@@ -11642,26 +12174,36 @@ async function cancelPrototypeRide(options = {}) {
     "passenger_cancel_request",
   );
   const bookingId = runtimeState.activeBookingId;
-  if (bookingId) {
-    suppressBookingEvents(bookingId, suppressReason);
+  if (!bookingId) {
+    throw new Error("Nenhuma busca ativa para cancelar.");
   }
+
   let cancelResponse = null;
-  if (bookingId) {
-    try {
-      const socket = WebSocketManager.getInstance();
-      if (socket.isConnected()) {
-        cancelResponse = await socket.cancelRide(
-          bookingId,
-          reason,
-        );
-      }
-    } catch (error) {
-      Logger.warn(
-        "⚠️ [PrototypeRuntime] Falha ao cancelar corrida no backend:",
-        error?.message || error,
+  try {
+    const socket = WebSocketManager.getInstance();
+    if (!socket.isConnected()) {
+      throw new Error(
+        "Sem conexão com o servidor. A corrida continua ativa; tente novamente ou fale com o suporte.",
       );
     }
+    cancelResponse = await socket.cancelRide(
+      bookingId,
+      reason,
+    );
+  } catch (error) {
+    Logger.warn(
+      "⚠️ [PrototypeRuntime] Falha ao cancelar corrida no backend:",
+      error?.message || error,
+    );
+    setRuntimeState({
+      lastError:
+        error?.message ||
+        "Não foi possível cancelar no servidor. A corrida continua ativa.",
+    });
+    throw error;
   }
+
+  suppressBookingEvents(bookingId, suppressReason);
 
   const refundData = cancelResponse?.data || {};
   const refundAmount = Number(refundData?.refundAmount || 0);
@@ -11705,8 +12247,10 @@ async function cancelPrototypeRide(options = {}) {
       updatedAt: null,
     },
     searchingElapsedSeconds: 0,
-    lastError: "",
+    lastError: cancelResponse?.message || "Corrida cancelada.",
   });
+
+  return cancelResponse;
 }
 
 async function arrivePrototypePickup(profile, options = {}) {
@@ -15136,8 +15680,13 @@ export function usePrototypeRideRuntime() {
         return;
       }
 
+      const foregroundRole = resolveRuntimeRole(profile);
       ensureCurrentLocation({
         allowCurrentPosition: true,
+        forceCurrentPosition:
+          Platform.OS === "android" &&
+          foregroundRole === "customer" &&
+          !runtimeState.activeBookingId,
       }).catch((error) => {
         Logger.warn(
           "⚠️ [PrototypeRuntime] Falha ao refrescar localização em foreground:",

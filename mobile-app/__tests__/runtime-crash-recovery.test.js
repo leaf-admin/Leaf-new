@@ -136,6 +136,35 @@ describe("runtimeCrashRecovery", () => {
     ).toBe(false);
   });
 
+  it("does not resync a completed passenger ride when stale active fields remain", () => {
+    const completedSnapshot = {
+      bookingStatus: "completed",
+      activeBookingId: "booking_late_event",
+      activeBooking: {
+        bookingId: "booking_late_event",
+        status: "STARTED",
+      },
+      driverInfo: { id: "driver_1", name: "Motorista Leaf" },
+    };
+
+    expect(
+      shouldMaintainRealtimeSessionForSnapshot("customer", completedSnapshot),
+    ).toBe(false);
+    expect(
+      shouldSyncActiveRideForSnapshot("customer", completedSnapshot),
+    ).toBe(false);
+    expect(
+      shouldMaintainRealtimeSessionForSnapshot("customer", {
+        ...completedSnapshot,
+        bookingStatus: "TRIP_COMPLETED",
+        activeBooking: {
+          ...completedSnapshot.activeBooking,
+          status: "ACCEPTED",
+        },
+      }),
+    ).toBe(false);
+  });
+
   it("normalizes backend ride statuses into runtime lifecycle phases", () => {
     expect(normalizeRuntimeLifecycleStatus("AWAITING_PAYMENT")).toBe("requesting");
     expect(normalizeRuntimeLifecycleStatus("NOTIFIED")).toBe("searching");

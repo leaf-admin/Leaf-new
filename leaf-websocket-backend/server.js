@@ -1321,6 +1321,7 @@ io.on('connection', async (socket) => {
         socket,
         io,
         redisPool,
+        gradualExpander,
         logStructured,
         logError
     });
@@ -1349,6 +1350,13 @@ io.on('connection', async (socket) => {
             socket,
             io,
             redisPool,
+            logStructured
+        });
+    } else {
+        const registerSocketRatingHandler = require('./bootstrap/register-socket-rating-handler');
+        registerSocketRatingHandler({
+            socket,
+            io,
             logStructured
         });
     }

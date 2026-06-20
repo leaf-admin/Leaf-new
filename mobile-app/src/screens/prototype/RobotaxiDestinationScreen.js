@@ -62,6 +62,11 @@ import {
   subscribePrototypeMapCamera,
 } from "./prototypeMapRoute";
 import { fetchDynamicPricingQuote } from "../../services/runtime/pricingQuoteService";
+import {
+  buildRidePaymentRouteContextKey,
+  clearRidePaymentSession,
+  findRecoverableRidePaymentSession,
+} from "../../services/RidePaymentSessionService";
 
 const { motion } = robotaxiPrototypeTokens;
 const SEARCH_STEP = "search";
@@ -79,6 +84,18 @@ const QUOTE_FALLBACK_HEIGHT = 322;
 const CONFIRM_FALLBACK_HEIGHT = 392;
 const PREFERENCE_CONFIRMATION_TIMEOUT_MS = 5000;
 const PREFERENCE_CONFIRMATION_TICK_MS = 80;
+const PASSENGER_QUOTE_VALIDITY_MS = Math.max(
+  15000,
+  Number.parseInt(process.env.EXPO_PUBLIC_QUOTE_VALIDITY_MS || "120000", 10) ||
+    120000,
+);
+const PASSENGER_QUOTE_COORDINATE_PRECISION = Math.max(
+  2,
+  Number.parseInt(
+    process.env.EXPO_PUBLIC_QUOTE_LOCK_COORDINATE_PRECISION || "3",
+    10,
+  ) || 3,
+);
 const ORIGIN_ADDRESS = "Rua das Pastorinhas, Taquara, Rio de Janeiro";
 const TEMPERATURE_OPTIONS = Object.freeze([
   {
@@ -224,6 +241,11 @@ function formatCurrency(value) {
   return `R$ ${Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function createPassengerQuoteSessionId(createdAt = Date.now()) {
+  const randomSuffix = Math.random().toString(36).slice(2, 10);
+  return `passenger_quote_${createdAt}_${randomSuffix}`;
+}
+
 function normalizeCoverageMessage(message) {
   const normalized = String(message || "").trim();
   if (!normalized) {
@@ -311,6 +333,33 @@ function normalizePreviewCoordinate(value) {
   return { latitude, longitude };
 }
 
+function buildPassengerFareQuoteRouteKey({
+  originCoordinate,
+  destinationCoordinate,
+}) {
+  const origin = normalizePreviewCoordinate(originCoordinate);
+  const destination = normalizePreviewCoordinate(destinationCoordinate);
+
+  if (!origin || !destination) {
+    return "";
+  }
+
+  return [
+    Number(origin.latitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(origin.longitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(destination.latitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(destination.longitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+  ].join("|");
+}
+
+function normalizeLockedQuoteNumber(value, fallback = null) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return fallback;
+  }
+  return numericValue;
+}
+
 function normalizeInitialSelectedDestination(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -336,6 +385,49 @@ function normalizeInitialSelectedDestination(value) {
     name,
     address,
     coordinate,
+  };
+}
+
+function normalizeInitialPricingQuote(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const rawQuote =
+    value.quote && typeof value.quote === "object" ? value.quote : value;
+  const estimatedFare = normalizeLockedQuoteNumber(
+    rawQuote.estimatedFare ?? value.fare,
+  );
+
+  if (!estimatedFare) {
+    return null;
+  }
+
+  const grossEstimatedFare =
+    normalizeLockedQuoteNumber(
+      rawQuote.grossEstimatedFare ?? value.grossEstimatedFare,
+      estimatedFare,
+    ) || estimatedFare;
+  const createdAt = Number(value.createdAt) || Date.now();
+
+  return {
+    quote: {
+      ...rawQuote,
+      estimatedFare,
+      grossEstimatedFare,
+    },
+    quoteSessionId:
+      String(value.quoteSessionId || rawQuote.quoteSessionId || "").trim() ||
+      null,
+    routeKey: String(value.routeKey || "").trim(),
+    distanceKm: normalizeLockedQuoteNumber(value.distanceKm),
+    durationMin: normalizeLockedQuoteNumber(value.durationMin),
+    arrivalTime: String(value.arrivalTime || "").trim(),
+    createdAt,
+    expiresAt:
+      Number(value.expiresAt) ||
+      Number(rawQuote.expiresAt) ||
+      createdAt + PASSENGER_QUOTE_VALIDITY_MS,
   };
 }
 
@@ -420,6 +512,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     () => normalizeInitialSelectedDestination(routeParams.initialSelectedDestination),
     [routeParams.initialSelectedDestination],
   );
+  const initialPricingQuote = useMemo(
+    () => normalizeInitialPricingQuote(routeParams.initialPricingQuote),
+    [routeParams.initialPricingQuote],
+  );
   const initialSelectedPlan = getPlanIdFromCarName(routeParams.initialSelectedPlan || "");
   const startAtConfirmation =
     routeParams.startAtConfirmation === true ||
@@ -442,9 +538,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     useState(false);
   const [availabilityNotice, setAvailabilityNotice] = useState("");
   const [planAvailabilityById, setPlanAvailabilityById] = useState({});
-  const [selectedPricingQuote, setSelectedPricingQuote] = useState(null);
+  const [selectedPricingQuote, setSelectedPricingQuote] = useState(
+    () => initialPricingQuote?.quote || null,
+  );
   const [pricingQuoteLoading, setPricingQuoteLoading] = useState(false);
   const [pricingQuoteError, setPricingQuoteError] = useState("");
+  const [paymentQuoteLock, setPaymentQuoteLock] = useState(null);
   const [submittingRide, setSubmittingRide] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(SEARCH_FALLBACK_HEIGHT);
   const [recentDestinations, setRecentDestinations] = useState([]);
@@ -474,6 +573,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const [pickupFloatingCardHeight, setPickupFloatingCardHeight] = useState(
     PICKUP_FLOATING_CARD_FALLBACK_HEIGHT,
   );
+  const [fareQuoteLock, setFareQuoteLock] = useState(null);
   const [preferenceModalVisible, setPreferenceModalVisible] = useState(false);
   const [preferenceProgress, setPreferenceProgress] = useState(0);
   const voiceAutoStartedRef = useRef(false);
@@ -485,9 +585,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const connectionAutomationTimersRef = useRef([]);
   const latestRidePreferencesRef = useRef(null);
   const pendingPaymentConfirmationRef = useRef(null);
+  const paymentRecoveryAttemptedRef = useRef("");
   const initialSelectedDestinationHydratedRef = useRef(false);
   const loadRecentDestinationsRef = useRef(loadRecentDestinations);
   const checkRideAvailabilityRef = useRef(checkRideAvailability);
+  const selectedPricingQuoteCacheRef = useRef({});
   const autoStartVoiceRequested =
     route?.params?.autoStartVoice === true ||
     route?.params?.autoStartVoice === "true" ||
@@ -1071,11 +1173,26 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     if (initialSelectedPlan) {
       setSelectedPlan(initialSelectedPlan);
     }
+    if (initialPricingQuote?.quote) {
+      setSelectedPricingQuote(initialPricingQuote.quote);
+      if (initialPricingQuote.routeKey) {
+        setFareQuoteLock({
+          routeKey: initialPricingQuote.routeKey,
+          quoteSessionId: initialPricingQuote.quoteSessionId,
+          distanceKm: initialPricingQuote.distanceKm,
+          durationMin: initialPricingQuote.durationMin,
+          arrivalTime: initialPricingQuote.arrivalTime,
+          createdAt: initialPricingQuote.createdAt,
+          expiresAt: initialPricingQuote.expiresAt,
+        });
+      }
+    }
     setStep(startAtConfirmation ? CONFIRM_STEP : QUOTE_STEP);
     setSheetHeight(startAtConfirmation ? CONFIRM_FALLBACK_HEIGHT : QUOTE_FALLBACK_HEIGHT);
   }, [
     initialSelectedPlan,
     initialSelectedDestination,
+    initialPricingQuote,
     isExtensionFlow,
     resolvedPickupAddress,
     resolvedPickupCoordinate,
@@ -1189,7 +1306,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     Number.isFinite(resolvedPickupCoordinate?.longitude),
   );
 
-  const durationMin = useMemo(() => {
+  const liveDurationMin = useMemo(() => {
     const previewDuration = Number(runtimeTripDurationMin);
     if (
       livePreviewMatchesSelection &&
@@ -1203,7 +1320,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     return Number.isFinite(value) ? Math.max(4, value + 4) : 9;
   }, [destinationInfo, livePreviewMatchesSelection, runtimeTripDurationMin]);
 
-  const distanceKm = useMemo(() => {
+  const liveDistanceKm = useMemo(() => {
     const previewDistance = Number(runtimeTripDistanceKm);
     if (
       livePreviewMatchesSelection &&
@@ -1213,23 +1330,89 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       return Number(previewDistance.toFixed(1));
     }
 
-    const estimate = durationMin * 0.52;
+    const estimate = liveDurationMin * 0.52;
     return Math.max(1.2, Number(estimate.toFixed(1)));
-  }, [durationMin, livePreviewMatchesSelection, runtimeTripDistanceKm]);
+  }, [liveDurationMin, livePreviewMatchesSelection, runtimeTripDistanceKm]);
 
-  const arrivalTime = useMemo(() => {
+  const liveArrivalTime = useMemo(() => {
     const previewArrival = String(runtimeTripArrivalText || "").trim();
     if (livePreviewMatchesSelection && previewArrival) {
       return previewArrival;
     }
 
     const now = new Date();
-    now.setMinutes(now.getMinutes() + durationMin);
+    now.setMinutes(now.getMinutes() + liveDurationMin);
     return new Intl.DateTimeFormat("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
     }).format(now);
-  }, [durationMin, livePreviewMatchesSelection, runtimeTripArrivalText]);
+  }, [liveDurationMin, livePreviewMatchesSelection, runtimeTripArrivalText]);
+
+  const fareQuoteRouteKey = useMemo(
+    () =>
+      buildPassengerFareQuoteRouteKey({
+        originCoordinate: resolvedPickupCoordinate,
+        destinationCoordinate,
+      }),
+    [
+      destinationCoordinate?.latitude,
+      destinationCoordinate?.longitude,
+      resolvedPickupCoordinate?.latitude,
+      resolvedPickupCoordinate?.longitude,
+    ],
+  );
+
+  useEffect(() => {
+    const canLockQuote =
+      (step === QUOTE_STEP || step === CONFIRM_STEP || step === PICKUP_STEP) &&
+      !isExtensionFlow &&
+      !routeGuardBlocked &&
+      canRequestRide &&
+      Boolean(fareQuoteRouteKey);
+
+    if (!canLockQuote) {
+      setFareQuoteLock(null);
+      return;
+    }
+
+    setFareQuoteLock((current) => {
+      if (current?.routeKey === fareQuoteRouteKey) {
+        return current;
+      }
+
+      const createdAt = Date.now();
+      return {
+        routeKey: fareQuoteRouteKey,
+        quoteSessionId: createPassengerQuoteSessionId(createdAt),
+        distanceKm: liveDistanceKm,
+        durationMin: liveDurationMin,
+        arrivalTime: liveArrivalTime,
+        createdAt,
+        expiresAt: createdAt + PASSENGER_QUOTE_VALIDITY_MS,
+      };
+    });
+  }, [
+    canRequestRide,
+    fareQuoteRouteKey,
+    isExtensionFlow,
+    liveArrivalTime,
+    liveDistanceKm,
+    liveDurationMin,
+    routeGuardBlocked,
+    step,
+  ]);
+
+  const fareQuoteLockMatchesRoute = fareQuoteLock?.routeKey === fareQuoteRouteKey;
+  const durationMin = fareQuoteLockMatchesRoute
+    ? normalizeLockedQuoteNumber(fareQuoteLock?.durationMin, liveDurationMin)
+    : liveDurationMin;
+  const distanceKm = fareQuoteLockMatchesRoute
+    ? normalizeLockedQuoteNumber(fareQuoteLock?.distanceKm, liveDistanceKm)
+    : liveDistanceKm;
+  const arrivalTime =
+    fareQuoteLockMatchesRoute && fareQuoteLock?.arrivalTime
+      ? fareQuoteLock.arrivalTime
+      : liveArrivalTime;
 
   const durationLabel = useMemo(() => {
     return `${durationMin} min`;
@@ -1298,11 +1481,18 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const selectedPlanData =
     plans.find((item) => item.id === selectedPlan) || plans[0];
   const selectedQuoteFare = Number(selectedPricingQuote?.estimatedFare);
+  const hasSelectedBackendQuote = Boolean(
+    selectedPricingQuote &&
+      Number.isFinite(selectedQuoteFare) &&
+      selectedQuoteFare > 0,
+  );
   const selectedPlanFare = routeGuardBlocked
     ? null
-    : Number.isFinite(selectedQuoteFare) && selectedQuoteFare > 0
+    : hasSelectedBackendQuote
       ? selectedQuoteFare
-      : selectedPlanData?.value;
+      : isExtensionFlow
+        ? selectedPlanData?.value
+        : null;
   const selectedDiscountBenefit =
     selectedPricingQuote?.discountBenefit && typeof selectedPricingQuote.discountBenefit === "object"
       ? selectedPricingQuote.discountBenefit
@@ -1312,6 +1502,112 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     Number.isFinite(selectedGrossQuoteFare) && selectedGrossQuoteFare > 0
       ? selectedGrossQuoteFare
       : selectedPlanFare;
+  const selectedBackendQuoteReady = Boolean(
+    hasSelectedBackendQuote &&
+      Number.isFinite(Number(selectedPlanFare)) &&
+      Number(selectedPlanFare) > 0,
+  );
+  const paymentQuotePending = Boolean(
+    !isExtensionFlow &&
+      canRequestRide &&
+      !routeGuardBlocked &&
+      (pricingQuoteLoading || !selectedBackendQuoteReady),
+  );
+  const lockedPaymentFare =
+    Number.isFinite(Number(paymentQuoteLock?.fare)) && Number(paymentQuoteLock?.fare) > 0
+      ? Number(paymentQuoteLock.fare)
+      : selectedPlanFare;
+  const lockedGrossEstimatedFare =
+    Number.isFinite(Number(paymentQuoteLock?.grossEstimatedFare)) &&
+    Number(paymentQuoteLock?.grossEstimatedFare) > 0
+      ? Number(paymentQuoteLock.grossEstimatedFare)
+      : selectedGrossEstimatedFare;
+  const lockedDiscountBenefit =
+    paymentQuoteLock?.discountBenefit !== undefined
+      ? paymentQuoteLock.discountBenefit
+      : selectedDiscountBenefit;
+  const paymentRecoveryRouteContextKey = useMemo(
+    () =>
+      buildRidePaymentRouteContextKey({
+        tripData: {
+          pickup: {
+            lat: resolvedPickupCoordinate?.latitude,
+            lng: resolvedPickupCoordinate?.longitude,
+          },
+          drop: {
+            lat: destinationCoordinate?.latitude,
+            lng: destinationCoordinate?.longitude,
+          },
+          carType: selectedPlanData?.title,
+        },
+      }),
+    [
+      destinationCoordinate?.latitude,
+      destinationCoordinate?.longitude,
+      resolvedPickupCoordinate?.latitude,
+      resolvedPickupCoordinate?.longitude,
+      selectedPlanData?.title,
+    ],
+  );
+
+  useEffect(() => {
+    const passengerId = profileUid || riderProfile?.uid || riderProfile?.id || "";
+    if (
+      paymentRecoveryAttemptedRef.current === paymentRecoveryRouteContextKey ||
+      isExtensionFlow ||
+      !canRequestRide ||
+      !passengerId ||
+      !paymentRecoveryRouteContextKey ||
+      routeGuardBlocked
+    ) {
+      return undefined;
+    }
+
+    paymentRecoveryAttemptedRef.current = paymentRecoveryRouteContextKey;
+    let cancelled = false;
+    findRecoverableRidePaymentSession({
+      passengerId,
+      routeContextKey: paymentRecoveryRouteContextKey,
+    })
+      .then((session) => {
+        const recovered = session?.paymentData;
+        const amountInCents = Number(recovered?.amountInCents);
+        if (
+          cancelled ||
+          !recovered?.chargeId ||
+          !Number.isFinite(amountInCents) ||
+          amountInCents <= 0
+        ) {
+          return;
+        }
+
+        const grossAmountInCents = Number(recovered?.grossAmountInCents);
+        setPaymentQuoteLock({
+          fare: amountInCents / 100,
+          grossEstimatedFare:
+            Number.isFinite(grossAmountInCents) && grossAmountInCents > 0
+              ? grossAmountInCents / 100
+              : amountInCents / 100,
+          discountBenefit: recovered.discountBenefit || null,
+          quoteSessionId: recovered.quoteSessionId || null,
+          pricingQuoteRequestKey: null,
+        });
+        setPixModalVisible(true);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canRequestRide,
+    isExtensionFlow,
+    paymentRecoveryRouteContextKey,
+    profileUid,
+    riderProfile?.id,
+    riderProfile?.uid,
+    routeGuardBlocked,
+  ]);
   const selectedPricingPayload = selectedPricingQuote?.pricingPayload || null;
   const selectedDynamicPercentage = Number(
     selectedPricingPayload?.dynamic_percentage ?? 0,
@@ -1428,6 +1724,22 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     categoryOptions.find((item) => item.id === selectedPlan) ||
     categoryOptions[0] ||
     null;
+  const selectedPricingQuoteRequestKey = useMemo(() => {
+    if (!fareQuoteLockMatchesRoute || !fareQuoteRouteKey || !selectedPlanData?.title) {
+      return "";
+    }
+
+    return [
+      fareQuoteRouteKey,
+      selectedPlanData.title,
+      fareQuoteLock?.quoteSessionId || "no-session",
+    ].join("|");
+  }, [
+    fareQuoteLock?.quoteSessionId,
+    fareQuoteLockMatchesRoute,
+    fareQuoteRouteKey,
+    selectedPlanData?.title,
+  ]);
 
   useEffect(() => {
     if (
@@ -1435,7 +1747,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       isExtensionFlow ||
       routeGuardBlocked ||
       !canRequestRide ||
-      !selectedPlanData?.title
+      !selectedPlanData?.title ||
+      !fareQuoteLockMatchesRoute ||
+      !selectedPricingQuoteRequestKey
     ) {
       setSelectedPricingQuote(null);
       setPricingQuoteLoading(false);
@@ -1455,6 +1769,32 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       !Number.isFinite(destinationLongitude)
     ) {
       setSelectedPricingQuote(null);
+      setPricingQuoteLoading(false);
+      setPricingQuoteError("");
+      return;
+    }
+
+    const cachedQuote =
+      selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] ||
+      null;
+    if (cachedQuote?.expiresAt > Date.now()) {
+      setSelectedPricingQuote(cachedQuote.quote);
+      setPricingQuoteLoading(false);
+      setPricingQuoteError("");
+      return;
+    }
+
+    if (
+      initialPricingQuote?.quote &&
+      initialPricingQuote.routeKey === fareQuoteRouteKey &&
+      initialPricingQuote.quoteSessionId === fareQuoteLock?.quoteSessionId &&
+      initialPricingQuote.expiresAt > Date.now()
+    ) {
+      selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
+        quote: initialPricingQuote.quote,
+        expiresAt: initialPricingQuote.expiresAt,
+      };
+      setSelectedPricingQuote(initialPricingQuote.quote);
       setPricingQuoteLoading(false);
       setPricingQuoteError("");
       return;
@@ -1483,12 +1823,26 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         routeDistanceKm: distanceKm,
         routeDurationSecs: Math.max(60, Math.round(durationMin * 60)),
         clientEstimatedFare: selectedPlanData.value,
+        quoteSessionId: fareQuoteLock?.quoteSessionId,
       },
-      { signal: controller.signal },
+      {
+        signal: controller.signal,
+        headers: fareQuoteLock?.quoteSessionId
+          ? { "x-leaf-quote-session-id": fareQuoteLock.quoteSessionId }
+          : undefined,
+      },
     )
       .then((quote) => {
         if (!cancelled) {
-          setSelectedPricingQuote(quote && typeof quote === "object" ? quote : null);
+          const normalizedQuote =
+            quote && typeof quote === "object" ? quote : null;
+          selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
+            quote: normalizedQuote,
+            expiresAt:
+              Number(fareQuoteLock?.expiresAt) ||
+              Date.now() + PASSENGER_QUOTE_VALIDITY_MS,
+          };
+          setSelectedPricingQuote(normalizedQuote);
         }
       })
       .catch((error) => {
@@ -1517,13 +1871,18 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     destinationInfo?.name,
     distanceKm,
     durationMin,
+    fareQuoteLock?.expiresAt,
+    fareQuoteLock?.quoteSessionId,
+    fareQuoteLockMatchesRoute,
     isExtensionFlow,
+    initialPricingQuote,
     resolvedPickupAddress,
     resolvedPickupCoordinate?.latitude,
     resolvedPickupCoordinate?.longitude,
     routeGuardBlocked,
     selectedPlanData?.title,
     selectedPlanData?.value,
+    selectedPricingQuoteRequestKey,
     step,
   ]);
 
@@ -1737,6 +2096,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     setPrototypeMapRoute({
       origin: originCoordinate,
       destination: previewDestinationCoordinate,
+      allowFallback: false,
       destinationLabel: destinationInfo?.name || "Destino",
       destinationAddress:
         destinationInfo?.address || destinationInfo?.name || "Destino",
@@ -1810,8 +2170,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           if (normalizedMessage === OUT_OF_COVERAGE_MESSAGE) {
             coverageBlockedByAvailability = true;
           }
+          const shouldBlockPlan =
+            !availability?.available &&
+            normalizedMessage === OUT_OF_COVERAGE_MESSAGE;
           nextAvailability[plan.id] = {
-            available: Boolean(availability?.available),
+            available: availability?.available ? true : shouldBlockPlan ? false : null,
             message: normalizedMessage,
             code: availability?.code || null,
           };
@@ -1823,7 +2186,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             coverageBlockedByAvailability = true;
           }
           nextAvailability[plan.id] = {
-            available: false,
+            available:
+              normalizedMessage === OUT_OF_COVERAGE_MESSAGE ? false : null,
             message: normalizedMessage,
             code: error?.code || "AVAILABILITY_CHECK_FAILED",
           };
@@ -1986,19 +2350,22 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       setCheckingAvailability(true);
       setAvailabilityNotice("");
 
-      if (selectedPlanUnavailable) {
+      if (routeGuardBlocked) {
         setAvailabilityNotice(
-          normalizeCoverageMessage(
-            selectedPlanAvailability?.message ||
-              "Não há motorista disponível para essa categoria.",
-          ),
+          routeGuardMessage || OUT_OF_COVERAGE_MESSAGE,
         );
         return;
       }
 
-      if (routeGuardBlocked) {
+      if (
+        pricingQuoteLoading ||
+        !selectedBackendQuoteReady ||
+        !Number.isFinite(Number(selectedPlanFare)) ||
+        Number(selectedPlanFare) <= 0
+      ) {
         setAvailabilityNotice(
-          routeGuardMessage || OUT_OF_COVERAGE_MESSAGE,
+          pricingQuoteError ||
+            "Aguarde a cotação da tarifa antes de solicitar a corrida.",
         );
         return;
       }
@@ -2013,6 +2380,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         pickupLocation: pickupLocationPayload,
         originCoordinate: resolvedPickupCoordinate,
         preferences: ridePreferences,
+      }, {
+        forceRefresh: true,
       });
 
       if (!availability?.available) {
@@ -2021,6 +2390,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             "Não há motorista disponível para essa categoria.",
         );
         setAvailabilityNotice(normalizedMessage);
+        setPlanAvailabilityById((current) => ({
+          ...current,
+          [selectedPlanData.id]: {
+            available:
+              normalizedMessage === OUT_OF_COVERAGE_MESSAGE ? false : null,
+            message: normalizedMessage,
+            code: availability?.code || null,
+          },
+        }));
         if (normalizedMessage === OUT_OF_COVERAGE_MESSAGE) {
           const nextAvailability = {};
           visiblePlans.forEach((plan) => {
@@ -2035,6 +2413,25 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
+      setPaymentQuoteLock({
+        fare: Number(selectedPlanFare),
+        grossEstimatedFare:
+          Number.isFinite(Number(selectedGrossEstimatedFare)) &&
+          Number(selectedGrossEstimatedFare) > 0
+            ? Number(selectedGrossEstimatedFare)
+            : Number(selectedPlanFare),
+        discountBenefit: selectedDiscountBenefit,
+        quoteSessionId: fareQuoteLock?.quoteSessionId || null,
+        pricingQuoteRequestKey: selectedPricingQuoteRequestKey || null,
+      });
+      setPlanAvailabilityById((current) => ({
+        ...current,
+        [selectedPlanData.id]: {
+          available: true,
+          message: "",
+          code: availability?.code || null,
+        },
+      }));
       setPixModalVisible(true);
     } catch (error) {
       setAvailabilityNotice(
@@ -2054,15 +2451,22 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     navigation,
     pickupLocationPayload,
     preferenceModalVisible,
+    pricingQuoteError,
+    pricingQuoteLoading,
     requestTripExtension,
     resolvedPickupCoordinate,
     returnRouteName,
     ridePreferences,
     routeGuardBlocked,
     routeGuardMessage,
+    selectedBackendQuoteReady,
+    selectedDiscountBenefit,
+    selectedGrossEstimatedFare,
+    selectedPlanData.id,
     selectedPlanData.title,
-    selectedPlanAvailability?.message,
-    selectedPlanUnavailable,
+    selectedPlanFare,
+    selectedPricingQuoteRequestKey,
+    fareQuoteLock?.quoteSessionId,
     visiblePlans,
     submittingRide,
   ]);
@@ -2072,7 +2476,42 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       return;
     }
     setPixModalVisible(false);
+    setPaymentQuoteLock(null);
   }, [submittingRide]);
+
+  useEffect(() => {
+    if (!isPixModalVisible || submittingRide) {
+      return;
+    }
+
+    if (
+      routeGuardBlocked ||
+      hasCoverageBlockedPlan ||
+      selectedPlanUnavailable ||
+      paymentQuotePending
+    ) {
+      setPixModalVisible(false);
+      setPaymentQuoteLock(null);
+      setAvailabilityNotice(
+        routeGuardBlocked || hasCoverageBlockedPlan
+          ? OUT_OF_COVERAGE_MESSAGE
+          : paymentQuotePending
+            ? "Aguarde a cotação da tarifa antes de solicitar a corrida."
+            : normalizeCoverageMessage(
+                selectedPlanAvailability?.message ||
+                  "Categoria indisponível nesta região no momento.",
+              ),
+      );
+    }
+  }, [
+    hasCoverageBlockedPlan,
+    isPixModalVisible,
+    paymentQuotePending,
+    routeGuardBlocked,
+    selectedPlanAvailability?.message,
+    selectedPlanUnavailable,
+    submittingRide,
+  ]);
 
   useEffect(() => {
     if (step === QUOTE_STEP || step === CONFIRM_STEP || step === PICKUP_STEP) {
@@ -2143,6 +2582,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const submitRideAfterPreferences = useCallback(
     async (paymentConfirmation = null, preferencesOverride = null) => {
       const confirmedChargeId = String(paymentConfirmation?.chargeId || "").trim();
+      const confirmedAmountInCents = Number(paymentConfirmation?.amountInCents);
+      const fallbackFare = Number(paymentQuoteLock?.fare ?? selectedPlanFare);
+      const confirmedFare =
+        Number.isFinite(confirmedAmountInCents) && confirmedAmountInCents > 0
+          ? confirmedAmountInCents / 100
+          : Number.isFinite(fallbackFare) && fallbackFare > 0
+            ? fallbackFare
+            : selectedPlanFare;
 
       if (submittingRideGuardRef.current || submittingRide) {
         return;
@@ -2183,7 +2630,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           originCoordinate: resolvedPickupCoordinate,
           pickupLocation: pickupLocationPayload,
           vehicle: selectedPlanData.title,
-          fare: selectedPlanFare,
+          fare: confirmedFare,
           paymentMethod: "pix",
           paymentConfirmation,
           preferences:
@@ -2191,6 +2638,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             latestRidePreferencesRef.current ||
             {},
         });
+
+        await clearRidePaymentSession({
+          passengerId: profileUid || riderProfile?.uid || riderProfile?.id || "",
+          paymentSessionId: paymentConfirmation?.paymentSessionId,
+          contextKey: paymentConfirmation?.paymentContextKey,
+          chargeId: confirmedChargeId,
+        }).catch(() => false);
 
         pendingPaymentConfirmationRef.current = null;
         navigation.replace("RobotaxiPrototypePaymentSuccess", {
@@ -2203,14 +2657,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           destinationCoordinate: destinationRoutePayload?.coordinate || null,
           initialSelectedDestination: destinationRoutePayload,
           initialSelectedPlan: selectedPlan,
-          selectedFare: selectedPlanFare,
-          fare: selectedPlanFare,
+          selectedFare: confirmedFare,
+          fare: confirmedFare,
           originAddress: resolvedPickupAddress,
           vehicle: selectedPlanData.title,
           autoAdvance: true,
         });
+        setPaymentQuoteLock(null);
       } catch (error) {
         pendingPaymentConfirmationRef.current = null;
+        setPaymentQuoteLock(null);
         if (confirmedChargeId) {
           lastHandledPaymentChargeIdRef.current = "";
         }
@@ -2224,7 +2680,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             initialPickupAdjustedOnMap: pickupAdjustedOnMap,
             initialSelectedDestination: destinationRoutePayload,
             initialSelectedPlan: selectedPlan,
-            selectedFare: selectedPlanFare,
+            selectedFare: confirmedFare,
           },
         });
       } finally {
@@ -2239,9 +2695,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       destinationInfo?.name,
       destinationRoutePayload,
       navigation,
+      paymentQuoteLock?.fare,
+      profileUid,
       pickupAdjustedOnMap,
       pickupLocationPayload,
       requestRide,
+      riderProfile?.id,
+      riderProfile?.uid,
       resolvedPickupAddress,
       resolvedPickupCoordinate,
       routeGuardBlocked,
@@ -2386,6 +2846,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       !canRequestRide ||
       checkingAvailability ||
       checkingPlanAvailability ||
+      paymentQuotePending ||
       submittingRide ||
       qaAutoPixOpenedRef.current
     ) {
@@ -2409,6 +2870,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     checkingAvailability,
     checkingPlanAvailability,
     handleOpenPixModal,
+    paymentQuotePending,
     qaAutoOpenPix,
     step,
     submittingRide,
@@ -2658,6 +3120,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   disabled={
                     checkingAvailability ||
                     checkingPlanAvailability ||
+                    paymentQuotePending ||
                     submittingRide ||
                     routeGuardBlocked ||
                     hasCoverageBlockedPlan ||
@@ -2668,6 +3131,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     styles.pickupFloatingPrimaryButton,
                     (checkingAvailability ||
                       checkingPlanAvailability ||
+                      paymentQuotePending ||
                       submittingRide ||
                       routeGuardBlocked ||
                       hasCoverageBlockedPlan ||
@@ -2680,7 +3144,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   <Text style={styles.pickupFloatingPrimaryButtonText}>
                     {checkingAvailability || checkingPlanAvailability
                       ? "Verificando..."
-                      : routeGuardBlocked ||
+                      : paymentQuotePending
+                        ? "Calculando tarifa..."
+                        : routeGuardBlocked ||
                           hasCoverageBlockedPlan ||
                           selectedPlanUnavailable
                         ? "Indisponível"
@@ -2784,7 +3250,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                       activeOpacity={0.88}
                       onPress={() => handleSelectDestination(item)}
                       testID={`passenger-destination-result-${index}`}
-                      accessibilityLabel={`passenger-destination-result-${index}`}
+                      accessibilityLabel={`Resultado de destino ${index + 1}: ${item.name}`}
+                      accessibilityHint={item.address || "Seleciona este destino para cotar a corrida"}
                     >
                       <View style={styles.destinationDot}>
                         <Ionicons
@@ -3079,7 +3546,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         ? "Verificando..."
                         : checkingAvailability
                           ? "Verificando..."
-                        : routeGuardBlocked ||
+                          : paymentQuotePending
+                            ? "Calculando tarifa..."
+                            : routeGuardBlocked ||
                             hasCoverageBlockedPlan ||
                             selectedPlanUnavailable
                           ? "Indisponível"
@@ -3090,6 +3559,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     onPress={
                       checkingAvailability ||
                       checkingPlanAvailability ||
+                      paymentQuotePending ||
                       submittingRide ||
                       routeGuardBlocked ||
                       hasCoverageBlockedPlan ||
@@ -3172,7 +3642,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     </View>
                   </View>
                   <View style={styles.categorySelectedPriceWrap}>
-                    <Text style={styles.categorySelectedPrice} numberOfLines={1}>
+                    <Text
+                      style={styles.categorySelectedPrice}
+                      numberOfLines={1}
+                      testID={`passenger-destination-quote-price-${selectedCategoryOption?.id || selectedPlan || "selected"}`}
+                      accessibilityLabel={`Valor da corrida ${selectedCategoryOption?.priceLabel || "--"}`}
+                    >
                       {selectedCategoryOption?.priceLabel || "--"}
                     </Text>
                     <Text style={styles.categorySelectedPriceCaption}>
@@ -3272,6 +3747,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         ? "Verificando..."
                       : checkingAvailability
                         ? "Buscando motorista..."
+                      : paymentQuotePending
+                        ? "Calculando tarifa..."
                       : routeGuardBlocked || hasCoverageBlockedPlan || selectedPlanUnavailable
                           ? "Indisponível"
                         : "Confirmar"
@@ -3281,6 +3758,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   onPress={
                     checkingAvailability ||
                     checkingPlanAvailability ||
+                    paymentQuotePending ||
                     submittingRide ||
                     routeGuardBlocked ||
                     hasCoverageBlockedPlan ||
@@ -3393,36 +3871,41 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     style={styles.editButton}
                   />
                   <LeafButton
-                  label={
-                    isExtensionFlow
-                      ? submittingRide
-                        ? "Solicitando alteração..."
-                        : "Confirmar"
-                      : checkingPlanAvailability
-                        ? "Verificando categorias..."
-                      : checkingAvailability
-                        ? "Verificando motoristas..."
-                      : routeGuardBlocked || hasCoverageBlockedPlan
-                          ? "Indisponível"
-                        : selectedPlanUnavailable
-                          ? "Indisponível"
-                        : "Confirmar"
-                  }
-                  tone="primary"
-                  style={styles.submitButton}
-                  onPress={
-                    checkingAvailability ||
-                    checkingPlanAvailability ||
-                    submittingRide ||
-                    routeGuardBlocked ||
-                    hasCoverageBlockedPlan ||
-                    selectedPlanUnavailable
-                      ? undefined
-                      : handleOpenPixModal
-                  }
-                  testID="passenger-destination-confirm-button"
-                  accessibilityLabel="Confirmar viagem"
-                />
+                    label={
+                      isExtensionFlow
+                        ? submittingRide
+                          ? "Solicitando alteração..."
+                          : "Confirmar"
+                        : checkingPlanAvailability
+                          ? "Verificando categorias..."
+                          : checkingAvailability
+                            ? "Verificando motoristas..."
+                            : paymentQuotePending
+                              ? pricingQuoteLoading
+                                ? "Calculando tarifa..."
+                                : "Tarifa indisponível"
+                              : routeGuardBlocked || hasCoverageBlockedPlan
+                                ? "Indisponível"
+                                : selectedPlanUnavailable
+                                  ? "Indisponível"
+                                  : "Confirmar"
+                    }
+                    tone="primary"
+                    style={styles.submitButton}
+                    onPress={
+                      checkingAvailability ||
+                      checkingPlanAvailability ||
+                      paymentQuotePending ||
+                      submittingRide ||
+                      routeGuardBlocked ||
+                      hasCoverageBlockedPlan ||
+                      selectedPlanUnavailable
+                        ? undefined
+                        : handleOpenPixModal
+                    }
+                    testID="passenger-destination-confirm-button"
+                    accessibilityLabel="Confirmar viagem"
+                  />
                 </View>
               </LeafRideSheet>
             </Animated.View>
@@ -3450,22 +3933,33 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 lng: destinationCoordinate?.longitude,
               },
               carType: selectedPlanData.title,
-              estimatedFare: selectedPlanFare,
-              grossEstimatedFare: selectedGrossEstimatedFare,
+              estimatedFare: lockedPaymentFare,
+              grossEstimatedFare: lockedGrossEstimatedFare,
             }}
-            estimates={{ estimateFare: selectedPlanFare }}
-            grossEstimatedFare={selectedGrossEstimatedFare}
-            discountBenefit={selectedDiscountBenefit}
+            estimates={{ estimateFare: lockedPaymentFare }}
+            grossEstimatedFare={lockedGrossEstimatedFare}
+            discountBenefit={lockedDiscountBenefit}
+            quoteSessionId={paymentQuoteLock?.quoteSessionId || fareQuoteLock?.quoteSessionId || null}
             passengerId={profileUid || riderProfile?.uid || riderProfile?.id || ""}
             passengerName={riderProfile?.name || "Passageira Leaf"}
             passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}
+            passengerPhone={
+              riderProfile?.phoneNumber ||
+              riderProfile?.phone ||
+              riderProfile?.profile?.phoneNumber ||
+              riderProfile?.profile?.phone ||
+              ""
+            }
             qaAutoConfirm={qaAutoConfirmPix}
           />
         ) : null}
 
         {preferenceModalVisible ? (
           <View
-            style={styles.preferenceModalLayer}
+            style={[
+              styles.preferenceModalLayer,
+              { paddingBottom: Math.max(insets.bottom + 18, 26) },
+            ]}
             testID="passenger-preference-countdown-modal"
           >
             <Animated.View
@@ -3510,14 +4004,32 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         testID={`passenger-temperature-option-${item.id}`}
                         accessibilityLabel={`Temperatura ${item.label}`}
                       >
-                        <Text
-                          style={[
-                            styles.preferenceModalOptionText,
-                            selected && styles.preferenceModalOptionTextSelected,
-                          ]}
-                        >
-                          {item.label}
-                        </Text>
+                        <View style={styles.preferenceModalOptionHeader}>
+                          <Text
+                            style={[
+                              styles.preferenceModalOptionText,
+                              selected &&
+                                styles.preferenceModalOptionTextSelected,
+                            ]}
+                          >
+                            {item.label}
+                          </Text>
+                          <View
+                            style={[
+                              styles.preferenceModalOptionCheck,
+                              selected &&
+                                styles.preferenceModalOptionCheckSelected,
+                            ]}
+                          >
+                            {selected ? (
+                              <Ionicons
+                                name="checkmark"
+                                size={13}
+                                color="#FFFFFF"
+                              />
+                            ) : null}
+                          </View>
+                        </View>
                         <Text
                           style={[
                             styles.preferenceModalOptionHint,
@@ -3527,20 +4039,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         >
                           {item.description}
                         </Text>
-                        {selected ? (
-                          <View style={styles.preferenceModalOptionTimer}>
-                            <View
-                              style={[
-                                styles.preferenceModalOptionTimerFill,
-                                {
-                                  width: `${Math.round(
-                                    preferenceProgress * 100,
-                                  )}%`,
-                                },
-                              ]}
-                            />
-                          </View>
-                        ) : null}
                       </TouchableOpacity>
                     );
                   })}
@@ -3566,14 +4064,32 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         testID={`passenger-sound-option-${item.id}`}
                         accessibilityLabel={`Som ${item.label}`}
                       >
-                        <Text
-                          style={[
-                            styles.preferenceModalOptionText,
-                            selected && styles.preferenceModalOptionTextSelected,
-                          ]}
-                        >
-                          {item.label}
-                        </Text>
+                        <View style={styles.preferenceModalOptionHeader}>
+                          <Text
+                            style={[
+                              styles.preferenceModalOptionText,
+                              selected &&
+                                styles.preferenceModalOptionTextSelected,
+                            ]}
+                          >
+                            {item.label}
+                          </Text>
+                          <View
+                            style={[
+                              styles.preferenceModalOptionCheck,
+                              selected &&
+                                styles.preferenceModalOptionCheckSelected,
+                            ]}
+                          >
+                            {selected ? (
+                              <Ionicons
+                                name="checkmark"
+                                size={13}
+                                color="#FFFFFF"
+                              />
+                            ) : null}
+                          </View>
+                        </View>
                         <Text
                           style={[
                             styles.preferenceModalOptionHint,
@@ -3583,24 +4099,29 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         >
                           {item.description}
                         </Text>
-                        {selected ? (
-                          <View style={styles.preferenceModalOptionTimer}>
-                            <View
-                              style={[
-                                styles.preferenceModalOptionTimerFill,
-                                {
-                                  width: `${Math.round(
-                                    preferenceProgress * 100,
-                                  )}%`,
-                                },
-                              ]}
-                            />
-                          </View>
-                        ) : null}
                       </TouchableOpacity>
                     );
                   })}
                 </View>
+              </View>
+
+              <View style={styles.preferenceModalProgressHeader}>
+                <Text style={styles.preferenceModalProgressLabel}>
+                  Confirmação automática
+                </Text>
+                <Text style={styles.preferenceModalProgressTime}>
+                  {Math.max(0, Math.ceil((1 - preferenceProgress) * 5))}s
+                </Text>
+              </View>
+              <View style={styles.preferenceModalProgressTrack}>
+                <View
+                  style={[
+                    styles.preferenceModalProgressFill,
+                    {
+                      width: `${Math.round(preferenceProgress * 100)}%`,
+                    },
+                  ]}
+                />
               </View>
 
               <TouchableOpacity
@@ -4623,23 +5144,23 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
     paddingHorizontal: 14,
-    paddingBottom: 22,
-    backgroundColor: "rgba(16,32,24,0.14)",
+    paddingBottom: 26,
+    backgroundColor: "rgba(14,24,18,0.18)",
     zIndex: 40,
     elevation: 40,
   },
   preferenceModalCard: {
-    borderRadius: 28,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.74)",
-    backgroundColor: "rgba(255,255,255,0.94)",
+    borderColor: "rgba(31,57,42,0.08)",
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 18,
     paddingTop: 18,
-    paddingBottom: 16,
+    paddingBottom: 18,
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.16,
-    shadowRadius: 34,
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.14,
+    shadowRadius: 28,
     elevation: 12,
   },
   preferenceModalHeader: {
@@ -4675,14 +5196,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   preferenceModalCountdown: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(34,139,84,0.12)",
+    backgroundColor: "#EFF7F2",
     borderWidth: 1,
-    borderColor: "rgba(34,139,84,0.16)",
+    borderColor: "rgba(34,139,84,0.18)",
   },
   preferenceModalCountdownText: {
     color: leafRideColors.leaf,
@@ -4691,71 +5212,107 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   preferenceModalSection: {
-    marginTop: 16,
+    marginTop: 18,
   },
   preferenceModalSectionLabel: {
     color: leafRideColors.secondary,
     fontFamily: fonts.SemiBold,
     fontSize: 11,
     lineHeight: 15,
-    marginBottom: 8,
+    marginBottom: 9,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
   preferenceModalOptions: {
-    flexDirection: "row",
     gap: 8,
   },
   preferenceModalOption: {
-    flex: 1,
-    minHeight: 64,
-    borderRadius: 18,
+    minHeight: 58,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(39,74,54,0.1)",
-    backgroundColor: "rgba(247,251,248,0.86)",
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 9,
+    borderColor: "#E7ECE8",
+    backgroundColor: "#FAFBFA",
+    paddingHorizontal: 13,
+    paddingVertical: 10,
     overflow: "hidden",
   },
   preferenceModalOptionSelected: {
-    borderColor: "rgba(23,74,43,0.2)",
-    backgroundColor: "rgba(236,247,240,0.98)",
+    borderColor: "rgba(23,74,43,0.38)",
+    backgroundColor: "#F0F7F2",
+  },
+  preferenceModalOptionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
   },
   preferenceModalOptionText: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 11.5,
-    lineHeight: 15,
+    fontSize: 13,
+    lineHeight: 17,
+    flex: 1,
   },
   preferenceModalOptionTextSelected: {
     color: leafRideColors.leaf,
   },
+  preferenceModalOptionCheck: {
+    width: 21,
+    height: 21,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "#D8E1DB",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  preferenceModalOptionCheckSelected: {
+    borderColor: leafRideColors.leaf,
+    backgroundColor: leafRideColors.leaf,
+  },
   preferenceModalOptionHint: {
-    marginTop: 3,
+    marginTop: 4,
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
-    fontSize: 9.5,
-    lineHeight: 13,
+    fontSize: 11,
+    lineHeight: 15,
   },
   preferenceModalOptionHintSelected: {
     color: "#466755",
   },
-  preferenceModalOptionTimer: {
-    position: "absolute",
-    left: 10,
-    right: 10,
-    bottom: 7,
-    height: 3,
+  preferenceModalProgressHeader: {
+    marginTop: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  preferenceModalProgressLabel: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  preferenceModalProgressTime: {
+    color: leafRideColors.leaf,
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  preferenceModalProgressTrack: {
+    marginTop: 7,
+    height: 4,
     borderRadius: 999,
     backgroundColor: "rgba(23,74,43,0.1)",
     overflow: "hidden",
   },
-  preferenceModalOptionTimerFill: {
+  preferenceModalProgressFill: {
     height: "100%",
     borderRadius: 999,
     backgroundColor: leafRideColors.leaf,
   },
   preferenceModalConfirmButton: {
-    marginTop: 18,
+    marginTop: 16,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
     alignItems: "center",

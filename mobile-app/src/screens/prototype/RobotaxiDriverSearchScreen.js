@@ -59,6 +59,8 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [cancelError, setCancelError] = useState("");
   const terminalRouteHandledRef = useRef(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
   const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
@@ -139,7 +141,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       normalizedBookingStatus === "arrived" ||
       normalizedBookingStatus === "started"
     ) {
-      navigation.navigate("RobotaxiPrototypeTrip", {
+      navigation.replace("RobotaxiPrototypeTrip", {
         destination,
         destinationAddress: routeDestinationAddress || bookingDestinationAddress,
         destinationCoordinate,
@@ -197,17 +199,19 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           retryRouteName: "RobotaxiPrototypeDestination",
           retryParams: {
             destination,
-            destinationAddress,
+            destinationAddress:
+              routeDestinationAddress || bookingDestinationAddress,
             destinationCoordinate,
             initialSelectedDestination:
               route?.params?.initialSelectedDestination || {
                 name: destination,
-                address: destinationAddress,
+                address:
+                  routeDestinationAddress || bookingDestinationAddress,
                 coordinate: destinationCoordinate,
               },
             selectedFare: route?.params?.selectedFare || route?.params?.fare,
             fare: route?.params?.fare,
-            originAddress,
+            originAddress: routeOriginAddress || bookingPickupAddress,
             vehicle,
           },
         });
@@ -227,18 +231,36 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     }
   }, [lastError, navigation, normalizedBookingStatus]);
 
-  const handleDismiss = () => {
-    if (
-      normalizedBookingStatus === "searching" ||
-      normalizedBookingStatus === "requesting"
-    ) {
-      cancelRideSearch();
-    }
-    if (navigation.canGoBack()) {
-      navigation.goBack();
+  const handleProtectedDismiss = useCallback(() => {}, []);
+
+  const handleCancelSearch = async () => {
+    if (normalizedBookingStatus !== "searching" || cancelPending) {
       return;
     }
-    navigation.navigate("RobotaxiPrototype");
+
+    setCancelPending(true);
+    setCancelError("");
+    try {
+      await cancelRideSearch();
+      terminalRouteHandledRef.current = true;
+      navigation.replace("RobotaxiPrototypeCancellation", {
+        source: "search",
+      });
+    } catch (error) {
+      setCancelError(
+        error?.message ||
+          "Não foi possível cancelar no servidor. A corrida continua ativa.",
+      );
+    } finally {
+      setCancelPending(false);
+    }
+  };
+
+  const handleOpenSupport = () => {
+    navigation.navigate("RobotaxiMenuHelp", {
+      source: "driver_search",
+      bookingId: activeBooking?.bookingId || activeBooking?.id || null,
+    });
   };
 
   usePrototypeMapOcclusion({
@@ -275,7 +297,9 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
         />
 
         <PrototypeDismissibleSheet
-          onClose={handleDismiss}
+          onClose={handleProtectedDismiss}
+          backdropDismissEnabled={false}
+          dragEnabled={false}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
           <LeafRideSheet
@@ -326,27 +350,47 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
               <LeafInfoRow title="Destino" />
             </View>
 
-            {lastError ? <Text style={styles.errorText}>{lastError}</Text> : null}
+            {cancelError || lastError ? (
+              <Text style={styles.errorText}>{cancelError || lastError}</Text>
+            ) : null}
 
             <LeafButton
               label={
                 normalizedBookingStatus === "requesting"
                   ? "Criando corrida..."
+                  : cancelPending
+                    ? "Cancelando..."
                   : "Cancelar"
               }
               onPress={
-                normalizedBookingStatus === "requesting" ? undefined : handleDismiss
+                normalizedBookingStatus === "requesting" || cancelPending
+                  ? undefined
+                  : handleCancelSearch
               }
               icon={
-                normalizedBookingStatus === "requesting"
+                normalizedBookingStatus === "requesting" || cancelPending
                   ? "time-outline"
                   : "close-circle-outline"
+              }
+              disabled={
+                normalizedBookingStatus === "requesting" || cancelPending
               }
               tone="ghost"
               style={styles.actionButton}
               testID="passenger-driver-search-cancel-button"
               accessibilityLabel="passenger-driver-search-cancel-button"
             />
+            {cancelError || searchPresentation.remainingSeconds === 0 ? (
+              <LeafButton
+                label="Falar com suporte"
+                onPress={handleOpenSupport}
+                icon="chatbubble-ellipses-outline"
+                tone="ghost"
+                style={styles.supportButton}
+                testID="passenger-driver-search-support-button"
+                accessibilityLabel="passenger-driver-search-support-button"
+              />
+            ) : null}
           </LeafRideSheet>
         </PrototypeDismissibleSheet>
       </View>
@@ -455,6 +499,12 @@ const styles = StyleSheet.create({
   actionButton: {
     marginTop: 30,
     width: 154,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
+  },
+  supportButton: {
+    marginTop: 10,
+    width: 190,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
   },

@@ -3,10 +3,15 @@ jest.unmock('express');
 const express = require('express');
 const request = require('supertest');
 
-const mockGetConnection = jest.fn(() => ({}));
+const mockRedis = {
+  incr: jest.fn(),
+  expire: jest.fn()
+};
+const mockGetConnection = jest.fn(() => mockRedis);
 const mockEstimateRideFare = jest.fn();
 const mockIsActive = jest.fn(() => false);
 const mockValidateRideLocations = jest.fn(() => ({ valid: true }));
+const mockRecordPricingQuoteRequest = jest.fn();
 
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: () => mockGetConnection()
@@ -27,7 +32,8 @@ jest.mock('../../../services/pricing/calculateFare', () => ({
 
 jest.mock('../../../utils/prometheus-metrics', () => ({
   metrics: {
-    recordPricingEvaluation: jest.fn()
+    recordPricingEvaluation: jest.fn(),
+    recordPricingQuoteRequest: (...args) => mockRecordPricingQuoteRequest(...args)
   }
 }));
 
@@ -52,7 +58,9 @@ function createApp() {
 describe('pricing routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetConnection.mockReturnValue({});
+    mockRedis.incr.mockResolvedValue(1);
+    mockRedis.expire.mockResolvedValue(1);
+    mockGetConnection.mockReturnValue(mockRedis);
     mockIsActive.mockReturnValue(false);
     mockValidateRideLocations.mockReturnValue({ valid: true });
     mockEstimateRideFare.mockResolvedValue({
@@ -143,5 +151,37 @@ describe('pricing routes', () => {
         destinationLocation: expect.objectContaining({ lat: -22.974, lng: -43.207 })
       })
     );
+  });
+
+  it('correlates quote requests by temporary session id', async () => {
+    mockRedis.incr.mockResolvedValue(2);
+    const app = createApp();
+    const response = await request(app)
+      .post('/pricing/quote')
+      .set('x-leaf-quote-session-id', 'passenger_quote_test_1')
+      .send({
+        pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+        destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+        routeDistanceKm: 9.7,
+        routeDurationSecs: 920,
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['x-leaf-quote-session-id']).toBe('passenger_quote_test_1');
+    expect(response.headers['x-leaf-quote-session-count']).toBe('2');
+    expect(response.body.quoteSessionId).toBe('passenger_quote_test_1');
+    expect(response.body.quoteRequestCount).toBe(2);
+    expect(mockRedis.incr).toHaveBeenCalledWith(
+      'pricing:quote-session:passenger_quote_test_1'
+    );
+    expect(mockRedis.expire).toHaveBeenCalledWith(
+      'pricing:quote-session:passenger_quote_test_1',
+      900
+    );
+    expect(mockRecordPricingQuoteRequest).toHaveBeenCalledWith({
+      success: true,
+      source: 'session'
+    });
   });
 });

@@ -278,4 +278,69 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(mergedReceipt.driverNetAmount).toBeCloseTo(12.73, 2);
     expect(mergedReceipt.totalFees).toBeCloseTo(1.49, 2);
   });
+
+  it('replaces an idle-sync fallback receipt with backend-final financials', () => {
+    const mergedReceipt = mergeCompletedReceiptForHistory(
+      {
+        id: 'booking_terminal_race',
+        fare: 81.17,
+        finalFare: 81.17,
+        operationalFee: 2.44,
+        paymentIntermediationFee: 0.89,
+        totalFees: 3.33,
+        driverNetAmount: 77.84,
+        financialSnapshotSource: 'local_fallback',
+        authoritativeSnapshot: false,
+      },
+      {
+        id: 'booking_terminal_race',
+        fare: 81.17,
+        finalFare: 81.17,
+        operationalFee: 2.44,
+        paymentIntermediationFee: 0.65,
+        totalFees: 3.09,
+        driverNetAmount: 78.08,
+        financialSnapshotSource: 'backend_final',
+        authoritativeSnapshot: true,
+      },
+    );
+
+    expect(mergedReceipt.operationalFee).toBeCloseTo(2.44, 2);
+    expect(mergedReceipt.paymentIntermediationFee).toBeCloseTo(0.65, 2);
+    expect(mergedReceipt.totalFees).toBeCloseTo(3.09, 2);
+    expect(mergedReceipt.driverNetAmount).toBeCloseTo(78.08, 2);
+  });
+
+  it('does not let a later recovery receipt overwrite backend-final financials', () => {
+    const mergedReceipt = mergeCompletedReceiptForHistory(
+      {
+        id: 'booking_terminal_race',
+        fare: 81.17,
+        finalFare: 81.17,
+        operationalFee: 2.44,
+        paymentIntermediationFee: 0.65,
+        totalFees: 3.09,
+        driverNetAmount: 78.08,
+        financialSnapshotSource: 'backend_final',
+        authoritativeSnapshot: true,
+      },
+      {
+        id: 'booking_terminal_race',
+        fare: 81.17,
+        finalFare: 81.17,
+        operationalFee: 2.44,
+        paymentIntermediationFee: 0.89,
+        totalFees: 3.33,
+        driverNetAmount: 77.84,
+        financialSnapshotSource: 'stored_receipt_recovery',
+        authoritativeSnapshot: true,
+      },
+    );
+
+    expect(mergedReceipt.paymentIntermediationFee).toBeCloseTo(0.65, 2);
+    expect(mergedReceipt.totalFees).toBeCloseTo(3.09, 2);
+    expect(mergedReceipt.driverNetAmount).toBeCloseTo(78.08, 2);
+    expect(mergedReceipt.financialSnapshotSource).toBe('backend_final');
+    expect(mergedReceipt.authoritativeSnapshot).toBe(true);
+  });
 });

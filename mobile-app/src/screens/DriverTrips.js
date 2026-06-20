@@ -20,8 +20,6 @@ import carImageIcon from '../../assets/images/track_Car.png';
 var { width, height } = Dimensions.get('window');
 import { CommonActions } from '@react-navigation/native';
 import { ExtraInfo, RateView, appConsts, MAIN_COLOR, SECONDORY_COLOR } from '../common/sharedFunctions';
-import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { startActivityAsync, ActivityAction } from 'expo-intent-launcher';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../common/font';
@@ -30,6 +28,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Typography from '../components/design-system/Typography';
 import AnimatedButton from '../components/design-system/AnimatedButton';
 import { useTheme } from '../theme/runtimeTokens';
+import {
+    requestBackgroundLocationPermissionWithDisclosure,
+    requestForegroundLocationPermissionWithDisclosure
+} from '../services/AndroidPermissionDisclosure';
 
 
 export default function DriverTrips(props) {
@@ -417,26 +419,9 @@ export default function DriverTrips(props) {
     }, []);
 
     const changePermission = async () => {
-        const disclosureAccepted = await new Promise(resolve => {
-            Alert.alert(
-                'Receba corridas com o app em segundo plano',
-                'Este app coleta sua localização em segundo plano apenas enquanto você estiver online como motorista para despacho de corridas, navegação ativa e segurança operacional. A Leaf não usa essa permissão para anúncios.',
-                [
-                    { text: 'Agora não', style: 'cancel', onPress: () => resolve(false) },
-                    { text: 'Permitir', onPress: () => resolve(true) }
-                ]
-            );
-        });
-
-        if (!disclosureAccepted) {
-            return;
-        }
-
-        await AsyncStorage.setItem('has_shown_background_location_modal', 'true');
-
-        let permResp = await Location.requestForegroundPermissionsAsync();
+        let permResp = await requestForegroundLocationPermissionWithDisclosure();
         if (permResp.status == 'granted') {
-            let { status } = await Location.requestBackgroundPermissionsAsync();
+            let { status } = await requestBackgroundLocationPermissionWithDisclosure();
             if (status === 'granted') {
                 dispatch(updateProfile({ driverActiveStatus: true }));
                 setChecks({ ...checks, driverActiveStatus: true });

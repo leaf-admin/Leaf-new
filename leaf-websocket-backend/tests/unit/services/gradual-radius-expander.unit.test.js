@@ -96,6 +96,7 @@ describe('gradual-radius-expander', () => {
       expire: jest.fn().mockResolvedValue(1),
       georadius: jest.fn().mockResolvedValue(['driver_1']),
       get: jest.fn().mockResolvedValue(null),
+      del: jest.fn().mockResolvedValue(1),
       smembers: jest.fn().mockResolvedValue([]),
       scard: jest.fn().mockResolvedValue(1)
     };
@@ -380,5 +381,132 @@ describe('gradual-radius-expander', () => {
       expander.config.driverResponseWaitMs,
       expect.any(Function)
     );
+  });
+
+  it('keeps an active customer search untouched before the canonical deadline', async () => {
+    process.env.MATCH_MINIMUM_SEARCH_DURATION_MS = '3000';
+    expander = new GradualRadiusExpander(io);
+    expander.config.driverResponseWaitMs = 1000;
+
+    redis.get.mockImplementation(async (key) => (
+      key === 'customer_active_booking:customer_1' ? 'booking_4' : null
+    ));
+    redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'booking_search:booking_4') {
+        return {
+          createdAt: '2026-01-01T00:00:01.000Z',
+          state: 'SEARCHING'
+        };
+      }
+      if (key === 'booking:booking_4') {
+        return {
+          customerId: 'customer_1',
+          status: 'SEARCHING',
+          pickupLocation: JSON.stringify({ lat: -23.55, lng: -46.63 })
+        };
+      }
+      return {};
+    });
+    const finalizeSpy = jest.spyOn(expander, 'handleMaxRadiusReached');
+
+    const result = await expander.reconcileExpiredSearchForCustomer(
+      'customer_1',
+      { nowMs: Date.parse('2026-01-01T00:00:03.500Z') }
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      reconciled: false,
+      reason: 'SEARCH_WINDOW_ACTIVE',
+      remainingMs: 500
+    }));
+    expect(finalizeSpy).not.toHaveBeenCalled();
+  });
+
+  it('reconciles a persisted customer search after the deadline without relying on an in-memory timer', async () => {
+    process.env.MATCH_MINIMUM_SEARCH_DURATION_MS = '3000';
+    expander = new GradualRadiusExpander(io);
+    expander.config.driverResponseWaitMs = 1000;
+
+    redis.get.mockImplementation(async (key) => (
+      key === 'customer_active_booking:customer_1' ? 'booking_4' : null
+    ));
+    redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'booking_search:booking_4') {
+        return {
+          createdAt: '2026-01-01T00:00:01.000Z',
+          state: 'SEARCHING'
+        };
+      }
+      if (key === 'booking:booking_4') {
+        return {
+          customerId: 'customer_1',
+          status: 'SEARCHING',
+          pickupLocation: JSON.stringify({ lat: -23.55, lng: -46.63 })
+        };
+      }
+      return {};
+    });
+    const finalizeSpy = jest
+      .spyOn(expander, 'handleMaxRadiusReached')
+      .mockResolvedValue(undefined);
+
+    const result = await expander.reconcileExpiredSearchForCustomer(
+      'customer_1',
+      { nowMs: Date.parse('2026-01-01T00:00:05.000Z') }
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      reconciled: true,
+      bookingId: 'booking_4',
+      forceFinalize: true
+    }));
+    expect(finalizeSpy).toHaveBeenCalledWith(
+      'booking_4',
+      expect.objectContaining({
+        reason: 'SEARCH_TIMEOUT',
+        skipMinimumSearchDuration: true,
+        forceFinalize: true
+      })
+    );
+  });
+
+  it('never expires a booking that already has a driver assigned', async () => {
+    redis.get.mockResolvedValue('booking_assigned');
+    redis.hgetall.mockResolvedValue({
+      customerId: 'customer_1',
+      driverId: 'driver_1',
+      status: 'SEARCHING',
+      createdAt: '2026-01-01T00:00:00.000Z'
+    });
+    const finalizeSpy = jest.spyOn(expander, 'handleMaxRadiusReached');
+
+    const result = await expander.reconcileExpiredSearchForCustomer(
+      'customer_1',
+      { nowMs: Date.parse('2026-01-01T00:10:00.000Z') }
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      reconciled: false,
+      reason: 'DRIVER_ALREADY_ASSIGNED'
+    }));
+    expect(finalizeSpy).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale customer active index that points to a terminal no-driver booking', async () => {
+    redis.get.mockResolvedValue('booking_terminal');
+    redis.hgetall.mockResolvedValue({
+      customerId: 'customer_1',
+      status: 'NO_DRIVERS_AVAILABLE',
+      noDriversFoundReason: 'NO_ELIGIBLE_DRIVERS_IN_REGION'
+    });
+
+    const result = await expander.reconcileExpiredSearchForCustomer('customer_1');
+
+    expect(result).toEqual(expect.objectContaining({
+      reconciled: true,
+      reason: 'TERMINAL_ACTIVE_INDEX_CLEARED',
+      bookingId: 'booking_terminal'
+    }));
+    expect(redis.del).toHaveBeenCalledWith('customer_active_booking:customer_1');
   });
 });

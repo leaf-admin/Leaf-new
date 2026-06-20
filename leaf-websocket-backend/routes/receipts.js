@@ -7,7 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const ReceiptService = require('../services/receipt-service');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 
 // Instanciar serviço de recibos
 const receiptService = new ReceiptService();
@@ -270,7 +270,6 @@ router.get('/api/receipts/health', (req, res) => {
 });
 
 module.exports = router;
-
 
 
 

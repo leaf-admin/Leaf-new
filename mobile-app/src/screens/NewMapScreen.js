@@ -19,6 +19,7 @@ import DriverOnTripUI from '../components/map/DriverOnTripUI';
 import PassengerOnTripUI from '../components/map/PassengerOnTripUI';
 import RatingUI from '../components/map/RatingUI';
 import WebSocketManager from '../services/WebSocketManager';
+import { requestForegroundLocationPermissionWithDisclosure } from '../services/AndroidPermissionDisclosure';
 import { darkTheme, lightTheme } from '../theme/runtimeTokens';
 import { clearBooking } from '../services/runtime/bookingStateBridge';
 import polyline from '@mapbox/polyline';
@@ -342,11 +343,11 @@ export default function NewMapScreen(props) {
     const getCurrentLocation = async ({ forcePrompt = false, silent = false } = {}) => {
         try {
             let permission = forcePrompt
-                ? await Location.requestForegroundPermissionsAsync()
+                ? await requestForegroundLocationPermissionWithDisclosure()
                 : await Location.getForegroundPermissionsAsync();
 
             if (permission.status !== 'granted' && !forcePrompt && permission.canAskAgain) {
-                permission = await Location.requestForegroundPermissionsAsync();
+                permission = await requestForegroundLocationPermissionWithDisclosure();
             }
 
             if (permission.status !== 'granted') {

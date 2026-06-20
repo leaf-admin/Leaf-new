@@ -345,6 +345,13 @@ const pricingMinimumFareApplied = new promClient.Counter({
     registers: [register]
 });
 
+const pricingQuoteRequests = new promClient.Counter({
+    name: 'leaf_pricing_quote_request_total',
+    help: 'Total de requisições ao endpoint de cotação por resultado e origem',
+    labelNames: ['result', 'source'],
+    registers: [register]
+});
+
 const pricingPressureScore = new promClient.Histogram({
     name: 'leaf_pricing_score_pressao',
     help: 'Distribuição do score de pressão operacional',
@@ -694,6 +701,17 @@ const metrics = {
             { operational_state: labels.operational_state },
             Number.isFinite(scoreExcecao) ? scoreExcecao : 0
         );
+    },
+
+    recordPricingQuoteRequest: ({
+        success = true,
+        source = 'unknown',
+        count = 1
+    } = {}) => {
+        pricingQuoteRequests.inc({
+            result: success ? 'success' : 'failure',
+            source: sanitizeLabelValue(source, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
     },
 
     recordPricingBaselineMaterialization: ({

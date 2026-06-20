@@ -195,6 +195,159 @@ async function markBookingPaymentConfirmed({
   await pipeline.exec();
 }
 
+async function materializePaymentForBooking({
+  bookingId,
+  chargeId,
+  temporaryRideId,
+  amountInCents,
+  passengerId = null,
+  paymentStatus = 'in_holding',
+  source = 'unknown'
+}) {
+  const safeBookingId = String(bookingId || '').trim();
+  const safeChargeId = String(chargeId || '').trim();
+  const safeTemporaryRideId = String(temporaryRideId || '').trim();
+  const safeAmountInCents = Number.isFinite(Number(amountInCents))
+    ? Math.round(Number(amountInCents))
+    : null;
+
+  if (!safeBookingId || (!safeChargeId && !safeTemporaryRideId)) {
+    return {
+      success: false,
+      skipped: true,
+      reason: 'PAYMENT_REFERENCE_MISSING'
+    };
+  }
+
+  await redisPool.ensureConnection();
+  const redis = redisPool.getConnection();
+
+  const firebaseConfig = require('../firebase-config');
+  const firestore = firebaseConfig.getFirestore();
+  const admin = require('firebase-admin');
+  const nowIso = new Date().toISOString();
+  const normalizedStatus = String(paymentStatus || 'in_holding').trim().toLowerCase() || 'in_holding';
+
+  let sourceHolding = null;
+  let sourceRidePayment = null;
+
+  if (firestore && safeTemporaryRideId) {
+    const [holdingDoc, ridePaymentDoc] = await Promise.all([
+      firestore.collection('payment_holdings').doc(safeTemporaryRideId).get().catch(() => null),
+      firestore.collection('ride_payments').doc(safeTemporaryRideId).get().catch(() => null)
+    ]);
+
+    if (holdingDoc?.exists) {
+      sourceHolding = holdingDoc.data() || null;
+    }
+    if (ridePaymentDoc?.exists) {
+      sourceRidePayment = ridePaymentDoc.data() || null;
+    }
+  }
+
+  const resolvedAmount = safeAmountInCents
+    || Number(sourceHolding?.amount)
+    || Number(sourceRidePayment?.amount)
+    || 0;
+  const roundedAmount = Number.isFinite(Number(resolvedAmount))
+    ? Math.round(Number(resolvedAmount))
+    : 0;
+
+  const resolvedPassengerId = passengerId
+    || sourceHolding?.passengerId
+    || sourceRidePayment?.passengerId
+    || null;
+  const resolvedChargeId = safeChargeId
+    || sourceHolding?.chargeId
+    || sourceHolding?.paymentId
+    || sourceRidePayment?.chargeId
+    || '';
+
+  if (firestore) {
+    const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
+    const basePaymentReference = {
+      rideId: safeBookingId,
+      canonicalRideId: safeBookingId,
+      bookingId: safeBookingId,
+      temporaryRideId: safeTemporaryRideId || null,
+      paymentReferenceRideId: safeTemporaryRideId || null,
+      chargeId: resolvedChargeId || null,
+      paymentId: resolvedChargeId || sourceHolding?.paymentId || null,
+      passengerId: resolvedPassengerId,
+      amount: roundedAmount,
+      amountInReais: roundedAmount > 0 ? roundedAmount / 100 : null,
+      status: normalizedStatus,
+      source,
+      materializedFrom: safeTemporaryRideId || null,
+      materializedAt: serverTimestamp,
+      materializedAtIso: nowIso,
+      updatedAt: serverTimestamp
+    };
+
+    await firestore.collection('payment_holdings').doc(safeBookingId).set({
+      ...(sourceHolding || {}),
+      ...basePaymentReference,
+      paymentMethod: sourceHolding?.paymentMethod || 'pix',
+      paidAt: sourceHolding?.paidAt || sourceRidePayment?.confirmedAt || nowIso,
+      confirmedAt: sourceHolding?.confirmedAt || nowIso
+    }, { merge: true });
+
+    await firestore.collection('ride_payments').doc(safeBookingId).set({
+      ...(sourceRidePayment || {}),
+      rideId: safeBookingId,
+      canonicalRideId: safeBookingId,
+      bookingId: safeBookingId,
+      temporaryRideId: safeTemporaryRideId || null,
+      paymentReferenceRideId: safeTemporaryRideId || null,
+      chargeId: resolvedChargeId || null,
+      passengerId: resolvedPassengerId,
+      amount: roundedAmount,
+      status: sourceRidePayment?.status || 'CONFIRMED',
+      credited: sourceRidePayment?.credited === true,
+      source,
+      materializedFrom: safeTemporaryRideId || null,
+      materializedAt: serverTimestamp,
+      materializedAtIso: nowIso,
+      updatedAt: serverTimestamp
+    }, { merge: true });
+  }
+
+  await markBookingPaymentConfirmed({
+    bookingId: safeBookingId,
+    chargeId: resolvedChargeId,
+    temporaryRideId: safeTemporaryRideId,
+    amountInCents: roundedAmount,
+    paymentStatus: normalizedStatus,
+    source
+  });
+
+  if (roundedAmount > 0) {
+    await redis.set(
+      `payment_status_cache:${safeBookingId}`,
+      JSON.stringify({
+        status: normalizedStatus,
+        amount: roundedAmount,
+        paymentId: resolvedChargeId || null,
+        chargeId: resolvedChargeId || null,
+        paidAt: sourceHolding?.paidAt || sourceRidePayment?.confirmedAt || nowIso,
+        confirmedAt: sourceHolding?.confirmedAt || nowIso,
+        rideId: safeBookingId,
+        updatedAt: nowIso
+      }),
+      'EX',
+      PAYMENT_LINK_TTL_SECONDS
+    ).catch(() => null);
+  }
+
+  return {
+    success: true,
+    bookingId: safeBookingId,
+    temporaryRideId: safeTemporaryRideId || null,
+    chargeId: resolvedChargeId || null,
+    amountInCents: roundedAmount
+  };
+}
+
 async function triggerDispatchAttempt({
   bookingId,
   io,
@@ -375,6 +528,7 @@ async function triggerDispatchAfterPayment(options) {
 
 module.exports = {
   linkPaymentToBooking,
+  materializePaymentForBooking,
   markBookingPaymentConfirmed,
   resolveBookingIdFromPaymentRefs,
   triggerDispatchAfterPayment

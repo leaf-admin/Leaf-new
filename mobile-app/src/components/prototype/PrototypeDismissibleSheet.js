@@ -22,7 +22,8 @@ export default function PrototypeDismissibleSheet({
   bottomGapFillColor = '#FFFFFF',
   dragFromTopOnly = true,
   dragHandleZoneHeight = 88,
-  dragEnabled = true
+  dragEnabled = true,
+  backdropDismissEnabled = true
 }) {
   const translateY = useSharedValue(OPEN_TRANSLATE_Y);
   const backdropOpacity = useSharedValue(0);
@@ -55,6 +56,14 @@ export default function PrototypeDismissibleSheet({
       }
     });
   }, [backdropOpacity, onClose, surfaceOpacity, translateY]);
+
+  const handleBackdropPress = useCallback(() => {
+    if (!backdropDismissEnabled) {
+      return;
+    }
+
+    closeSheet(0);
+  }, [backdropDismissEnabled, closeSheet]);
 
   const panGesture = Gesture.Pan()
     .onUpdate(event => {
@@ -114,7 +123,7 @@ export default function PrototypeDismissibleSheet({
     <View style={styles.overlay} pointerEvents="box-none">
       <AnimatedPressable
         style={[styles.backdrop, { backgroundColor: backdropColor }, animatedBackdropStyle]}
-        onPress={() => closeSheet(0)}
+        onPress={handleBackdropPress}
       />
       {bottomGapHeight > 0 ? (
         <Animated.View

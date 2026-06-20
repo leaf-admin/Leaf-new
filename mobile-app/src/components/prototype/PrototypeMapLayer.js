@@ -292,6 +292,27 @@ function normalizeRoutePath(path = []) {
     : [];
 }
 
+function normalizeTrafficRouteSegments(segments = []) {
+  if (!Array.isArray(segments)) {
+    return [];
+  }
+
+  return segments
+    .map((segment, index) => {
+      const coordinates = normalizeRoutePath(segment?.coordinates);
+      if (coordinates.length < 2) {
+        return null;
+      }
+
+      return {
+        key: `${index}:${String(segment?.level || 'normal')}:${String(segment?.color || '')}:${coordinates.length}`,
+        coordinates,
+        color: String(segment?.color || '').trim() || '#1A330E',
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildRouteMotionMetrics(path = []) {
   const coordinates = normalizeRoutePath(path);
 
@@ -1116,6 +1137,7 @@ function PrototypeMapLayer({
   searchPreviewRadiusKm = null,
   nearbyVehicles = [],
   routeCoordinates,
+  routeTrafficSegments = [],
   originCoordinate,
   destinationCoordinate,
   destinationLabel,
@@ -1242,6 +1264,10 @@ function PrototypeMapLayer({
       return Number.isFinite(item?.latitude) && Number.isFinite(item?.longitude);
     });
   }, [denseRoute, routeCoordinates]);
+  const normalizedTrafficRouteSegments = useMemo(
+    () => normalizeTrafficRouteSegments(routeTrafficSegments),
+    [routeTrafficSegments],
+  );
   const routeMotionMetrics = useMemo(
     () => buildRouteMotionMetrics(staticRouteCoordinates),
     [staticRouteCoordinates],
@@ -1387,6 +1413,7 @@ function PrototypeMapLayer({
     routeHighlightColor === undefined
       ? null
       : routeHighlightColor;
+  const trafficRouteSegmentCount = normalizedTrafficRouteSegments.length;
   const shouldRenderExternalMapChildren = !useSimplifiedIosMap && !hasRoute;
   const nativeMapTopologyKey = useMemo(() => {
     if (Platform.OS !== 'ios') {
@@ -1397,6 +1424,7 @@ function PrototypeMapLayer({
       hasRenderableRoute
         ? 1 +
           (!useSimplifiedIosMap ? 1 : 0) +
+          trafficRouteSegmentCount +
           (!useSimplifiedIosMap && effectiveRouteHighlightColor ? 1 : 0)
         : 0;
 
@@ -1418,6 +1446,7 @@ function PrototypeMapLayer({
     hasDestinationMarker,
     hasDisplayedDriverCoordinate,
     hasRenderableRoute,
+    trafficRouteSegmentCount,
     hasSearchCenter,
     hasSearchPreviewRadius,
     hasSearchRadius,
@@ -2258,6 +2287,20 @@ function PrototypeMapLayer({
               lineJoin="round"
             />
           ) : null}
+
+          {hasRenderableRoute
+            ? normalizedTrafficRouteSegments.map(segment => (
+              <Polyline
+                key={`route-traffic-${segment.key}`}
+                coordinates={segment.coordinates}
+                strokeColor={segment.color}
+                strokeColors={[segment.color, segment.color]}
+                strokeWidth={useSimplifiedIosMap ? 4.2 : 4.6}
+                lineCap="round"
+                lineJoin="round"
+              />
+            ))
+            : null}
 
           {!useSimplifiedIosMap &&
           hasRenderableRoute &&

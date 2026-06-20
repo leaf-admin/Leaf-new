@@ -11,6 +11,7 @@ import {
     saveBackgroundNotification
 } from './BackgroundNotificationQueue';
 import { registerFCMBackgroundMessageHandler } from './FCMBackgroundMessageHandler';
+import { requestPostNotificationsPermissionWithDisclosure } from './AndroidPermissionDisclosure';
 
 const SHOULD_DISABLE_SIMULATOR_LOCAL_NOTIFICATIONS =
     Platform.OS === 'ios' && !Device.isDevice;
@@ -219,7 +220,7 @@ class FCMNotificationService {
                     return true;
                 }
 
-                const result = await PermissionsAndroid.request(POST_NOTIFICATIONS_PERMISSION);
+                const result = await requestPostNotificationsPermissionWithDisclosure(POST_NOTIFICATIONS_PERMISSION);
                 const granted = result === PermissionsAndroid.RESULTS.GRANTED;
                 if (granted) {
                     Logger.log('✅ Permissão POST_NOTIFICATIONS concedida');

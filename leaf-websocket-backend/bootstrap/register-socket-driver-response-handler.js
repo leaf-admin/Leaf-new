@@ -18,21 +18,56 @@ function registerSocketDriverResponseHandler({ socket, io, logStructured }) {
             }
 
             if (accepted) {
+                const activeBooking = io.activeBookings?.get(bookingId) || null;
+                const customerId =
+                    activeBooking?.customerId ||
+                    activeBooking?.customer ||
+                    activeBooking?.passengerId ||
+                    activeBooking?.passenger ||
+                    null;
+                const normalizedStatus = String(activeBooking?.status || '').trim().toUpperCase();
+                const isTerminalBooking = ['COMPLETED', 'CANCELLED', 'CANCELED'].includes(normalizedStatus);
+
+                if (isTerminalBooking) {
+                    socket.emit('driverResponseError', {
+                        error: 'Corrida já encerrada',
+                        bookingId
+                    });
+                    logStructured('warn', 'driverResponse bloqueado para corrida terminal', {
+                        service: 'websocket',
+                        socketId: socket.id,
+                        userId: socket.userId,
+                        bookingId,
+                        status: normalizedStatus,
+                        eventType: 'driverResponse'
+                    });
+                    return;
+                }
+
                 // Motorista aceitou
                 socket.emit('rideAccepted', {
                     success: true,
                     bookingId,
                     message: 'Corrida aceita com sucesso',
-                    driverId: socket.id
+                    driverId: socket.userId || socket.id
                 });
 
-                // Notificar cliente
-                io.emit('rideAccepted', {
-                    success: true,
-                    bookingId,
-                    message: 'Motorista aceitou sua corrida',
-                    driverId: socket.id
-                });
+                if (customerId) {
+                    io.to(`customer_${customerId}`).emit('rideAccepted', {
+                        success: true,
+                        bookingId,
+                        message: 'Motorista aceitou sua corrida',
+                        driverId: socket.userId || socket.id
+                    });
+                } else {
+                    logStructured('warn', 'rideAccepted legado sem customerId resolvido; fan-out global bloqueado', {
+                        service: 'websocket',
+                        socketId: socket.id,
+                        userId: socket.userId,
+                        bookingId,
+                        eventType: 'driverResponse'
+                    });
+                }
 
                 logStructured('info', 'Motorista aceitou corrida', {
                     service: 'websocket',

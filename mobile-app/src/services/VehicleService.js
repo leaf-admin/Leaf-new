@@ -906,11 +906,16 @@ class VehicleService {
             // Usar a mesma configuração de API que outros serviços
             const { getSelfHostedApiUrl } = require('../config/ApiConfig');
             const backendUrl = getSelfHostedApiUrl('/api/vehicles/ocr-data');
+            const token = await auth().currentUser?.getIdToken?.();
+            if (!token) {
+                throw new Error('Usuário não autenticado para envio de dados estruturados do CRLV');
+            }
             
             const response = await fetch(backendUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify(payload),
             });

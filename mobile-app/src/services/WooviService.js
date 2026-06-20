@@ -31,11 +31,17 @@ class WooviService {
 
             const response = await this.backendApi.post('/api/payment/advance', {
                 passengerId: paymentData.passengerId,
+                passengerPhone: paymentData.passengerPhone,
+                phone: paymentData.phone,
+                phoneNumber: paymentData.phoneNumber,
                 amount: paymentData.amount,
                 grossAmountInCents: paymentData.grossAmountInCents,
                 grossAmount: paymentData.grossAmount,
                 discountBenefit: paymentData.discountBenefit || null,
                 rideId: paymentData.rideId,
+                paymentSessionId: paymentData.paymentSessionId,
+                paymentContextKey: paymentData.paymentContextKey,
+                quoteSessionId: paymentData.quoteSessionId,
                 rideDetails: paymentData.rideDetails,
                 passengerName: paymentData.passengerName,
                 passengerEmail: paymentData.passengerEmail,
@@ -111,12 +117,17 @@ class WooviService {
 
     async simulateTestWebhook({
         chargeId,
+        paymentIntentId,
         rideId,
         passengerId,
         amountInCents,
         paymentType = 'advance_payment'
     }) {
         try {
+            if (!paymentIntentId) {
+                throw new Error('paymentIntentId é obrigatório para simular webhook sandbox');
+            }
+
             const paidAt = new Date().toISOString();
             const payload = {
                 event: 'OPENPIX:CHARGE_COMPLETED',
@@ -131,6 +142,7 @@ class WooviService {
                         { key: 'passenger_id', value: passengerId || '' },
                         { key: 'ride_id', value: rideId || '' },
                         { key: 'payment_type', value: paymentType },
+                        { key: 'payment_intent_id', value: paymentIntentId },
                         { key: 'service', value: 'ride_sharing' }
                     ]
                 },

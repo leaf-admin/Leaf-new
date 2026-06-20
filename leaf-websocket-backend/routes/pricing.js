@@ -13,6 +13,10 @@ const MAX_OPERATIONAL_ROUTE_DISTANCE_KM = Math.max(
   80,
   Number.parseFloat(process.env.PRICING_MAX_OPERATIONAL_ROUTE_DISTANCE_KM || '120') || 120
 );
+const QUOTE_SESSION_COUNTER_TTL_SECONDS = Math.max(
+  60,
+  Number.parseInt(process.env.PRICING_QUOTE_SESSION_COUNTER_TTL_SECONDS || '900', 10) || 900
+);
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(
@@ -33,6 +37,48 @@ function hasCoordinate(location = {}) {
     return false;
   }
   return Number.isFinite(toNumber(latRaw, NaN)) && Number.isFinite(toNumber(lngRaw, NaN));
+}
+
+function normalizeQuoteSessionId(value) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9:_-]/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 96);
+  return normalized || '';
+}
+
+function resolveQuoteSessionId(req, body = {}) {
+  return normalizeQuoteSessionId(
+    req.headers['x-leaf-quote-session-id'] ||
+      req.headers['x-quote-session-id'] ||
+      body.quoteSessionId ||
+      body.quote_session_id ||
+      ''
+  );
+}
+
+async function incrementQuoteSessionCounter(redis, quoteSessionId) {
+  if (!redis || !quoteSessionId || typeof redis.incr !== 'function') {
+    return null;
+  }
+
+  const key = `pricing:quote-session:${quoteSessionId}`;
+  try {
+    const count = Number(await redis.incr(key));
+    if (typeof redis.expire === 'function') {
+      await redis.expire(key, QUOTE_SESSION_COUNTER_TTL_SECONDS);
+    }
+    return Number.isFinite(count) && count > 0 ? count : null;
+  } catch (error) {
+    logStructured('warn', 'Falha ao incrementar contador temporário de quote', {
+      service: 'pricing-routes',
+      operation: 'pricing_quote_session_counter',
+      quoteSessionId,
+      error: error.message
+    });
+    return null;
+  }
 }
 
 function haversineDistanceKm(lat1, lng1, lat2, lng2) {
@@ -72,8 +118,10 @@ router.post('/pricing/quote', async (req, res) => {
   const body = req.body || {};
   const pickupLocation = body.pickupLocation || body.pickup || {};
   const destinationLocation = body.destinationLocation || body.destination || body.drop || {};
+  const quoteSessionId = resolveQuoteSessionId(req, body);
 
   if (!hasCoordinate(pickupLocation) || !hasCoordinate(destinationLocation)) {
+    metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
     return res.status(400).json({
       error: 'pickup_and_destination_required',
       message: 'Pickup e destino com lat/lng válidos são obrigatórios.'
@@ -97,6 +145,7 @@ router.post('/pricing/quote', async (req, res) => {
       normalizedDestinationLocation
     );
     if (!geofenceValidation.valid) {
+      metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
       return res.status(422).json({
         error: 'route_out_of_coverage',
         message: geofenceValidation.error || 'Origem ou destino fora da área de operação da Leaf.'
@@ -111,6 +160,7 @@ router.post('/pricing/quote', async (req, res) => {
     normalizedDestinationLocation.lng
   );
   if (Number.isFinite(straightDistanceKm) && straightDistanceKm > MAX_OPERATIONAL_ROUTE_DISTANCE_KM) {
+    metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
     return res.status(422).json({
       error: 'route_distance_exceeds_limit',
       message: 'Destino fora da área de cobertura operacional da Leaf.',
@@ -120,6 +170,7 @@ router.post('/pricing/quote', async (req, res) => {
 
   try {
     const redis = redisPool.getConnection();
+    const quoteRequestCount = await incrementQuoteSessionCounter(redis, quoteSessionId);
     const result = await fareEstimationService.estimateRideFare({
       redis,
       pickupLocation: normalizedPickupLocation,
@@ -145,7 +196,27 @@ router.post('/pricing/quote', async (req, res) => {
       ? discountPreview.payableFare
       : result.estimatedFare;
 
+    metrics.recordPricingQuoteRequest?.({ success: true, source: quoteSessionId ? 'session' : 'anonymous' });
+
+    if (quoteSessionId) {
+      res.set('X-Leaf-Quote-Session-Id', quoteSessionId);
+    }
+    if (quoteRequestCount) {
+      res.set('X-Leaf-Quote-Session-Count', String(quoteRequestCount));
+    }
+
+    logStructured('info', 'Quote dinâmico calculado', {
+      service: 'pricing-routes',
+      operation: 'pricing_quote',
+      quoteSessionId: quoteSessionId || null,
+      quoteRequestCount: quoteRequestCount || null,
+      carType: result.normalizedCarType,
+      estimatedFare
+    });
+
     return res.json({
+      quoteSessionId: quoteSessionId || null,
+      quoteRequestCount: quoteRequestCount || null,
       estimatedFare,
       grossEstimatedFare: result.estimatedFare,
       passengerPayableFare: estimatedFare,
@@ -163,6 +234,7 @@ router.post('/pricing/quote', async (req, res) => {
       exceptionalMode: result.exceptionalMode || null
     });
   } catch (error) {
+    metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
     metrics.recordPricingEvaluation({
       success: false,
       operationalState: 'UNKNOWN',

@@ -7,6 +7,10 @@ import { getWebSocketUrl, getWebSocketConfig } from '../config/WebSocketConfig';
 // Configuração da URL do WebSocket
 const SOCKET_URL = getWebSocketUrl();
 const CONFIG = getWebSocketConfig();
+const SOCKET_TRANSPORTS =
+    Array.isArray(CONFIG.transports) && CONFIG.transports.length > 0
+        ? CONFIG.transports
+        : ['websocket'];
 
 class SocketService {
     constructor() {
@@ -44,7 +48,7 @@ class SocketService {
             this.socket = io(SOCKET_URL, {
                 // ✅ Passar token JWT na conexão (handshake)
                 auth: { token: userToken },
-                transports: ['websocket', 'polling'],
+                transports: SOCKET_TRANSPORTS,
                 timeout: CONFIG.timeout,
                 forceNew: true,
                 reconnection: true,
@@ -247,4 +251,4 @@ class SocketService {
 // Instância singleton
 const socketService = new SocketService();
 
-export default socketService; 
+export default socketService;

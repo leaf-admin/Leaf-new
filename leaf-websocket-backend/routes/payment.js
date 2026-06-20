@@ -566,15 +566,18 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       grossAmount,
       passengerPhone,
       phone,
-      phoneNumber
+      phoneNumber,
+      paymentSessionId,
+      paymentContextKey,
+      quoteSessionId
     } = req.body;
 
     // Validações básicas
-    if (!passengerId || !amount || !rideId || !rideDetails) {
+    if (!passengerId || !amount || (!rideId && !paymentSessionId) || !rideDetails) {
       return res.status(400).json({
         success: false,
         error: 'Dados obrigatórios não fornecidos',
-        required: ['passengerId', 'amount', 'rideId', 'rideDetails']
+        required: ['passengerId', 'amount', 'rideId|paymentSessionId', 'rideDetails']
       });
     }
 
@@ -601,6 +604,9 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       passengerId,
       amount,
       rideId,
+      paymentSessionId,
+      paymentContextKey,
+      quoteSessionId,
       rideDetails,
       passengerName,
       passengerEmail,

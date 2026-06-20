@@ -4,7 +4,7 @@ function registerSocketCancelDriverSearchHandler({
 }) {
     socket.on('cancelDriverSearch', async (data) => {
         try {
-            logStructured('info', 'Busca de motoristas cancelada', {
+            logStructured('warn', 'cancelDriverSearch rejeitado: cancelamento canônico exige cancelRide', {
                 service: 'server',
                 userId: socket.userId || socket.id,
                 bookingId: data?.bookingId,
@@ -14,18 +14,21 @@ function registerSocketCancelDriverSearchHandler({
 
             const { bookingId, reason } = data;
 
-            // Emitir confirmação
+            if (!bookingId) {
+                socket.emit('driverSearchCancelled', {
+                    success: false,
+                    code: 'BOOKING_ID_REQUIRED',
+                    error: 'ID da corrida obrigatório'
+                });
+                return;
+            }
+
             socket.emit('driverSearchCancelled', {
-                success: true,
+                success: false,
                 bookingId,
                 reason: reason || 'Cancelado pelo usuário',
-                message: 'Busca cancelada com sucesso'
-            });
-
-            logStructured('info', 'Busca de motoristas cancelada para corrida', {
-                service: 'websocket',
-                operation: 'cancelSearch',
-                bookingId
+                code: 'CANONICAL_CANCEL_REQUIRED',
+                error: 'Use cancelRide para encerrar a busca e reconciliar pagamento e estado'
             });
 
         } catch (error) {

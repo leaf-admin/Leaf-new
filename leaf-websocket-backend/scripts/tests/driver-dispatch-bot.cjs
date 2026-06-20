@@ -8,8 +8,23 @@ const PICKUP = {
   lng: Number(process.env.TEST_PICKUP_LNG || -122.419906)
 };
 const ESTIMATED_FARE = Number(process.env.TEST_FARE || 13.42);
+const RIDE_REQUEST_TIMEOUT_MS = Math.max(
+  180000,
+  Number(process.env.DRIVER_RIDE_REQUEST_TIMEOUT_MS || 180000)
+);
+const ACCEPTED_HOLD_MS = Math.max(0, Number(process.env.DRIVER_ACCEPTED_HOLD_MS || 2000));
+const ARRIVED_HOLD_MS = Math.max(0, Number(process.env.DRIVER_ARRIVED_HOLD_MS || 1000));
+const TRIP_STEP_INTERVAL_MS = Math.max(250, Number(process.env.DRIVER_TRIP_STEP_INTERVAL_MS || 1800));
+const TRIP_STEPS = Math.max(2, Number(process.env.DRIVER_TRIP_STEPS || 10));
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  }
+  return null;
+}
 function interpolatePoints(start, end, steps = 10) {
   const out = [];
   for (let i = 1; i <= steps; i += 1) {
@@ -17,6 +32,20 @@ function interpolatePoints(start, end, steps = 10) {
     out.push({ lat: start.lat + (end.lat - start.lat) * f, lng: start.lng + (end.lng - start.lng) * f });
   }
   return out;
+}
+function distanceKmBetween(start, end) {
+  const lat1 = Number(start?.lat ?? start?.latitude);
+  const lng1 = Number(start?.lng ?? start?.longitude);
+  const lat2 = Number(end?.lat ?? end?.latitude);
+  const lng2 = Number(end?.lng ?? end?.longitude);
+  if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return null;
+  const toRad = value => (value * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 function onceStatusAck(driverClient, payload, timeoutMs = 12000) {
   return new Promise((resolve) => {
@@ -88,14 +117,27 @@ async function main() {
     };
     sendLocation();
     heartbeatTimer = setInterval(sendLocation, 1200);
-    const request = await driver.waitForEvent('newRideRequest', 180000);
+    const request = await driver.waitForEvent('newRideRequest', RIDE_REQUEST_TIMEOUT_MS);
     const bookingId = request?.bookingId || request?.rideId;
     const pickup = request?.pickupLocation || PICKUP;
     const destination = request?.destinationLocation || { lat: PICKUP.lat - 0.01, lng: PICKUP.lng - 0.01 };
     console.log('new_ride_request', JSON.stringify({ bookingId, pickup, destination }));
     const accepted = await driver.acceptRide(bookingId);
     console.log('ride_accepted', JSON.stringify(accepted || {}));
-    await sleep(2000);
+    const completionFare = firstFiniteNumber(
+      accepted?.estimatedFare,
+      accepted?.fare,
+      accepted?.totalFare,
+      accepted?.grossAmount,
+      request?.estimatedFare,
+      request?.fare,
+      request?.totalFare,
+      ESTIMATED_FARE
+    );
+    await sleep(ACCEPTED_HOLD_MS);
+    const arrived = await driver.arrivedAtPickup(bookingId, { location: pickup, timeoutMs: 30000 });
+    console.log('arrived_at_pickup', JSON.stringify(arrived || {}));
+    await sleep(ARRIVED_HOLD_MS);
     const startWait = driver.waitForEvent('tripStarted', 30000, payload => (payload?.bookingId || payload?.rideId) === bookingId);
     driver.socket.emit('startTrip', { bookingId, startLocation: pickup });
     const started = await startWait;
@@ -103,15 +145,24 @@ async function main() {
     const steps = interpolatePoints(
       { lat: Number(pickup.lat || pickup.latitude), lng: Number(pickup.lng || pickup.longitude) },
       { lat: Number(destination.lat || destination.latitude), lng: Number(destination.lng || destination.longitude) },
-      10
+      TRIP_STEPS
     );
     for (const [index, point] of steps.entries()) {
       driver.socket.emit('updateTripLocation', { bookingId, lat: point.lat, lng: point.lng, heading: 45, speed: 12 });
       console.log('trip_location_update', JSON.stringify({ step: index + 1, total: steps.length, point }));
-      await sleep(1800);
+      await sleep(TRIP_STEP_INTERVAL_MS);
     }
+    const simulatedDistanceKm = firstFiniteNumber(
+      process.env.TEST_DISTANCE_KM,
+      distanceKmBetween(pickup, destination)
+    );
     const completeWait = driver.waitForEvent('tripCompleted', 30000, payload => (payload?.bookingId || payload?.rideId) === bookingId);
-    driver.socket.emit('completeTrip', { bookingId, endLocation: destination, distance: 4.7, fare: ESTIMATED_FARE, mockPayment: true, __mockPayment: true });
+    driver.socket.emit('completeTrip', {
+      bookingId,
+      endLocation: destination,
+      distance: simulatedDistanceKm,
+      fare: completionFare ?? ESTIMATED_FARE
+    });
     const completed = await completeWait;
     console.log('trip_completed', JSON.stringify(completed || {}));
   } finally {

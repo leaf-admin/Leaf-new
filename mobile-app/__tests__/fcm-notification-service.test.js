@@ -9,6 +9,12 @@ const mockPlatform = {
   OS: 'android',
   Version: 32,
 };
+const mockAlert = {
+  alert: jest.fn((_title, _message, buttons = []) => {
+    const confirmButton = buttons.find(button => button.text === 'Concordo e continuar') || buttons[1] || buttons[0];
+    confirmButton?.onPress?.();
+  }),
+};
 const mockPermissionsAndroid = {
   PERMISSIONS: {
     POST_NOTIFICATIONS: 'android.permission.POST_NOTIFICATIONS',
@@ -60,6 +66,7 @@ jest.mock('@react-native-firebase/messaging', () => mockMessaging);
 
 jest.mock('react-native', () => ({
   AppState: mockAppState,
+  Alert: mockAlert,
   Platform: mockPlatform,
   PermissionsAndroid: mockPermissionsAndroid,
 }));
@@ -117,6 +124,7 @@ describe('FCMNotificationService initialization', () => {
     mockDevice.isDevice = false;
     mockPlatform.OS = 'android';
     mockPlatform.Version = 32;
+    mockAlert.alert.mockClear();
     mockAppState.currentState = 'active';
     mockAppStateListener = null;
     globalThis.navigationRef = undefined;
@@ -195,6 +203,12 @@ describe('FCMNotificationService initialization', () => {
     await FCMNotificationService.getFCMToken();
 
     expect(mockPermissionsAndroid.check).toHaveBeenCalledWith('android.permission.POST_NOTIFICATIONS');
+    expect(mockAlert.alert).toHaveBeenCalledWith(
+      'Notificações da Leaf',
+      expect.stringContaining('corridas'),
+      expect.any(Array),
+      expect.objectContaining({ cancelable: true })
+    );
     expect(mockPermissionsAndroid.request).toHaveBeenCalledWith('android.permission.POST_NOTIFICATIONS');
     expect(mockGetToken).toHaveBeenCalledTimes(1);
   });

@@ -80,8 +80,14 @@ function normalizeAutoBoolean(value, fallback = null) {
 }
 
 export default function RobotaxiRatingScreen({ navigation, route }) {
-  const { activeRole, profile, driverInfo, lastReceipt, markTripRating } =
-    usePrototypeRideRuntime();
+  const {
+    activeRole,
+    profile,
+    driverInfo,
+    lastReceipt,
+    markTripRating,
+    dismissCompletedReceipt,
+  } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
@@ -273,13 +279,11 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
             },
       );
 
+      dismissCompletedReceipt();
+      navigation.navigate("RobotaxiPrototype");
       Alert.alert(
         "Avaliação enviada",
         `Sua nota para ${targetName} foi registrada com sucesso.`,
-      );
-      navigation.navigate(
-        fromReceipt ? "RobotaxiPrototypeReceipt" : "RobotaxiPrototype",
-        fromReceipt ? { fromTrip: true, fromRating: true } : undefined,
       );
     } catch (error) {
       Alert.alert(
@@ -292,7 +296,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   }, [
     airConditioningOk,
     comment,
-    fromReceipt,
+    dismissCompletedReceipt,
     markTripRating,
     navigation,
     profile?.uid,

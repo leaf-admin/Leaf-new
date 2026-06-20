@@ -23,6 +23,12 @@ import { allowForcedPaymentBypass } from '../../config/runtimeAccessPolicy';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import { formatCurrencyBRL } from '../../screens/prototype/tripFinancialSummary';
 import SecurePaymentBadge from './SecurePaymentBadge';
+import {
+    buildRidePaymentContextKey,
+    clearRidePaymentSession,
+    getOrCreateRidePaymentSession,
+    saveRidePaymentSessionData,
+} from '../../services/RidePaymentSessionService';
 
 
 const { width, height } = Dimensions.get('window');
@@ -31,6 +37,7 @@ const { color, typography, radius, spacing, elevation } = robotaxiPrototypeToken
 // Tempo de expiração: 5 minutos (300 segundos)
 const PAYMENT_TIMEOUT = 300;
 const CONFIRMED_PAYMENT_STATUSES = new Set(['completed', 'confirmed', 'paid', 'in_holding']);
+const TERMINAL_PAYMENT_STATUSES = new Set(['cancelled', 'canceled', 'expired', 'refunded']);
 const PIX_SURFACE = {
     bg: '#F8FBF9',
     sheet: 'rgba(255,255,255,0.97)',
@@ -54,12 +61,14 @@ export default function WooviPaymentModal({
     passengerId,
     passengerName,
     passengerEmail,
+    passengerPhone,
     prefilledPaymentData = null,
     preserveChargeOnClose = false,
     paymentTitle = 'Pagamento PIX',
     qaAutoConfirm = false,
     discountBenefit = null,
-    grossEstimatedFare = null
+    grossEstimatedFare = null,
+    quoteSessionId = null
 }) {
     const qaAutoConfirmEnabled = Boolean(qaAutoConfirm);
     // Estados
@@ -168,6 +177,8 @@ export default function WooviPaymentModal({
             grossAmount: normalizedPayload.grossAmount,
             grossAmountInCents: normalizedPayload.grossAmountInCents,
             discountBenefit: normalizedPayload.discountBenefit || null,
+            paymentSessionId: normalizedPayload.paymentSessionId || null,
+            paymentContextKey: normalizedPayload.paymentContextKey || null,
             bypassed: normalizedPayload.bypassed === true,
             mockPayment:
                 normalizedPayload.mockPayment === true ||
@@ -192,10 +203,10 @@ export default function WooviPaymentModal({
         return true;
     };
 
-    // Resetar quando modal abre - SEMPRE gerar novo QR code
+    // Reabre a sessão canônica antes de considerar uma nova cobrança.
     useEffect(() => {
         if (visible) {
-            Logger.log('🔄 [WooviPaymentModal] Modal aberto, resetando estado e gerando NOVO pagamento...');
+            Logger.log('🔄 [WooviPaymentModal] Modal aberto, recuperando sessão de pagamento...');
             // ✅ Limpar estado anterior completamente
             cleanup();
             paymentConfirmedRef.current = false;
@@ -214,6 +225,7 @@ export default function WooviPaymentModal({
                 const amountInCentsValue = Number(prefilledPaymentData?.amountInCents);
                 const normalizedPaymentInfo = {
                     chargeId: prefilledPaymentData.chargeId,
+                    paymentIntentId: prefilledPaymentData.paymentIntentId || null,
                     rideId: prefilledPaymentData.rideId || tripData?.rideId || `prefilled-${Date.now()}`,
                     qrCodeImage: prefilledPaymentData.qrCodeImage || null,
                     qrCodeText:
@@ -248,10 +260,9 @@ export default function WooviPaymentModal({
                 return undefined;
             }
 
-            // ✅ SEMPRE gerar novo pagamento quando modal abre
-            // Delay para garantir que o estado foi limpo antes de gerar novo pagamento
+            // Delay para garantir que o estado foi limpo antes de recuperar/criar o pagamento.
             const generateTimer = setTimeout(() => {
-                Logger.log('💳 [WooviPaymentModal] Gerando NOVO pagamento PIX...');
+                Logger.log('💳 [WooviPaymentModal] Recuperando ou criando pagamento PIX...');
                 generatePayment();
             }, 150);
             
@@ -292,6 +303,7 @@ export default function WooviPaymentModal({
         tripData?.estimatedFare,
         tripData?.grossEstimatedFare,
         tripData?.rideId,
+        quoteSessionId,
         visible
     ]);
 
@@ -402,6 +414,7 @@ export default function WooviPaymentModal({
                 setQaDebugStatus('confirming');
                 await WooviService.simulateTestWebhook({
                     chargeId: paymentData.chargeId,
+                    paymentIntentId: paymentData.paymentIntentId,
                     rideId: paymentData.rideId,
                     passengerId: paymentData.passengerId || passengerId,
                     amountInCents: paymentData.amountInCents
@@ -500,13 +513,13 @@ export default function WooviPaymentModal({
         Alert.alert('Abrir banco', 'Não foi possível abrir o link automaticamente. Copie o código PIX e cole no app do banco.');
     };
 
-    // Função para gerar pagamento via Woovi Sandbox
+    // Recupera a sessão persistida antes de criar uma cobrança no backend.
     const generatePayment = async () => {
         let paymentRequest = null;
         try {
             setLoading(true);
             setPaymentGenerationError(null);
-            Logger.log('💳 Gerando pagamento PIX via Woovi Sandbox...');
+            Logger.log('💳 Preparando sessão de pagamento PIX...');
 
             const resolvedPassengerId = resolveAuthenticatedPassengerId();
             if (!resolvedPassengerId) {
@@ -525,29 +538,86 @@ export default function WooviPaymentModal({
             const grossAmountInCents = Number.isFinite(Number(discountBenefit?.grossAmountInCents))
                 ? Math.round(Number(discountBenefit.grossAmountInCents))
                 : Math.round((Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount : amount) * 100);
-            
+            const paymentContextKey = buildRidePaymentContextKey({
+                tripData,
+                amountInCents,
+                grossAmountInCents,
+            });
+            let paymentSession = await getOrCreateRidePaymentSession({
+                passengerId: resolvedPassengerId,
+                contextKey: paymentContextKey,
+            });
+
             Logger.log('💰 [Woovi] Valor calculado:', { 
                 amount, 
                 amountInCents, 
                 fromEstimates: estimates?.estimateFare,
                 fromTripData: tripData?.estimatedFare
             });
-            
-            // ✅ Criar ID temporário da corrida ÚNICO (inclui timestamp + random para evitar duplicatas)
-            // Será usado para criar a reserva após pagamento
-            // ✅ GARANTIR que cada chamada gera um ID completamente novo
-            const timestamp = Date.now();
-            const randomSuffix = Math.random().toString(36).substring(2, 9);
-            const nanoRandom = Math.random().toString(36).substring(2, 7); // Segundo random para garantir unicidade
-            const tempRideId = `temp_ride_${timestamp}_${randomSuffix}_${nanoRandom}_${resolvedPassengerId}`;
-            
-            Logger.log('🆔 [WooviPaymentModal] Gerando NOVO tempRideId único:', tempRideId);
-            Logger.log('🆔 [WooviPaymentModal] Timestamp:', timestamp, '| Random:', randomSuffix, nanoRandom);
+
+            if (paymentSession?.paymentData?.chargeId) {
+                const restoredPaymentData = {
+                    ...paymentSession.paymentData,
+                    paymentSessionId: paymentSession.paymentSessionId,
+                    paymentContextKey,
+                    passengerId: resolvedPassengerId,
+                };
+                let restoredStatus = '';
+                try {
+                    const statusResult = await WooviService.getPaymentStatus(restoredPaymentData.chargeId);
+                    restoredStatus = String(statusResult?.status || '').trim().toLowerCase();
+                } catch (statusError) {
+                    Logger.warn(
+                        '⚠️ [WooviPaymentModal] Status indisponível durante recuperação; preservando cobrança:',
+                        statusError?.message || statusError,
+                    );
+                }
+
+                if (CONFIRMED_PAYMENT_STATUSES.has(restoredStatus)) {
+                    Logger.log('✅ [WooviPaymentModal] Pagamento confirmado recuperado da sessão persistida');
+                    setPaymentData(restoredPaymentData);
+                    setLoading(false);
+                    confirmPaymentOnce(restoredPaymentData, 'storage_recovery');
+                    return;
+                }
+
+                if (!TERMINAL_PAYMENT_STATUSES.has(restoredStatus)) {
+                    const expiresAtMs = Date.parse(restoredPaymentData.expiresAt || '');
+                    const remainingSeconds = Number.isFinite(expiresAtMs)
+                        ? Math.ceil((expiresAtMs - Date.now()) / 1000)
+                        : PAYMENT_TIMEOUT;
+                    const resumedPaymentData = remainingSeconds > 0
+                        ? restoredPaymentData
+                        : {
+                            ...restoredPaymentData,
+                            expiresAt: new Date(Date.now() + PAYMENT_TIMEOUT * 1000).toISOString(),
+                        };
+                    setPaymentData(resumedPaymentData);
+                    setCountdown(Math.max(1, remainingSeconds > 0 ? remainingSeconds : PAYMENT_TIMEOUT));
+                    setPaymentStatus('pending');
+                    setLoading(false);
+                    return;
+                }
+
+                await clearRidePaymentSession({
+                    passengerId: resolvedPassengerId,
+                    paymentSessionId: paymentSession.paymentSessionId,
+                    chargeId: restoredPaymentData.chargeId,
+                });
+                paymentSession = await getOrCreateRidePaymentSession({
+                    passengerId: resolvedPassengerId,
+                    contextKey: paymentContextKey,
+                });
+            }
+
+            const tempRideId = `temp_ride_session_${paymentSession.paymentSessionId}`;
+            Logger.log('🆔 [WooviPaymentModal] Sessão canônica preparada:', paymentSession.paymentSessionId);
 
             const bypassEnabled = await shouldBypassPayment();
             if (bypassEnabled) {
+                const timestamp = Date.now();
                 const bypassPaymentInfo = {
-                    chargeId: `qa_bypass_${timestamp}_${randomSuffix}`,
+                    chargeId: `qa_bypass_${timestamp}_${paymentSession.paymentSessionId}`,
                     rideId: tempRideId,
                     qrCodeImage: null,
                     qrCodeText: 'BYPASS_PAYMENT_ENABLED',
@@ -559,11 +629,20 @@ export default function WooviPaymentModal({
                     discountBenefit,
                     expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
                     passengerId: resolvedPassengerId,
+                    paymentSessionId: paymentSession.paymentSessionId,
+                    paymentContextKey,
+                    quoteSessionId,
                     bypassed: true,
                     mockPayment: true
                 };
 
                 Logger.log('🧪 [WooviPaymentModal] BYPASS de pagamento habilitado para teste E2E.');
+                await saveRidePaymentSessionData({
+                    passengerId: resolvedPassengerId,
+                    contextKey: paymentContextKey,
+                    paymentSessionId: paymentSession.paymentSessionId,
+                    paymentData: bypassPaymentInfo,
+                });
                 setPaymentData(bypassPaymentInfo);
                 setCountdown(PAYMENT_TIMEOUT);
                 setPaymentStatus('pending');
@@ -577,11 +656,17 @@ export default function WooviPaymentModal({
             // Preparar dados do pagamento
             paymentRequest = {
                 passengerId: resolvedPassengerId,
+                passengerPhone,
+                phone: passengerPhone,
+                phoneNumber: passengerPhone,
                 amount: amountInCents,
                 grossAmountInCents,
                 grossAmount: grossAmountInCents / 100,
                 discountBenefit,
                 rideId: tempRideId,
+                paymentSessionId: paymentSession.paymentSessionId,
+                paymentContextKey,
+                quoteSessionId,
                 rideDetails: {
                     origin: tripData?.pickup?.add || 'Origem',
                     destination: tripData?.drop?.add || 'Destino'
@@ -602,7 +687,8 @@ export default function WooviPaymentModal({
             // Salvar dados do pagamento
             const paymentInfo = {
                 chargeId: result.chargeId,
-                rideId: tempRideId,
+                paymentIntentId: result.paymentIntentId || null,
+                rideId: result.rideId || tempRideId,
                 qrCodeImage: result.qrCode,
                 qrCodeText: result.qrCodeText || result.paymentLink,
                 paymentLink: result.paymentLink,
@@ -611,9 +697,19 @@ export default function WooviPaymentModal({
                 grossAmount: grossAmountInCents / 100,
                 grossAmountInCents,
                 discountBenefit: result.discountBenefit || discountBenefit || null,
-                expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
-                passengerId: resolvedPassengerId
+                expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)).toISOString(),
+                passengerId: resolvedPassengerId,
+                paymentSessionId: paymentSession.paymentSessionId,
+                paymentContextKey: result.paymentContextKey || paymentContextKey,
+                quoteSessionId: result.quoteSessionId || quoteSessionId || null,
             };
+
+            await saveRidePaymentSessionData({
+                passengerId: resolvedPassengerId,
+                contextKey: paymentContextKey,
+                paymentSessionId: paymentSession.paymentSessionId,
+                paymentData: paymentInfo,
+            });
             
             setPaymentData(paymentInfo);
             setCountdown(PAYMENT_TIMEOUT);
@@ -896,15 +992,30 @@ export default function WooviPaymentModal({
             <View
                 style={styles.paymentContainer}
                 testID="payment-modal-content"
-                accessibilityLabel="payment-modal-content"
+                accessibilityLabel="Modal de pagamento PIX"
+                accessibilityViewIsModal
             >
                 <View style={styles.paymentHeader}>
                     <View>
-                        <Text style={styles.paymentTitle}>
+                        <Text
+                            style={styles.paymentTitle}
+                            testID="payment-modal-title"
+                            accessibilityLabel="Pague com PIX"
+                        >
                             Pague com PIX
                         </Text>
                         <SecurePaymentBadge style={styles.securePaymentBadge} color={PIX_SURFACE.muted} />
-                        <View style={styles.statusChip}>
+                        <View
+                            style={styles.statusChip}
+                            testID="payment-modal-status"
+                            accessibilityLabel={
+                                paymentStatus === 'confirmed'
+                                    ? 'PIX confirmado'
+                                    : paymentStatus === 'expired'
+                                        ? 'Tempo esgotado'
+                                        : 'Aguardando PIX'
+                            }
+                        >
                             <Text style={styles.statusChipText}>
                                 {paymentStatus === 'confirmed'
                                     ? 'PIX confirmado'
@@ -915,7 +1026,11 @@ export default function WooviPaymentModal({
                         </View>
                     </View>
                     <View style={styles.paymentRightColumn}>
-                        <Text style={styles.paymentAmount}>
+                        <Text
+                            style={styles.paymentAmount}
+                            testID="payment-modal-amount"
+                            accessibilityLabel={`Valor PIX ${formatCurrencyBRL(paymentData.amount)}`}
+                        >
                             {formatCurrencyBRL(paymentData.amount)}
                         </Text>
                         <Text
@@ -923,6 +1038,14 @@ export default function WooviPaymentModal({
                                 styles.expiryText,
                                 countdown <= 60 && paymentStatus === 'pending' && styles.expiryTextDanger,
                             ]}
+                            testID="payment-modal-expiry"
+                            accessibilityLabel={
+                                paymentStatus === 'pending'
+                                    ? `PIX expira em ${formatTime(countdown)}`
+                                    : paymentStatus === 'confirmed'
+                                        ? 'PIX confirmado'
+                                        : 'PIX expirado'
+                            }
                         >
                             {paymentStatus === 'pending'
                                 ? `Expira em ${formatTime(countdown)}`
@@ -947,7 +1070,11 @@ export default function WooviPaymentModal({
                     />
                 </View>
 
-                <View style={styles.qrContainer}>
+                <View
+                    style={styles.qrContainer}
+                    testID="payment-modal-qr-container"
+                    accessibilityLabel="QR Code PIX"
+                >
                     {paymentData?.qrCodeImage ? (
                         <Image
                             source={{ uri: paymentData.qrCodeImage }}
@@ -993,6 +1120,8 @@ export default function WooviPaymentModal({
                         style={styles.primaryAction}
                         onPress={copyPixCode}
                         activeOpacity={0.88}
+                        testID="payment-modal-copy-code-button"
+                        accessibilityLabel="Copiar código PIX"
                     >
                         <Text style={styles.primaryActionText}>Copiar código</Text>
                     </TouchableOpacity>
@@ -1000,6 +1129,8 @@ export default function WooviPaymentModal({
                         style={styles.secondaryAction}
                         onPress={openPaymentLink}
                         activeOpacity={0.88}
+                        testID="payment-modal-open-bank-button"
+                        accessibilityLabel="Abrir banco"
                     >
                         <Text style={styles.secondaryActionText}>Abrir banco</Text>
                     </TouchableOpacity>

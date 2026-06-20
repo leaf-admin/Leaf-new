@@ -2,7 +2,9 @@ import React from 'react';
 import { Alert, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import RobotaxiHomeScreen from '../src/screens/prototype/RobotaxiHomeScreen';
+import RobotaxiHomeScreen, {
+  resolveHomeCategoryFarePresentation,
+} from '../src/screens/prototype/RobotaxiHomeScreen';
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
 import {
   resolvePassengerAutoRoute,
@@ -274,6 +276,34 @@ function buildPassengerRuntime(overrides = {}) {
 }
 
 describe('driver online toggle', () => {
+  it('keeps selected passenger fare hidden while the backend quote is pending', () => {
+    expect(
+      resolveHomeCategoryFarePresentation({
+        isSelectedCategory: true,
+        quotePending: true,
+        backendFare: null,
+        localFare: 83.42,
+      }),
+    ).toEqual({
+      fare: null,
+      priceLabel: 'Calculando',
+    });
+  });
+
+  it('uses the backend fare over the local estimate once the quote is ready', () => {
+    expect(
+      resolveHomeCategoryFarePresentation({
+        isSelectedCategory: true,
+        quotePending: false,
+        backendFare: 54.73,
+        localFare: 83.42,
+      }),
+    ).toEqual({
+      fare: 54.73,
+      priceLabel: 'R$ 54,73',
+    });
+  });
+
   beforeEach(async () => {
     jest.clearAllMocks();
     const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
@@ -793,7 +823,7 @@ describe('driver online toggle', () => {
     });
   });
 
-  it('pushes strong pickup and destination labels when passenger search is rehydrated from booking data', async () => {
+  it('replaces the current route with strong pickup and destination labels when passenger search is rehydrated', async () => {
     resolvePassengerAutoRoute.mockReturnValue('RobotaxiPrototypeDriverSearch');
     shouldAutoSyncPassengerRoute.mockReturnValue(true);
 
@@ -819,7 +849,7 @@ describe('driver online toggle', () => {
     render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
 
     await waitFor(() => {
-      expect(navigation.navigate).toHaveBeenCalledWith(
+      expect(navigation.replace).toHaveBeenCalledWith(
         'RobotaxiPrototypeDriverSearch',
         expect.objectContaining({
           destination: 'Ferry Building',
@@ -828,11 +858,14 @@ describe('driver online toggle', () => {
           vehicle: 'Leaf Plus',
         })
       );
-      expect(navigation.replace).not.toHaveBeenCalled();
+      expect(navigation.navigate).not.toHaveBeenCalledWith(
+        'RobotaxiPrototypeDriverSearch',
+        expect.any(Object)
+      );
     });
   });
 
-  it('opens the passenger trip as an overlay over the home map instead of replacing the base route', async () => {
+  it('replaces the current route with the passenger trip surface to avoid back-stack regression', async () => {
     resolvePassengerAutoRoute.mockReturnValue('RobotaxiPrototypeTrip');
     shouldAutoSyncPassengerRoute.mockReturnValue(true);
     mockUseIsFocused.mockReturnValue(true);
@@ -870,7 +903,7 @@ describe('driver online toggle', () => {
     render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
 
     await waitFor(() => {
-      expect(navigation.navigate).toHaveBeenCalledWith(
+      expect(navigation.replace).toHaveBeenCalledWith(
         'RobotaxiPrototypeTrip',
         expect.objectContaining({
           destination: 'Ferry Building',
@@ -880,7 +913,10 @@ describe('driver online toggle', () => {
           driverName: 'Motorista Teste',
         })
       );
-      expect(navigation.replace).not.toHaveBeenCalled();
+      expect(navigation.navigate).not.toHaveBeenCalledWith(
+        'RobotaxiPrototypeTrip',
+        expect.any(Object)
+      );
     });
   });
 

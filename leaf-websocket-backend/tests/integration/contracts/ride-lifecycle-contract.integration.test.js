@@ -33,6 +33,11 @@ describe('Ride lifecycle source contract audit', () => {
     expect(startTripHandler).toContain("emit('tripStarted'");
     expect(completeTripHandler).toContain("socket.on('completeTrip'");
     expect(completeTripHandler).toContain("emit('tripCompleted'");
+    expect(completeTripHandler).toContain('paymentIntermediationFee: fareBreakdown.paymentIntermediationFee');
+    expect(completeTripHandler).toContain('totalFees: fareBreakdown.totalFees');
+    expect(completeTripHandler).toContain('driverNetAmount: fareBreakdown.driverNetAmount');
+    expect(completeTripHandler).toContain("financialSnapshotSource: 'backend_final'");
+    expect(completeTripHandler).toContain('authoritativeSnapshot: true');
     expect(confirmPaymentHandler).toContain("socket.on('confirmPayment'");
     expect(confirmPaymentHandler).toContain("socket.emit('paymentConfirmed'");
     expect(updateTripLocationHandler).toContain("socket.on('updateTripLocation'");

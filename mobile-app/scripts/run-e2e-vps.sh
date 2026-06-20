@@ -4,11 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MOBILE_DIR="$ROOT_DIR/mobile-app"
 BACKEND_DIR="$ROOT_DIR/leaf-websocket-backend"
-BACKEND_GUARD_SCRIPT="$MOBILE_DIR/scripts/qa/assert-backend-real-sandbox.sh"
 
 BACKEND_URL="${BACKEND_URL:-https://api.leaf.app.br}"
 APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
 SEED_TEST_USERS="${SEED_TEST_USERS:-true}"
+PAYMENT_RUNTIME_GUARD="${PAYMENT_RUNTIME_GUARD:-canary}"
+FIREBASE_TEST_PHONE="${FIREBASE_TEST_PHONE:-21102938475}"
 ADB_BIN="${ADB_BIN:-$(command -v adb || true)}"
 ANDROID_SERIAL_ENV="${ANDROID_SERIAL:-}"
 MAESTRO_MIN_VERSION="${MAESTRO_MIN_VERSION:-2.5.0}"
@@ -307,9 +308,25 @@ if ! curl -sS --max-time 12 "$BACKEND_URL/socket.io/?EIO=4&transport=polling" > 
   exit 1
 fi
 
-if ! bash "$BACKEND_GUARD_SCRIPT" "$BACKEND_URL" "$ARTIFACTS_DIR/backend-runtime-flags.json"; then
-  exit 1
-fi
+case "$PAYMENT_RUNTIME_GUARD" in
+  canary)
+    if ! FIREBASE_TEST_PHONE="$FIREBASE_TEST_PHONE" bash "$MOBILE_DIR/scripts/qa/assert-backend-payment-runtime-canary.sh" "$BACKEND_URL" "$ARTIFACTS_DIR/backend-payment-runtime-canary.json"; then
+      exit 1
+    fi
+    ;;
+  global)
+    if ! bash "$MOBILE_DIR/scripts/qa/assert-backend-real-sandbox.sh" "$BACKEND_URL" "$ARTIFACTS_DIR/backend-runtime-flags.json"; then
+      exit 1
+    fi
+    ;;
+  none)
+    echo "[e2e][warn] PAYMENT_RUNTIME_GUARD=none; skipping payment runtime guard."
+    ;;
+  *)
+    echo "[e2e][error] Unknown PAYMENT_RUNTIME_GUARD=$PAYMENT_RUNTIME_GUARD (expected canary, global, none)."
+    exit 1
+    ;;
+esac
 
 if [[ "$SEED_TEST_USERS" == "true" ]]; then
   if [[ -f "$BACKEND_DIR/scripts/criar-usuarios-teste-completo.js" ]]; then

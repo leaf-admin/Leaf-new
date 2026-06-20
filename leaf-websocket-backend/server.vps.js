@@ -6959,6 +6959,45 @@ io.on('connection', async (socket) => {
                     }
                 };
 
+                const { ensureAcceptedRideCanonicalState } = require('./utils/accepted-ride-state');
+                try {
+                    const activeBookingDataForSync = await ensureAcceptedRideCanonicalState(acceptRideRedis, {
+                        bookingId: bookingIdToUse,
+                        driverId,
+                        acceptedAt: acceptRideResponse.timestamp,
+                        extraPatch: {
+                            driverAcceptedLocation: acceptedLocation ? JSON.stringify(acceptedLocation) : undefined,
+                            driverDistanceToPickupKm: Number.isFinite(Number(driverDistanceToPickupKm))
+                                ? String(driverDistanceToPickupKm)
+                                : undefined,
+                            estimatedArrivalToPickupMin: Number.isFinite(Number(estimatedArrivalToPickupMin))
+                                ? String(estimatedArrivalToPickupMin)
+                                : undefined
+                        }
+                    });
+                    if (io.activeBookings) {
+                        io.activeBookings.set(bookingIdToUse, {
+                            ...io.activeBookings.get(bookingIdToUse),
+                            ...activeBookingDataForSync
+                        });
+                    }
+                } catch (canonicalStateError) {
+                    logStructured('error', 'acceptRide bloqueado: falha ao consolidar estado canonico antes da emissao', {
+                        driverId,
+                        bookingId: bookingIdToUse,
+                        eventType: 'acceptRide',
+                        error: canonicalStateError.message
+                    });
+                    socket.emit('acceptRideError', {
+                        error: 'Erro ao consolidar estado da corrida',
+                        code: 'ACCEPTED_STATE_PERSISTENCE_FAILED'
+                    });
+                    if (acceptRideIdempotencyKey) {
+                        await idempotencyService.releaseInflight(acceptRideIdempotencyKey).catch(() => null);
+                    }
+                    return;
+                }
+
                 // ✅ Emitir confirmação IMEDIATAMENTE para o motorista que solicitou o aceite
                 socket.emit('rideAccepted', acceptRideResponse);
                 if (customerId) {

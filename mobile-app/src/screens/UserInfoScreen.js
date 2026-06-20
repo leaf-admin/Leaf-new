@@ -7,6 +7,7 @@ import * as Device from 'expo-device';
 import DeviceInfo from 'react-native-device-info';
 import rnauth from '@react-native-firebase/auth';
 import { useTranslation } from '../components/i18n/LanguageProvider';
+import { requestPhoneStatePermissionWithDisclosure } from '../services/AndroidPermissionDisclosure';
 
 // import testPhoneDetection from '../../test-phone-detection';
 
@@ -60,15 +61,8 @@ export default function UserInfoScreen() {
             // Verificar permissões no Android
             if (Platform.OS === 'android') {
                 try {
-                    const granted = await PermissionsAndroid.request(
-                        PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
-                        {
-                            title: 'Permissão necessária',
-                            message: 'Precisamos de permissão para detectar o número do seu telefone.',
-                            buttonNeutral: 'Perguntar depois',
-                            buttonNegative: 'Cancelar',
-                            buttonPositive: 'OK',
-                        }
+                    const granted = await requestPhoneStatePermissionWithDisclosure(
+                        PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE
                     );
                     
                     if (granted !== PermissionsAndroid.RESULTS.GRANTED) {

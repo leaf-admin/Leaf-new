@@ -2,6 +2,12 @@ const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
+const redisPool = require('../utils/redis-pool');
+const {
+  buildVehicleOcrUpdates,
+  normalizeVehicleOcrPayload,
+  sanitizeVehicleOcrData
+} = require('../utils/vehicle-ocr-data');
 
 const legacyProfileMirrorDefault = process.env.NODE_ENV === 'production' ? 'false' : 'true';
 const legacyProfileRtdbMirrorEnabled =
@@ -213,6 +219,37 @@ function serializeForClient(value) {
   }
 
   return value;
+}
+
+async function findUserVehicleIdForVehicle(userId, vehicleId) {
+  const snapshot = await admin.database().ref(`user_vehicles/${userId}`).once('value');
+  if (!snapshot.exists()) return null;
+
+  let matchedUserVehicleId = null;
+  snapshot.forEach((childSnapshot) => {
+    const record = childSnapshot.val() || {};
+    if (
+      record.vehicleId === vehicleId ||
+      record.id === vehicleId ||
+      childSnapshot.key === vehicleId
+    ) {
+      matchedUserVehicleId = childSnapshot.key;
+      return true;
+    }
+    return false;
+  });
+
+  return matchedUserVehicleId;
+}
+
+async function invalidateDriverEligibilityCache(userId) {
+  try {
+    await redisPool.ensureConnection?.();
+    const redis = redisPool.getConnection?.();
+    await redis?.del?.(`driver_eligibility_profile:${userId}`);
+  } catch (error) {
+    logger.warn(`Falha ao invalidar cache de elegibilidade do motorista ${userId}: ${error.message}`);
+  }
 }
 
 function composeProfileRecord(userId, existingProfile = {}, incomingProfile = {}, tokenClaims = {}, options = {}) {
@@ -458,6 +495,106 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Erro ao atualizar perfil da conta'
+    });
+  }
+});
+
+router.post('/api/vehicles/ocr-data', requireFirebase, async (req, res) => {
+  try {
+    const authenticatedUserId = req.user.uid;
+    const vehicleId = String(req.body?.vehicleId || '').trim();
+    const requestedUserId = String(req.body?.userId || authenticatedUserId).trim();
+    const vehicleData = req.body?.vehicleData;
+    const metadata = req.body?.metadata || {};
+
+    if (!vehicleId) {
+      return res.status(400).json({
+        success: false,
+        message: 'vehicleId é obrigatório'
+      });
+    }
+
+    if (requestedUserId !== authenticatedUserId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Usuário autenticado não corresponde ao cadastro do veículo'
+      });
+    }
+
+    if (!vehicleData || typeof vehicleData !== 'object' || Array.isArray(vehicleData)) {
+      return res.status(400).json({
+        success: false,
+        message: 'vehicleData do OCR é obrigatório'
+      });
+    }
+
+    const normalized = normalizeVehicleOcrPayload(vehicleData);
+    const hasUsefulVehicleData = Boolean(
+      normalized.plate ||
+        normalized.color ||
+        normalized.make ||
+        normalized.model ||
+        normalized.year ||
+        normalized.renavam ||
+        normalized.chassis
+    );
+
+    if (!hasUsefulVehicleData) {
+      return res.status(400).json({
+        success: false,
+        message: 'OCR não contém dados veiculares úteis'
+      });
+    }
+
+    const userVehicleId = await findUserVehicleIdForVehicle(authenticatedUserId, vehicleId);
+    if (!userVehicleId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Veículo não está vinculado ao usuário autenticado'
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const { updates } = buildVehicleOcrUpdates({
+      vehicleId,
+      userId: authenticatedUserId,
+      userVehicleId,
+      payload: vehicleData,
+      metadata,
+      nowIso
+    });
+
+    await admin.database().ref().update(updates);
+
+    await admin.firestore()
+      .collection('vehicle_ocr_data')
+      .doc(`${authenticatedUserId}_${vehicleId}`)
+      .set({
+        userId: authenticatedUserId,
+        vehicleId,
+        userVehicleId,
+        normalized,
+        metadata: sanitizeVehicleOcrData(metadata),
+        auditImageProvided: Boolean(req.body?.auditImage),
+        source: 'crlv_pdf_ocr',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+    await invalidateDriverEligibilityCache(authenticatedUserId);
+
+    return res.json({
+      success: true,
+      vehicleId,
+      userVehicleId,
+      normalizedColor: normalized.color || null,
+      normalizedPlate: normalized.plate || null,
+      updatedPaths: Object.keys(updates)
+    });
+  } catch (error) {
+    logger.error('Erro ao persistir dados estruturados do CRLV:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erro ao persistir dados estruturados do CRLV'
     });
   }
 });

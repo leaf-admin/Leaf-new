@@ -8,6 +8,7 @@ function registerSocketActiveRideHandlers({
     socket,
     io,
     redisPool,
+    gradualExpander,
     logStructured,
     logError
 }) {
@@ -32,7 +33,32 @@ function registerSocketActiveRideHandlers({
                 await redis.connect().catch(() => { });
             }
 
-            const activeRideSnapshot = await buildActiveRideSnapshotForUser(redis, userId, userType);
+            let activeRideSnapshot = await buildActiveRideSnapshotForUser(redis, userId, userType);
+            const snapshotStatus = String(activeRideSnapshot?.status || '').trim().toUpperCase();
+            const shouldReconcilePassengerSearch =
+                (userType === 'customer' || userType === 'passenger') &&
+                typeof gradualExpander?.reconcileExpiredSearchForCustomer === 'function' &&
+                (
+                    ['PENDING', 'SEARCHING', 'EXPANDED', 'NOTIFIED', 'AWAITING_RESPONSE'].includes(snapshotStatus) ||
+                    (activeRideSnapshot?.hasActiveRide === false && Boolean(activeRideSnapshot?.bookingId))
+                );
+
+            if (shouldReconcilePassengerSearch) {
+                try {
+                    const reconciliation = await gradualExpander.reconcileExpiredSearchForCustomer(userId);
+                    if (reconciliation?.reconciled) {
+                        activeRideSnapshot = await buildActiveRideSnapshotForUser(redis, userId, userType);
+                    }
+                } catch (reconcileError) {
+                    logStructured('error', 'Falha ao reconciliar busca vencida durante syncActiveRide', {
+                        service: 'websocket',
+                        socketId: socket.id,
+                        userId,
+                        userType,
+                        error: reconcileError.message
+                    });
+                }
+            }
 
             socket.emit('activeRideSync', {
                 success: true,
