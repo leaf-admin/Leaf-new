@@ -589,6 +589,47 @@ describe('prototype ride screens', () => {
     expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
   });
 
+  it('shows a passenger ride sync warning without dismissing the active trip surface', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'started',
+        rideLocalSync: {
+          status: 'pending',
+          bookingId: 'booking_1',
+          pendingEventType: 'complete_trip',
+          message: 'Aguardando confirmação do servidor.',
+        },
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getByTestId('passenger-trip-local-sync-pill')).toBeTruthy();
+    expect(screen.getByText('Atualização pendente')).toBeTruthy();
+    expect(screen.getByLabelText('passenger-trip-screen')).toBeTruthy();
+  });
+
+  it('shows a driver ride sync warning on an active lifecycle state', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'arrived',
+        rideLocalSync: {
+          status: 'offline',
+          bookingId: 'booking_1',
+          message: 'Sem conexão. Mantendo o último estado confirmado da corrida.',
+        },
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() };
+    const screen = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getByTestId('driver-trip-local-sync-pill')).toBeTruthy();
+    expect(screen.getByText('Sem conexão')).toBeTruthy();
+    expect(screen.getByLabelText('driver-live-trip-screen')).toBeTruthy();
+  });
+
   it.each(['accepted', 'arrived', 'started'])(
     'keeps passenger trip state %s from regressing through sheet backdrop actions',
     (bookingStatus) => {

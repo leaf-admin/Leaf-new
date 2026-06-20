@@ -3109,7 +3109,7 @@ class WebSocketManager {
   }
 
   // Motorista chegou ao pickup
-  async arriveAtPickup(rideId, location) {
+  async arriveAtPickup(rideId, location, options = {}) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
@@ -3132,6 +3132,10 @@ class WebSocketManager {
       }, 10000);
 
       const bookingId = rideId;
+      const requestId =
+        String(options?.requestId || "").trim() ||
+        createSocketRequestId("arrive_at_pickup");
+      const idempotencyKey = String(options?.idempotencyKey || "").trim();
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -3229,6 +3233,8 @@ class WebSocketManager {
         action: "arrived_at_pickup",
         bookingId,
         location,
+        requestId,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
       });
     });
   }
@@ -3334,7 +3340,11 @@ class WebSocketManager {
     });
   }
 
-  async startTrip(bookingId, startLocation) {
+  async startTrip(bookingId, startLocation, options = {}) {
+    const requestId =
+      String(options?.requestId || "").trim() ||
+      createSocketRequestId("start_trip");
+    const idempotencyKey = String(options?.idempotencyKey || "").trim();
     return this._emitLifecycleCommandWithAck({
       commandName: "startTrip",
       eventName: "startTrip",
@@ -3346,7 +3356,8 @@ class WebSocketManager {
       payload: {
         bookingId,
         startLocation,
-        requestId: createSocketRequestId("start_trip"),
+        requestId,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
       },
     });
   }
@@ -3374,7 +3385,11 @@ class WebSocketManager {
     });
   }
 
-  async completeTrip(bookingId, endLocation, distance, fare) {
+  async completeTrip(bookingId, endLocation, distance, fare, options = {}) {
+    const requestId =
+      String(options?.requestId || "").trim() ||
+      createSocketRequestId("complete_trip");
+    const idempotencyKey = String(options?.idempotencyKey || "").trim();
     return this._emitLifecycleCommandWithAck({
       commandName: "completeTrip",
       eventName: "completeTrip",
@@ -3388,7 +3403,8 @@ class WebSocketManager {
         endLocation,
         distance,
         fare,
-        requestId: createSocketRequestId("complete_trip"),
+        requestId,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
       },
     });
   }
@@ -4296,6 +4312,7 @@ class WebSocketManager {
     bookingId,
     reason = "Cancelado pelo usuário",
     cancellationFee = 0,
+    options = {},
   ) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
@@ -4352,6 +4369,11 @@ class WebSocketManager {
         }
       };
 
+      const requestId =
+        String(options?.requestId || "").trim() ||
+        createSocketRequestId("cancel_ride");
+      const idempotencyKey = String(options?.idempotencyKey || "").trim();
+
       this._recordRideTelemetryCommand(
         "cancelRide",
         {
@@ -4361,7 +4383,13 @@ class WebSocketManager {
         bookingId,
       );
       this.socket.once("rideCancelled", onCancelled);
-      this.socket.emit("cancelRide", { bookingId, reason, cancellationFee });
+      this.socket.emit("cancelRide", {
+        bookingId,
+        reason,
+        cancellationFee,
+        requestId,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      });
     });
   }
 

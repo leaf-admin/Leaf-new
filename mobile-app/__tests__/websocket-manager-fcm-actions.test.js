@@ -220,10 +220,14 @@ describe('WebSocketManager FCM and notification actions', () => {
       })
     );
 
-    expect(socket.emit).toHaveBeenCalledWith('cancelRide', {
-      bookingId: 'booking-3',
-      cancellationFee: 0,
-      reason: 'Cancelado pela notificação',
-    });
+    expect(socket.emit).toHaveBeenCalledWith(
+      'cancelRide',
+      expect.objectContaining({
+        bookingId: 'booking-3',
+        cancellationFee: 0,
+        reason: 'Cancelado pela notificação',
+        requestId: expect.stringMatching(/^cancel_ride_/),
+      })
+    );
   });
 });

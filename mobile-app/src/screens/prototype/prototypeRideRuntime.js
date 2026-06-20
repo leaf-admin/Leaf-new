@@ -81,6 +81,15 @@ import {
 } from "../../services/DriverOnboardingService";
 import driverActivationService from "../../services/DriverActivationService";
 import rideCostTelemetryService from "../../services/RideCostTelemetryService";
+import {
+  RIDE_EVENT_TYPES,
+  buildRideEventIdempotencyKey,
+  enqueueRideEventIntent,
+  markRideEventIntentAcked,
+  markRideEventIntentRejected,
+} from "../../services/RideEventOutboxService";
+import { replayPendingRideLifecycleIntents } from "../../services/RideLifecycleOutboxReplayService";
+import { saveCanonicalRideLocalSnapshot } from "../../services/RideLocalSnapshotService";
 import { getApiURL } from "../../config/NetworkConfig";
 import { getPrototypePlaybackConfigSnapshot } from "../../config/prototypePlaybackConfig";
 import {
@@ -259,6 +268,7 @@ const RUNTIME_PERSISTED_FIELDS = Object.freeze([
   "rideExtension",
   "driverExtensionRequest",
   "operationalContinuation",
+  "rideLocalSync",
   "lastError",
   "socketError",
   "documentAnalysisState",
@@ -373,6 +383,14 @@ const DEFAULT_DRIVER_TRANSIENT_CARD = Object.freeze({
   bookingId: null,
   shownAt: null,
   visibleUntil: null,
+});
+const DEFAULT_RIDE_LOCAL_SYNC_STATE = Object.freeze({
+  status: "idle",
+  bookingId: null,
+  pendingEventType: "",
+  idempotencyKey: "",
+  message: "",
+  updatedAt: null,
 });
 const runtimeRoutePlanCache = new Map();
 const runtimeRoutePlanInFlight = new Map();
@@ -510,6 +528,7 @@ const DEFAULT_RUNTIME_STATE = Object.freeze({
   rideExtension: DEFAULT_RIDE_EXTENSION_STATE,
   driverExtensionRequest: DEFAULT_DRIVER_EXTENSION_REQUEST,
   operationalContinuation: DEFAULT_OPERATIONAL_CONTINUATION,
+  rideLocalSync: DEFAULT_RIDE_LOCAL_SYNC_STATE,
   lastError: "",
   tripHistory: [],
   lastReceipt: null,
@@ -554,6 +573,7 @@ let runtimeDeferredSocketBootstrapTimer = null;
 let runtimeQALockUntil = 0;
 let runtimeDriverOnlineEnablePromise = null;
 let runtimeLastSocketConnectAt = 0;
+let runtimeLifecycleOutboxFlushPromise = null;
 let runtimeLastDriverCoordinateUpdateAt = 0;
 let runtimeLastSharedDriverRoutePlanKey = "";
 let runtimeLastSharedDriverRoutePlanAt = 0;
@@ -2351,6 +2371,248 @@ function resolveKnownRideBookingId(source = {}) {
   ).trim();
 }
 
+function buildRuntimeCanonicalRideSnapshot(source = runtimeState, options = {}) {
+  const state = source && typeof source === "object" ? source : runtimeState;
+  const bookingId =
+    resolveKnownRideBookingId(state) || String(options.bookingId || "").trim();
+  const status = normalizeRuntimeLifecycleStatus(
+    options.status || state.bookingStatus,
+  );
+  if (!bookingId || !status || status === "idle") {
+    return null;
+  }
+
+  return {
+    bookingId,
+    status,
+    userId: state.profileUid || null,
+    role: normalizeRuntimeRole(state.activeRole) || resolveRuntimeRole(state.profile),
+    source: options.source || "runtime",
+    activeBooking: state.activeBooking || null,
+    driverActiveRide: state.driverActiveRide || null,
+    selectedDestination: state.selectedDestination || null,
+    selectedFare: Number.isFinite(Number(state.selectedFare))
+      ? Number(state.selectedFare)
+      : null,
+    selectedVehicle: state.selectedVehicle || "",
+    paymentState: state.paymentState || null,
+    financialSnapshot: {
+      fare: Number.isFinite(Number(state.selectedFare))
+        ? Number(state.selectedFare)
+        : null,
+      paymentStatus: state.paymentState?.status || null,
+      paymentId: state.paymentState?.paymentId || null,
+      chargeId: state.paymentState?.chargeId || null,
+    },
+    routeSnapshot: {
+      distanceKm: Number.isFinite(Number(state.tripDistanceKm))
+        ? Number(state.tripDistanceKm)
+        : null,
+      durationMin: Number.isFinite(Number(state.tripDurationMin))
+        ? Number(state.tripDurationMin)
+        : null,
+      arrivalText: state.tripArrivalText || "",
+      driverTripMeta: state.driverTripMeta || null,
+    },
+    lastServerEventAt: options.lastServerEventAt || null,
+  };
+}
+
+function persistRuntimeCanonicalRideSnapshot(state = runtimeState, options = {}) {
+  const snapshot = buildRuntimeCanonicalRideSnapshot(state, options);
+  if (!snapshot) {
+    return;
+  }
+
+  saveCanonicalRideLocalSnapshot(snapshot).catch((error) => {
+    Logger.warn(
+      "⚠️ [PrototypeRuntime] Falha ao persistir snapshot local da corrida:",
+      error?.message || error,
+    );
+  });
+}
+
+function shouldPersistRuntimeCanonicalRideSnapshot(changedKeys = []) {
+  return [
+    "bookingStatus",
+    "activeBookingId",
+    "activeBooking",
+    "driverActiveRide",
+    "selectedFare",
+    "paymentState",
+  ].some((key) => changedKeys.includes(key));
+}
+
+function getRuntimeLifecycleActorId(profile = null) {
+  return String(
+    profile?.uid || runtimeState.profileUid || runtimeState.profile?.uid || "",
+  ).trim();
+}
+
+function getRuntimeLifecycleIdempotencyKey(eventType, bookingId, profile = null) {
+  return buildRideEventIdempotencyKey({
+    bookingId,
+    actorId: getRuntimeLifecycleActorId(profile),
+    eventType,
+  });
+}
+
+function shouldQueueRuntimeLifecycleFailure(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return [
+    "websocket não conectado",
+    "websocket nao conectado",
+    "sem conexão",
+    "sem conexao",
+    "indisponível",
+    "indisponivel",
+    "timeout",
+    "network",
+    "disconnected",
+  ].some((fragment) => message.includes(fragment));
+}
+
+async function queueRuntimeLifecycleIntent({
+  bookingId,
+  eventType,
+  payload = null,
+  profile = null,
+  error = null,
+  reason = "remote_unavailable",
+} = {}) {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) {
+    return null;
+  }
+
+  const actorId = getRuntimeLifecycleActorId(profile);
+  const idempotencyKey = getRuntimeLifecycleIdempotencyKey(
+    eventType,
+    normalizedBookingId,
+    profile,
+  );
+  const intent = await enqueueRideEventIntent({
+    bookingId: normalizedBookingId,
+    actorId,
+    role: resolveRuntimeRole(profile),
+    eventType,
+    payload,
+    idempotencyKey,
+    reason,
+  });
+  const message =
+    "Sem confirmação do servidor. Mantendo o último estado confirmado e sincronizando quando a conexão voltar.";
+  setRuntimeState({
+    rideLocalSync: cloneDefaultRideLocalSyncState({
+      status: "pending",
+      bookingId: normalizedBookingId,
+      pendingEventType: eventType,
+      idempotencyKey: intent.idempotencyKey,
+      message,
+      updatedAt: new Date().toISOString(),
+    }),
+    lastError: error?.message || message,
+  });
+  return intent;
+}
+
+function markRuntimeLifecycleIntentAcked(eventType, bookingId, payload = {}) {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) return;
+
+  markRideEventIntentAcked({
+    bookingId: normalizedBookingId,
+    actorId: getRuntimeLifecycleActorId(),
+    eventType,
+    idempotencyKey: payload?.idempotencyKey || null,
+  }).catch((error) => {
+    Logger.warn(
+      "⚠️ [PrototypeRuntime] Falha ao marcar intenção local como confirmada:",
+      error?.message || error,
+    );
+  });
+
+  const activePendingKey = String(runtimeState.rideLocalSync?.idempotencyKey || "");
+  const payloadKey = String(payload?.idempotencyKey || "").trim();
+  const shouldClear =
+    runtimeState.rideLocalSync?.bookingId === normalizedBookingId &&
+    (!activePendingKey || !payloadKey || activePendingKey === payloadKey);
+  if (shouldClear) {
+    setRuntimeState({
+      rideLocalSync: cloneDefaultRideLocalSyncState(),
+    });
+  }
+}
+
+function markRuntimeLifecycleIntentRejected(eventType, bookingId, error = null) {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) return;
+
+  markRideEventIntentRejected({
+    bookingId: normalizedBookingId,
+    actorId: getRuntimeLifecycleActorId(),
+    eventType,
+    error: error?.message || error,
+  }).catch((storageError) => {
+    Logger.warn(
+      "⚠️ [PrototypeRuntime] Falha ao marcar intenção local como rejeitada:",
+      storageError?.message || storageError,
+    );
+  });
+}
+
+function flushRuntimeLifecycleOutbox(reason = "socket_reconnect") {
+  if (runtimeLifecycleOutboxFlushPromise) {
+    return runtimeLifecycleOutboxFlushPromise;
+  }
+
+  const socket = WebSocketManager.getInstance();
+  runtimeLifecycleOutboxFlushPromise = replayPendingRideLifecycleIntents({
+    state: runtimeState,
+    socket,
+    actorId: getRuntimeLifecycleActorId(),
+    logger: Logger,
+    onSyncState: (rideLocalSync) => {
+      setRuntimeState({
+        rideLocalSync: cloneDefaultRideLocalSyncState(rideLocalSync),
+      });
+    },
+  })
+    .then((report) => {
+      if (
+        report.replayed ||
+        report.acked ||
+        report.rejected ||
+        report.failed
+      ) {
+        writeRuntimeDebugProbe("ride_lifecycle_outbox_flush", {
+          reason,
+          ...report,
+        });
+      }
+      return report;
+    })
+    .catch((error) => {
+      Logger.warn(
+        "⚠️ [PrototypeRuntime] Falha ao sincronizar ações pendentes da corrida:",
+        error?.message || error,
+      );
+      return {
+        replayed: 0,
+        acked: 0,
+        rejected: 0,
+        held: 0,
+        failed: 1,
+        error: error?.message || String(error),
+      };
+    })
+    .finally(() => {
+      runtimeLifecycleOutboxFlushPromise = null;
+    });
+
+  return runtimeLifecycleOutboxFlushPromise;
+}
+
 function setRuntimeState(next) {
   const previousState = runtimeState;
   const rawPatch = typeof next === "function" ? next(runtimeState) : next;
@@ -2431,6 +2693,11 @@ function setRuntimeState(next) {
     } else {
       scheduleRuntimeSessionPersist();
     }
+  }
+  if (shouldPersistRuntimeCanonicalRideSnapshot(changedKeys)) {
+    persistRuntimeCanonicalRideSnapshot(nextRuntimeState, {
+      source: "runtime_state",
+    });
   }
   notifyRuntime();
 }
@@ -3020,6 +3287,13 @@ function cloneDefaultDriverExtensionRequest(patch = {}) {
 function cloneDefaultOperationalContinuation(patch = {}) {
   return {
     ...DEFAULT_OPERATIONAL_CONTINUATION,
+    ...patch,
+  };
+}
+
+function cloneDefaultRideLocalSyncState(patch = {}) {
+  return {
+    ...DEFAULT_RIDE_LOCAL_SYNC_STATE,
     ...patch,
   };
 }
@@ -6018,6 +6292,7 @@ function clearRuntimeRideStateFromSync() {
     rideExtension: cloneDefaultRideExtensionState(),
     driverExtensionRequest: cloneDefaultDriverExtensionRequest(),
     operationalContinuation: cloneDefaultOperationalContinuation(),
+    rideLocalSync: cloneDefaultRideLocalSyncState(),
     lastError: "",
   }));
 }
@@ -6724,11 +6999,30 @@ function attachSocketListeners() {
 
   const handleConnect = () => {
     runtimeLastSocketConnectAt = Date.now();
+    const activeRideBookingId = resolveKnownRideBookingId(runtimeState);
+    const shouldMarkSyncing =
+      Boolean(activeRideBookingId) &&
+      ["offline", "pending", "error"].includes(
+        String(runtimeState.rideLocalSync?.status || ""),
+      );
     setRuntimeState({
       connecting: false,
       isSocketConnected: true,
       socketError: "",
+      ...(shouldMarkSyncing
+        ? {
+            rideLocalSync: cloneDefaultRideLocalSyncState({
+              status: "syncing",
+              bookingId: activeRideBookingId,
+              pendingEventType: runtimeState.rideLocalSync?.pendingEventType || "",
+              idempotencyKey: runtimeState.rideLocalSync?.idempotencyKey || "",
+              message: "Conexão restaurada. Validando o estado da corrida.",
+              updatedAt: new Date().toISOString(),
+            }),
+          }
+        : {}),
     });
+    flushRuntimeLifecycleOutbox("socket_connect");
   };
 
   const handleDisconnect = () => {
@@ -6740,10 +7034,31 @@ function attachSocketListeners() {
       (Boolean(runtimeState.driverOnline) ||
         Boolean(runtimeState.driverOnlinePending));
 
+    const activeRideBookingId = resolveKnownRideBookingId(runtimeState);
+    const activeRideStatus = normalizeRuntimeLifecycleStatus(
+      runtimeState.bookingStatus,
+    );
+    const shouldShowRideOfflineState =
+      Boolean(activeRideBookingId) &&
+      ["accepted", "arrived", "started", "operational_interrupted"].includes(
+        activeRideStatus,
+      );
+
     setRuntimeState({
       connecting: false,
       isSocketConnected: false,
       isSocketAuthenticated: false,
+      ...(shouldShowRideOfflineState
+        ? {
+            rideLocalSync: cloneDefaultRideLocalSyncState({
+              status: "offline",
+              bookingId: activeRideBookingId,
+              message:
+                "Sem conexão. Mantendo o último estado confirmado da corrida.",
+              updatedAt: new Date().toISOString(),
+            }),
+          }
+        : {}),
       ...(shouldKeepDriverOnlineIntent
         ? {
             driverOnline: true,
@@ -6829,6 +7144,7 @@ function attachSocketListeners() {
       isSocketAuthenticated: true,
       socketError: "",
     });
+    flushRuntimeLifecycleOutbox("socket_authenticated");
   };
 
   const handleActiveRideSync = (payload) => {
@@ -7002,6 +7318,7 @@ function attachSocketListeners() {
           rideExtension: cloneDefaultRideExtensionState(),
           driverExtensionRequest: cloneDefaultDriverExtensionRequest(),
           operationalContinuation: cloneDefaultOperationalContinuation(),
+          rideLocalSync: cloneDefaultRideLocalSyncState(),
           lastError: "",
         });
         pushTripHistoryItem(receipt);
@@ -7084,6 +7401,7 @@ function attachSocketListeners() {
         rideExtension: cloneDefaultRideExtensionState(),
         driverExtensionRequest: cloneDefaultDriverExtensionRequest(),
         operationalContinuation: cloneDefaultOperationalContinuation(),
+        rideLocalSync: cloneDefaultRideLocalSyncState(),
         lastError: "",
       });
       pushTripHistoryItem(receipt);
@@ -8112,6 +8430,11 @@ function attachSocketListeners() {
     if (shouldIgnoreDuplicateLifecycleEvent("driverArrived", bookingId, "arrived")) {
       return;
     }
+    markRuntimeLifecycleIntentAcked(
+      RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP,
+      bookingId,
+      payload,
+    );
 
     const configuredWindowSec = Number(payload?.boardingWindowSec || 120);
     const normalizedWindowSec = Math.max(
@@ -8155,6 +8478,7 @@ function attachSocketListeners() {
         confirmationTimeoutSec: null,
         updatedAt: null,
       },
+      rideLocalSync: cloneDefaultRideLocalSyncState(),
       lastError: "",
     }));
     if (runtimeRole !== "driver") {
@@ -8228,6 +8552,11 @@ function attachSocketListeners() {
     if (shouldIgnoreDuplicateLifecycleEvent("tripStarted", bookingId, "started")) {
       return;
     }
+    markRuntimeLifecycleIntentAcked(
+      RIDE_EVENT_TYPES.START_TRIP,
+      bookingId,
+      payload,
+    );
 
     writeRuntimeDebugProbe("event_trip_started", {
       bookingId: bookingId || runtimeState.activeBookingId || null,
@@ -8414,6 +8743,7 @@ function attachSocketListeners() {
       runtimeState.driverCoordinate
         ? { currentCoordinate: runtimeState.driverCoordinate }
         : {}),
+      rideLocalSync: cloneDefaultRideLocalSyncState(),
       lastError: "",
     });
     appendRuntimeNotification(
@@ -8619,6 +8949,11 @@ function attachSocketListeners() {
       return;
     }
     clearDirectionsBudgetForBooking(completedBookingId);
+    markRuntimeLifecycleIntentAcked(
+      RIDE_EVENT_TYPES.COMPLETE_TRIP,
+      completedBookingId,
+      payload,
+    );
     writeRuntimeDebugProbe("event_trip_completed", {
       bookingId:
         payload?.bookingId || runtimeState.activeBookingId || null,
@@ -8783,6 +9118,7 @@ function attachSocketListeners() {
             }
           : {}),
       },
+      rideLocalSync: cloneDefaultRideLocalSyncState(),
       lastError: "",
     });
     appendRuntimeNotification(
@@ -8913,6 +9249,17 @@ function attachSocketListeners() {
     clearDirectionsBudgetForBooking(cancelledBookingId);
     if (cancelledBookingId) {
       suppressBookingEvents(cancelledBookingId, "ride_cancelled");
+      markRuntimeLifecycleIntentAcked(
+        RIDE_EVENT_TYPES.CANCEL_RIDE,
+        cancelledBookingId,
+        payload,
+      );
+      persistRuntimeCanonicalRideSnapshot(runtimeState, {
+        bookingId: cancelledBookingId,
+        status: "canceled",
+        source: "ride_cancelled",
+        lastServerEventAt: new Date().toISOString(),
+      });
     }
     const hadDriverOfferBeforeCancellation = Boolean(
       runtimeRole === "driver" &&
@@ -8970,6 +9317,7 @@ function attachSocketListeners() {
         rideExtension: cloneDefaultRideExtensionState(),
         driverExtensionRequest: cloneDefaultDriverExtensionRequest(),
         operationalContinuation: cloneDefaultOperationalContinuation(),
+        rideLocalSync: cloneDefaultRideLocalSyncState(),
         driverInfo: null,
         driverCoordinate: null,
         tripIntegrityAlert: {
@@ -10157,6 +10505,7 @@ function applySyncedActiveRideSnapshot(snapshot) {
       bookingStatus === "arrived"
         ? "Motorista chegou ao embarque"
         : previous.tripArrivalText,
+    rideLocalSync: cloneDefaultRideLocalSyncState(),
     boardingDeadlineAt:
       bookingStatus === "arrived" ? boardingDeadlineIso : null,
     boardingRemainingSec:
@@ -12177,20 +12526,47 @@ async function cancelPrototypeRide(options = {}) {
   if (!bookingId) {
     throw new Error("Nenhuma busca ativa para cancelar.");
   }
+  const idempotencyKey = getRuntimeLifecycleIdempotencyKey(
+    RIDE_EVENT_TYPES.CANCEL_RIDE,
+    bookingId,
+  );
 
   let cancelResponse = null;
   try {
     const socket = WebSocketManager.getInstance();
     if (!socket.isConnected()) {
-      throw new Error(
+      const offlineError = new Error(
         "Sem conexão com o servidor. A corrida continua ativa; tente novamente ou fale com o suporte.",
       );
+      await queueRuntimeLifecycleIntent({
+        bookingId,
+        eventType: RIDE_EVENT_TYPES.CANCEL_RIDE,
+        payload: { reason },
+        error: offlineError,
+      });
+      throw offlineError;
     }
     cancelResponse = await socket.cancelRide(
       bookingId,
       reason,
+      0,
+      { idempotencyKey },
     );
   } catch (error) {
+    if (shouldQueueRuntimeLifecycleFailure(error)) {
+      await queueRuntimeLifecycleIntent({
+        bookingId,
+        eventType: RIDE_EVENT_TYPES.CANCEL_RIDE,
+        payload: { reason },
+        error,
+      });
+    } else {
+      markRuntimeLifecycleIntentRejected(
+        RIDE_EVENT_TYPES.CANCEL_RIDE,
+        bookingId,
+        error,
+      );
+    }
     Logger.warn(
       "⚠️ [PrototypeRuntime] Falha ao cancelar corrida no backend:",
       error?.message || error,
@@ -12284,12 +12660,39 @@ async function arrivePrototypePickup(profile, options = {}) {
     throw new Error("Não foi possível validar sua localização atual.");
   }
 
-  const socket = await getRealtimeSocket(
+  const idempotencyKey = getRuntimeLifecycleIdempotencyKey(
+    RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP,
+    bookingId,
     profile,
-    "Serviço indisponível para registrar chegada.",
   );
+  let socket = null;
+  try {
+    socket = await getRealtimeSocket(
+      profile,
+      "Serviço indisponível para registrar chegada.",
+    );
+  } catch (error) {
+    if (shouldQueueRuntimeLifecycleFailure(error)) {
+      await queueRuntimeLifecycleIntent({
+        bookingId,
+        eventType: RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP,
+        profile,
+        payload: { location: locationPayload },
+        error,
+      });
+    }
+    throw error;
+  }
   if (!socket?.isConnected()) {
-    throw new Error("Serviço indisponível para registrar chegada.");
+    const offlineError = new Error("Serviço indisponível para registrar chegada.");
+    await queueRuntimeLifecycleIntent({
+      bookingId,
+      eventType: RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP,
+      profile,
+      payload: { location: locationPayload },
+      error: offlineError,
+    });
+    throw offlineError;
   }
 
   const driverId = sanitizeText(profile?.uid || runtimeState.profileUid, "");
@@ -12313,7 +12716,9 @@ async function arrivePrototypePickup(profile, options = {}) {
   let response = null;
   let actionError = null;
   try {
-    response = await socket.arriveAtPickup(bookingId, locationPayload);
+    response = await socket.arriveAtPickup(bookingId, locationPayload, {
+      idempotencyKey,
+    });
   } catch (error) {
     actionError = error;
     Logger.warn(
@@ -12342,6 +12747,21 @@ async function arrivePrototypePickup(profile, options = {}) {
         "arrived";
 
     if (!recoveredBySync) {
+      if (shouldQueueRuntimeLifecycleFailure(actionError)) {
+        await queueRuntimeLifecycleIntent({
+          bookingId,
+          eventType: RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP,
+          profile,
+          payload: { location: locationPayload },
+          error: actionError,
+        });
+      } else {
+        markRuntimeLifecycleIntentRejected(
+          RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP,
+          bookingId,
+          actionError,
+        );
+      }
       throw (
         actionError ||
         new Error("Não foi possível registrar chegada ao embarque.")
@@ -12372,6 +12792,11 @@ async function arrivePrototypePickup(profile, options = {}) {
     ? new Date(response.boardingDeadlineAt).toISOString()
     : new Date(Date.now() + normalizedWindowSec * 1000).toISOString();
   startBoardingCountdown(deadlineAt);
+  markRuntimeLifecycleIntentAcked(
+    RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP,
+    bookingId,
+    response,
+  );
   setRuntimeState((previous) => ({
     bookingStatus: "arrived",
     tripArrivalText: "Passageiro embarcando",
@@ -12388,6 +12813,7 @@ async function arrivePrototypePickup(profile, options = {}) {
       ...(previous.driverTripMeta || {}),
       leg: "boarding",
     },
+    rideLocalSync: cloneDefaultRideLocalSyncState(),
     lastError: "",
   }));
 
@@ -12471,6 +12897,11 @@ async function startPrototypeTrip(options = {}) {
   }
 
   const allowLocalFallback = allowRuntimeLocalRideLifecycleFallback();
+  const idempotencyKey = getRuntimeLifecycleIdempotencyKey(
+    RIDE_EVENT_TYPES.START_TRIP,
+    bookingId,
+  );
+  let startLocation = null;
 
   try {
     const socket = WebSocketManager.getInstance();
@@ -12478,21 +12909,42 @@ async function startPrototypeTrip(options = {}) {
       throw new Error("Serviço indisponível para iniciar a corrida.");
     }
 
-    const startLocation = {
+    startLocation = {
       lat:
         Number(locationOverride?.lat) ||
         Number(locationOverride?.latitude) ||
         runtimeState.driverCoordinate?.latitude ||
-        runtimeState.currentCoordinate.latitude,
+        runtimeState.currentCoordinate?.latitude,
       lng:
         Number(locationOverride?.lng) ||
         Number(locationOverride?.longitude) ||
         runtimeState.driverCoordinate?.longitude ||
-        runtimeState.currentCoordinate.longitude,
+        runtimeState.currentCoordinate?.longitude,
     };
-    await socket.startTrip(bookingId, startLocation);
+    const startResponse = await socket.startTrip(bookingId, startLocation, {
+      idempotencyKey,
+    });
+    markRuntimeLifecycleIntentAcked(
+      RIDE_EVENT_TYPES.START_TRIP,
+      bookingId,
+      startResponse,
+    );
   } catch (error) {
     if (!allowLocalFallback) {
+      if (shouldQueueRuntimeLifecycleFailure(error)) {
+        await queueRuntimeLifecycleIntent({
+          bookingId,
+          eventType: RIDE_EVENT_TYPES.START_TRIP,
+          payload: { startLocation },
+          error,
+        });
+      } else {
+        markRuntimeLifecycleIntentRejected(
+          RIDE_EVENT_TYPES.START_TRIP,
+          bookingId,
+          error,
+        );
+      }
       Logger.warn(
         "⚠️ [PrototypeRuntime] startTrip remoto falhou; mantendo estado atual:",
         error?.message || error,
@@ -12675,6 +13127,7 @@ async function startPrototypeTrip(options = {}) {
           status: "started",
         }
       : runtimeState.driverActiveRide,
+    rideLocalSync: cloneDefaultRideLocalSyncState(),
   });
   return { success: true };
 }
@@ -12808,6 +13261,7 @@ async function completePrototypeTrip(options = {}) {
       },
       tripArrivalText: "",
       searchingElapsedSeconds: 0,
+      rideLocalSync: cloneDefaultRideLocalSyncState(),
     });
     pushTripHistoryItem(fallbackReceipt);
 
@@ -12819,12 +13273,28 @@ async function completePrototypeTrip(options = {}) {
   };
 
   const allowLocalFallback = allowRuntimeLocalRideLifecycleFallback();
+  const idempotencyKey = bookingId
+    ? getRuntimeLifecycleIdempotencyKey(RIDE_EVENT_TYPES.COMPLETE_TRIP, bookingId)
+    : "";
 
   if (bookingId) {
     const socket = WebSocketManager.getInstance();
     if (!socket.isConnected()) {
       if (!allowLocalFallback) {
-        throw new Error("Serviço indisponível para finalizar a corrida.");
+        const offlineError = new Error(
+          "Serviço indisponível para finalizar a corrida.",
+        );
+        await queueRuntimeLifecycleIntent({
+          bookingId,
+          eventType: RIDE_EVENT_TYPES.COMPLETE_TRIP,
+          payload: {
+            endLocation: locationOverride || null,
+            distanceKm,
+            fare,
+          },
+          error: offlineError,
+        });
+        throw offlineError;
       }
       Logger.warn(
         "⚠️ [PrototypeRuntime] Serviço indisponível para finalizar a corrida; fallback local permitido por QA.",
@@ -12849,13 +13319,24 @@ async function completePrototypeTrip(options = {}) {
         },
         distanceKm,
         fare,
+        { idempotencyKey },
       );
 
       if (remoteResult?.success !== false) {
+        markRuntimeLifecycleIntentAcked(
+          RIDE_EVENT_TYPES.COMPLETE_TRIP,
+          bookingId,
+          remoteResult,
+        );
         return remoteResult;
       }
 
       if (!allowLocalFallback) {
+        markRuntimeLifecycleIntentRejected(
+          RIDE_EVENT_TYPES.COMPLETE_TRIP,
+          bookingId,
+          remoteResult?.error || remoteResult?.message,
+        );
         throw new Error(
           remoteResult?.error ||
             remoteResult?.message ||
@@ -12869,6 +13350,24 @@ async function completePrototypeTrip(options = {}) {
       return finalizeLocalCompletion();
     } catch (error) {
       if (!allowLocalFallback) {
+        if (shouldQueueRuntimeLifecycleFailure(error)) {
+          await queueRuntimeLifecycleIntent({
+            bookingId,
+            eventType: RIDE_EVENT_TYPES.COMPLETE_TRIP,
+            payload: {
+              endLocation: locationOverride || null,
+              distanceKm,
+              fare,
+            },
+            error,
+          });
+        } else {
+          markRuntimeLifecycleIntentRejected(
+            RIDE_EVENT_TYPES.COMPLETE_TRIP,
+            bookingId,
+            error,
+          );
+        }
         Logger.warn(
           "⚠️ [PrototypeRuntime] completeTrip remoto falhou; mantendo corrida ativa:",
           error?.message || error,
