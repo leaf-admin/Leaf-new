@@ -4,6 +4,7 @@ const {
 
 describe('android real-device smoke payment status', () => {
   it.each([
+    'passenger_booking_finalizing',
     'passenger_searching_driver',
     'passenger_active_trip',
     'passenger_receipt',

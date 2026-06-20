@@ -253,6 +253,13 @@ function detectScreen(nodes) {
     return "payment_loading";
   }
   if (
+    allText.includes("passenger-booking-finalizing-sheet") ||
+    allText.includes("finalizando solicitação") ||
+    allText.includes("finalizando solicitacao")
+  ) {
+    return "passenger_booking_finalizing";
+  }
+  if (
     allText.includes("passenger-driver-search-sheet") ||
     allText.includes("buscando motorista") ||
     allText.includes("pagamento confirmado")
@@ -601,8 +608,14 @@ async function captureStep(name) {
   if (CAPTURE_XML_SETTLE_MS > 0) {
     await sleep(CAPTURE_XML_SETTLE_MS);
   }
-  adbRun(["shell", "uiautomator", "dump", phoneDumpPath], { allowFailure: true });
-  adbRun(["pull", phoneDumpPath, dump], { allowFailure: true });
+  adbRun(["shell", "rm", "-f", phoneDumpPath], { allowFailure: true });
+  if (fs.existsSync(dump)) fs.unlinkSync(dump);
+  const dumpResult = adbRun(["shell", "uiautomator", "dump", phoneDumpPath], { allowFailure: true });
+  if (dumpResult.status === 0) {
+    adbRun(["pull", phoneDumpPath, dump], { allowFailure: true });
+  } else {
+    warnings.push(`Falha ao capturar XML em ${name}; evitando reutilizar dump antigo.`);
+  }
   const xml = fs.existsSync(dump) ? fs.readFileSync(dump, "utf8") : "";
   if (xml) evidence.push(dump);
   const nodes = parseNodes(xml);

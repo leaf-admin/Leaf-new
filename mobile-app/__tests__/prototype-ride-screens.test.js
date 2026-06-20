@@ -589,6 +589,27 @@ describe('prototype ride screens', () => {
     expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
   });
 
+  it.each(['accepted', 'arrived', 'started'])(
+    'keeps passenger trip state %s from regressing through sheet backdrop actions',
+    (bookingStatus) => {
+      usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus }));
+
+      const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() };
+      const { getByTestId } = render(
+        <RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />
+      );
+
+      expect(getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+      expect(getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+
+      fireEvent.press(getByTestId('prototype-dismissible-sheet-backdrop'));
+
+      expect(navigation.goBack).not.toHaveBeenCalled();
+      expect(navigation.replace).not.toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+    }
+  );
+
   it('renders the passenger trip as a compact summary while the driver is on the way', () => {
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'accepted' }));
 

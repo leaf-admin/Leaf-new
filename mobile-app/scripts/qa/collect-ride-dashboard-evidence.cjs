@@ -132,12 +132,26 @@ function findFirstAmount(numbers, patterns) {
 function compareAmount(label, expected, actual) {
   if (expected == null) return { label, status: "not_requested" };
   if (!actual) return { label, status: "missing", expected };
-  const delta = Number(Math.abs(expected - actual.value).toFixed(2));
+  const pathName = String(actual.path || "").toLowerCase();
+  const looksLikeCents =
+    pathName.includes("cents") ||
+    pathName.includes("amount") ||
+    pathName.includes("fee") ||
+    pathName.includes("net") ||
+    pathName.includes("total");
+  const centsAsMoney = Number((actual.value / 100).toFixed(2));
+  const shouldUseCentsAsMoney =
+    looksLikeCents &&
+    Number.isInteger(actual.value) &&
+    Math.abs(expected - centsAsMoney) <= 0.01;
+  const normalizedActual = shouldUseCentsAsMoney ? centsAsMoney : actual.value;
+  const delta = Number(Math.abs(expected - normalizedActual).toFixed(2));
   return {
     label,
     status: delta <= 0.01 ? "ok" : "mismatch",
     expected,
-    actual: actual.value,
+    actual: normalizedActual,
+    rawActual: actual.value,
     actualPath: actual.path,
     delta,
   };
@@ -156,7 +170,16 @@ async function main() {
   const reconciliation = await requestJson(`/api/financial/reconciliation/rides/${encodeURIComponent(RIDE_ID)}`, token);
   const health = await requestJson("/api/monitoring/health", token);
   const numbers = walkNumbers(reconciliation.json || {});
-  const gross = findFirstAmount(numbers, ["gross", "totalPaid", "totalAmount", "passengerAmount", "fare"]);
+  const gross = findFirstAmount(numbers, [
+    "gross",
+    "totalPaid",
+    "totalAmount",
+    "passengerAmount",
+    "ridePayment.amount",
+    "paymentHolding.amount",
+    "amountInReais",
+    "fare",
+  ]);
   const fees = findFirstAmount(numbers, ["totalFees", "fees.total", "feeAmount"]);
   const driverNet = findFirstAmount(numbers, ["driverNet", "driverAmount", "netAmount", "payout"]);
   const comparisons = [
