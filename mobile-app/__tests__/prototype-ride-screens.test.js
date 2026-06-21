@@ -29,6 +29,13 @@ import {
   validateRideCardRenderedFields,
 } from '../src/screens/prototype/rideCardContract';
 
+jest.mock('@react-navigation/native', () => ({
+  StackActions: {
+    replace: jest.fn((name, params) => ({ type: 'REPLACE', payload: { name, params } })),
+  },
+  useIsFocused: jest.fn(() => true),
+}));
+
 jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
   usePrototypeRideRuntime: jest.fn(),
 }));
@@ -243,6 +250,7 @@ describe('prototype ride screens', () => {
     jest.clearAllMocks();
     allowForcedPaymentBypass.mockReturnValue(false);
     allowTestUserTools.mockReturnValue(false);
+    require('@react-navigation/native').useIsFocused.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -831,6 +839,22 @@ describe('prototype ride screens', () => {
         targetUserId: fallbackDriverId,
       })
     );
+  });
+
+  it('removes an inactive passenger receipt from the Android accessibility tree', () => {
+    require('@react-navigation/native').useIsFocused.mockReturnValue(false);
+    usePrototypeRideRuntime.mockReturnValue(buildReceiptRuntime());
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { queryByTestId, UNSAFE_getByProps } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+    const receipt = UNSAFE_getByProps({ testID: 'passenger-receipt-screen' });
+
+    expect(queryByTestId('passenger-receipt-screen')).toBeNull();
+    expect(receipt.props.accessibilityElementsHidden).toBe(true);
+    expect(receipt.props.importantForAccessibility).toBe('no-hide-descendants');
+    expect(receipt.props.pointerEvents).toBe('none');
   });
 
   it('dismisses the passenger receipt into the map without re-locking the completed trip state', () => {
