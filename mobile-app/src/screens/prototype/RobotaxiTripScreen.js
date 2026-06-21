@@ -39,6 +39,9 @@ import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 292;
+const TRIP_MAP_TOP_PADDING = 128;
+const TRIP_MAP_SIDE_PADDING = 44;
+const TRIP_MAP_BOTTOM_GUTTER = 28;
 const PROTECTED_PASSENGER_TRIP_STATUSES = new Set([
   'accepted',
   'arrived',
@@ -462,6 +465,16 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const qaAutoConfirmPix = true;
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
   const sheetBottom = SHEET_BOTTOM_OFFSET;
+  const mapOccludedBottom = sheetBottom + cardHeight;
+  const tripMapViewportPadding = useMemo(
+    () => ({
+      top: insets.top + TRIP_MAP_TOP_PADDING,
+      right: TRIP_MAP_SIDE_PADDING,
+      bottom: mapOccludedBottom + TRIP_MAP_BOTTOM_GUTTER,
+      left: TRIP_MAP_SIDE_PADDING,
+    }),
+    [insets.top, mapOccludedBottom],
+  );
   const rideLocalSyncIndicator = useMemo(() => {
     const syncStatus = String(rideLocalSync?.status || '').toLowerCase();
     const isProtectedStatus = PROTECTED_PASSENGER_TRIP_STATUSES.has(
@@ -1010,7 +1023,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || 'prototype-trip',
-    occludedBottom: sheetBottom + cardHeight
+    occludedBottom: mapOccludedBottom
   });
 
   const handleCardLayout = useCallback(event => {
@@ -1525,7 +1538,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           destinationAddress={destinationAddress}
           originLabel="Partida"
           originAddress={currentAddress || 'Sua localização atual'}
-          interactionEnabled={false}
+          interactionEnabled
+          viewportPadding={tripMapViewportPadding}
           animateRoute
           hideRouteEndpointMarkers
           driverMarkerMode="car"
