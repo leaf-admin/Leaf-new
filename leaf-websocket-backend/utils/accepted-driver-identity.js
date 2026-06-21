@@ -1,5 +1,7 @@
 'use strict';
 
+const { CANONICAL_IDENTITY_SOURCES } = require('./driver-vehicle-identity');
+
 function firstText(...values) {
     for (const value of values) {
         const normalized = String(value || '').trim();
@@ -14,8 +16,15 @@ function resolveAcceptedDriverIdentity({
     eligibilityProfile = {},
     socket = {}
 } = {}) {
-    const driverVehicle = driverData?.driver?.vehicle || {};
-    const payloadVehicle = driverData?.vehicle || {};
+    const canonicalProfile = (profile) => {
+        const source = String(profile?.vehicleIdentitySource || '').trim().toLowerCase();
+        const canonical = profile?.vehicleIdentityCanonical === true ||
+            profile?.vehicleIdentityCanonical === 'true' ||
+            CANONICAL_IDENTITY_SOURCES.has(source);
+        return canonical ? profile : {};
+    };
+    const eligibilityVehicle = canonicalProfile(eligibilityProfile);
+    const cachedVehicle = canonicalProfile(redisProfile);
 
     return {
         name: firstText(
@@ -29,55 +38,30 @@ function resolveAcceptedDriverIdentity({
         ),
         vehicle: {
             make: firstText(
-                driverVehicle?.make,
-                driverVehicle?.brand,
-                payloadVehicle?.make,
-                payloadVehicle?.brand,
-                eligibilityProfile?.vehicleMake,
-                redisProfile?.vehicleMake,
-                redisProfile?.make,
-                redisProfile?.carMake
+                eligibilityVehicle?.vehicleMake,
+                cachedVehicle?.vehicleMake,
+                cachedVehicle?.make,
+                cachedVehicle?.carMake
             ),
             model: firstText(
-                driverVehicle?.model,
-                payloadVehicle?.model,
-                driverVehicle?.type,
-                payloadVehicle?.type,
-                driverData?.carType,
-                eligibilityProfile?.vehicleModel,
-                eligibilityProfile?.carType,
-                redisProfile?.vehicleModel,
-                redisProfile?.model,
-                redisProfile?.carModel,
-                redisProfile?.carType,
-                redisProfile?.vehicleType,
-                redisProfile?.vehicleCategory,
-                socket?.vehicleModel
+                eligibilityVehicle?.vehicleModel,
+                cachedVehicle?.vehicleModel,
+                cachedVehicle?.model,
+                cachedVehicle?.carModel
             ),
             plate: firstText(
-                driverVehicle?.plate,
-                payloadVehicle?.plate,
-                driverData?.vehiclePlate,
-                driverData?.carPlate,
-                eligibilityProfile?.vehiclePlate,
-                redisProfile?.vehiclePlate,
-                redisProfile?.vehicleNumber,
-                redisProfile?.carPlate,
-                socket?.vehiclePlate
+                eligibilityVehicle?.vehiclePlate,
+                cachedVehicle?.vehiclePlate,
+                cachedVehicle?.vehicleNumber,
+                cachedVehicle?.carPlate
             ),
             color: firstText(
-                driverVehicle?.color,
-                payloadVehicle?.color,
-                driverData?.vehicleColor,
-                driverData?.carColor,
-                eligibilityProfile?.vehicleColor,
-                redisProfile?.vehicleColor,
-                redisProfile?.color,
-                redisProfile?.carColor
+                eligibilityVehicle?.vehicleColor,
+                cachedVehicle?.vehicleColor,
+                cachedVehicle?.color,
+                cachedVehicle?.carColor
             ),
             category: firstText(
-                driverVehicle?.category,
-                payloadVehicle?.category,
                 eligibilityProfile?.carType,
                 eligibilityProfile?.vehicleCategory,
                 redisProfile?.carType,

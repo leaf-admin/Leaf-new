@@ -24,6 +24,9 @@ backend event monitoring.
    - Both users must be in the same test region.
    - The driver must be online, dispatch eligible, and close enough to the pickup
      before payment or ride request is opened.
+   - The managed driver must expose plate, model, and color from the canonical
+     active vehicle. Real CRLV OCR uses `crlv_pdf_ocr`; controlled test-user
+     fixtures must be labeled `qa_crlv_fixture` and must never impersonate OCR.
 
 3. Payment sandbox is confirmed by backend policy.
    - Woovi sandbox mode must be active for the test user/profile by backend flag
@@ -50,6 +53,9 @@ backend event monitoring.
 Stop and mark the run as `blocked_precondition` when any precondition fails.
 
 - `blocked_precondition:driver_unavailable`
+- `blocked_precondition:driver_vehicle_identity_incomplete`
+- `blocked_precondition:driver_vehicle_identity_not_canonical`
+- `blocked_precondition:driver_vehicle_identity_not_crlv`
 - `blocked_precondition:geofence_not_ready`
 - `blocked_precondition:payment_sandbox_not_confirmed`
 - `blocked_precondition:toolchain_not_ready`
@@ -94,6 +100,8 @@ Every real smoke report must include:
 - Device serial, OS version, package id, passenger test user, driver test user.
 - Pickup/destination coordinates and geofence mode.
 - Driver availability evidence before request/payment.
+- Canonical driver vehicle identity, provenance, and reconciliation across the
+  accepted trip UI, receipt, and dashboard projection.
 - Quote id/session id, gross fare, net fare, fee/tax breakdown, expiration time.
 - Payment sandbox charge id and confirmation event.
 - Booking id and ordered lifecycle events.

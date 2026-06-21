@@ -19,6 +19,8 @@ jest.mock('../../../services/ride-state-manager', () => ({
 
 jest.mock('../../../services/pricing-h3-read-model-service', () => ({
   applyBookingSnapshot: jest.fn().mockResolvedValue(undefined),
+  applyDriverSnapshot: jest.fn().mockResolvedValue(undefined),
+  removeDriverSnapshot: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../../services/booking-visibility-service', () => ({
@@ -29,8 +31,31 @@ jest.mock('../../../services/driver-activation-state-service', () => ({
   resolveDriverActivationState: jest.fn(),
 }));
 
+jest.mock('../../../services/driver-destination-mode-service', () => ({
+  resolveDestinationModeIntent: jest.fn().mockResolvedValue({
+    allowed: true,
+    shouldWrite: false,
+    patch: null,
+    destinationMode: undefined,
+    policy: null,
+  }),
+}));
+
+jest.mock('../../../services/driver-eligibility-service', () => ({
+  resolveDriverProfile: jest.fn().mockResolvedValue({
+    activeVehicleId: 'vehicle_1',
+    vehiclePlate: 'RJA2D41',
+    vehicleMake: 'Honda',
+    vehicleModel: 'City',
+    vehicleColor: 'BRANCO',
+    vehicleIdentitySource: 'crlv_pdf_ocr',
+    vehicleIdentityCanonical: true,
+  }),
+}));
+
 const registerSocketDriverControlHandlers = require('../../../bootstrap/register-socket-driver-control-handlers');
 const { assessDriverArrivalAtPickup } = require('../../../utils/pickup-arrival-policy');
+const { resolveDriverActivationState } = require('../../../services/driver-activation-state-service');
 
 const createSocket = () => {
   const handlers = new Map();
@@ -63,6 +88,10 @@ const createRedis = () => ({
   hset: jest.fn().mockResolvedValue(1),
   type: jest.fn().mockResolvedValue('hash'),
   del: jest.fn().mockResolvedValue(1),
+  zrem: jest.fn().mockResolvedValue(1),
+  srem: jest.fn().mockResolvedValue(1),
+  sadd: jest.fn().mockResolvedValue(1),
+  geoadd: jest.fn().mockResolvedValue(1),
 });
 
 describe('register-socket-driver-control-handlers notificationAction scope', () => {
@@ -193,6 +222,42 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
         action: 'arrived_at_pickup',
         bookingId: 'booking_1',
         cached: true,
+      })
+    );
+  });
+
+  it('returns canonical vehicle identity in the authenticated driver online ack', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      dispatchEligible: 'true',
+      lat: '-22.9207',
+      lng: '-43.4059',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({
+        success: true,
+        driverId: 'driver_1',
+        vehicleIdentity: {
+          activeVehicleId: 'vehicle_1',
+          plate: 'RJA2D41',
+          make: 'Honda',
+          model: 'City',
+          color: 'BRANCO',
+          source: 'crlv_pdf_ocr',
+          canonical: true,
+          complete: true,
+        },
       })
     );
   });

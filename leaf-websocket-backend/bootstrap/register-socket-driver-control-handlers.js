@@ -10,6 +10,7 @@ const {
 const {
     resolveDestinationModeIntent
 } = require('../services/driver-destination-mode-service');
+const { buildDriverVehicleIdentity } = require('../utils/driver-vehicle-identity');
 
 const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
     30,
@@ -512,6 +513,24 @@ function registerSocketDriverControlHandlers({
                 }
             }
 
+            let vehicleIdentity = null;
+            if (isOnline) {
+                try {
+                    const driverEligibilityService = require('../services/driver-eligibility-service');
+                    const profile = await driverEligibilityService.resolveDriverProfile(
+                        driverId,
+                        existingDriverState || {}
+                    );
+                    vehicleIdentity = buildDriverVehicleIdentity(profile);
+                } catch (identityError) {
+                    logStructured('warn', 'Status online continuou sem identidade veicular hidratada', {
+                        service: 'driver-control-handlers',
+                        driverId,
+                        error: identityError.message
+                    });
+                }
+            }
+
             socket.emit('driverStatusUpdated', {
                 success: true,
                 driverId,
@@ -522,6 +541,7 @@ function registerSocketDriverControlHandlers({
                     ? destinationIntent.destinationMode
                     : undefined,
                 destinationModePolicy: destinationIntent.policy || null,
+                vehicleIdentity,
                 checkedAt: new Date().toISOString()
             });
             scheduleMapH3Refresh(io, {

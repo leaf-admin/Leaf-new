@@ -10,6 +10,12 @@ const { spawn, spawnSync } = require("child_process");
 const { PNG } = require("pngjs");
 const { extractCriticalAppLines } = require("./real-smoke-logcat.cjs");
 const { resolvePostSandboxPaymentStatus } = require("./real-smoke-payment-status.cjs");
+const {
+  compareRenderedVehicleIdentity,
+  evaluateManagedDriverVehicleIdentity,
+  managedDriverBlockFailure,
+  managedDriverPaymentBlockStatus,
+} = require("./real-smoke-driver-identity.cjs");
 
 const mobileDir = path.resolve(__dirname, "../..");
 const rootDir = path.resolve(mobileDir, "..");
@@ -27,6 +33,8 @@ const ALLOW_EXISTING_ACTIVE_RIDE =
   process.env.REAL_SMOKE_ALLOW_EXISTING_ACTIVE_RIDE === "true";
 const SYNC_DRIVER_TO_APP_PICKUP =
   process.env.REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP === "true";
+const REQUIRE_DRIVER_CRLV_IDENTITY =
+  process.env.REAL_SMOKE_REQUIRE_DRIVER_CRLV_IDENTITY !== "false";
 const REQUIRE_CANONICAL_PICKUP =
   process.env.REAL_SMOKE_REQUIRE_CANONICAL_PICKUP !== "false";
 const REQUIRE_POST_TRIP =
@@ -321,6 +329,51 @@ function extractDriverSearchElapsed(nodes) {
   const node = findNode(nodes, ["passenger-driver-search-elapsed"]);
   const value = String(node?.text || node?.["content-desc"] || "").trim();
   return /^\d{2}:\d{2}$/.test(value) ? value : null;
+}
+
+function nodeTextByResourceFragment(nodes, fragment) {
+  const matches = nodes.filter((node) => {
+    const resourceId = String(node["resource-id"] || "");
+    const text = String(node.text || node["content-desc"] || "").trim();
+    const bounds = node.boundsRect;
+    const hasVisibleArea = bounds && bounds.x2 > bounds.x1 && bounds.y2 > bounds.y1;
+    return resourceId.includes(fragment) && text && hasVisibleArea;
+  });
+  const node = matches[matches.length - 1];
+  return String(node?.text || node?.["content-desc"] || "").trim() || null;
+}
+
+function extractRenderedVehicleIdentity(nodes, screen) {
+  if (screen === "passenger_active_trip") {
+    const identity = {
+      plate: nodeTextByResourceFragment(nodes, "vehicle_plate"),
+      model: nodeTextByResourceFragment(nodes, "vehicle_model"),
+      color: nodeTextByResourceFragment(nodes, "vehicle_color"),
+    };
+    return Object.values(identity).some(Boolean)
+      ? { ...identity, source: "passenger_active_trip_ui" }
+      : null;
+  }
+
+  if (screen === "passenger_receipt") {
+    const modelColor = nodeTextByResourceFragment(
+      nodes,
+      "passenger-receipt-vehicle-model-color",
+    );
+    const [model, color] = String(modelColor || "")
+      .split("·")
+      .map((value) => value.trim());
+    const identity = {
+      plate: nodeTextByResourceFragment(nodes, "passenger-receipt-vehicle-plate"),
+      model: model || null,
+      color: color || null,
+    };
+    return Object.values(identity).some(Boolean)
+      ? { ...identity, source: "passenger_receipt_ui" }
+      : null;
+  }
+
+  return null;
 }
 
 function parseCanonicalPickup(raw, source) {
@@ -681,14 +734,19 @@ async function startManagedDriverBotAtPickup(pickup) {
   child.unref();
 
   const online = await waitForManagedDriverReadiness(logPath, 45000);
+  const vehicleIdentity = evaluateManagedDriverVehicleIdentity(
+    online.latestOnline || {},
+    { requireCrlvSource: REQUIRE_DRIVER_CRLV_IDENTITY },
+  );
   const result = {
     requested: true,
-    ok: online.ok,
-    error: online.error || null,
+    ok: online.ok && vehicleIdentity.ok,
+    error: online.error || (vehicleIdentity.ok ? null : vehicleIdentity.code),
     pid: child.pid,
     logPath,
     pickup,
     latestOnline: online.latestOnline || null,
+    vehicleIdentity,
     tail: online.tail,
   };
   writeArtifact("managed-driver-bot.json", JSON.stringify(result, null, 2));
@@ -824,9 +882,7 @@ async function prepareCanonicalPickupForPayment(current) {
 
   const managedDriverBot = await startManagedDriverBotAtPickup(pickup);
   if (managedDriverBot.requested && !managedDriverBot.ok) {
-    failures.push(
-      `blocked_precondition:managed_driver_not_online:${managedDriverBot.error || "driver_online_timeout"}`,
-    );
+    failures.push(managedDriverBlockFailure(managedDriverBot.error));
     return {
       ok: false,
       pickup,
@@ -1336,6 +1392,7 @@ async function captureStep(name) {
   }
   const prices = extractPrices(nodes);
   const screen = detectScreen(nodes);
+  const vehicleIdentity = extractRenderedVehicleIdentity(nodes, screen);
   const driverSearchElapsed = extractDriverSearchElapsed(nodes);
   return {
     name,
@@ -1346,6 +1403,7 @@ async function captureStep(name) {
     accessibilityDumpLog,
     prices,
     screen,
+    vehicleIdentity,
     driverSearchElapsed,
   };
 }
@@ -1627,10 +1685,9 @@ async function main() {
             appPickupAvailability = canonicalReadiness.availability;
             managedDriverBot = canonicalReadiness.managedDriverBot || managedDriverBot;
             if (!canonicalReadiness.ok) {
-              paymentStatus =
-                canonicalReadiness.managedDriverBot?.error === "driver_not_dispatch_eligible"
-                  ? "blocked_precondition_driver_not_dispatch_eligible"
-                  : "blocked_precondition_canonical_pickup";
+              paymentStatus = managedDriverPaymentBlockStatus(
+                canonicalReadiness.managedDriverBot?.error,
+              );
             } else {
               const paymentOpen = await tapConfirmUntilPayment(current, steps);
               current = paymentOpen.current;
@@ -1692,10 +1749,9 @@ async function main() {
           appPickupAvailability = canonicalReadiness.availability;
           managedDriverBot = canonicalReadiness.managedDriverBot || managedDriverBot;
           if (!canonicalReadiness.ok) {
-            paymentStatus =
-              canonicalReadiness.managedDriverBot?.error === "driver_not_dispatch_eligible"
-                ? "blocked_precondition_driver_not_dispatch_eligible"
-                : "blocked_precondition_canonical_pickup";
+            paymentStatus = managedDriverPaymentBlockStatus(
+              canonicalReadiness.managedDriverBot?.error,
+            );
           } else {
             const paymentOpen = await tapConfirmUntilPayment(current, steps);
             current = paymentOpen.current;
@@ -1762,6 +1818,16 @@ async function main() {
     laterQuote,
     sandboxPaymentConfirmation,
   });
+  const driverVehicleConsistency = compareRenderedVehicleIdentity(
+    managedDriverBot?.vehicleIdentity?.identity || {},
+    steps
+      .filter((step) => step.vehicleIdentity)
+      .map((step) => ({
+        step: step.name,
+        screen: step.screen,
+        ...step.vehicleIdentity,
+      })),
+  );
   if (logAnalysis.critical.length > 0) {
     failures.push(`Logcat registrou ${logAnalysis.critical.length} linhas críticas.`);
   }
@@ -1796,6 +1862,23 @@ async function main() {
         .join(", ") || "cotação indisponível"}`,
     );
   }
+  if (managedDriverBot?.vehicleIdentity?.ok && !driverVehicleConsistency.ok) {
+    failures.push("driver_vehicle_identity_mismatch");
+  }
+  if (
+    REQUIRE_POST_TRIP &&
+    managedDriverBot?.vehicleIdentity?.ok &&
+    !driverVehicleConsistency.coverage.activeTrip
+  ) {
+    failures.push("driver_vehicle_identity_active_trip_evidence_missing");
+  }
+  if (
+    REQUIRE_POST_TRIP &&
+    managedDriverBot?.vehicleIdentity?.ok &&
+    !driverVehicleConsistency.coverage.receipt
+  ) {
+    failures.push("driver_vehicle_identity_receipt_evidence_missing");
+  }
   if (COLLECT_DASHBOARD_EVIDENCE && !dashboardEvidenceCollection.ok) {
     failures.push(`Evidência dashboard falhou: ${dashboardEvidenceCollection.error || dashboardEvidenceCollection.stderr || "unknown"}`);
   }
@@ -1826,6 +1909,7 @@ async function main() {
               source: step.canonicalPickup.source,
             }
           : null,
+        vehicleIdentity: step.vehicleIdentity || null,
       })),
       quoteStatus,
       initialQuote,
@@ -1847,6 +1931,7 @@ async function main() {
       routingLogLines: logAnalysis.routing.length,
       criticalLogLines: logAnalysis.critical.length,
       fareConsistency,
+      driverVehicleConsistency,
     },
     warnings,
     failures,
@@ -1876,6 +1961,8 @@ async function main() {
     `- App canonical pickup: ${appCanonicalPickup ? `${appCanonicalPickup.lat}, ${appCanonicalPickup.lng}` : "not captured"}`,
     `- App pickup availability: ${appPickupAvailability ? (appPickupAvailability.ok ? "OK" : "FAIL") : "not captured"}`,
     `- Managed driver bot: ${managedDriverBot?.requested ? (managedDriverBot.ok ? "OK" : "FAIL") : "not requested"}`,
+    `- Managed driver vehicle identity: ${managedDriverBot?.vehicleIdentity ? (managedDriverBot.vehicleIdentity.ok ? "OK" : `FAIL (${managedDriverBot.vehicleIdentity.code})`) : "not captured"}`,
+    `- Driver vehicle consistency: ${driverVehicleConsistency.entries.length > 0 ? (driverVehicleConsistency.ok ? "OK" : "FAIL") : "not captured"}`,
     `- Sandbox payment auto-confirm: ${AUTO_CONFIRM_SANDBOX_PAYMENT ? (sandboxPaymentConfirmation.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Post-trip validation: ${postTripValidation?.requested ? (postTripValidation.ok ? "OK" : postTripValidation.ok === false ? "FAIL" : "not reached") : "not requested"}`,
     `- Fare consistency: ${fareConsistency.ok ? "OK" : "FAIL"}${fareConsistency.quote ? ` (quote R$ ${fareConsistency.quote.amount.toFixed(2)})` : ""}`,

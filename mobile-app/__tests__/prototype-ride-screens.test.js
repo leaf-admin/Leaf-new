@@ -795,6 +795,32 @@ describe('prototype ride screens', () => {
     );
   });
 
+  it('renders canonical vehicle model, color and plate on the passenger receipt', () => {
+    const baseRuntime = buildReceiptRuntime();
+    const receiptWithVehicle = {
+      ...baseRuntime.lastReceipt,
+      vehicleLabel: 'Honda City',
+      vehicleColor: 'BRANCO',
+      vehiclePlate: 'RJA2D41',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        lastReceipt: receiptWithVehicle,
+        tripHistory: [receiptWithVehicle],
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('passenger-receipt-vehicle-model-color').props.children).toBe(
+      'Honda City · BRANCO'
+    );
+    expect(getByTestId('passenger-receipt-vehicle-plate').props.children).toBe('RJA2D41');
+  });
+
   it('keeps passenger rating available when the completed receipt is missing driverId but runtime still has it', () => {
     const fallbackDriverId = 'driver_fallback_1';
     const completedReceiptWithoutDriverId = {

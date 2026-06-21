@@ -73,7 +73,8 @@ describe('driver-eligibility-service', () => {
           plate: 'LEF1234',
           make: 'Nissan',
           model: 'Leaf',
-          color: 'Branco'
+          color: 'Branco',
+          ocrData: { source: 'crlv_pdf_ocr' }
         },
         'vehicle_active_assignment/vehicle_1': {
           driverId: 'driver_1',
@@ -97,6 +98,9 @@ describe('driver-eligibility-service', () => {
     expect(profile.vehicleMake).toBe('Nissan');
     expect(profile.vehicleModel).toBe('Leaf');
     expect(profile.vehicleColor).toBe('Branco');
+    expect(profile.vehicleIdentitySource).toBe('crlv_pdf_ocr');
+    expect(profile.vehicleIdentityCanonical).toBe(true);
+    expect(profile.vehicleIdentityComplete).toBe(true);
   });
 
   it('normalizes visual vehicle models into operational carType labels', async () => {

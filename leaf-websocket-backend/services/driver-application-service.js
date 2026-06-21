@@ -379,11 +379,41 @@ class DriverApplicationService {
         plate: linkedVehicle.plate || linkedVehicle.vehicleNumber || linkedVehicle.vehiclePlate || null,
         brand: linkedVehicle.brand || linkedVehicle.vehicleMake || null,
         model: linkedVehicle.model || linkedVehicle.vehicleModel || null,
-        year: linkedVehicle.year || linkedVehicle.manufactureYear || null
+        year: linkedVehicle.year || linkedVehicle.manufactureYear || null,
+        color:
+          linkedVehicle.color ||
+          linkedVehicle.vehicleColor ||
+          linkedVehicle.carColor ||
+          userVehicle.color ||
+          userVehicle.vehicleColor ||
+          null,
+        identitySource:
+          linkedVehicle?.ocrData?.source ||
+          userVehicle?.ocrData?.source ||
+          (Object.keys(linkedVehicle).length > 0 ? 'vehicles_catalog' : 'user_vehicles')
       };
     });
 
     const activeUserVehicle = userVehicleEntries.find((vehicle) => vehicle.isActive) || null;
+    const dashboardVehicle = activeUserVehicle
+      ? {
+          make: activeUserVehicle.brand || '',
+          model: activeUserVehicle.model || '',
+          year: activeUserVehicle.year || '',
+          plate: activeUserVehicle.plate || '',
+          color: activeUserVehicle.color || '',
+          identitySource: activeUserVehicle.identitySource || 'user_vehicles'
+        }
+      : userCar
+        ? {
+            make: userCar.carMake || '',
+            model: userCar.carModel || '',
+            year: userCar.carYear || '',
+            plate: userCar.carNumber || '',
+            color: userCar.carColor || '',
+            identitySource: 'cars_legacy'
+          }
+        : null;
     const normalizedKycStatus = user.kycStatus ||
       user.kycOnboarding?.status ||
       (user.kycBlocked === true ? 'blocked' : null) ||
@@ -438,13 +468,7 @@ class DriverApplicationService {
         approved: user.approved === true,
         status: user.status || (user.approved === true ? 'approved' : 'pending')
       },
-      vehicle: userCar ? {
-        make: userCar.carMake || '',
-        model: userCar.carModel || '',
-        year: userCar.carYear || '',
-        plate: userCar.carNumber || '',
-        color: userCar.carColor || ''
-      } : null,
+      vehicle: dashboardVehicle,
       documents: normalizedDocuments,
       status: applicationStatus,
       submissionDate: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
@@ -472,6 +496,9 @@ class DriverApplicationService {
         activeUserVehicleId: activeUserVehicle?.userVehicleId || null,
         activeVehicleId: activeUserVehicle?.vehicleId || null,
         activeVehiclePlate: activeUserVehicle?.plate || user.vehicleNumber || user.carPlate || null,
+        activeVehicleModel: activeUserVehicle?.model || user.vehicleModel || user.carModel || null,
+        activeVehicleColor: activeUserVehicle?.color || user.vehicleColor || user.carColor || null,
+        activeVehicleIdentitySource: activeUserVehicle?.identitySource || null,
         category: activeUserVehicle?.category || user.carType || null,
         acceptPlusWithElite: user.acceptPlusWithElite === true || user.acceptPlusRides === true || user.receivePlusRides === true,
         vehicles: userVehicleEntries

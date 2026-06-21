@@ -5,6 +5,10 @@ const {
     normalizeOperationalCarType,
     resolveOperationalCarTypeLabel
 } = require('../utils/operational-car-type');
+const {
+    buildDriverVehicleIdentity,
+    resolveVehicleIdentitySource
+} = require('../utils/driver-vehicle-identity');
 
 const PROFILE_CACHE_TTL_SECONDS = 90;
 const PROFILE_CACHE_FALLBACK_TTL_SECONDS = Number.parseInt(
@@ -204,7 +208,7 @@ class DriverEligibilityService {
         const cached = await this.redis.hgetall(cacheKey);
 
         if (cached && cached.driverId) {
-            return {
+            const cachedProfile = {
                 driverId,
                 driverApproved: toBoolean(cached.driverApproved, true),
                 vehicleApproved: toBoolean(cached.vehicleApproved, true),
@@ -217,7 +221,15 @@ class DriverEligibilityService {
                 vehicleMake: cached.vehicleMake || fallbackDriverData.vehicleMake || fallbackDriverData.carMake || null,
                 vehicleModel: cached.vehicleModel || fallbackDriverData.vehicleModel || fallbackDriverData.carModel || null,
                 vehicleColor: cached.vehicleColor || fallbackDriverData.vehicleColor || fallbackDriverData.carColor || null,
+                vehicleIdentitySource: cached.vehicleIdentitySource || 'eligibility_cache_legacy',
+                vehicleIdentityCanonical: toBoolean(cached.vehicleIdentityCanonical, false),
                 assignmentConflict: toBoolean(cached.assignmentConflict, false)
+            };
+            const cachedIdentity = buildDriverVehicleIdentity(cachedProfile);
+            return {
+                ...cachedProfile,
+                vehicleIdentityCanonical: cachedIdentity.canonical,
+                vehicleIdentityComplete: cachedIdentity.complete
             };
         }
 
@@ -236,8 +248,11 @@ class DriverEligibilityService {
                 vehicleMake: fallbackDriverData.vehicleMake || fallbackDriverData.carMake || null,
                 vehicleModel: fallbackDriverData.vehicleModel || fallbackDriverData.carModel || null,
                 vehicleColor: fallbackDriverData.vehicleColor || fallbackDriverData.carColor || null,
+                vehicleIdentitySource: 'runtime_fallback',
+                vehicleIdentityCanonical: false,
                 assignmentConflict: false
             };
+            fallbackProfile.vehicleIdentityComplete = buildDriverVehicleIdentity(fallbackProfile).complete;
 
             // Cache curto para evitar repetição de lookups lentos em ondas consecutivas.
             await this.redis.hset(cacheKey, {
@@ -253,6 +268,9 @@ class DriverEligibilityService {
                 vehicleMake: fallbackProfile.vehicleMake || '',
                 vehicleModel: fallbackProfile.vehicleModel || '',
                 vehicleColor: fallbackProfile.vehicleColor || '',
+                vehicleIdentitySource: fallbackProfile.vehicleIdentitySource,
+                vehicleIdentityCanonical: String(fallbackProfile.vehicleIdentityCanonical),
+                vehicleIdentityComplete: String(fallbackProfile.vehicleIdentityComplete),
                 assignmentConflict: String(fallbackProfile.assignmentConflict === true)
             });
             await this.redis.expire(cacheKey, PROFILE_CACHE_FALLBACK_TTL_SECONDS);
@@ -312,6 +330,11 @@ class DriverEligibilityService {
             user?.rating ??
             '5'
         );
+        const vehicleIdentitySource = resolveVehicleIdentitySource({
+            vehicle,
+            activeUserVehicle,
+            user
+        });
 
         const profile = {
             driverId,
@@ -360,8 +383,13 @@ class DriverEligibilityService {
                 user?.vehicleColor ||
                 user?.carColor ||
                 null,
+            vehicleIdentitySource,
+            vehicleIdentityCanonical: ['crlv_pdf_ocr', 'qa_crlv_fixture', 'vehicles_catalog', 'user_vehicles'].includes(
+                vehicleIdentitySource
+            ),
             assignmentConflict
         };
+        profile.vehicleIdentityComplete = buildDriverVehicleIdentity(profile).complete;
 
         await this.redis.hset(cacheKey, {
             driverId: profile.driverId,
@@ -376,6 +404,9 @@ class DriverEligibilityService {
             vehicleMake: profile.vehicleMake || '',
             vehicleModel: profile.vehicleModel || '',
             vehicleColor: profile.vehicleColor || '',
+            vehicleIdentitySource: profile.vehicleIdentitySource,
+            vehicleIdentityCanonical: String(profile.vehicleIdentityCanonical),
+            vehicleIdentityComplete: String(profile.vehicleIdentityComplete),
             assignmentConflict: String(profile.assignmentConflict === true)
         });
         await this.redis.expire(cacheKey, PROFILE_CACHE_TTL_SECONDS);
@@ -502,7 +533,15 @@ class DriverEligibilityService {
             acceptsPlusWithElite: String(profileData.acceptsPlusWithElite ?? true),
             rating: String(profileData.rating ?? 5),
             activeVehicleId: profileData.activeVehicleId || '',
-            vehiclePlate: profileData.vehiclePlate || ''
+            vehiclePlate: profileData.vehiclePlate || '',
+            vehicleMake: profileData.vehicleMake || '',
+            vehicleModel: profileData.vehicleModel || '',
+            vehicleColor: profileData.vehicleColor || '',
+            vehicleIdentitySource: profileData.vehicleIdentitySource || 'runtime_fallback',
+            vehicleIdentityCanonical: String(profileData.vehicleIdentityCanonical === true),
+            vehicleIdentityComplete: String(
+                buildDriverVehicleIdentity(profileData).complete
+            )
         });
         await this.redis.expire(cacheKey, PROFILE_CACHE_TTL_SECONDS);
     }
