@@ -4,6 +4,13 @@ import { fireEvent, render } from "@testing-library/react-native";
 import RobotaxiReceiptScreen from "../src/screens/prototype/RobotaxiReceiptScreen";
 import { usePrototypeRideRuntime } from "../src/screens/prototype/prototypeRideRuntime";
 
+jest.mock("@react-navigation/native", () => ({
+  StackActions: {
+    replace: jest.fn((name, params) => ({ type: "REPLACE", payload: { name, params } })),
+  },
+  useIsFocused: jest.fn(() => true),
+}));
+
 jest.mock("../src/screens/prototype/prototypeRideRuntime", () => ({
   usePrototypeRideRuntime: jest.fn(),
 }));

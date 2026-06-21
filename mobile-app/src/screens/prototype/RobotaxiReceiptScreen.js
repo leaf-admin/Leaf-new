@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import { StackActions } from "@react-navigation/native";
+import { StackActions, useIsFocused } from "@react-navigation/native";
 import { fonts } from "../../theme/runtimeTokens";
 import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
@@ -333,6 +333,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const isScreenFocused = useIsFocused();
   const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
@@ -1009,6 +1010,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         style={styles.receiptCleanContainer}
         testID={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
         accessibilityLabel={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
+        accessibilityElementsHidden={!isScreenFocused}
+        importantForAccessibility={isScreenFocused ? "auto" : "no-hide-descendants"}
+        pointerEvents={isScreenFocused ? "auto" : "none"}
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <View style={styles.receiptCleanMapLayer}>{renderCleanMap()}</View>
