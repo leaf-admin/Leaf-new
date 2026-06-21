@@ -682,15 +682,26 @@ describe('prototype ride screens', () => {
     expect(screen.queryByText('Cancelar corrida')).toBeNull();
   });
 
-  it('keeps the started passenger trip expanded instead of collapsing to compact summary', () => {
+  it('keeps the started passenger trip compact with visible route progress and icon-only actions', () => {
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
 
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
-    expect(screen.queryByLabelText('passenger-trip-compact-summary')).toBeNull();
+    expect(screen.getByLabelText('passenger-trip-compact-summary')).toBeTruthy();
+    expect(screen.getByTestId('passenger-trip-route-progress')).toBeTruthy();
+    expect(screen.getByTestId('passenger-trip-started-action-dock')).toBeTruthy();
+    expect(screen.getByLabelText('Chat')).toBeTruthy();
+    expect(screen.getByLabelText('Compartilhar')).toBeTruthy();
+    expect(screen.getByLabelText('Alterar destino')).toBeTruthy();
+    expect(screen.getByLabelText('Encerrar agora')).toBeTruthy();
     expect(screen.queryByLabelText('passenger-trip-collapse-button')).toBeNull();
     expect(screen.getByLabelText('passenger-trip-screen')).toBeTruthy();
+    expect(screen.queryByText('Chat')).toBeNull();
+    expect(screen.queryByText('Suporte')).toBeNull();
+    expect(screen.queryByText('Compartilhar')).toBeNull();
+    expect(screen.queryByText('Alterar destino')).toBeNull();
+    expect(screen.queryByText('Encerrar agora')).toBeNull();
   });
 
   it('hydrates accepted passenger vehicle and pickup ETA from active ride aliases', () => {

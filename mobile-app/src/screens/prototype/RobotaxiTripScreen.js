@@ -387,7 +387,7 @@ function buildExtensionPaymentData(rideExtension, bookingId) {
   };
 }
 
-function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style }) {
+function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style, disabled = false }) {
   const isWarning = tone === 'warning';
   const isDanger = tone === 'danger';
   return (
@@ -397,10 +397,12 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
       accessibilityLabel={label}
       testID={testID}
       onPress={onPress}
+      disabled={disabled}
       style={[
         styles.iconActionButton,
         isWarning && styles.iconActionButtonWarning,
         isDanger && styles.iconActionButtonDanger,
+        disabled && styles.iconActionButtonDisabled,
         style,
         styles.iconOnlyActionButton
       ]}
@@ -413,7 +415,9 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style 
             ? leafRideColors.dangerText
             : isWarning
               ? leafRideColors.warningText
-              : leafRideColors.leaf
+              : disabled
+                ? leafRideColors.muted
+                : leafRideColors.leaf
         }
       />
     </LeafAnimatedPressable>
@@ -454,7 +458,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [isBusy, setIsBusy] = useState(false);
   const [isExtensionPaymentVisible, setIsExtensionPaymentVisible] = useState(false);
-  const [isTripExpanded, setIsTripExpanded] = useState(true);
+  const [isTripExpanded, setIsTripExpanded] = useState(false);
   const qaAutoConfirmPix = true;
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
   const sheetBottom = SHEET_BOTTOM_OFFSET;
@@ -670,7 +674,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       ''
   );
   const passengerTripSheetExpansionLocked = [
-    'started',
     'operational_interrupted',
     'searching_replacement',
   ].includes(normalizedStatus);
@@ -1151,6 +1154,53 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     Alert.alert('Aviso registrado', 'Avise o motorista pelo chat se precisar de mais alguns instantes.');
   }, []);
 
+  const renderStartedActionDock = (style) => (
+    <View
+      style={[styles.startedActionDock, style]}
+      testID="passenger-trip-started-action-dock"
+      accessibilityLabel="passenger-trip-started-action-dock"
+    >
+      <IconActionButton
+        icon="shield-checkmark-outline"
+        label="SOS"
+        tone="warning"
+        onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
+        style={styles.startedDockAction}
+        testID={passengerCardFieldTestIDs.safety_action}
+      />
+      <IconActionButton
+        icon="chatbubble-ellipses-outline"
+        label="Chat"
+        onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+        style={styles.startedDockAction}
+        testID="passenger-trip-message-button"
+      />
+      <IconActionButton
+        icon="share-social-outline"
+        label="Compartilhar"
+        onPress={handleShareTrip}
+        style={styles.startedDockAction}
+        testID={passengerCardFieldTestIDs.share_trip_action}
+      />
+      <IconActionButton
+        icon="navigate-outline"
+        label="Alterar destino"
+        onPress={handleOpenExtensionFlow}
+        style={styles.startedDockAction}
+        testID="passenger-trip-change-destination-button"
+      />
+      <IconActionButton
+        icon="flag-outline"
+        label={isBusy ? 'Encerrando...' : 'Encerrar agora'}
+        tone="danger"
+        onPress={handleEndTripEarly}
+        disabled={isBusy}
+        style={styles.startedDockAction}
+        testID="passenger-trip-end-early-button"
+      />
+    </View>
+  );
+
   const renderPassengerCardStateHeader = () => (
     <>
       <View style={styles.cardStateHeader}>
@@ -1266,32 +1316,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           >
             {vehicleColorLabel}
           </Text>
-          <View style={styles.passengerSecondaryActionsRow}>
-            <IconActionButton
-              icon="shield-checkmark-outline"
-              label="SOS"
-              onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
-              style={styles.passengerSecondaryActionButton}
-              testID="passenger-trip-support-button"
-            />
-            <IconActionButton
-              icon="chatbubble-ellipses-outline"
-              label="Mensagem"
-              onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
-              style={styles.passengerSecondaryActionButton}
-              testID="passenger-trip-message-button"
-            />
-          </View>
-          <View style={styles.passengerPrimaryActionRow}>
-            <LeafButton
-              label="Compartilhar"
-              tone="primary"
-              onPress={handleShareTrip}
-              style={styles.startedShareButton}
-              testID="passenger-trip-share-button"
-              accessibilityLabel="passenger-trip-share-button"
-            />
-          </View>
+          {renderStartedActionDock(styles.startedActionDockCompact)}
         </>
       ) : isArrived ? (
         <>
@@ -1605,6 +1630,20 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             >
               {destination}
             </Text>
+            {isStarted ? (
+              <LeafRouteProgress
+                originLabel={pickupPointLabel}
+                destinationLabel={destination}
+                progress={routeProgress}
+                progressKey={liveRouteKey || 'passenger-trip-route'}
+                arrivalLabel={arrivalClockLabel || resolvedTripArrivalText || compactEtaValue}
+                style={styles.tripRouteProgress}
+                testID="passenger-trip-route-progress"
+                fieldTestIDs={{
+                  progress: passengerCardFieldTestIDs.route_progress,
+                }}
+              />
+            ) : null}
             {resolvedTripArrivalText ? (
               <Text style={styles.driverText}>{resolvedTripArrivalText}</Text>
             ) : null}
@@ -1622,12 +1661,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             </Text>
             {isStarted ? (
               <>
-                <Text
-                  style={styles.hiddenText}
-                  testID={passengerCardFieldTestIDs.route_progress}
-                >
-                  {String(routeProgress)}
-                </Text>
                 <Text
                   style={styles.hiddenText}
                   testID={passengerCardFieldTestIDs.driver_photo}
@@ -1793,84 +1826,38 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               </View>
             ) : null}
 
-            <View style={styles.actionsRow}>
-              <TouchableOpacity
-                style={styles.secondaryAction}
-                activeOpacity={0.86}
-                onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
-              >
-                <Ionicons
-                  name="chatbubble-ellipses-outline"
-                  size={leafButtonMetrics.iconSize}
-                  color={color.text.primary}
-                />
-                <Text style={styles.secondaryActionText}>Chat</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.secondaryAction}
-                activeOpacity={0.86}
-                onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
-              >
-                <Ionicons
-                  name="shield-checkmark-outline"
-                  size={leafButtonMetrics.iconSize}
-                  color={color.text.primary}
-                />
-                <Text style={styles.secondaryActionText}>Suporte</Text>
-              </TouchableOpacity>
-            </View>
-
-            {isStarted ? (
+            {!isStarted ? (
               <View style={styles.actionsRow}>
                 <TouchableOpacity
                   style={styles.secondaryAction}
                   activeOpacity={0.86}
-                  onPress={handleShareTrip}
-                  testID={passengerCardFieldTestIDs.share_trip_action}
-                  accessibilityLabel={passengerCardFieldTestIDs.share_trip_action}
+                  onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
                 >
                   <Ionicons
-                    name="share-social-outline"
+                    name="chatbubble-ellipses-outline"
                     size={leafButtonMetrics.iconSize}
                     color={color.text.primary}
                   />
-                  <Text style={styles.secondaryActionText}>Compartilhar</Text>
+                  <Text style={styles.secondaryActionText}>Chat</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.secondaryAction}
                   activeOpacity={0.86}
-                  onPress={handleOpenExtensionFlow}
-                  testID="passenger-trip-change-destination-button"
-                  accessibilityLabel="passenger-trip-change-destination-button"
+                  onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
                 >
                   <Ionicons
-                    name="navigate-outline"
+                    name="shield-checkmark-outline"
                     size={leafButtonMetrics.iconSize}
                     color={color.text.primary}
                   />
-                  <Text style={styles.secondaryActionText}>Alterar destino</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.secondaryAction, styles.warningAction]}
-                  activeOpacity={0.86}
-                  onPress={handleEndTripEarly}
-                  disabled={isBusy}
-                  testID="passenger-trip-end-early-button"
-                  accessibilityLabel="passenger-trip-end-early-button"
-                >
-                  <Ionicons
-                    name="flag-outline"
-                    size={leafButtonMetrics.iconSize}
-                    color="#8A1F2B"
-                  />
-                  <Text style={[styles.secondaryActionText, styles.warningActionText]}>
-                    {isBusy ? 'Encerrando...' : 'Encerrar agora'}
-                  </Text>
+                  <Text style={styles.secondaryActionText}>Suporte</Text>
                 </TouchableOpacity>
               </View>
+            ) : null}
+
+            {isStarted ? (
+              renderStartedActionDock(styles.startedActionDockExpanded)
             ) : (
               <TouchableOpacity
                 style={styles.cancelAction}
@@ -2004,6 +1991,9 @@ const styles = StyleSheet.create({
   iconActionButtonDanger: {
     backgroundColor: leafRideColors.danger,
     borderColor: '#F5CBD2'
+  },
+  iconActionButtonDisabled: {
+    opacity: 0.5
   },
   cardStateDivider: {
     marginTop: 14,
@@ -2257,6 +2247,25 @@ const styles = StyleSheet.create({
   passengerPrimaryActionRow: {
     marginTop: 10
   },
+  startedActionDock: {
+    minHeight: leafButtonMetrics.height + 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8
+  },
+  startedActionDockCompact: {
+    marginTop: 16
+  },
+  startedActionDockExpanded: {
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(91,105,86,0.1)',
+    paddingTop: 12
+  },
+  startedDockAction: {
+    backgroundColor: '#FFFFFF'
+  },
   acceptedAction: {
     width: 94
   },
@@ -2270,11 +2279,6 @@ const styles = StyleSheet.create({
   },
   arrivedPrimary: {
     width: '100%',
-    minHeight: leafButtonMetrics.height,
-    borderRadius: leafButtonMetrics.radius
-  },
-  startedShareButton: {
-    flex: 1,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius
   },
