@@ -438,6 +438,11 @@ function normalizeInitialPricingQuote(value) {
       estimatedFare,
       grossEstimatedFare,
     },
+    carType: String(value.carType || rawQuote.carType || "").trim() || null,
+    planId:
+      String(value.planId || value.categoryId || rawQuote.planId || rawQuote.categoryId || "")
+        .trim()
+        .toLowerCase() || null,
     quoteSessionId:
       String(value.quoteSessionId || rawQuote.quoteSessionId || "").trim() ||
       null,
@@ -450,6 +455,34 @@ function normalizeInitialPricingQuote(value) {
       Number(value.expiresAt) ||
       Number(rawQuote.expiresAt) ||
       createdAt + PASSENGER_QUOTE_VALIDITY_MS,
+  };
+}
+
+function buildPaymentQuoteLockFromInitialPricingQuote(initialPricingQuote) {
+  if (!initialPricingQuote?.quote) {
+    return null;
+  }
+
+  const fare = normalizeLockedQuoteNumber(
+    initialPricingQuote.quote.estimatedFare ?? initialPricingQuote.fare,
+  );
+  if (!fare) {
+    return null;
+  }
+
+  const grossEstimatedFare =
+    normalizeLockedQuoteNumber(
+      initialPricingQuote.quote.grossEstimatedFare ??
+        initialPricingQuote.grossEstimatedFare,
+      fare,
+    ) || fare;
+
+  return {
+    fare,
+    grossEstimatedFare,
+    discountBenefit: initialPricingQuote.quote.discountBenefit || null,
+    quoteSessionId: initialPricingQuote.quoteSessionId || null,
+    pricingQuoteRequestKey: null,
   };
 }
 
@@ -565,7 +598,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   );
   const [pricingQuoteLoading, setPricingQuoteLoading] = useState(false);
   const [pricingQuoteError, setPricingQuoteError] = useState("");
-  const [paymentQuoteLock, setPaymentQuoteLock] = useState(null);
+  const [paymentQuoteLock, setPaymentQuoteLock] = useState(() =>
+    buildPaymentQuoteLockFromInitialPricingQuote(initialPricingQuote),
+  );
   const [submittingRide, setSubmittingRide] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(SEARCH_FALLBACK_HEIGHT);
   const [recentDestinations, setRecentDestinations] = useState([]);
@@ -1778,6 +1813,27 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     fareQuoteRouteKey,
     selectedPlanData?.title,
   ]);
+  const initialPricingQuotePlanId = useMemo(
+    () =>
+      getPlanIdFromCarName(
+        initialPricingQuote?.planId ||
+          initialPricingQuote?.carType ||
+          initialPricingQuote?.quote?.carType ||
+          "",
+      ),
+    [
+      initialPricingQuote?.carType,
+      initialPricingQuote?.planId,
+      initialPricingQuote?.quote?.carType,
+    ],
+  );
+  const initialPricingQuoteMatchesCurrentSelection = Boolean(
+    initialPricingQuote?.quote &&
+      initialPricingQuote.routeKey === fareQuoteRouteKey &&
+      initialPricingQuote.expiresAt > Date.now() &&
+      (!initialPricingQuotePlanId ||
+        initialPricingQuotePlanId === selectedPlanData?.id),
+  );
 
   useEffect(() => {
     if (
@@ -1822,12 +1878,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       return;
     }
 
-    if (
-      initialPricingQuote?.quote &&
-      initialPricingQuote.routeKey === fareQuoteRouteKey &&
-      initialPricingQuote.quoteSessionId === fareQuoteLock?.quoteSessionId &&
-      initialPricingQuote.expiresAt > Date.now()
-    ) {
+    if (initialPricingQuoteMatchesCurrentSelection) {
       selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
         quote: initialPricingQuote.quote,
         expiresAt: initialPricingQuote.expiresAt,
@@ -1914,6 +1965,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     fareQuoteLockMatchesRoute,
     isExtensionFlow,
     initialPricingQuote,
+    initialPricingQuoteMatchesCurrentSelection,
     resolvedPickupAddress,
     resolvedPickupCoordinate?.latitude,
     resolvedPickupCoordinate?.longitude,
@@ -2463,16 +2515,27 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
-      setPaymentQuoteLock({
-        fare: Number(selectedPlanFare),
-        grossEstimatedFare:
-          Number.isFinite(Number(selectedGrossEstimatedFare)) &&
-          Number(selectedGrossEstimatedFare) > 0
-            ? Number(selectedGrossEstimatedFare)
-            : Number(selectedPlanFare),
-        discountBenefit: selectedDiscountBenefit,
-        quoteSessionId: fareQuoteLock?.quoteSessionId || null,
-        pricingQuoteRequestKey: selectedPricingQuoteRequestKey || null,
+      setPaymentQuoteLock((current) => {
+        const currentFare = Number(current?.fare);
+        if (
+          initialPricingQuoteMatchesCurrentSelection &&
+          Number.isFinite(currentFare) &&
+          currentFare > 0
+        ) {
+          return current;
+        }
+
+        return {
+          fare: Number(selectedPlanFare),
+          grossEstimatedFare:
+            Number.isFinite(Number(selectedGrossEstimatedFare)) &&
+            Number(selectedGrossEstimatedFare) > 0
+              ? Number(selectedGrossEstimatedFare)
+              : Number(selectedPlanFare),
+          discountBenefit: selectedDiscountBenefit,
+          quoteSessionId: fareQuoteLock?.quoteSessionId || null,
+          pricingQuoteRequestKey: selectedPricingQuoteRequestKey || null,
+        };
       });
       setPlanAvailabilityById((current) => ({
         ...current,
@@ -2498,6 +2561,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     destinationInfo?.address,
     destinationInfo?.name,
     isExtensionFlow,
+    initialPricingQuoteMatchesCurrentSelection,
     navigation,
     pickupLocationPayload,
     preferenceModalVisible,

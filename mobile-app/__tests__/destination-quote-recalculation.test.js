@@ -669,6 +669,116 @@ describe("RobotaxiDestinationScreen", () => {
     });
   });
 
+  it("keeps the home quote locked through confirmation and PIX even if context changes", async () => {
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 80.39,
+      grossEstimatedFare: 80.39,
+      pricingPayload: {},
+    });
+
+    const destination = {
+      id: "destination_copacabana_palace",
+      name: "Copacabana Palace",
+      address: "Av. Atlântica, 1702 - Copacabana, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9673111,
+        longitude: -43.1789541,
+      },
+      eta: "4",
+    };
+    const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "4, Rua das Pastorinhas",
+      currentCoordinate: {
+        latitude: -22.920772,
+        longitude: -43.4060272,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 80.39,
+      selectedDestination: destination,
+      tripDistanceKm: 23.8,
+      tripDurationMin: 22,
+      tripArrivalText: "22:48",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={{
+          navigate: jest.fn(),
+          replace: jest.fn(),
+          canGoBack: jest.fn(() => false),
+          goBack: jest.fn(),
+        }}
+        route={{
+          params: {
+            initialPickupCoordinate: {
+              latitude: -22.920781,
+              longitude: -43.406005,
+            },
+            initialPickupAddress: "4, Rua das Pastorinhas",
+            initialSelectedDestination: destination,
+            initialSelectedPlan: "plus",
+            startAtConfirmation: true,
+            skipDestinationSearch: true,
+            initialPricingQuote: {
+              quote: {
+                estimatedFare: 81.59,
+                grossEstimatedFare: 81.59,
+                carType: "leaf_plus",
+                pricingPayload: {},
+              },
+              planId: "plus",
+              carType: "Leaf Plus",
+              quoteSessionId: "passenger_home_quote_lock_1",
+              routeKey: "-22.921|-43.406|-22.967|-43.179",
+              distanceKm: 23.8,
+              durationMin: 22,
+              arrivalTime: "22:48",
+              expiresAt: Date.now() + 120000,
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/R\$ 81,59/)).toBeTruthy();
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+    });
+
+    expect(fetchDynamicPricingQuote).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(checkRideAvailability).toHaveBeenCalledWith(
+        expect.objectContaining({
+          vehicle: "Leaf Plus",
+        }),
+        expect.objectContaining({
+          forceRefresh: true,
+        }),
+      );
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("81.59");
+    });
+  });
+
   it("opens the post-PIX preference countdown before sending the ride request", async () => {
     const destination = {
       id: "destination_shopping_leblon",
