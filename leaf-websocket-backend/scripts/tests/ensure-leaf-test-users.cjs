@@ -20,6 +20,66 @@ function titleFromPhone(phone, fallback) {
   return `${fallback} ${suffix}`;
 }
 
+function resolveTestVehicleIdentity({ currentVehicle = {}, carPlate, nowIso, env = process.env }) {
+  const currentOcrData = currentVehicle.ocrData && typeof currentVehicle.ocrData === 'object'
+    ? currentVehicle.ocrData
+    : null;
+  const vehicleIdentitySource = currentOcrData?.source ||
+    (currentOcrData ? 'ocr_legacy_unverified' : env.TEST_DRIVER_VEHICLE_IDENTITY_SOURCE || 'qa_crlv_fixture');
+  const isQaFixture = vehicleIdentitySource === 'qa_crlv_fixture';
+  const ocrVehicle = currentOcrData?.data || {};
+  const vehicleMake =
+    currentVehicle.make || currentVehicle.brand || ocrVehicle.make || ocrVehicle.marca ||
+    (isQaFixture ? env.TEST_DRIVER_VEHICLE_MAKE || 'Toyota' : '');
+  const vehicleModel =
+    currentVehicle.model || currentVehicle.vehicleModel || ocrVehicle.model || ocrVehicle.modelo ||
+    (isQaFixture ? env.TEST_DRIVER_VEHICLE_MODEL || 'Prius' : '');
+  const vehicleColor =
+    currentVehicle.color || currentVehicle.vehicleColor || currentVehicle.carColor ||
+    ocrVehicle.color || ocrVehicle.cor ||
+    (isQaFixture ? env.TEST_DRIVER_VEHICLE_COLOR || 'PRETO' : '');
+  const vehicleOcrData = currentOcrData
+    ? (isQaFixture ? {
+        ...currentOcrData,
+        source: vehicleIdentitySource,
+        updatedAt: nowIso,
+        metadata: {
+          ...(currentOcrData.metadata || {}),
+          fixture: true,
+          provisioner: 'ensure-leaf-test-users'
+        },
+        data: {
+          ...(currentOcrData.data || {}),
+          plate: carPlate,
+          make: vehicleMake,
+          model: vehicleModel,
+          color: vehicleColor
+        }
+      } : currentOcrData)
+    : (isQaFixture ? {
+      source: vehicleIdentitySource,
+      updatedAt: nowIso,
+      metadata: {
+        fixture: true,
+        provisioner: 'ensure-leaf-test-users'
+      },
+      data: {
+        plate: carPlate,
+        make: vehicleMake,
+        model: vehicleModel,
+        color: vehicleColor
+      }
+    } : null);
+
+  return {
+    vehicleMake,
+    vehicleModel,
+    vehicleColor,
+    vehicleIdentitySource,
+    vehicleOcrData
+  };
+}
+
 async function ensureAuthUserByPhone(auth, phone, displayName) {
   try {
     const existing = await auth.getUserByPhoneNumber(phone);
@@ -91,6 +151,16 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
   const carPlate = (current.carPlate || current.vehicleNumber || current.vehiclePlate || `TES${suffix}`).toUpperCase();
   const carType = current.carType || 'Leaf Plus';
   const vehicleId = current.vehicleId || `test_vehicle_${uid.slice(0, 12)}`;
+  const vehicleRef = db.ref(`vehicles/${vehicleId}`);
+  const vehicleSnapshot = await vehicleRef.once('value');
+  const currentVehicle = vehicleSnapshot.val() || {};
+  const {
+    vehicleMake,
+    vehicleModel,
+    vehicleColor,
+    vehicleIdentitySource,
+    vehicleOcrData
+  } = resolveTestVehicleIdentity({ currentVehicle, carPlate, nowIso });
 
   await userRef.update({
     uid,
@@ -123,13 +193,21 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     lastLogin: nowIso
   });
 
-  await db.ref(`vehicles/${vehicleId}`).update({
+  await vehicleRef.update({
     id: vehicleId,
     ownerId: uid,
     driver: uid,
     plate: carPlate,
     vehicleNumber: carPlate,
     carType,
+    make: vehicleMake,
+    brand: vehicleMake,
+    model: vehicleModel,
+    vehicleModel,
+    color: vehicleColor,
+    vehicleColor,
+    carColor: vehicleColor,
+    ...(vehicleOcrData ? { ocrData: vehicleOcrData } : {}),
     status: 'approved',
     approved: true,
     active: true,
@@ -162,6 +240,14 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     vehicleId,
     plate: carPlate,
     vehicleNumber: carPlate,
+    make: vehicleMake,
+    brand: vehicleMake,
+    model: vehicleModel,
+    vehicleModel,
+    color: vehicleColor,
+    vehicleColor,
+    carColor: vehicleColor,
+    ...(vehicleOcrData ? { ocrData: vehicleOcrData } : {}),
     status: 'approved',
     approved: true,
     isActive: true,
@@ -291,7 +377,16 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     updatedAt: nowIso
   }, { merge: true });
 
-  return { vehicleId, userVehicleId, carPlate, carType };
+  return {
+    vehicleId,
+    userVehicleId,
+    carPlate,
+    carType,
+    vehicleMake,
+    vehicleModel,
+    vehicleColor,
+    vehicleIdentitySource
+  };
 }
 
 async function main() {
@@ -382,7 +477,11 @@ async function main() {
   await Promise.all(admin.apps.map((app) => app.delete().catch(() => undefined)));
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({ ok: false, error: error.message, stack: error.stack }, null, 2));
-  process.exit(1);
-});
+module.exports = { ensureDriverProfile, resolveTestVehicleIdentity };
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(JSON.stringify({ ok: false, error: error.message, stack: error.stack }, null, 2));
+    process.exit(1);
+  });
+}

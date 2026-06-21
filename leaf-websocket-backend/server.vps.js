@@ -140,6 +140,8 @@ const {
     hasRideDispatchPreferences
 } = require('./services/ride-dispatch-preference-service');
 const driverEligibilityService = require('./services/driver-eligibility-service');
+const { buildDriverVehicleIdentity } = require('./utils/driver-vehicle-identity');
+const { resolveAcceptedDriverIdentity } = require('./utils/accepted-driver-identity');
 const fcmService = new FCMService(); // Singleton local ao worker
 // =========================================================================================
 
@@ -2981,7 +2983,20 @@ const saveDriverLocation = async (
                             ? { vehiclePlate: resolvedProfile.vehiclePlate }
                             : existingDriverState?.vehiclePlate
                               ? { vehiclePlate: existingDriverState.vehiclePlate }
-                              : {})
+                              : {}),
+                        vehicleMake: resolvedProfile.vehicleMake || existingDriverState?.vehicleMake || '',
+                        vehicleModel: resolvedProfile.vehicleModel || existingDriverState?.vehicleModel || '',
+                        vehicleColor: resolvedProfile.vehicleColor || existingDriverState?.vehicleColor || '',
+                        vehicleIdentitySource:
+                            resolvedProfile.vehicleIdentitySource ||
+                            existingDriverState?.vehicleIdentitySource ||
+                            '',
+                        vehicleIdentityCanonical: String(
+                            resolvedProfile.vehicleIdentityCanonical === true
+                        ),
+                        vehicleIdentityComplete: String(
+                            resolvedProfile.vehicleIdentityComplete === true
+                        )
                     };
                 }
             } catch (profileError) {
@@ -6855,41 +6870,32 @@ io.on('connection', async (socket) => {
                     driverRedisProfile = {};
                 }
 
-                const driverNamePayload = String(
-                    driverData?.driver?.name ||
-                    driverData?.driverName ||
-                    driverRedisProfile?.name ||
-                    driverRedisProfile?.driverName ||
-                    driverRedisProfile?.displayName ||
-                    socket?.driverName ||
-                    'Motorista Leaf'
-                ).trim();
-                const driverVehicleModel = String(
-                    driverData?.driver?.vehicle?.model ||
-                    driverData?.vehicle?.model ||
-                    driverData?.driver?.vehicle?.type ||
-                    driverData?.vehicle?.type ||
-                    driverData?.carType ||
-                    driverRedisProfile?.vehicleModel ||
-                    driverRedisProfile?.model ||
-                    driverRedisProfile?.carModel ||
-                    driverRedisProfile?.carType ||
-                    driverRedisProfile?.vehicleType ||
-                    driverRedisProfile?.vehicleCategory ||
-                    socket?.vehicleModel ||
-                    ''
-                ).trim();
-                const driverVehiclePlate = String(
-                    driverData?.driver?.vehicle?.plate ||
-                    driverData?.vehicle?.plate ||
-                    driverData?.vehiclePlate ||
-                    driverData?.carPlate ||
-                    driverRedisProfile?.vehiclePlate ||
-                    driverRedisProfile?.vehicleNumber ||
-                    driverRedisProfile?.carPlate ||
-                    socket?.vehiclePlate ||
-                    ''
-                ).trim();
+                let eligibilityProfile = {};
+                try {
+                    eligibilityProfile = await driverEligibilityService.resolveDriverProfile(
+                        driverId,
+                        driverRedisProfile
+                    );
+                } catch (driverIdentityError) {
+                    logStructured('warn', 'acceptRide continuou sem perfil de elegibilidade hidratado', {
+                        driverId,
+                        bookingId: bookingIdToUse,
+                        eventType: 'acceptRide',
+                        error: driverIdentityError.message
+                    });
+                }
+
+                const acceptedDriverIdentity = resolveAcceptedDriverIdentity({
+                    driverData,
+                    redisProfile: driverRedisProfile,
+                    eligibilityProfile,
+                    socket
+                });
+                const driverNamePayload = acceptedDriverIdentity.name;
+                const driverVehicleMake = acceptedDriverIdentity.vehicle.make;
+                const driverVehicleModel = acceptedDriverIdentity.vehicle.model;
+                const driverVehiclePlate = acceptedDriverIdentity.vehicle.plate;
+                const driverVehicleColor = acceptedDriverIdentity.vehicle.color;
                 const acceptedLat = toFiniteNumber(
                     driverData?.driver?.location?.lat ??
                     driverData?.location?.lat ??
@@ -6947,15 +6953,19 @@ io.on('connection', async (socket) => {
                         id: driverId,
                         name: driverNamePayload || 'Motorista Leaf',
                         vehicle: {
+                            make: driverVehicleMake,
                             model: driverVehicleModel,
-                            plate: driverVehiclePlate
+                            plate: driverVehiclePlate,
+                            color: driverVehicleColor
                         },
                         ...(acceptedLocation ? { location: acceptedLocation } : {})
                     },
                     ...(acceptedLocation ? { location: acceptedLocation } : {}),
                     vehicle: {
+                        make: driverVehicleMake,
                         model: driverVehicleModel,
-                        plate: driverVehiclePlate
+                        plate: driverVehiclePlate,
+                        color: driverVehicleColor
                     }
                 };
 
@@ -6966,6 +6976,13 @@ io.on('connection', async (socket) => {
                         driverId,
                         acceptedAt: acceptRideResponse.timestamp,
                         extraPatch: {
+                            driverName: driverNamePayload || undefined,
+                            vehicleMake: driverVehicleMake || undefined,
+                            vehicleModel: driverVehicleModel || undefined,
+                            vehiclePlate: driverVehiclePlate || undefined,
+                            vehicleColor: driverVehicleColor || undefined,
+                            vehicleIdentitySource:
+                                eligibilityProfile?.vehicleIdentitySource || undefined,
                             driverAcceptedLocation: acceptedLocation ? JSON.stringify(acceptedLocation) : undefined,
                             driverDistanceToPickupKm: Number.isFinite(Number(driverDistanceToPickupKm))
                                 ? String(driverDistanceToPickupKm)
@@ -10283,6 +10300,24 @@ io.on('connection', async (socket) => {
                 });
             }
 
+            let vehicleIdentity = null;
+            if (resolvedIsOnline) {
+                try {
+                    const profile = await driverEligibilityService.resolveDriverProfile(driverId, {
+                        ...(driverData || {}),
+                        vehiclePlate: socket.vehiclePlate || driverData?.vehiclePlate || ''
+                    });
+                    vehicleIdentity = buildDriverVehicleIdentity(profile);
+                } catch (identityError) {
+                    logStructured('warn', 'Status online continuou sem identidade veicular hidratada', {
+                        service: 'websocket',
+                        operation: 'setDriverStatus',
+                        driverId,
+                        error: identityError.message
+                    });
+                }
+            }
+
             // Emitir confirmação
             socket.emit('driverStatusUpdated', {
                 success: true,
@@ -10299,6 +10334,7 @@ io.on('connection', async (socket) => {
                         expiresAt: resolvedIsOnline ? requestedDestinationMode.expiresAt : ''
                     }
                     : undefined,
+                vehicleIdentity,
                 message: 'Status atualizado com sucesso'
             });
             recordRealtimeMetricSafe('set_driver_status', resolvedIsOnline ? 'success_online' : 'success_offline');

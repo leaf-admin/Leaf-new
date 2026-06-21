@@ -456,6 +456,8 @@ function registerSocketAcceptRideHandler({
                             vehiclePlate: acceptedDriverIdentity.vehicle.plate || undefined,
                             vehicleColor: acceptedDriverIdentity.vehicle.color || undefined,
                             vehicleCategory: acceptedDriverIdentity.vehicle.category || undefined,
+                            vehicleIdentitySource:
+                                eligibilityProfile?.vehicleIdentitySource || undefined,
                             driverAcceptedLocation: acceptedLocation ? JSON.stringify(acceptedLocation) : undefined,
                             driverDistanceToPickupKm: Number.isFinite(driverDistanceToPickupKm)
                                 ? String(driverDistanceToPickupKm)

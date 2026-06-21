@@ -183,4 +183,56 @@ describe('driver-application-service', () => {
       }
     });
   });
+
+  it('prefers the active canonical CRLV vehicle over the legacy cars mirror', async () => {
+    const application = await service.buildApplication('driver_vehicle', {
+      db: {},
+      carsByDriverId: {
+        driver_vehicle: [{
+          carMake: 'Legacy',
+          carModel: 'Car',
+          carNumber: 'OLD0001',
+          carColor: 'Cinza',
+        }],
+      },
+      userVehiclesRaw: {
+        uv_1: {
+          vehicleId: 'vehicle_1',
+          isActive: true,
+          status: 'approved',
+          approved: true,
+        },
+      },
+      vehiclesRaw: {
+        vehicle_1: {
+          brand: 'Honda',
+          model: 'City',
+          plate: 'RJA2D41',
+          color: 'BRANCO',
+          year: 2024,
+          ocrData: { source: 'crlv_pdf_ocr' },
+        },
+      },
+      userData: {
+        usertype: 'driver',
+        approved: true,
+        firstName: 'Maria',
+      },
+    });
+
+    expect(application.vehicle).toEqual({
+      make: 'Honda',
+      model: 'City',
+      year: 2024,
+      plate: 'RJA2D41',
+      color: 'BRANCO',
+      identitySource: 'crlv_pdf_ocr',
+    });
+    expect(application.vehicleConfig).toEqual(expect.objectContaining({
+      activeVehiclePlate: 'RJA2D41',
+      activeVehicleModel: 'City',
+      activeVehicleColor: 'BRANCO',
+      activeVehicleIdentitySource: 'crlv_pdf_ocr',
+    }));
+  });
 });
