@@ -5239,6 +5239,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       initialSelectedPlan: homeSelectedCategory?.id || homeSelectedCategoryId || 'plus',
       initialPricingQuote: {
         quote: homeBackendQuote.quote,
+        planId: homeSelectedCategory?.id || homeSelectedCategoryId || 'plus',
+        carType: selectedHomeRateCard.title,
         quoteSessionId: homeBackendQuote.quoteSessionId,
         routeKey: homeDestinationFareQuoteRouteKey,
         distanceKm: homeBackendQuote.distanceKm,
@@ -5264,6 +5266,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeSelectedDestination,
     navigation,
     selectedHomeBackendQuoteReady,
+    selectedHomeRateCard.title,
   ]);
 
   useEffect(() => {
