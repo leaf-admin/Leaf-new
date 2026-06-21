@@ -115,6 +115,13 @@ const HOME_PICKUP_SEARCH_DEBOUNCE_MS = 360;
 const HOME_PICKUP_REVERSE_GEOCODE_DEBOUNCE_MS = 900;
 const HOME_PICKUP_REVERSE_GEOCODE_TIMEOUT_MS = 5500;
 const HOME_PICKUP_REVERSE_GEOCODE_PRECISION = 5;
+const PASSENGER_QUOTE_COORDINATE_PRECISION = Math.max(
+  2,
+  Number.parseInt(
+    process.env.EXPO_PUBLIC_QUOTE_LOCK_COORDINATE_PRECISION || '3',
+    10,
+  ) || 3,
+);
 let hasPrototypeHomeSurfaceHydratedInSession = IS_TEST_ENV;
 const DEFAULT_USER_COORDINATE = {
   latitude: PROTOTYPE_REGION.latitude,
@@ -649,16 +656,16 @@ function buildHomeRoutePreviewKey(origin, destination) {
   return `${originKey}|${destinationKey}`;
 }
 
-function buildDestinationFareQuoteRouteKey(origin, destination) {
+export function buildDestinationFareQuoteRouteKey(origin, destination) {
   if (!isFiniteCoordinate(origin) || !isFiniteCoordinate(destination)) {
     return '';
   }
 
   return [
-    Number(origin.latitude).toFixed(5),
-    Number(origin.longitude).toFixed(5),
-    Number(destination.latitude).toFixed(5),
-    Number(destination.longitude).toFixed(5),
+    Number(origin.latitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(origin.longitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(destination.latitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
+    Number(destination.longitude).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION),
   ].join('|');
 }
 

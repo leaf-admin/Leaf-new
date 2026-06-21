@@ -3,6 +3,7 @@ import { Alert, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiHomeScreen, {
+  buildDestinationFareQuoteRouteKey,
   buildTrafficSegmentsFromDirectionsRoute,
   resolveHomeCategoryFarePresentation,
 } from '../src/screens/prototype/RobotaxiHomeScreen';
@@ -334,6 +335,15 @@ describe('driver online toggle', () => {
       fare: null,
       priceLabel: '--',
     });
+  });
+
+  it('uses the passenger quote lock precision for the destination route key', () => {
+    expect(
+      buildDestinationFareQuoteRouteKey(
+        { latitude: -22.9207879, longitude: -43.406031 },
+        { latitude: -22.8710707, longitude: -43.3360867 },
+      ),
+    ).toBe('-22.921|-43.406|-22.871|-43.336');
   });
 
   it('renders full-route traffic when only route totals carry congestion timing', () => {
