@@ -52,6 +52,7 @@ const SECOND_LAUNCH_WAIT_MS = Number(process.env.SECOND_LAUNCH_WAIT_MS || 12000)
 const QUOTE_STABILITY_WAIT_MS = Number(process.env.QUOTE_STABILITY_WAIT_MS || 18000);
 const PAYMENT_WAIT_MS = Number(process.env.REAL_SMOKE_PAYMENT_WAIT_MS || 30000);
 const CAPTURE_XML_SETTLE_MS = Number(process.env.REAL_SMOKE_CAPTURE_XML_SETTLE_MS || 700);
+const CAPTURE_XML_RETRY_MS = Number(process.env.REAL_SMOKE_CAPTURE_XML_RETRY_MS || 1200);
 const RUN_ID = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
 const artifactsDir = path.join(mobileDir, "test-results", `android_real_smoke_${RUN_ID}`);
 const phoneScreenshotPath = "/sdcard/leaf-real-smoke-screen.png";
@@ -1048,8 +1049,16 @@ async function verifyActiveTripMapTap(current, steps) {
 
   tapScreenPoint(540, 420, "mapa durante corrida ativa");
   await sleep(1800);
-  const afterTap = await captureStep("10-active-trip-after-map-tap");
+  let afterTap = await captureStep("10-active-trip-after-map-tap");
   steps.push(afterTap);
+  if (afterTap.screen === "blank" && afterTap.nodes.length === 0) {
+    await sleep(1500);
+    const retry = await captureStep("10-active-trip-after-map-tap-retry");
+    steps.push(retry);
+    if (retry.screen !== "blank" || retry.nodes.length > 0) {
+      afterTap = retry;
+    }
+  }
   const ok = ["passenger_active_trip", "passenger_receipt", "passenger_rating", "passenger_rating_success"].includes(
     afterTap.screen,
   );
@@ -1285,15 +1294,27 @@ async function captureStep(name) {
   if (CAPTURE_XML_SETTLE_MS > 0) {
     await sleep(CAPTURE_XML_SETTLE_MS);
   }
-  adbRun(["shell", "rm", "-f", phoneDumpPath], { allowFailure: true });
-  if (fs.existsSync(dump)) fs.unlinkSync(dump);
-  const dumpResult = adbRun(["shell", "uiautomator", "dump", phoneDumpPath], { allowFailure: true });
-  if (dumpResult.status === 0) {
-    adbRun(["pull", phoneDumpPath, dump], { allowFailure: true });
-  } else {
-    warnings.push(`Falha ao capturar XML em ${name}; evitando reutilizar dump antigo.`);
+  let xml = "";
+  let lastDumpStatus = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    adbRun(["shell", "rm", "-f", phoneDumpPath], { allowFailure: true });
+    if (fs.existsSync(dump)) fs.unlinkSync(dump);
+    const dumpResult = adbRun(["shell", "uiautomator", "dump", phoneDumpPath], { allowFailure: true });
+    lastDumpStatus = dumpResult.status;
+    if (dumpResult.status === 0) {
+      adbRun(["pull", phoneDumpPath, dump], { allowFailure: true });
+      xml = fs.existsSync(dump) ? fs.readFileSync(dump, "utf8") : "";
+      if (xml.trim()) break;
+    }
+    if (attempt < 3) {
+      await sleep(CAPTURE_XML_RETRY_MS);
+    }
   }
-  const xml = fs.existsSync(dump) ? fs.readFileSync(dump, "utf8") : "";
+  if (!xml.trim()) {
+    warnings.push(
+      `Falha ao capturar XML utilizável em ${name}; evitando reutilizar dump antigo.${lastDumpStatus === 0 ? "" : ` status=${lastDumpStatus}`}`,
+    );
+  }
   if (xml) evidence.push(dump);
   const nodes = parseNodes(xml);
   const accessibilityLogResult = adbRun(
