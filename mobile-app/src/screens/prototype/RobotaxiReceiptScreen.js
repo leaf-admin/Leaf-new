@@ -858,12 +858,21 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const receiptPersonName = isDriverView
     ? selected?.passengerName || "Passageiro Leaf"
     : selected?.driverName || "Motorista Leaf";
-  const receiptVehicleLabel = isDriverView
-    ? `${passengersCount} passageiro${passengersCount > 1 ? "s" : ""}`
-    : selected?.vehicleLabel ||
+  const receiptVehicleModel = !isDriverView
+    ? selected?.vehicleLabel ||
+      selected?.vehicleModel ||
       selected?.vehicle ||
       selected?.driverVehicle ||
-      "Veículo não informado";
+      ""
+    : "";
+  const receiptVehicleColor = !isDriverView
+    ? selected?.vehicleColor || selected?.color || selected?.carColor || ""
+    : "";
+  const receiptVehicleLabel = isDriverView
+    ? `${passengersCount} passageiro${passengersCount > 1 ? "s" : ""}`
+    : [receiptVehicleModel, receiptVehicleColor]
+        .filter(Boolean)
+        .join(" · ") || "Veículo não informado";
   const receiptPlateLabel = !isDriverView
     ? selected?.vehiclePlate || selected?.plate || "Placa não informada"
     : "";
@@ -929,7 +938,16 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     );
   };
 
-  const renderCleanAvatarRow = ({ marker, tone = "green", title, subtitle, right, topDivider = true }) => (
+  const renderCleanAvatarRow = ({
+    marker,
+    tone = "green",
+    title,
+    subtitle,
+    subtitleTestID,
+    right,
+    rightTestID,
+    topDivider = true,
+  }) => (
     <>
       {topDivider ? <View style={styles.receiptCleanDivider} /> : null}
       <View style={styles.receiptCleanAvatarRow}>
@@ -940,9 +958,25 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         </View>
         <View style={styles.receiptCleanAvatarCopy}>
           <Text style={styles.receiptCleanRowTitle} numberOfLines={1}>{title}</Text>
-          {subtitle ? <Text style={styles.receiptCleanRowSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+          {subtitle ? (
+            <Text
+              style={styles.receiptCleanRowSubtitle}
+              numberOfLines={1}
+              testID={subtitleTestID}
+            >
+              {subtitle}
+            </Text>
+          ) : null}
         </View>
-        {right ? <Text style={styles.receiptCleanRowRight} numberOfLines={1}>{right}</Text> : null}
+        {right ? (
+          <Text
+            style={styles.receiptCleanRowRight}
+            numberOfLines={1}
+            testID={rightTestID}
+          >
+            {right}
+          </Text>
+        ) : null}
       </View>
     </>
   );
@@ -1053,7 +1087,13 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               marker: receiptPersonName.slice(0, 1).toUpperCase(),
               title: receiptPersonName,
               subtitle: receiptVehicleLabel,
+              subtitleTestID: !isDriverView
+                ? "passenger-receipt-vehicle-model-color"
+                : undefined,
               right: receiptPlateLabel,
+              rightTestID: !isDriverView
+                ? "passenger-receipt-vehicle-plate"
+                : undefined,
             })}
 
             {renderCleanRouteRow({
