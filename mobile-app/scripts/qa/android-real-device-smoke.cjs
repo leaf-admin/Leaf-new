@@ -29,6 +29,13 @@ const SYNC_DRIVER_TO_APP_PICKUP =
   process.env.REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP === "true";
 const REQUIRE_CANONICAL_PICKUP =
   process.env.REAL_SMOKE_REQUIRE_CANONICAL_PICKUP !== "false";
+const REQUIRE_POST_TRIP =
+  process.env.REAL_SMOKE_REQUIRE_POST_TRIP === "true";
+const VERIFY_ACTIVE_TRIP_MAP_TAP =
+  process.env.REAL_SMOKE_VERIFY_ACTIVE_TRIP_MAP_TAP === "true";
+const COMPLETE_EXISTING_RECEIPT =
+  process.env.REAL_SMOKE_COMPLETE_EXISTING_RECEIPT === "true";
+const POST_TRIP_WAIT_MS = Number(process.env.REAL_SMOKE_POST_TRIP_WAIT_MS || 150000);
 const PAYMENT_RUNTIME_PHONE = process.env.PAYMENT_RUNTIME_PHONE || process.env.FIREBASE_TEST_PHONE || "";
 const PAYMENT_PASSENGER_UID =
   process.env.REAL_SMOKE_PASSENGER_UID ||
@@ -237,6 +244,78 @@ function extractPrices(nodes) {
   return [...values];
 }
 
+function parseBrlPriceLabel(value) {
+  const match = String(value || "").match(/R\$\s*(\d+(?:[.,]\d{2})?)/);
+  if (!match) return null;
+  const numeric = Number(match[1].replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : null;
+}
+
+function firstPriceValue(prices) {
+  if (!Array.isArray(prices)) return null;
+  for (const price of prices) {
+    const parsed = parseBrlPriceLabel(price);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function pricesMatch(left, right) {
+  return (
+    Number.isFinite(Number(left)) &&
+    Number.isFinite(Number(right)) &&
+    Math.abs(Number(left) - Number(right)) < 0.005
+  );
+}
+
+function buildFareConsistencyReport({ steps, initialQuote, laterQuote, sandboxPaymentConfirmation }) {
+  const entries = [];
+  const add = (stage, amount, source = null) => {
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return;
+    entries.push({
+      stage,
+      amount: Number(Number(amount).toFixed(2)),
+      source,
+    });
+  };
+
+  add("quote_initial", firstPriceValue(initialQuote), "quote");
+  add("quote_after_wait", firstPriceValue(laterQuote), "quote");
+
+  for (const step of steps || []) {
+    const amount = firstPriceValue(step.prices);
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) continue;
+    if (step.name.startsWith("07-payment-after-confirm")) {
+      add("payment_review", amount, step.name);
+    } else if (step.screen === "passenger_active_trip") {
+      add("active_trip", amount, step.name);
+    } else if (step.screen === "passenger_receipt") {
+      add("receipt_gross", amount, step.name);
+    }
+  }
+
+  const paymentEvidence = readJsonFile(sandboxPaymentConfirmation?.evidencePath);
+  const chargeValue = Number(paymentEvidence?.charge?.value);
+  if (Number.isFinite(chargeValue) && chargeValue > 0) {
+    add("sandbox_charge", chargeValue / 100, "sandbox-payment-confirmation.json");
+  }
+
+  const quoteEntry =
+    entries.find((entry) => entry.stage === "quote_after_wait") ||
+    entries.find((entry) => entry.stage === "quote_initial") ||
+    null;
+  const mismatches = quoteEntry
+    ? entries.filter((entry) => !pricesMatch(entry.amount, quoteEntry.amount))
+    : [];
+
+  return {
+    ok: Boolean(quoteEntry) && mismatches.length === 0,
+    quote: quoteEntry,
+    entries,
+    mismatches,
+  };
+}
+
 function extractDriverSearchElapsed(nodes) {
   const node = findNode(nodes, ["passenger-driver-search-elapsed"]);
   const value = String(node?.text || node?.["content-desc"] || "").trim();
@@ -290,6 +369,13 @@ function extractSelectedCarType(nodes) {
 
 function detectScreen(nodes) {
   const allText = nodes.map(combinedText).join("\n");
+  if (
+    (allText.includes("avaliação enviada") || allText.includes("avaliacao enviada")) &&
+    (allText.includes("android:id/button1") || allText.includes("sua nota para"))
+  ) {
+    return "passenger_rating_success";
+  }
+  if (allText.includes("passenger-rating-submit-button")) return "passenger_rating";
   if (allText.includes("payment-modal-confirmed")) return "payment_confirmed";
   if (allText.includes("payment-modal-content") || allText.includes("payment-modal-copy-pix-button")) {
     return "payment_pix_ready";
@@ -322,18 +408,11 @@ function detectScreen(nodes) {
   }
   if (
     allText.includes("passenger-trip-screen") ||
-    allText.includes("passenger-trip-compact-summary") ||
-    allText.includes("passenger-trip-driver-identity")
+      allText.includes("passenger-trip-compact-summary") ||
+      allText.includes("passenger-trip-driver-identity")
   ) {
     return "passenger_active_trip";
   }
-  if (
-    allText.includes("passenger-receipt-rate-trip-button") ||
-    allText.includes("passenger-receipt-report-issue-button")
-  ) {
-    return "passenger_receipt";
-  }
-  if (allText.includes("passenger-rating-submit-button")) return "passenger_rating";
   if (allText.includes("passenger-destination-confirm-button")) return "passenger_quote";
   if (
     allText.includes("passenger-destination-search-input") ||
@@ -343,6 +422,12 @@ function detectScreen(nodes) {
   }
   if (allText.includes("passenger-home-destination-result-0")) return "destination_results";
   if (allText.includes("passenger-home-destination-input") || allText.includes("para onde")) return "passenger_home";
+  if (
+    allText.includes("passenger-receipt-rate-trip-button") ||
+    allText.includes("passenger-receipt-report-issue-button")
+  ) {
+    return "passenger_receipt";
+  }
   if (allText.includes("support-screen") || allText.includes("support-tab-")) return "support";
   if (allText.includes("driver-home-toggle-online") || allText.includes("driver")) return "driver_home";
   if (allText.includes("auth-phone-input") || allText.includes("telefone") || allText.includes("entrar")) return "auth";
@@ -816,7 +901,14 @@ function tapNode(node, label) {
 }
 
 function inputText(value) {
-  const escaped = String(value)
+  const adbSafeValue = String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, "");
+  if (adbSafeValue !== String(value)) {
+    warnings.push(`Texto normalizado para entrada ADB: "${value}" -> "${adbSafeValue}".`);
+  }
+  const escaped = adbSafeValue
     .replace(/\\/g, "\\\\")
     .replace(/ /g, "%s")
     .replace(/'/g, "\\'");
@@ -844,6 +936,15 @@ function normalizeInputText(value) {
 
 function pressKey(keyCode) {
   adbRun(["shell", "input", "keyevent", String(keyCode)]);
+}
+
+function tapScreenPoint(x, y, label) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    warnings.push(`Coordenada inválida para tocar em ${label}.`);
+    return false;
+  }
+  adbRun(["shell", "input", "tap", String(Math.round(x)), String(Math.round(y))]);
+  return true;
 }
 
 async function tapConfirmUntilPayment(current, steps) {
@@ -914,6 +1015,254 @@ async function waitForPaymentReady(current, steps) {
     }
   }
   return { current, status };
+}
+
+function findRatingStarNode(nodes) {
+  const starNodes = nodes
+    .filter((node) => {
+      const content = String(node["content-desc"] || "").trim();
+      return (
+        node.clickable === "true" &&
+        node.center &&
+        content.length > 0 &&
+        content.length <= 4 &&
+        node.boundsRect?.y1 >= 900 &&
+        node.boundsRect?.y2 <= 1300
+      );
+    })
+    .sort((a, b) => a.center.x - b.center.x);
+  return starNodes[starNodes.length - 1] || null;
+}
+
+async function verifyActiveTripMapTap(current, steps) {
+  if (!VERIFY_ACTIVE_TRIP_MAP_TAP) {
+    return { requested: false, ok: null, skippedReason: "disabled" };
+  }
+  if (current.screen !== "passenger_active_trip") {
+    return {
+      requested: true,
+      ok: null,
+      skippedReason: `screen_not_active_trip:${current.screen}`,
+    };
+  }
+
+  tapScreenPoint(540, 420, "mapa durante corrida ativa");
+  await sleep(1800);
+  const afterTap = await captureStep("10-active-trip-after-map-tap");
+  steps.push(afterTap);
+  const ok = ["passenger_active_trip", "passenger_receipt", "passenger_rating", "passenger_rating_success"].includes(
+    afterTap.screen,
+  );
+  return {
+    requested: true,
+    ok,
+    beforeScreen: current.screen,
+    afterScreen: afterTap.screen,
+    current: afterTap,
+  };
+}
+
+async function waitForPostTripReceipt(current, steps) {
+  if (!REQUIRE_POST_TRIP) {
+    return { requested: false, ok: null, skippedReason: "disabled", current };
+  }
+
+  if (current.screen === "passenger_receipt") {
+    return { requested: true, ok: true, current, reachedScreen: current.screen };
+  }
+
+  const deadline = Date.now() + POST_TRIP_WAIT_MS;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    await sleep(5000);
+    attempt += 1;
+    current = await captureStep(`11-post-trip-wait-${attempt}`);
+    steps.push(current);
+    if (current.screen === "passenger_receipt") {
+      return { requested: true, ok: true, current, reachedScreen: current.screen };
+    }
+    if (current.screen === "passenger_home") {
+      return {
+        requested: true,
+        ok: false,
+        current,
+        reachedScreen: current.screen,
+        error: "returned_home_before_receipt",
+      };
+    }
+  }
+
+  return {
+    requested: true,
+    ok: false,
+    current,
+    reachedScreen: current.screen,
+    error: "receipt_timeout",
+  };
+}
+
+async function completeReceiptRating(current, steps, prefix = "12-receipt-rating") {
+  const result = {
+    requested: true,
+    ok: false,
+    initialScreen: current.screen,
+    finalScreen: current.screen,
+    stages: [],
+  };
+
+  if (current.screen !== "passenger_receipt") {
+    result.ok = current.screen === "passenger_home";
+    result.skippedReason = `screen_not_receipt:${current.screen}`;
+    result.current = current;
+    return result;
+  }
+
+  for (let attempt = 1; attempt <= 3 && current.screen === "passenger_receipt"; attempt += 1) {
+    const rateButton = findNodeByPriority(current.nodes, [
+      ["passenger-receipt-rate-trip-button"],
+      ["Avaliar corrida"],
+    ]);
+    if (!rateButton || rateButton.enabled === "false") break;
+    tapNode(rateButton, `botão avaliar corrida tentativa ${attempt}`);
+    await sleep(attempt === 1 ? 2500 : 3500);
+    current = await captureStep(`${prefix}-01-rating-opened-${attempt}`);
+    steps.push(current);
+    result.stages.push({ name: current.name, screen: current.screen });
+  }
+
+  if (current.screen === "passenger_receipt") {
+    const closeButton = findNodeByPriority(current.nodes, [
+      ["passenger-receipt-back-to-map-button"],
+      ["×"],
+    ]);
+    if (tapNode(closeButton, "fechar recibo para voltar ao mapa")) {
+      await sleep(2500);
+      current = await captureStep(`${prefix}-receipt-closed`);
+      steps.push(current);
+      result.stages.push({ name: current.name, screen: current.screen });
+    }
+    result.finalScreen = current.screen;
+    result.ok = current.screen === "passenger_home";
+    result.current = current;
+    return result;
+  }
+
+  if (current.screen !== "passenger_rating") {
+    result.finalScreen = current.screen;
+    result.error = `rating_screen_not_reached:${current.screen}`;
+    result.current = current;
+    return result;
+  }
+
+  const starNode = findRatingStarNode(current.nodes);
+  if (starNode) {
+    tapNode(starNode, "quinta estrela da avaliação");
+    await sleep(600);
+  } else {
+    warnings.push("Não encontrei a estrela de avaliação por acessibilidade; mantendo seleção padrão da tela.");
+  }
+
+  const airConditioningYes = findNodeByPriority(current.nodes, [
+    ["passenger-rating-air-conditioning-yes"],
+    ["Sim"],
+  ]);
+  if (airConditioningYes) {
+    tapNode(airConditioningYes, "confirmação de ar-condicionado");
+    await sleep(600);
+  }
+
+  current = await captureStep(`${prefix}-02-rating-filled`);
+  steps.push(current);
+  result.stages.push({ name: current.name, screen: current.screen });
+
+  const submitButton = findNodeByPriority(current.nodes, [
+    ["passenger-rating-submit-button"],
+    ["Enviar avaliação"],
+  ]);
+  if (!tapNode(submitButton, "botão enviar avaliação")) {
+    result.finalScreen = current.screen;
+    result.error = "submit_button_unavailable";
+    result.current = current;
+    return result;
+  }
+
+  await sleep(5000);
+  current = await captureStep(`${prefix}-03-rating-submitted`);
+  steps.push(current);
+  result.stages.push({ name: current.name, screen: current.screen });
+
+  if (current.screen === "passenger_rating_success") {
+    const okButton = findNodeByPriority(current.nodes, [["android:id/button1"], ["OK"]]);
+    if (tapNode(okButton, "OK da avaliação enviada")) {
+      await sleep(3000);
+      current = await captureStep(`${prefix}-04-rating-ok`);
+      steps.push(current);
+      result.stages.push({ name: current.name, screen: current.screen });
+    }
+  }
+
+  result.finalScreen = current.screen;
+  result.ok = current.screen === "passenger_home";
+  if (!result.ok) {
+    result.error = `final_screen_not_home:${current.screen}`;
+  }
+  result.current = current;
+  return result;
+}
+
+async function verifyPostPaymentTripFlow(current, steps, sandboxConfirmed) {
+  const result = {
+    requested: Boolean(REQUIRE_POST_TRIP || VERIFY_ACTIVE_TRIP_MAP_TAP),
+    ok: null,
+    skippedReason: null,
+    activeTripMapTap: null,
+    receipt: null,
+    rating: null,
+    finalScreen: current.screen,
+    current,
+  };
+
+  if (!result.requested) {
+    result.skippedReason = "disabled";
+    return result;
+  }
+
+  if (!sandboxConfirmed) {
+    result.ok = false;
+    result.skippedReason = "sandbox_payment_not_confirmed";
+    return result;
+  }
+
+  result.activeTripMapTap = await verifyActiveTripMapTap(current, steps);
+  if (result.activeTripMapTap?.current) {
+    current = result.activeTripMapTap.current;
+  }
+
+  result.receipt = await waitForPostTripReceipt(current, steps);
+  if (result.receipt?.current) {
+    current = result.receipt.current;
+  }
+
+  if (result.receipt?.ok) {
+    result.rating = await completeReceiptRating(current, steps);
+    if (result.rating?.current) {
+      current = result.rating.current;
+    }
+  }
+
+  const requiredChecks = [];
+  if (VERIFY_ACTIVE_TRIP_MAP_TAP && result.activeTripMapTap?.ok !== null) {
+    requiredChecks.push(result.activeTripMapTap.ok === true);
+  }
+  if (REQUIRE_POST_TRIP) {
+    requiredChecks.push(result.receipt?.ok === true);
+    requiredChecks.push(result.rating?.ok === true);
+  }
+
+  result.finalScreen = current.screen;
+  result.current = current;
+  result.ok = requiredChecks.length > 0 ? requiredChecks.every(Boolean) : true;
+  return result;
 }
 
 async function captureStep(name) {
@@ -1131,6 +1480,11 @@ async function main() {
   let appCanonicalPickup = null;
   let appPickupAvailability = null;
   let managedDriverBot = { requested: SYNC_DRIVER_TO_APP_PICKUP, ok: null, skippedReason: "not_reached" };
+  let postTripValidation = {
+    requested: Boolean(REQUIRE_POST_TRIP || VERIFY_ACTIVE_TRIP_MAP_TAP || COMPLETE_EXISTING_RECEIPT),
+    ok: null,
+    skippedReason: "not_reached",
+  };
 
   try {
     log("abrindo app em duas passagens para permitir aplicação OTA quando disponível");
@@ -1145,6 +1499,23 @@ async function main() {
     let current = await captureStep("02-second-launch");
     steps.push(current);
     log(`tela detectada: ${current.screen}`);
+
+    if (current.screen === "passenger_receipt" && COMPLETE_EXISTING_RECEIPT) {
+      postTripValidation = {
+        requested: true,
+        ok: null,
+        kind: "existing_receipt_cleanup",
+        rating: await completeReceiptRating(current, steps, "03-existing-receipt-rating"),
+      };
+      current = postTripValidation.rating?.current || current;
+      postTripValidation.ok = postTripValidation.rating?.ok === true;
+      postTripValidation.finalScreen = current.screen;
+      if (!postTripValidation.ok) {
+        failures.push(
+          `blocked_precondition:existing_receipt_cleanup_failed:${postTripValidation.rating?.error || current.screen}`,
+        );
+      }
+    }
 
     if (
       current.screen === "passenger_home" ||
@@ -1262,6 +1633,12 @@ async function main() {
                     paymentStatus: detectPaymentStatus(current.nodes),
                     screen: current.screen,
                   });
+                  postTripValidation = await verifyPostPaymentTripFlow(
+                    current,
+                    steps,
+                    sandboxPaymentConfirmation.ok,
+                  );
+                  current = postTripValidation.current || current;
                 }
               }
             }
@@ -1321,6 +1698,12 @@ async function main() {
                   paymentStatus: detectPaymentStatus(current.nodes),
                   screen: current.screen,
                 });
+                postTripValidation = await verifyPostPaymentTripFlow(
+                  current,
+                  steps,
+                  sandboxPaymentConfirmation.ok,
+                );
+                current = postTripValidation.current || current;
               }
             }
           }
@@ -1352,6 +1735,12 @@ async function main() {
   }
 
   const logAnalysis = analyzeLogcat(logcat.path);
+  const fareConsistency = buildFareConsistencyReport({
+    steps,
+    initialQuote,
+    laterQuote,
+    sandboxPaymentConfirmation,
+  });
   if (logAnalysis.critical.length > 0) {
     failures.push(`Logcat registrou ${logAnalysis.critical.length} linhas críticas.`);
   }
@@ -1369,6 +1758,22 @@ async function main() {
   }
   if (AUTO_CONFIRM_SANDBOX_PAYMENT && !sandboxPaymentConfirmation.ok) {
     failures.push(`Baixa automática sandbox falhou: ${sandboxPaymentConfirmation.error || sandboxPaymentConfirmation.stderr || "unknown"}`);
+  }
+  if (
+    (REQUIRE_POST_TRIP || VERIFY_ACTIVE_TRIP_MAP_TAP) &&
+    postTripValidation.requested &&
+    postTripValidation.ok === false
+  ) {
+    failures.push(
+      `Validação pós-corrida falhou: ${postTripValidation.receipt?.error || postTripValidation.rating?.error || postTripValidation.activeTripMapTap?.error || postTripValidation.finalScreen || "unknown"}`,
+    );
+  }
+  if (!fareConsistency.ok) {
+    failures.push(
+      `Consistência de tarifa falhou: ${fareConsistency.mismatches
+        .map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`)
+        .join(", ") || "cotação indisponível"}`,
+    );
   }
   if (COLLECT_DASHBOARD_EVIDENCE && !dashboardEvidenceCollection.ok) {
     failures.push(`Evidência dashboard falhou: ${dashboardEvidenceCollection.error || dashboardEvidenceCollection.stderr || "unknown"}`);
@@ -1415,10 +1820,12 @@ async function main() {
         managedDriverBot,
         sandboxConfirmation: sandboxPaymentConfirmation,
         dashboardEvidence: dashboardEvidenceCollection,
+        postTripValidation,
       },
       pricingQuoteLogLines: logAnalysis.pricingQuote.length,
       routingLogLines: logAnalysis.routing.length,
       criticalLogLines: logAnalysis.critical.length,
+      fareConsistency,
     },
     warnings,
     failures,
@@ -1449,6 +1856,8 @@ async function main() {
     `- App pickup availability: ${appPickupAvailability ? (appPickupAvailability.ok ? "OK" : "FAIL") : "not captured"}`,
     `- Managed driver bot: ${managedDriverBot?.requested ? (managedDriverBot.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Sandbox payment auto-confirm: ${AUTO_CONFIRM_SANDBOX_PAYMENT ? (sandboxPaymentConfirmation.ok ? "OK" : "FAIL") : "not requested"}`,
+    `- Post-trip validation: ${postTripValidation?.requested ? (postTripValidation.ok ? "OK" : postTripValidation.ok === false ? "FAIL" : "not reached") : "not requested"}`,
+    `- Fare consistency: ${fareConsistency.ok ? "OK" : "FAIL"}${fareConsistency.quote ? ` (quote R$ ${fareConsistency.quote.amount.toFixed(2)})` : ""}`,
     `- Dashboard evidence: ${COLLECT_DASHBOARD_EVIDENCE ? (dashboardEvidenceCollection.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Pricing quote log lines: ${logAnalysis.pricingQuote.length}`,
     `- Routing log lines: ${logAnalysis.routing.length}`,
