@@ -70,11 +70,17 @@ jest.mock('../src/components/prototype/PrototypeDismissibleSheet', () => {
       backdropDismissEnabled={backdropDismissEnabled}
       dragEnabled={dragEnabled}
     >
-      <TouchableOpacity
+      <View
         testID="prototype-dismissible-sheet-backdrop"
         accessibilityLabel="prototype-dismissible-sheet-backdrop"
-        onPress={backdropDismissEnabled ? onClose : undefined}
-      />
+        pointerEvents={backdropDismissEnabled ? 'auto' : 'none'}
+      >
+        <TouchableOpacity
+          testID="prototype-dismissible-sheet-backdrop-pressable"
+          accessibilityLabel="prototype-dismissible-sheet-backdrop-pressable"
+          onPress={backdropDismissEnabled ? onClose : undefined}
+        />
+      </View>
       {children}
     </View>
   );
@@ -109,9 +115,42 @@ jest.mock('react-native-maps', () => {
   const React = require('react');
   const { View } = require('react-native');
   const MockView = ({ children }) => <View>{children}</View>;
+  const MockMapView = React.forwardRef(
+    (
+      {
+        accessibilityLabel,
+        children,
+        mapPadding,
+        pitchEnabled,
+        rotateEnabled,
+        scrollEnabled,
+        testID,
+        zoomEnabled,
+      },
+      ref,
+    ) => {
+      React.useImperativeHandle(ref, () => ({
+        animateToRegion: jest.fn(),
+        fitToCoordinates: jest.fn(),
+      }));
+      return (
+        <View
+          accessibilityLabel={accessibilityLabel}
+          mapPadding={mapPadding}
+          pitchEnabled={pitchEnabled}
+          rotateEnabled={rotateEnabled}
+          scrollEnabled={scrollEnabled}
+          testID={testID}
+          zoomEnabled={zoomEnabled}
+        >
+          {children}
+        </View>
+      );
+    },
+  );
   return {
     __esModule: true,
-    default: MockView,
+    default: MockMapView,
     Marker: MockView,
     Polyline: MockView,
     Polygon: MockView,
@@ -650,6 +689,7 @@ describe('prototype ride screens', () => {
 
       expect(getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
       expect(getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+      expect(getByTestId('prototype-dismissible-sheet-backdrop').props.pointerEvents).toBe('none');
 
       fireEvent.press(getByTestId('prototype-dismissible-sheet-backdrop'));
 
@@ -689,6 +729,11 @@ describe('prototype ride screens', () => {
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
     expect(screen.getByLabelText('passenger-trip-compact-summary')).toBeTruthy();
+    const mapView = screen.getByTestId('prototype-map-view');
+    expect(mapView.props.scrollEnabled).toBe(true);
+    expect(mapView.props.zoomEnabled).toBe(true);
+    expect(mapView.props.rotateEnabled).toBe(true);
+    expect(mapView.props.mapPadding.bottom).toBeGreaterThanOrEqual(320);
     expect(screen.getByTestId('passenger-trip-route-progress')).toBeTruthy();
     expect(screen.getByTestId('passenger-trip-started-action-dock')).toBeTruthy();
     expect(screen.getByLabelText('Chat')).toBeTruthy();

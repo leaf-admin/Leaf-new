@@ -24,6 +24,8 @@ const NEARBY_VEHICLE_DOTS_DURATION_MS = 1700;
 const NEARBY_VEHICLE_USER_CLEARANCE_PX = 94;
 const NEARBY_VEHICLE_CLUSTER_CLEARANCE_PX = 58;
 const IS_TEST_ENV = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
+const MIN_VISIBLE_VIEWPORT_HEIGHT = 180;
+const MIN_VISIBLE_VIEWPORT_WIDTH = 160;
 const DRIVER_MARKER_IMAGE_SOURCES = Object.freeze({
   black: require('../../assets/map/leaf-map-car-marker-black.png'),
   white: require('../../assets/map/leaf-map-car-marker-white.png'),
@@ -629,6 +631,29 @@ function clampNumber(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function normalizeViewportPadding(padding = {}, layout = {}) {
+  const resolvedPadding = padding && typeof padding === 'object' ? padding : {};
+  const height = Number(layout.height);
+  const width = Number(layout.width);
+  const rawTop = Math.max(0, Number(resolvedPadding.top) || 0);
+  const rawBottom = Math.max(0, Number(resolvedPadding.bottom) || 0);
+  const rawLeft = Math.max(0, Number(resolvedPadding.left) || 0);
+  const rawRight = Math.max(0, Number(resolvedPadding.right) || 0);
+  const maxBottom = Number.isFinite(height) && height > MIN_VISIBLE_VIEWPORT_HEIGHT
+    ? Math.max(0, height - rawTop - MIN_VISIBLE_VIEWPORT_HEIGHT)
+    : rawBottom;
+  const maxRight = Number.isFinite(width) && width > MIN_VISIBLE_VIEWPORT_WIDTH
+    ? Math.max(0, width - rawLeft - MIN_VISIBLE_VIEWPORT_WIDTH)
+    : rawRight;
+
+  return {
+    top: rawTop,
+    bottom: Math.min(rawBottom, maxBottom),
+    left: rawLeft,
+    right: Math.min(rawRight, maxRight),
+  };
+}
+
 function calculateScreenDistance(left, right) {
   if (
     !Number.isFinite(left?.x) ||
@@ -1166,6 +1191,7 @@ function PrototypeMapLayer({
   driverMarkerLetter = 'D',
   destinationMarkerMode = 'place',
   destinationMarkerLetter = 'P',
+  viewportPadding = null,
   forceRegionUpdate = false
 }) {
   const mapProvider =
@@ -1173,6 +1199,17 @@ function PrototypeMapLayer({
       ? PROVIDER_GOOGLE
       : undefined;
   const windowLayout = useWindowDimensions();
+  const resolvedViewportPadding = useMemo(
+    () => normalizeViewportPadding(viewportPadding, windowLayout),
+    [
+      viewportPadding?.bottom,
+      viewportPadding?.left,
+      viewportPadding?.right,
+      viewportPadding?.top,
+      windowLayout.height,
+      windowLayout.width,
+    ],
+  );
   const markerCoordinate = userCoordinate || region;
   const normalizedDriverCoordinate = useMemo(
     () => normalizeMapCoordinate(driverCoordinate),
@@ -1355,6 +1392,22 @@ function PrototypeMapLayer({
 
     return staticRouteCoordinates.slice(0, 2);
   }, [displayedRouteCoordinates, hasRoute, staticRouteCoordinates]);
+  const routeViewportFitCoordinates = useMemo(() => {
+    if (staticRouteCoordinates.length >= 2) {
+      return staticRouteCoordinates;
+    }
+
+    return [
+      normalizedOriginCoordinate,
+      normalizedDestinationCoordinate,
+      normalizedDriverCoordinate,
+    ].filter(Boolean);
+  }, [
+    normalizedDestinationCoordinate,
+    normalizedDriverCoordinate,
+    normalizedOriginCoordinate,
+    staticRouteCoordinates,
+  ]);
   const hasRenderableRoute = routeRenderCoordinates.length >= 2;
   const displayedDriverCoordinate =
     smoothedDriverCoordinate || targetDriverCoordinate || normalizedDriverCoordinate;
@@ -1750,6 +1803,22 @@ function PrototypeMapLayer({
       if (!mapRef?.current) {
         return;
       }
+
+      if (
+        routeViewportFitCoordinates.length >= 2 &&
+        typeof mapRef.current.fitToCoordinates === 'function'
+      ) {
+        try {
+          mapRef.current.fitToCoordinates(routeViewportFitCoordinates, {
+            edgePadding: resolvedViewportPadding,
+            animated: Platform.OS !== 'android',
+          });
+          return;
+        } catch (_error) {
+          // Fallback to the previous region behavior if the native map is not ready yet.
+        }
+      }
+
       mapRef.current.animateToRegion(region, Platform.OS === 'android' ? 0 : 180);
     }, Platform.OS === 'android' ? 420 : 80);
 
@@ -1761,6 +1830,11 @@ function PrototypeMapLayer({
     region?.latitudeDelta,
     region?.longitude,
     region?.longitudeDelta,
+    resolvedViewportPadding.bottom,
+    resolvedViewportPadding.left,
+    resolvedViewportPadding.right,
+    resolvedViewportPadding.top,
+    routeViewportFitCoordinates,
     scheduleAndroidVisibleRegionUpdate,
   ]);
 
@@ -2217,7 +2291,10 @@ function PrototypeMapLayer({
           // only when that native child topology changes.
           key={nativeMapTopologyKey}
           ref={mapRef}
+          testID="prototype-map-view"
+          accessibilityLabel="prototype-map-view"
           style={StyleSheet.absoluteFillObject}
+          mapPadding={resolvedViewportPadding}
           onRegionChange={scheduleAndroidVisibleRegionUpdate}
           onRegionChangeComplete={nextRegion => {
             scheduleAndroidVisibleRegionUpdate(nextRegion);

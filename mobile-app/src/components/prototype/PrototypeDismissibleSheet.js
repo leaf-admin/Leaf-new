@@ -122,6 +122,7 @@ export default function PrototypeDismissibleSheet({
   return (
     <View style={styles.overlay} pointerEvents="box-none">
       <AnimatedPressable
+        pointerEvents={backdropDismissEnabled ? 'auto' : 'none'}
         style={[styles.backdrop, { backgroundColor: backdropColor }, animatedBackdropStyle]}
         onPress={handleBackdropPress}
       />
