@@ -132,6 +132,7 @@ jest.mock("../src/components/payment/WooviPaymentModal", () => {
 describe("RobotaxiDestinationScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    fetchDynamicPricingQuote.mockReset();
     fetchDynamicPricingQuote.mockResolvedValue({
       estimatedFare: 13.42,
       grossEstimatedFare: 13.42,
@@ -850,12 +851,6 @@ describe("RobotaxiDestinationScreen", () => {
   });
 
   it("keeps the home quote locked through confirmation and PIX even if context changes", async () => {
-    fetchDynamicPricingQuote.mockResolvedValueOnce({
-      estimatedFare: 80.39,
-      grossEstimatedFare: 80.39,
-      pricingPayload: {},
-    });
-
     const destination = {
       id: "destination_copacabana_palace",
       name: "Copacabana Palace",
@@ -960,10 +955,122 @@ describe("RobotaxiDestinationScreen", () => {
         }),
       );
       expect(screen.getByTestId("mock-pix-amount").props.children).toBe("81.59");
+      expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
+        "ql_home_quote_lock_1",
+      );
     });
   });
 
-  it("does not show an initial route quote without backend quote lock", async () => {
+  it("refreshes an expired home quote lock before opening PIX", async () => {
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 82.41,
+      grossEstimatedFare: 82.41,
+      quoteLockId: "ql_fresh_after_expired_home_lock",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
+
+    const destination = {
+      id: "destination_copacabana_palace",
+      name: "Copacabana Palace",
+      address: "Av. Atlântica, 1702 - Copacabana, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9673111,
+        longitude: -43.1789541,
+      },
+      eta: "4",
+    };
+    const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "4, Rua das Pastorinhas",
+      currentCoordinate: {
+        latitude: -22.920772,
+        longitude: -43.4060272,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 80.39,
+      selectedDestination: destination,
+      tripDistanceKm: 23.8,
+      tripDurationMin: 22,
+      tripArrivalText: "22:48",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={{
+          navigate: jest.fn(),
+          replace: jest.fn(),
+          canGoBack: jest.fn(() => false),
+          goBack: jest.fn(),
+        }}
+        route={{
+          params: {
+            initialPickupCoordinate: {
+              latitude: -22.920781,
+              longitude: -43.406005,
+            },
+            initialPickupAddress: "4, Rua das Pastorinhas",
+            initialSelectedDestination: destination,
+            initialSelectedPlan: "plus",
+            startAtConfirmation: true,
+            skipDestinationSearch: true,
+            initialPricingQuote: {
+              quote: {
+                estimatedFare: 81.59,
+                grossEstimatedFare: 81.59,
+                carType: "leaf_plus",
+                quoteLockId: "ql_expired_home_quote_lock",
+                quoteLockExpiresAt: new Date(Date.now() - 1000).toISOString(),
+                pricingPayload: {},
+              },
+              planId: "plus",
+              carType: "Leaf Plus",
+              quoteSessionId: "passenger_home_quote_lock_expired",
+              quoteLockId: "ql_expired_home_quote_lock",
+              quoteLockExpiresAt: new Date(Date.now() - 1000).toISOString(),
+              routeKey: "-22.921|-43.406|-22.967|-43.179",
+              distanceKm: 23.8,
+              durationMin: 22,
+              arrivalTime: "22:48",
+              expiresAt: Date.now() + 120000,
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/R\$ 82,41/)).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("82.41");
+      expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
+        "ql_fresh_after_expired_home_lock",
+      );
+    });
+  });
+
+  it("refetches the route quote when the initial quote has no backend lock", async () => {
     fetchDynamicPricingQuote.mockResolvedValueOnce({
       estimatedFare: 80.39,
       grossEstimatedFare: 80.39,
@@ -1057,9 +1164,8 @@ describe("RobotaxiDestinationScreen", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Tarifa indisponível")).toBeTruthy();
       expect(screen.queryByText(/R\$ 81,59/)).toBeNull();
-      expect(screen.queryByText(/R\$ 80,39/)).toBeNull();
+      expect(screen.getByText(/R\$ 80,39/)).toBeTruthy();
     });
   });
 

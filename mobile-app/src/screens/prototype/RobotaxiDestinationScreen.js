@@ -489,6 +489,10 @@ function buildPaymentQuoteLockFromInitialPricingQuote(initialPricingQuote) {
     return null;
   }
 
+  if (!hasValidBackendQuoteLock(initialPricingQuote)) {
+    return null;
+  }
+
   const fare = normalizeLockedQuoteNumber(
     initialPricingQuote.quote.estimatedFare ?? initialPricingQuote.fare,
   );
@@ -518,6 +522,59 @@ function buildPaymentQuoteLockFromInitialPricingQuote(initialPricingQuote) {
       null,
     pricingQuoteRequestKey: null,
   };
+}
+
+function hasReadyPaymentQuoteLock(value, expectedRequestKey = null) {
+  const fare = Number(value?.fare);
+  const requestKey = String(value?.pricingQuoteRequestKey || "").trim();
+
+  return Boolean(
+    Number.isFinite(fare) &&
+      fare > 0 &&
+      hasValidBackendQuoteLock(value) &&
+      (!expectedRequestKey || !requestKey || requestKey === expectedRequestKey),
+  );
+}
+
+function buildReadyPaymentQuoteLock({
+  selectedPricingQuote,
+  fareQuoteLock,
+  selectedPlanFare,
+  selectedGrossEstimatedFare,
+  selectedDiscountBenefit,
+  selectedPricingQuoteRequestKey,
+}) {
+  const fare = Number(selectedPlanFare);
+  if (!Number.isFinite(fare) || fare <= 0) {
+    return null;
+  }
+
+  const candidate = {
+    fare,
+    grossEstimatedFare:
+      Number.isFinite(Number(selectedGrossEstimatedFare)) &&
+      Number(selectedGrossEstimatedFare) > 0
+        ? Number(selectedGrossEstimatedFare)
+        : fare,
+    discountBenefit: selectedDiscountBenefit,
+    quoteSessionId:
+      selectedPricingQuote?.quoteSessionId ||
+      fareQuoteLock?.quoteSessionId ||
+      null,
+    quoteLockId:
+      selectedPricingQuote?.quoteLockId ||
+      fareQuoteLock?.quoteLockId ||
+      null,
+    quoteLockExpiresAt:
+      selectedPricingQuote?.quoteLockExpiresAt ||
+      fareQuoteLock?.quoteLockExpiresAt ||
+      null,
+    pricingQuoteRequestKey: selectedPricingQuoteRequestKey || null,
+  };
+
+  return hasReadyPaymentQuoteLock(candidate, selectedPricingQuoteRequestKey)
+    ? candidate
+    : null;
 }
 
 function resolveOption(options, selectedId) {
@@ -1861,7 +1918,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const initialPricingQuoteMatchesCurrentSelection = Boolean(
     initialPricingQuote?.quote &&
       initialPricingQuote.routeKey === fareQuoteRouteKey &&
-      initialPricingQuote.expiresAt > Date.now() &&
+      hasValidBackendQuoteLock(initialPricingQuote) &&
       (!initialPricingQuotePlanId ||
         initialPricingQuotePlanId === selectedPlanData?.id),
   );
@@ -2627,36 +2684,24 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
-      setPaymentQuoteLock((current) => {
-        const currentFare = Number(current?.fare);
-        if (
-          initialPricingQuoteMatchesCurrentSelection &&
-          Number.isFinite(currentFare) &&
-          currentFare > 0
-        ) {
-          return current;
-        }
-
-        return {
-          fare: Number(selectedPlanFare),
-          grossEstimatedFare:
-            Number.isFinite(Number(selectedGrossEstimatedFare)) &&
-            Number(selectedGrossEstimatedFare) > 0
-              ? Number(selectedGrossEstimatedFare)
-              : Number(selectedPlanFare),
-          discountBenefit: selectedDiscountBenefit,
-          quoteSessionId: fareQuoteLock?.quoteSessionId || null,
-          quoteLockId:
-            selectedPricingQuote?.quoteLockId ||
-            fareQuoteLock?.quoteLockId ||
-            null,
-          quoteLockExpiresAt:
-            selectedPricingQuote?.quoteLockExpiresAt ||
-            fareQuoteLock?.quoteLockExpiresAt ||
-            null,
-          pricingQuoteRequestKey: selectedPricingQuoteRequestKey || null,
-        };
+      const nextPaymentQuoteLock = buildReadyPaymentQuoteLock({
+        selectedPricingQuote,
+        fareQuoteLock,
+        selectedPlanFare,
+        selectedGrossEstimatedFare,
+        selectedDiscountBenefit,
+        selectedPricingQuoteRequestKey,
       });
+
+      if (!nextPaymentQuoteLock) {
+        setPaymentQuoteLock(null);
+        setAvailabilityNotice(
+          "Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.",
+        );
+        return;
+      }
+
+      setPaymentQuoteLock(nextPaymentQuoteLock);
       setPlanAvailabilityById((current) => ({
         ...current,
         [selectedPlanData.id]: {
@@ -4244,8 +4289,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             estimates={{ estimateFare: lockedPaymentFare }}
             grossEstimatedFare={lockedGrossEstimatedFare}
             discountBenefit={lockedDiscountBenefit}
-            quoteSessionId={paymentQuoteLock?.quoteSessionId || fareQuoteLock?.quoteSessionId || null}
-            quoteLockId={paymentQuoteLock?.quoteLockId || fareQuoteLock?.quoteLockId || null}
+            quoteSessionId={paymentQuoteLock?.quoteSessionId || null}
+            quoteLockId={paymentQuoteLock?.quoteLockId || null}
             passengerId={profileUid || riderProfile?.uid || riderProfile?.id || ""}
             passengerName={riderProfile?.name || "Passageira Leaf"}
             passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}
