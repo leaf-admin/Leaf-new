@@ -253,6 +253,31 @@ function extractPrices(nodes) {
   return [...values];
 }
 
+function extractVisiblePaymentError(nodes) {
+  const texts = [];
+  for (const node of nodes || []) {
+    for (const value of [node.text, node["content-desc"]]) {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      if (!text || texts.includes(text)) continue;
+      texts.push(text);
+    }
+  }
+
+  const titleIndex = texts.findIndex((text) => /falha ao gerar pagamento/i.test(text));
+  if (titleIndex >= 0) {
+    const subtitle = texts
+      .slice(titleIndex + 1)
+      .find((text) => !/tentar novamente|fechar/i.test(text));
+    return subtitle || texts[titleIndex] || null;
+  }
+
+  return (
+    texts.find((text) =>
+      /sess[aã]o expirou|n[aã]o h[aá] motorista|atualize a cota[cç][aã]o|n[aã]o foi poss[ií]vel gerar o pix/i.test(text),
+    ) || null
+  );
+}
+
 function parseBrlPriceLabel(value) {
   const match = String(value || "").match(/R\$\s*(\d+(?:[.,]\d{2})?)/);
   if (!match) return null;
@@ -1396,6 +1421,7 @@ async function captureStep(name) {
   const screen = detectScreen(nodes);
   const vehicleIdentity = extractRenderedVehicleIdentity(nodes, screen);
   const driverSearchElapsed = extractDriverSearchElapsed(nodes);
+  const paymentErrorMessage = extractVisiblePaymentError(nodes);
   return {
     name,
     screenshot,
@@ -1407,6 +1433,7 @@ async function captureStep(name) {
     screen,
     vehicleIdentity,
     driverSearchElapsed,
+    paymentErrorMessage,
   };
 }
 
@@ -1556,6 +1583,7 @@ async function main() {
   let paymentStatus = OPEN_PAYMENT ? "not_reached" : "skipped";
   let paymentOpened = false;
   let paymentPrices = null;
+  let paymentErrorMessage = null;
   let sandboxPaymentConfirmation = { requested: AUTO_CONFIRM_SANDBOX_PAYMENT, ok: null, skippedReason: "not_reached" };
   let dashboardEvidenceCollection = { requested: COLLECT_DASHBOARD_EVIDENCE, ok: null, skippedReason: "not_reached" };
   let appCanonicalPickup = null;
@@ -1695,12 +1723,14 @@ async function main() {
               current = paymentOpen.current;
               paymentOpened = paymentOpen.opened;
               paymentStatus = paymentOpen.status;
+              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
             }
             if (paymentOpened) {
               const paymentReady = await waitForPaymentReady(current, steps);
               current = paymentReady.current;
               paymentStatus = paymentReady.status;
               paymentPrices = current.prices;
+              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
               if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
                 sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
                 dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
@@ -1759,12 +1789,14 @@ async function main() {
             current = paymentOpen.current;
             paymentOpened = paymentOpen.opened;
             paymentStatus = paymentOpen.status;
+            paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
           }
           if (paymentOpened) {
             const paymentReady = await waitForPaymentReady(current, steps);
             current = paymentReady.current;
             paymentStatus = paymentReady.status;
             paymentPrices = current.prices;
+            paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
             if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
               sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
               dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
@@ -1903,6 +1935,7 @@ async function main() {
         screen: step.screen,
         prices: step.prices,
         driverSearchElapsed: step.driverSearchElapsed,
+        paymentErrorMessage: step.paymentErrorMessage || null,
         canonicalPickup: step.canonicalPickup
           ? {
               lat: step.canonicalPickup.lat,
@@ -1922,6 +1955,7 @@ async function main() {
         opened: paymentOpened,
         status: paymentStatus,
         prices: paymentPrices,
+        errorMessage: paymentErrorMessage,
         appCanonicalPickup,
         appPickupAvailability,
         managedDriverBot,
@@ -1960,6 +1994,7 @@ async function main() {
     `- Payment opened: ${paymentOpened ? "yes" : "no"}`,
     `- Payment status: ${paymentStatus}`,
     `- Payment prices: ${(paymentPrices || []).join(", ") || "not captured"}`,
+    `- Payment error: ${paymentErrorMessage || "not captured"}`,
     `- App canonical pickup: ${appCanonicalPickup ? `${appCanonicalPickup.lat}, ${appCanonicalPickup.lng}` : "not captured"}`,
     `- App pickup availability: ${appPickupAvailability ? (appPickupAvailability.ok ? "OK" : "FAIL") : "not captured"}`,
     `- Managed driver bot: ${managedDriverBot?.requested ? (managedDriverBot.ok ? "OK" : "FAIL") : "not requested"}`,

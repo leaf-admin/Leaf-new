@@ -58,10 +58,41 @@ function resolveQuoteLockFailureStatus(code) {
   return 400;
 }
 
+function resolveAdvancePaymentFailureStatus(code) {
+  const normalized = String(code || '').toUpperCase();
+  if (normalized === 'PAYMENT_SESSION_CONSUMED' || normalized === 'PAYMENT_INTENT_CONFLICT') return 409;
+  if (
+    normalized === 'PAYMENT_PROFILE_CREDENTIALS_MISSING' ||
+    normalized === 'PAYMENT_INTENT_STORE_UNAVAILABLE'
+  ) {
+    return 503;
+  }
+  if (normalized.includes('WOOVI') || normalized.includes('PROVIDER')) return 502;
+  return 400;
+}
+
 function extractBearerToken(req) {
   const header = req.headers.authorization || '';
   if (!header.startsWith('Bearer ')) return null;
   return header.slice('Bearer '.length).trim();
+}
+
+function buildPaymentRequestLogContext(req, extra = {}) {
+  const body = req.body || {};
+  return {
+    service: 'payment-routes',
+    method: req.method,
+    path: req.originalUrl || req.path,
+    requestId: req.headers['x-request-id'] || req.headers['x-correlation-id'] || null,
+    passengerId: body.passengerId || null,
+    rideId: body.rideId || body.paymentSessionId || null,
+    paymentSessionId: body.paymentSessionId || null,
+    quoteSessionId: body.quoteSessionId || null,
+    quoteLockId: body.quoteLockId || null,
+    actorId: req.paymentActor?.uid || req.paymentActor?.id || null,
+    actorType: req.paymentActor?.type || null,
+    ...extra
+  };
 }
 
 function normalizeDigits(value) {
@@ -113,12 +144,17 @@ function isPaymentAdmin(actor, roles = PAYMENT_ADMIN_ROLES) {
 async function authenticatePaymentActor(req, res, next) {
   const token = extractBearerToken(req);
   if (!token) {
+    logStructured('warn', 'payment auth bloqueado por token ausente', buildPaymentRequestLogContext(req, {
+      code: 'PAYMENT_AUTH_TOKEN_MISSING'
+    }));
     return res.status(401).json({
       success: false,
-      error: 'Token não fornecido'
+      error: 'Token não fornecido',
+      code: 'PAYMENT_AUTH_TOKEN_MISSING'
     });
   }
 
+  let firebaseAuthError = null;
   try {
     const decoded = await admin.auth().verifyIdToken(token);
     const actor = {
@@ -133,6 +169,7 @@ async function authenticatePaymentActor(req, res, next) {
     req.user = req.user || actor;
     return next();
   } catch (firebaseError) {
+    firebaseAuthError = firebaseError;
     // Admin dashboard uses its own JWT. We only fall through to that verifier here.
   }
 
@@ -140,9 +177,13 @@ async function authenticatePaymentActor(req, res, next) {
     const decoded = jwt.verify(token, PAYMENT_JWT_SECRET);
     const userId = decoded.userId || decoded.id || decoded.sub;
     if (!userId) {
+      logStructured('warn', 'payment auth bloqueado por JWT sem usuário', buildPaymentRequestLogContext(req, {
+        code: 'PAYMENT_AUTH_JWT_USER_MISSING'
+      }));
       return res.status(401).json({
         success: false,
-        error: 'Token inválido'
+        error: 'Token inválido',
+        code: 'PAYMENT_AUTH_TOKEN_INVALID'
       });
     }
 
@@ -151,9 +192,14 @@ async function authenticatePaymentActor(req, res, next) {
       maxAgeMs: 15 * 1000
     });
     if (!userRecord.exists || userRecord.data?.active === false) {
+      logStructured('warn', 'payment auth bloqueado por admin inexistente ou inativo', buildPaymentRequestLogContext(req, {
+        code: 'PAYMENT_AUTH_ADMIN_INACTIVE',
+        adminUserId: userId
+      }));
       return res.status(403).json({
         success: false,
-        error: 'Usuário não encontrado ou inativo'
+        error: 'Usuário não encontrado ou inativo',
+        code: 'PAYMENT_AUTH_ADMIN_INACTIVE'
       });
     }
 
@@ -170,9 +216,15 @@ async function authenticatePaymentActor(req, res, next) {
     req.user = actor;
     return next();
   } catch (jwtError) {
+    logStructured('warn', 'payment auth bloqueado por token inválido', buildPaymentRequestLogContext(req, {
+      code: 'PAYMENT_AUTH_TOKEN_INVALID',
+      firebaseAuthCode: firebaseAuthError?.code || null,
+      jwtError: jwtError?.name || null
+    }));
     return res.status(401).json({
       success: false,
-      error: 'Token inválido ou expirado'
+      error: 'Token inválido ou expirado',
+      code: 'PAYMENT_AUTH_TOKEN_INVALID'
     });
   }
 }
@@ -205,9 +257,14 @@ function requirePassengerScope(req, res, next) {
     return next();
   }
 
+  logStructured('warn', 'payment auth bloqueado por passageiro divergente', buildPaymentRequestLogContext(req, {
+    code: 'PAYMENT_PASSENGER_SCOPE_MISMATCH',
+    passengerId: passengerId || null
+  }));
   return res.status(403).json({
     success: false,
-    error: 'Passageiro não autorizado para esta operação'
+    error: 'Passageiro não autorizado para esta operação',
+    code: 'PAYMENT_PASSENGER_SCOPE_MISMATCH'
   });
 }
 
@@ -791,7 +848,28 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
         charge: result.charge || (chargeId ? { id: chargeId, correlationID: chargeId } : undefined)
       });
     } else {
-      res.status(400).json(result);
+      const failureCode = result.code || 'PAYMENT_ADVANCE_FAILED';
+      const statusCode = resolveAdvancePaymentFailureStatus(failureCode);
+      logStructured(statusCode >= 500 ? 'error' : 'warn', 'payment/advance recusado pelo serviço de pagamento', {
+        service: 'payment-routes',
+        passengerId,
+        rideId: paymentData.rideId || paymentData.paymentSessionId || null,
+        paymentSessionId: paymentData.paymentSessionId || null,
+        quoteSessionId: paymentData.quoteSessionId || null,
+        quoteLockId: paymentData.quoteLockId || null,
+        code: failureCode,
+        provider: result.provider || 'woovi',
+        providerEnvironment: result.providerEnvironment || null,
+        paymentProfileId: result.paymentProfileId || null,
+        paymentIntentId: result.paymentIntentId || null,
+        chargeId: result.chargeId || null,
+        error: result.error || null,
+        providerStatus: result.details?.status || result.details?.data?.status || null
+      });
+      res.status(statusCode).json({
+        ...result,
+        code: failureCode
+      });
     }
 
   } catch (error) {

@@ -1290,6 +1290,11 @@ class PaymentService {
         return {
           success: false,
           error: 'Falha ao criar cobrança PIX',
+          code: 'PAYMENT_PROVIDER_CHARGE_FAILED',
+          provider: 'woovi',
+          providerEnvironment: paymentProfile.environment,
+          paymentProfileId: paymentProfile.profileId,
+          paymentIntentId: paymentIntent.paymentIntentId || null,
           details: chargeResult.error || chargeResult.details
         };
       }
@@ -1323,6 +1328,11 @@ class PaymentService {
         return {
           success: false,
           error: 'Falha ao identificar cobrança PIX',
+          code: 'PAYMENT_PROVIDER_CHARGE_ID_MISSING',
+          provider: 'woovi',
+          providerEnvironment: paymentProfile.environment,
+          paymentProfileId: paymentProfile.profileId,
+          paymentIntentId: paymentIntent.paymentIntentId || null,
           details: {
             message: 'A Woovi retornou cobrança sem identificador',
             correlationID: chargeData.correlationID
@@ -1370,6 +1380,7 @@ class PaymentService {
       return {
         success: false,
         error: 'Erro interno do servidor',
+        code: 'PAYMENT_ADVANCE_INTERNAL_ERROR',
         details: error.message
       };
     }

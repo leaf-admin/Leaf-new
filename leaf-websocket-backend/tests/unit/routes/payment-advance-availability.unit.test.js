@@ -80,6 +80,7 @@ jest.mock('../../../utils/logger', () => ({
 }));
 
 const paymentRoutes = require('../../../routes/payment');
+const { logStructured } = require('../../../utils/logger');
 
 function createApp() {
   const app = express();
@@ -108,6 +109,7 @@ describe('payment advance availability guard', () => {
     mockProcessAdvancePayment.mockReset();
     mockHasPaymentEligibleDriver.mockReset();
     mockValidateQuoteLock.mockReset();
+    logStructured.mockClear();
     mockBuildPaymentAvailabilityInput.mockClear();
     mockValidateQuoteLock.mockResolvedValue({
       success: true,
@@ -147,6 +149,31 @@ describe('payment advance availability guard', () => {
       code: 'NO_DRIVERS_AVAILABLE'
     });
     expect(mockProcessAdvancePayment).not.toHaveBeenCalled();
+  });
+
+  it('rejects Pix creation without an authenticated payment actor', async () => {
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .send(validPaymentPayload);
+
+    expect(response.status).toBe(401);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'PAYMENT_AUTH_TOKEN_MISSING'
+    });
+    expect(mockVerifyIdToken).not.toHaveBeenCalled();
+    expect(mockProcessAdvancePayment).not.toHaveBeenCalled();
+    expect(logStructured).toHaveBeenCalledWith(
+      'warn',
+      'payment auth bloqueado por token ausente',
+      expect.objectContaining({
+        code: 'PAYMENT_AUTH_TOKEN_MISSING',
+        passengerId: 'passenger-1',
+        rideId: 'temp-ride-1'
+      })
+    );
   });
 
   it('blocks Pix creation when pickup coordinates are missing from the payment payload', async () => {
@@ -204,6 +231,52 @@ describe('payment advance availability guard', () => {
         destinationLocation: validPaymentPayload.destinationLocation,
         carType: 'Leaf Plus',
         preferences: validPaymentPayload.preferences
+      })
+    );
+  });
+
+  it('returns a stable code and logs when the payment service refuses Pix creation', async () => {
+    const app = createApp();
+    mockHasPaymentEligibleDriver.mockResolvedValue({
+      success: true,
+      hasDrivers: true,
+      code: 'DRIVERS_AVAILABLE',
+      driverId: 'driver-1'
+    });
+    mockProcessAdvancePayment.mockResolvedValue({
+      success: false,
+      error: 'Falha ao criar cobrança PIX',
+      provider: 'woovi',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'real-smoke-passenger-sandbox',
+      paymentIntentId: 'payment_intent_1',
+      details: { status: 403 }
+    });
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .set('Authorization', 'Bearer passenger-token')
+      .send(validPaymentPayload);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'PAYMENT_ADVANCE_FAILED',
+      provider: 'woovi',
+      providerEnvironment: 'sandbox'
+    });
+    expect(logStructured).toHaveBeenCalledWith(
+      'warn',
+      'payment/advance recusado pelo serviço de pagamento',
+      expect.objectContaining({
+        passengerId: 'passenger-1',
+        rideId: 'temp-ride-1',
+        code: 'PAYMENT_ADVANCE_FAILED',
+        provider: 'woovi',
+        providerEnvironment: 'sandbox',
+        paymentProfileId: 'real-smoke-passenger-sandbox',
+        paymentIntentId: 'payment_intent_1',
+        providerStatus: 403
       })
     );
   });
