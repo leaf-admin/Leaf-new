@@ -99,6 +99,7 @@ describe('RidePaymentSessionService', () => {
         chargeId: 'charge_original_quote',
         rideId: 'temp_ride_original_quote',
         amountInCents: 7690,
+        quoteLockId: 'ql_original_quote',
       },
     });
 
@@ -112,7 +113,42 @@ describe('RidePaymentSessionService', () => {
       paymentData: {
         chargeId: 'charge_original_quote',
         amountInCents: 7690,
+        quoteLockId: 'ql_original_quote',
       },
     });
+  });
+
+  it('does not recover a charge that is missing the backend quote lock', async () => {
+    const tripData = {
+      pickup: { lat: -22.920775, lng: -43.406003 },
+      drop: { lat: -22.9673111, lng: -43.1789541 },
+      carType: 'Leaf Plus',
+    };
+    const contextKey = buildRidePaymentContextKey({
+      tripData,
+      amountInCents: 8497,
+      grossAmountInCents: 8497,
+    });
+    const session = await getOrCreateRidePaymentSession({
+      passengerId: 'passenger_without_lock',
+      contextKey,
+    });
+    await saveRidePaymentSessionData({
+      passengerId: 'passenger_without_lock',
+      contextKey,
+      paymentSessionId: session.paymentSessionId,
+      paymentData: {
+        chargeId: 'charge_without_quote_lock',
+        rideId: 'temp_ride_without_quote_lock',
+        amountInCents: 8497,
+      },
+    });
+
+    const recovered = await findRecoverableRidePaymentSession({
+      passengerId: 'passenger_without_lock',
+      routeContextKey: buildRidePaymentRouteContextKey({ tripData }),
+    });
+
+    expect(recovered).toBeNull();
   });
 });

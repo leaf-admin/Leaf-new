@@ -1707,12 +1707,18 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     )
       .then((quote) => {
         if (cancelled) return;
+        const quoteLockId = String(quote?.quoteLockId || '').trim() || null;
+        const quoteLockExpiresAt = String(quote?.quoteLockExpiresAt || '').trim() || null;
         setHomeBackendQuote({
           key: homeBackendQuoteKey,
           quoteSessionId: homeBackendQuoteSessionId,
+          quoteLockId,
+          quoteLockExpiresAt,
           quote: quote && typeof quote === 'object'
             ? {
                 ...quote,
+                quoteLockId,
+                quoteLockExpiresAt,
                 quoteRouteSnapshot: homeQuoteRouteSnapshot,
               }
             : null,
@@ -1761,6 +1767,27 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const selectedHomeBackendQuoteReady = Boolean(
     homeBackendQuote?.key === homeBackendQuoteKey &&
       homeBackendQuote?.quote &&
+      String(
+        homeBackendQuote?.quoteLockId ||
+          homeBackendQuote?.quote?.quoteLockId ||
+          '',
+      ).trim() &&
+      Number.isFinite(
+        Date.parse(
+          String(
+            homeBackendQuote?.quoteLockExpiresAt ||
+              homeBackendQuote?.quote?.quoteLockExpiresAt ||
+              '',
+          ),
+        ),
+      ) &&
+      Date.parse(
+        String(
+          homeBackendQuote?.quoteLockExpiresAt ||
+            homeBackendQuote?.quote?.quoteLockExpiresAt ||
+            '',
+        ),
+      ) > Date.now() &&
       Number.isFinite(Number(homeBackendQuote.quote.estimatedFare)) &&
       Number(homeBackendQuote.quote.estimatedFare) > 0,
   );
@@ -5427,6 +5454,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         planId: homeSelectedCategory?.id || homeSelectedCategoryId || 'plus',
         carType: selectedHomeRateCard.title,
         quoteSessionId: homeBackendQuote.quoteSessionId,
+        quoteLockId:
+          homeBackendQuote.quoteLockId ||
+          homeBackendQuote.quote?.quoteLockId ||
+          null,
+        quoteLockExpiresAt:
+          homeBackendQuote.quoteLockExpiresAt ||
+          homeBackendQuote.quote?.quoteLockExpiresAt ||
+          null,
         routeKey: homeDestinationFareQuoteRouteKey,
         quoteRouteSnapshot: homeBackendQuote.routeSnapshot,
         distanceKm: homeBackendQuote.distanceKm,

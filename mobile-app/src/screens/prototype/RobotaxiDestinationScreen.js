@@ -1835,6 +1835,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         }
 
         const grossAmountInCents = Number(recovered?.grossAmountInCents);
+        const recoveredQuoteLockId = String(recovered?.quoteLockId || "").trim();
+        if (!recoveredQuoteLockId) {
+          clearRidePaymentSession({
+            passengerId,
+            paymentSessionId: session.paymentSessionId,
+            contextKey: session.contextKey,
+            chargeId: recovered.chargeId,
+          }).catch(() => false);
+          return;
+        }
         setPaymentQuoteLock({
           fare: amountInCents / 100,
           grossEstimatedFare:
@@ -1843,6 +1853,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               : amountInCents / 100,
           discountBenefit: recovered.discountBenefit || null,
           quoteSessionId: recovered.quoteSessionId || null,
+          quoteLockId: recoveredQuoteLockId,
+          quoteLockExpiresAt: recovered.quoteLockExpiresAt || null,
           pricingQuoteRequestKey: null,
         });
         setPixModalVisible(true);
