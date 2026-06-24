@@ -213,7 +213,7 @@ class SupportTicketService {
 
         } catch (error) {
             Logger.error('❌ Erro ao buscar tickets do usuário:', error);
-            return [];
+            throw error;
         }
     }
 
@@ -239,7 +239,7 @@ class SupportTicketService {
 
         } catch (error) {
             Logger.error('❌ Erro ao buscar tickets para agentes:', error);
-            return [];
+            throw error;
         }
     }
 
@@ -259,7 +259,7 @@ class SupportTicketService {
 
         } catch (error) {
             Logger.error('❌ Erro ao buscar mensagens do ticket:', error);
-            return [];
+            throw error;
         }
     }
 

@@ -21,7 +21,10 @@ import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import useSearchElapsedClock from "./useSearchElapsedClock";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
 import { formatCurrencyBRL } from "./tripFinancialSummary";
-import { normalizePassengerBookingStatus } from "./passengerFlowRouting";
+import {
+  normalizePassengerBookingStatus,
+  resolvePassengerAutoRoute,
+} from "./passengerFlowRouting";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 302;
@@ -44,10 +47,123 @@ function formatFareLabel(value) {
   return formatCurrencyBRL(numeric);
 }
 
+function toPositiveMoney(value) {
+  if (typeof value === "string") {
+    const sanitized = value.replace(/[^\d,.-]/g, "").trim();
+    if (!sanitized) {
+      return null;
+    }
+    const normalized = sanitized.includes(",")
+      ? sanitized.replace(/\./g, "").replace(",", ".")
+      : sanitized;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function pickPaidSearchAmount(source = {}) {
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+
+  const nestedPayment =
+    source.payment ||
+    source.paymentState ||
+    source.paymentData ||
+    source.paymentBreakdown ||
+    {};
+  const candidates = [
+    source.passengerPaidAmount,
+    source.totalPaid,
+    source.totalAmount,
+    source.totalFare,
+    source.paymentAmount,
+    source.chargedAmount,
+    source.amountPaid,
+    source.customerPaid,
+    source.customer_paid,
+    source.grossAmount,
+    source.grossFare,
+    nestedPayment.passengerPaidAmount,
+    nestedPayment.totalPaid,
+    nestedPayment.totalAmount,
+    nestedPayment.totalFare,
+    nestedPayment.paymentAmount,
+    nestedPayment.chargedAmount,
+    nestedPayment.amountPaid,
+    nestedPayment.customerPaid,
+    nestedPayment.amount,
+    nestedPayment.grossAmount,
+    nestedPayment.grossFare,
+  ];
+
+  for (const candidate of candidates) {
+    const amount = toPositiveMoney(candidate);
+    if (amount !== null) {
+      return amount;
+    }
+  }
+
+  const cents = [
+    source.paymentAmountCents,
+    source.amountPaidCents,
+    source.totalAmountCents,
+    source.grossAmountInCents,
+    nestedPayment.paymentAmountCents,
+    nestedPayment.amountPaidCents,
+    nestedPayment.totalAmountCents,
+    nestedPayment.grossAmountInCents,
+  ].find(value => Number.isFinite(Number(value)) && Number(value) > 0);
+
+  return cents ? Number((Number(cents) / 100).toFixed(2)) : null;
+}
+
+function resolveProtectedSearchFareAmount({
+  routeParams,
+  paymentState,
+  activeBooking,
+  selectedFare,
+} = {}) {
+  return (
+    pickPaidSearchAmount(routeParams) ??
+    pickPaidSearchAmount(paymentState) ??
+    pickPaidSearchAmount(activeBooking) ??
+    toPositiveMoney(routeParams?.selectedFare) ??
+    toPositiveMoney(routeParams?.fare) ??
+    toPositiveMoney(selectedFare) ??
+    toPositiveMoney(activeBooking?.estimatedFare) ??
+    toPositiveMoney(activeBooking?.fare) ??
+    null
+  );
+}
+
+function isConfirmedPaymentState(paymentState) {
+  const status = String(paymentState?.status || "").trim().toLowerCase();
+  return (
+    ["processing", "confirmed", "paid", "settled", "completed", "approved"].includes(status) ||
+    Boolean(paymentState?.confirmedAt || paymentState?.processedAt || paymentState?.paymentId || paymentState?.chargeId)
+  );
+}
+
+const TERMINAL_SEARCH_STATUSES = new Set([
+  "completed",
+  "cancelled",
+  "canceled",
+  "cancelada",
+  "rejected",
+  "expired",
+  "no_drivers",
+]);
+
 export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const {
     activeBooking,
+    activeBookingId,
     bookingStatus,
+    paymentState,
     searchingElapsedSeconds,
     selectedVehicle,
     selectedFare,
@@ -62,11 +178,48 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState("");
   const terminalRouteHandledRef = useRef(false);
+  const protectedSearchExitRef = useRef(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
   const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
-  const isSearchActive =
+  const passengerAutoRoute = resolvePassengerAutoRoute(bookingStatus);
+  const isCanonicalSearchActive =
     normalizedBookingStatus === "searching" ||
     normalizedBookingStatus === "requesting";
+  const resolvedActiveBookingId = String(
+    activeBooking?.bookingId ||
+      activeBooking?.id ||
+      activeBookingId ||
+      route?.params?.bookingId ||
+      "",
+  ).trim();
+  const searchCancellationContext = useMemo(
+    () => ({
+      ...(resolvedActiveBookingId
+        ? {
+            bookingId: resolvedActiveBookingId,
+            rideId: resolvedActiveBookingId,
+            tripId: resolvedActiveBookingId,
+          }
+        : {}),
+      bookingStatus: normalizedBookingStatus,
+      source: "search",
+    }),
+    [normalizedBookingStatus, resolvedActiveBookingId],
+  );
+  const hasPaidOrActiveBookingEvidence =
+    Boolean(resolvedActiveBookingId) ||
+    Boolean(activeBooking && typeof activeBooking === "object") ||
+    isConfirmedPaymentState(paymentState) ||
+    Boolean(activeBooking?.paymentData?.confirmedAt);
+  const isTerminalSearchStatus = TERMINAL_SEARCH_STATUSES.has(
+    normalizedBookingStatus,
+  );
+  const isSearchReconciling =
+    !isCanonicalSearchActive &&
+    !isTerminalSearchStatus &&
+    !lastError &&
+    hasPaidOrActiveBookingEvidence;
+  const isSearchActive = isCanonicalSearchActive || isSearchReconciling;
   const searchAnchorTimestamp =
     activeBooking?.timestamp ||
     activeBooking?.createdAt ||
@@ -125,23 +278,62 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       destination,
     "Destino",
   );
-  const fareLabel = formatFareLabel(
-    selectedFare ||
-      activeBooking?.estimatedFare ||
-      activeBooking?.fare ||
-      route?.params?.selectedFare,
-  );
+  const protectedFareAmount = resolveProtectedSearchFareAmount({
+    routeParams: route?.params,
+    paymentState,
+    activeBooking,
+    selectedFare,
+  });
+  const completedReceiptParams = useMemo(() => ({
+    fromTrip: true,
+    ...(resolvedActiveBookingId
+      ? {
+          bookingId: resolvedActiveBookingId,
+          rideId: resolvedActiveBookingId,
+          tripId: resolvedActiveBookingId,
+        }
+      : {}),
+    ...(Number.isFinite(Number(protectedFareAmount)) && Number(protectedFareAmount) > 0
+      ? {
+          fare: Number(protectedFareAmount),
+          grossAmount: Number(protectedFareAmount),
+        }
+      : {}),
+    pickupAddress: routeOriginAddress || bookingPickupAddress || currentAddress,
+    destinationAddress: routeDestinationAddress || bookingDestinationAddress || destination,
+    driverId: driverInfo?.id || null,
+    driverName: driverInfo?.name || null,
+    vehicleLabel: vehicle,
+  }), [
+    bookingDestinationAddress,
+    bookingPickupAddress,
+    currentAddress,
+    destination,
+    driverInfo?.id,
+    driverInfo?.name,
+    protectedFareAmount,
+    resolvedActiveBookingId,
+    routeDestinationAddress,
+    routeOriginAddress,
+    vehicle,
+  ]);
+  const fareLabel = formatFareLabel(protectedFareAmount);
   const searchMilestoneLabel = searchPresentation.isMaxRadius
     ? "Buscando no maior raio disponível para esta corrida"
     : `Buscando em ${searchPresentation.diameterLabel} neste momento`;
+  const replaceAfterProtectedSearch = useCallback((routeName, params) => {
+    protectedSearchExitRef.current = routeName;
+    if (typeof navigation.replace === "function") {
+      navigation.replace(routeName, params);
+      return;
+    }
+
+    navigation.navigate(routeName, params);
+  }, [navigation]);
 
   useEffect(() => {
-    if (
-      normalizedBookingStatus === "accepted" ||
-      normalizedBookingStatus === "arrived" ||
-      normalizedBookingStatus === "started"
-    ) {
-      navigation.replace("RobotaxiPrototypeTrip", {
+    if (passengerAutoRoute === "RobotaxiPrototypeTrip") {
+      replaceAfterProtectedSearch("RobotaxiPrototypeTrip", {
         destination,
         destinationAddress: routeDestinationAddress || bookingDestinationAddress,
         destinationCoordinate,
@@ -151,38 +343,28 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
             address: routeDestinationAddress || bookingDestinationAddress || destination,
             coordinate: destinationCoordinate,
           },
-        selectedFare:
-          route?.params?.selectedFare ||
-          selectedFare ||
-          activeBooking?.estimatedFare ||
-          activeBooking?.fare,
+        selectedFare: protectedFareAmount,
         vehicle,
         elapsed,
         driverName: driverInfo?.name || "Motorista",
       });
     }
   }, [
-    activeBooking?.estimatedFare,
-    activeBooking?.fare,
     bookingDestinationAddress,
     destination,
     destinationCoordinate,
     driverInfo?.name,
     elapsed,
-    navigation,
-    normalizedBookingStatus,
+    passengerAutoRoute,
+    protectedFareAmount,
+    replaceAfterProtectedSearch,
     route?.params?.initialSelectedDestination,
-    route?.params?.selectedFare,
     routeDestinationAddress,
-    selectedFare,
     vehicle,
   ]);
 
   useEffect(() => {
-    if (
-      normalizedBookingStatus === "searching" ||
-      normalizedBookingStatus === "requesting"
-    ) {
+    if (isCanonicalSearchActive || isSearchReconciling) {
       terminalRouteHandledRef.current = false;
       return;
     }
@@ -191,10 +373,38 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       return;
     }
 
+    if (passengerAutoRoute === "RobotaxiPrototypeReceipt") {
+      terminalRouteHandledRef.current = true;
+      replaceAfterProtectedSearch("RobotaxiPrototypeReceipt", completedReceiptParams);
+      return;
+    }
+
+    if (passengerAutoRoute === "RobotaxiPrototypeNoDrivers") {
+      terminalRouteHandledRef.current = true;
+      replaceAfterProtectedSearch("RobotaxiPrototypeNoDrivers", {
+        reason:
+          lastError ||
+          "Não há motoristas disponíveis para essa corrida agora.",
+      });
+      return;
+    }
+
+    if (passengerAutoRoute === "RobotaxiPrototypeCancellation") {
+      terminalRouteHandledRef.current = true;
+      replaceAfterProtectedSearch(
+        "RobotaxiPrototypeCancellation",
+        {
+          ...searchCancellationContext,
+          completed: true,
+        },
+      );
+      return;
+    }
+
     if (normalizedBookingStatus === "idle" && lastError) {
       terminalRouteHandledRef.current = true;
       if (/pagamento|payment/i.test(lastError)) {
-        navigation.replace("RobotaxiPrototypePaymentFailed", {
+        replaceAfterProtectedSearch("RobotaxiPrototypePaymentFailed", {
           errorMessage: lastError,
           retryRouteName: "RobotaxiPrototypeDestination",
           retryParams: {
@@ -209,8 +419,8 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                   routeDestinationAddress || bookingDestinationAddress,
                 coordinate: destinationCoordinate,
               },
-            selectedFare: route?.params?.selectedFare || route?.params?.fare,
-            fare: route?.params?.fare,
+            selectedFare: protectedFareAmount,
+            fare: protectedFareAmount,
             originAddress: routeOriginAddress || bookingPickupAddress,
             vehicle,
           },
@@ -219,33 +429,83 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       }
 
       if (/cancelad|cancelled|cancelada/i.test(lastError)) {
-        navigation.replace("RobotaxiPrototypeCancellation", {
-          source: "search",
-        });
+        replaceAfterProtectedSearch(
+          "RobotaxiPrototypeCancellation",
+          {
+            ...searchCancellationContext,
+            completed: true,
+          },
+        );
         return;
       }
 
-      navigation.replace("RobotaxiPrototypeNoDrivers", {
+      replaceAfterProtectedSearch("RobotaxiPrototypeNoDrivers", {
         reason: lastError,
       });
     }
-  }, [lastError, navigation, normalizedBookingStatus]);
+  }, [
+    bookingDestinationAddress,
+    bookingPickupAddress,
+    completedReceiptParams,
+    destination,
+    destinationCoordinate,
+    isCanonicalSearchActive,
+    isSearchReconciling,
+    lastError,
+    normalizedBookingStatus,
+    passengerAutoRoute,
+    protectedFareAmount,
+    replaceAfterProtectedSearch,
+    route?.params?.initialSelectedDestination,
+    routeDestinationAddress,
+    routeOriginAddress,
+    searchCancellationContext,
+    vehicle,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isSearchActive ||
+      typeof navigation?.addListener !== "function"
+    ) {
+      return undefined;
+    }
+
+    // A confirmed payment/search must remain visible until a canonical
+    // transition (acceptance, cancellation ACK, timeout or no-driver result).
+    const unsubscribe = navigation.addListener("beforeRemove", event => {
+      const expectedRouteName = protectedSearchExitRef.current;
+      const actionRouteName = event?.data?.action?.payload?.name;
+      if (expectedRouteName && actionRouteName === expectedRouteName) {
+        protectedSearchExitRef.current = null;
+        return;
+      }
+
+      event?.preventDefault?.();
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [isSearchActive, navigation]);
 
   const handleProtectedDismiss = useCallback(() => {}, []);
 
   const handleCancelSearch = async () => {
-    if (normalizedBookingStatus !== "searching" || cancelPending) {
+    if (!isCanonicalSearchActive || cancelPending) {
       return;
     }
 
     setCancelPending(true);
     setCancelError("");
     try {
-      await cancelRideSearch();
+      await cancelRideSearch(searchCancellationContext);
       terminalRouteHandledRef.current = true;
-      navigation.replace("RobotaxiPrototypeCancellation", {
-        source: "search",
-      });
+      replaceAfterProtectedSearch(
+        "RobotaxiPrototypeCancellation",
+        {
+          ...searchCancellationContext,
+          completed: true,
+        },
+      );
     } catch (error) {
       setCancelError(
         error?.message ||
@@ -259,7 +519,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const handleOpenSupport = () => {
     navigation.navigate("RobotaxiMenuHelp", {
       source: "driver_search",
-      bookingId: activeBooking?.bookingId || activeBooking?.id || null,
+      bookingId: resolvedActiveBookingId || null,
     });
   };
 
@@ -328,7 +588,9 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
             >
               {searchPresentation.elapsedLabel}
             </Text>
-            <Text style={styles.elapsedMetaText}>tempo de busca</Text>
+              <Text style={styles.elapsedMetaText}>
+                {isSearchReconciling ? "sincronizando estado" : "tempo de busca"}
+              </Text>
 
             <View style={styles.routeSummaryRow}>
               <Ionicons name="location-outline" size={19} color={leafRideColors.accent} />
@@ -356,24 +618,32 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
 
             <LeafButton
               label={
-                normalizedBookingStatus === "requesting"
-                  ? "Criando corrida..."
-                  : cancelPending
+                isSearchReconciling
+                  ? "Sincronizando..."
+                  : normalizedBookingStatus === "requesting"
+                    ? "Criando corrida..."
+                    : cancelPending
                     ? "Cancelando..."
                   : "Cancelar"
               }
               onPress={
-                normalizedBookingStatus === "requesting" || cancelPending
+                isSearchReconciling ||
+                normalizedBookingStatus === "requesting" ||
+                cancelPending
                   ? undefined
                   : handleCancelSearch
               }
               icon={
-                normalizedBookingStatus === "requesting" || cancelPending
+                isSearchReconciling ||
+                normalizedBookingStatus === "requesting" ||
+                cancelPending
                   ? "time-outline"
                   : "close-circle-outline"
               }
               disabled={
-                normalizedBookingStatus === "requesting" || cancelPending
+                isSearchReconciling ||
+                normalizedBookingStatus === "requesting" ||
+                cancelPending
               }
               tone="ghost"
               style={styles.actionButton}

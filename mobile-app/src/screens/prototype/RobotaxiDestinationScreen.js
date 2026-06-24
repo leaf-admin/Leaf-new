@@ -45,6 +45,7 @@ import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { isE2ETestBuild } from "../../config/runtimeAccessPolicy";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
+import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolvePassengerAutoRoute } from "./passengerFlowRouting";
 import { resolveDestinationAutomationConfig } from "./destinationAutomationConfig";
@@ -382,6 +383,16 @@ function normalizeLockedQuoteNumber(value, fallback = null) {
   return numericValue;
 }
 
+function hasValidBackendQuoteLock(value) {
+  const quoteLockId = String(value?.quoteLockId || "").trim();
+  const expiresAt = Date.parse(String(value?.quoteLockExpiresAt || ""));
+  return Boolean(
+    quoteLockId &&
+      Number.isFinite(expiresAt) &&
+      expiresAt > Date.now(),
+  );
+}
+
 function normalizeInitialSelectedDestination(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -425,12 +436,21 @@ function normalizeInitialPricingQuote(value) {
     return null;
   }
 
+  const quoteLockId =
+    String(value.quoteLockId || rawQuote.quoteLockId || "").trim() || null;
+  if (!quoteLockId) {
+    return null;
+  }
+
   const grossEstimatedFare =
     normalizeLockedQuoteNumber(
       rawQuote.grossEstimatedFare ?? value.grossEstimatedFare,
       estimatedFare,
     ) || estimatedFare;
   const createdAt = Number(value.createdAt) || Date.now();
+  const quoteLockExpiresAtMs = Date.parse(
+    String(value.quoteLockExpiresAt || rawQuote.quoteLockExpiresAt || ""),
+  );
 
   return {
     quote: {
@@ -446,6 +466,10 @@ function normalizeInitialPricingQuote(value) {
     quoteSessionId:
       String(value.quoteSessionId || rawQuote.quoteSessionId || "").trim() ||
       null,
+    quoteLockId,
+    quoteLockExpiresAt:
+      String(value.quoteLockExpiresAt || rawQuote.quoteLockExpiresAt || "").trim() ||
+      null,
     routeKey: String(value.routeKey || "").trim(),
     distanceKm: normalizeLockedQuoteNumber(value.distanceKm),
     durationMin: normalizeLockedQuoteNumber(value.durationMin),
@@ -454,7 +478,9 @@ function normalizeInitialPricingQuote(value) {
     expiresAt:
       Number(value.expiresAt) ||
       Number(rawQuote.expiresAt) ||
-      createdAt + PASSENGER_QUOTE_VALIDITY_MS,
+      (Number.isFinite(quoteLockExpiresAtMs)
+        ? quoteLockExpiresAtMs
+        : createdAt + PASSENGER_QUOTE_VALIDITY_MS),
   };
 }
 
@@ -482,6 +508,14 @@ function buildPaymentQuoteLockFromInitialPricingQuote(initialPricingQuote) {
     grossEstimatedFare,
     discountBenefit: initialPricingQuote.quote.discountBenefit || null,
     quoteSessionId: initialPricingQuote.quoteSessionId || null,
+    quoteLockId:
+      initialPricingQuote.quoteLockId ||
+      initialPricingQuote.quote.quoteLockId ||
+      null,
+    quoteLockExpiresAt:
+      initialPricingQuote.quoteLockExpiresAt ||
+      initialPricingQuote.quote.quoteLockExpiresAt ||
+      null,
     pricingQuoteRequestKey: null,
   };
 }
@@ -536,6 +570,9 @@ function resolveInitialPickupAddress(params = {}) {
 export default function RobotaxiDestinationScreen({ navigation, route }) {
   const {
     bookingStatus,
+    activeBooking,
+    activeBookingId,
+    lastRideBookingId,
     currentAddress,
     currentCoordinate,
     driverInfo,
@@ -1252,6 +1289,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         setFareQuoteLock({
           routeKey: initialPricingQuote.routeKey,
           quoteSessionId: initialPricingQuote.quoteSessionId,
+          quoteLockId: initialPricingQuote.quoteLockId,
+          quoteLockExpiresAt: initialPricingQuote.quoteLockExpiresAt,
           distanceKm: initialPricingQuote.distanceKm,
           durationMin: initialPricingQuote.durationMin,
           arrivalTime: initialPricingQuote.arrivalTime,
@@ -1438,7 +1477,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   useEffect(() => {
     const canLockQuote =
       (step === QUOTE_STEP || step === CONFIRM_STEP || step === PICKUP_STEP) &&
-      !isExtensionFlow &&
       !routeGuardBlocked &&
       canRequestRide &&
       Boolean(fareQuoteRouteKey);
@@ -1467,7 +1505,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [
     canRequestRide,
     fareQuoteRouteKey,
-    isExtensionFlow,
     liveArrivalTime,
     liveDistanceKm,
     liveDurationMin,
@@ -1557,15 +1594,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const hasSelectedBackendQuote = Boolean(
     selectedPricingQuote &&
       Number.isFinite(selectedQuoteFare) &&
-      selectedQuoteFare > 0,
+      selectedQuoteFare > 0 &&
+      hasValidBackendQuoteLock(selectedPricingQuote),
   );
   const selectedPlanFare = routeGuardBlocked
     ? null
     : hasSelectedBackendQuote
       ? selectedQuoteFare
-      : isExtensionFlow
-        ? selectedPlanData?.value
-        : null;
+      : null;
   const selectedDiscountBenefit =
     selectedPricingQuote?.discountBenefit && typeof selectedPricingQuote.discountBenefit === "object"
       ? selectedPricingQuote.discountBenefit
@@ -1581,8 +1617,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       Number(selectedPlanFare) > 0,
   );
   const paymentQuotePending = Boolean(
-    !isExtensionFlow &&
-      canRequestRide &&
+    canRequestRide &&
       !routeGuardBlocked &&
       (pricingQuoteLoading || !selectedBackendQuoteReady),
   );
@@ -1704,10 +1739,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     }
     return plans.filter((item) => item.id === extensionPlanId);
   }, [extensionPlanId, isExtensionFlow, plans]);
-  const activePlanData =
-    visiblePlans.find((item) => item.id === selectedPlan) ||
-    visiblePlans[0] ||
-    selectedPlanData;
   const visiblePlanSignature = useMemo(
     () => visiblePlans.map((item) => `${item.id}:${item.title}`).join("|"),
     [visiblePlans],
@@ -1743,8 +1774,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           : plan.id === selectedPlan &&
               selectedPlanFare != null &&
               Number.isFinite(Number(selectedPlanFare))
-          ? Number(selectedPlanFare)
-          : Number(plan.value);
+            ? Number(selectedPlanFare)
+            : null;
       const pickupEta =
         plan.id === "elite"
           ? basePickupEta + 2
@@ -1838,7 +1869,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   useEffect(() => {
     if (
       (step !== QUOTE_STEP && step !== CONFIRM_STEP && step !== PICKUP_STEP) ||
-      isExtensionFlow ||
       routeGuardBlocked ||
       !canRequestRide ||
       !selectedPlanData?.title ||
@@ -1925,6 +1955,25 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         if (!cancelled) {
           const normalizedQuote =
             quote && typeof quote === "object" ? quote : null;
+          const quoteFare = Number(normalizedQuote?.estimatedFare);
+          const hasLockedBackendQuote = Boolean(
+            normalizedQuote &&
+              Number.isFinite(quoteFare) &&
+              quoteFare > 0 &&
+              hasValidBackendQuoteLock(normalizedQuote),
+          );
+          if (!hasLockedBackendQuote) {
+            selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
+              quote: null,
+              expiresAt:
+                Number(fareQuoteLock?.expiresAt) ||
+                Date.now() + PASSENGER_QUOTE_VALIDITY_MS,
+            };
+            setSelectedPricingQuote(null);
+            setPricingQuoteError("Cotação expirada ou ausente. Recalcule a tarifa.");
+            return;
+          }
+
           selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
             quote: normalizedQuote,
             expiresAt:
@@ -2016,8 +2065,39 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     SEARCH_FALLBACK_HEIGHT,
     windowHeight - insets.top - effectiveSheetBottomOffset - 24,
   );
+  const destinationSheetFallbackHeight =
+    step === SEARCH_STEP
+      ? SEARCH_FALLBACK_HEIGHT
+      : step === QUOTE_STEP
+        ? QUOTE_FALLBACK_HEIGHT
+        : step === CONFIRM_STEP
+          ? CONFIRM_FALLBACK_HEIGHT
+          : PICKUP_FALLBACK_HEIGHT;
+  const destinationSheetViewport = useMemo(
+    () =>
+      buildOverlaySheetViewportMetrics({
+        windowHeight,
+        topOcclusion: pickupMapTopOcclusion,
+        bottomOffset: effectiveSheetBottomOffset,
+        measuredHeight: sheetHeight,
+        fallbackHeight: destinationSheetFallbackHeight,
+        minVisibleMapHeight: 240,
+        minSheetHeight:
+          step === SEARCH_STEP ? SEARCH_FALLBACK_HEIGHT : QUOTE_FALLBACK_HEIGHT,
+        maxSheetRatio: step === SEARCH_STEP ? 0.72 : 0.62,
+      }),
+    [
+      destinationSheetFallbackHeight,
+      effectiveSheetBottomOffset,
+      pickupMapTopOcclusion,
+      sheetHeight,
+      step,
+      windowHeight,
+    ],
+  );
+  const destinationSheetMaxHeight = destinationSheetViewport.maxSheetHeight;
   const mapOccludedBottom =
-    step === PICKUP_STEP ? 0 : effectiveSheetBottomOffset + sheetHeight;
+    step === PICKUP_STEP ? 0 : destinationSheetViewport.occludedBottom;
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -2355,9 +2435,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const handleCardLayout = useCallback((event) => {
     const nextHeight = event?.nativeEvent?.layout?.height;
     if (Number.isFinite(nextHeight) && nextHeight > 0) {
-      setSheetHeight(nextHeight);
+      const boundedHeight = Math.min(nextHeight, destinationSheetMaxHeight);
+      setSheetHeight((previous) =>
+        previous === boundedHeight ? previous : boundedHeight,
+      );
     }
-  }, []);
+  }, [destinationSheetMaxHeight]);
 
   const handlePickupFloatingCardLayout = useCallback((event) => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -2389,6 +2472,24 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     }
 
     if (isExtensionFlow) {
+      if (routeGuardBlocked) {
+        setAvailabilityNotice(routeGuardMessage || OUT_OF_COVERAGE_MESSAGE);
+        return;
+      }
+
+      if (
+        pricingQuoteLoading ||
+        !selectedBackendQuoteReady ||
+        !Number.isFinite(Number(selectedPlanFare)) ||
+        Number(selectedPlanFare) <= 0
+      ) {
+        setAvailabilityNotice(
+          pricingQuoteError ||
+            "Aguarde a cotação da tarifa antes de solicitar a alteração.",
+        );
+        return;
+      }
+
       try {
         setSubmittingRide(true);
         setAvailabilityNotice("");
@@ -2398,7 +2499,18 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             address: destinationInfo?.address || "",
             coordinate: destinationCoordinate,
           },
-          newFare: activePlanData?.value,
+          newFare: Number(selectedPlanFare),
+          routeDistanceKm: distanceKm,
+          routeDurationSecs: Math.max(60, Math.round(durationMin * 60)),
+          quoteLockId:
+            selectedPricingQuote?.quoteLockId ||
+            fareQuoteLock?.quoteLockId ||
+            null,
+          quoteSessionId:
+            selectedPricingQuote?.quoteSessionId ||
+            fareQuoteLock?.quoteSessionId ||
+            null,
+          backendQuote: selectedPricingQuote,
         });
 
         if (result?.directChange) {
@@ -2534,6 +2646,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               : Number(selectedPlanFare),
           discountBenefit: selectedDiscountBenefit,
           quoteSessionId: fareQuoteLock?.quoteSessionId || null,
+          quoteLockId:
+            selectedPricingQuote?.quoteLockId ||
+            fareQuoteLock?.quoteLockId ||
+            null,
+          quoteLockExpiresAt:
+            selectedPricingQuote?.quoteLockExpiresAt ||
+            fareQuoteLock?.quoteLockExpiresAt ||
+            null,
           pricingQuoteRequestKey: selectedPricingQuoteRequestKey || null,
         };
       });
@@ -2554,12 +2674,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       setCheckingAvailability(false);
     }
   }, [
-    activePlanData?.value,
     canRequestRide,
     checkingAvailability,
     destinationCoordinate,
     destinationInfo?.address,
     destinationInfo?.name,
+    distanceKm,
+    durationMin,
     isExtensionFlow,
     initialPricingQuoteMatchesCurrentSelection,
     navigation,
@@ -2579,8 +2700,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     selectedPlanData.id,
     selectedPlanData.title,
     selectedPlanFare,
+    selectedPricingQuote,
     selectedPricingQuoteRequestKey,
     fareQuoteLock?.quoteSessionId,
+    fareQuoteLock?.quoteLockExpiresAt,
+    fareQuoteLock?.quoteLockId,
     visiblePlans,
     submittingRide,
   ]);
@@ -2647,7 +2771,22 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     }
 
     lastAutoRouteRef.current = routeKey;
+    const terminalFare = Number.isFinite(Number(selectedPlanFare)) && Number(selectedPlanFare) > 0
+      ? Number(selectedPlanFare)
+      : Number(
+          activeBooking?.grossFare ||
+            activeBooking?.fare ||
+            activeBooking?.amount ||
+            selectedFare,
+        );
     const commonParams = {
+      ...(activeBookingId || activeBooking?.bookingId || activeBooking?.id || lastRideBookingId
+        ? {
+            bookingId: activeBookingId || activeBooking?.bookingId || activeBooking?.id || lastRideBookingId,
+            rideId: activeBookingId || activeBooking?.bookingId || activeBooking?.id || lastRideBookingId,
+            tripId: activeBookingId || activeBooking?.bookingId || activeBooking?.id || lastRideBookingId,
+          }
+        : {}),
       destination: destinationRoutePayload?.name || destinationInfo?.name || "Destino",
       destinationAddress:
         destinationRoutePayload?.address ||
@@ -2657,14 +2796,24 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       destinationCoordinate: destinationRoutePayload?.coordinate || null,
       initialSelectedDestination: destinationRoutePayload,
       initialSelectedPlan: selectedPlan,
-      selectedFare: selectedPlanFare,
-      fare: selectedPlanFare,
+      selectedFare: Number.isFinite(terminalFare) && terminalFare > 0 ? terminalFare : null,
+      fare: Number.isFinite(terminalFare) && terminalFare > 0 ? terminalFare : null,
       originAddress: resolvedPickupAddress,
       vehicle: selectedPlanData.title || selectedVehicle || "Leaf Plus",
+      status: bookingStatus || null,
     };
 
     if (passengerAutoRoute === "RobotaxiPrototypeReceipt") {
-      navigation.replace("RobotaxiPrototypeReceipt", { fromTrip: true });
+      navigation.replace("RobotaxiPrototypeReceipt", {
+        ...commonParams,
+        fromTrip: true,
+        ...(Number.isFinite(terminalFare) && terminalFare > 0
+          ? {
+              fare: terminalFare,
+              grossAmount: terminalFare,
+            }
+          : {}),
+      });
       return;
     }
 
@@ -2678,18 +2827,26 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
     navigation.replace("RobotaxiPrototypeDriverSearch", commonParams);
   }, [
+    activeBooking?.bookingId,
+    activeBooking?.amount,
+    activeBooking?.fare,
+    activeBooking?.grossFare,
+    activeBooking?.id,
+    activeBookingId,
     bookingStatus,
     destinationInfo?.address,
     destinationInfo?.name,
     destinationRoutePayload,
     driverInfo?.name,
     isExtensionFlow,
+    lastRideBookingId,
     navigation,
     resolvedPickupAddress,
     passengerAutoRoute,
     selectedPlan,
     selectedPlanData.title,
     selectedPlanFare,
+    selectedFare,
     selectedVehicle,
   ]);
 
@@ -3289,7 +3446,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               )}
               style={[
                 styles.searchSurface,
-                { maxHeight: searchSurfaceMaxHeight },
+                { maxHeight: Math.min(searchSurfaceMaxHeight, destinationSheetMaxHeight) },
               ]}
             >
               <View style={styles.sheetHandle} />
@@ -3696,7 +3853,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               style={styles.categoryStack}
               onLayout={handleCardLayout}
             >
-              <LeafRideSheet style={styles.categoryCard}>
+              <LeafRideSheet
+                style={[
+                  styles.categoryCard,
+                  { maxHeight: destinationSheetMaxHeight },
+                ]}
+                scrollEnabled
+                showsVerticalScrollIndicator
+              >
                 <View style={styles.categoryHandle} />
                 <View style={styles.categoryTopRow}>
                   <Text style={styles.categoryEyebrow}>Escolha a categoria</Text>
@@ -3856,13 +4020,19 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     isExtensionFlow
                       ? submittingRide
                         ? "Solicitando alteração..."
-                        : "Confirmar"
+                        : paymentQuotePending
+                          ? pricingQuoteLoading
+                            ? "Calculando tarifa..."
+                            : "Tarifa indisponível"
+                          : "Confirmar"
                       : checkingPlanAvailability
                         ? "Verificando..."
                       : checkingAvailability
                         ? "Buscando motorista..."
                       : paymentQuotePending
-                        ? "Calculando tarifa..."
+                        ? pricingQuoteLoading
+                          ? "Calculando tarifa..."
+                          : "Tarifa indisponível"
                       : routeGuardBlocked || hasCoverageBlockedPlan || selectedPlanUnavailable
                           ? "Indisponível"
                         : "Confirmar"
@@ -3897,7 +4067,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               style={styles.confirmStack}
               onLayout={handleCardLayout}
             >
-              <LeafRideSheet style={styles.confirmCard}>
+              <LeafRideSheet
+                style={[
+                  styles.confirmCard,
+                  { maxHeight: destinationSheetMaxHeight },
+                ]}
+                scrollEnabled
+                showsVerticalScrollIndicator
+              >
                 <View style={styles.sheetHandle} />
                 <View style={styles.confirmHeader}>
                   <View style={styles.confirmHeaderCopy}>
@@ -3998,7 +4175,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                       isExtensionFlow
                         ? submittingRide
                           ? "Solicitando alteração..."
-                          : "Confirmar"
+                          : paymentQuotePending
+                            ? pricingQuoteLoading
+                              ? "Calculando tarifa..."
+                              : "Tarifa indisponível"
+                            : "Confirmar"
                         : checkingPlanAvailability
                           ? "Verificando categorias..."
                           : checkingAvailability
@@ -4064,6 +4245,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             grossEstimatedFare={lockedGrossEstimatedFare}
             discountBenefit={lockedDiscountBenefit}
             quoteSessionId={paymentQuoteLock?.quoteSessionId || fareQuoteLock?.quoteSessionId || null}
+            quoteLockId={paymentQuoteLock?.quoteLockId || fareQuoteLock?.quoteLockId || null}
             passengerId={profileUid || riderProfile?.uid || riderProfile?.id || ""}
             passengerName={riderProfile?.name || "Passageira Leaf"}
             passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}

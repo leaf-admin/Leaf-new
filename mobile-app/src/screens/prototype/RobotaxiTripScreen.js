@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
@@ -27,7 +27,10 @@ import { useLiveRouteTiming } from './liveRouteTiming';
 import { formatCurrencyBRL } from './tripFinancialSummary';
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from './robotaxiPrototypeData';
 import { normalizePassengerBookingStatus } from './passengerFlowRouting';
-import { buildFallbackRouteCoordinates } from './prototypeMapRoute';
+import {
+  buildRouteViewportRegion,
+  buildVisibleRouteEdgePadding,
+} from './prototypeRouteViewport';
 import {
   RIDE_CARD_ROLES,
   RIDE_CARD_STATES,
@@ -39,9 +42,14 @@ import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 292;
+const TRIP_SHEET_MIN_HEIGHT = 332;
+const TRIP_SHEET_MAX_HEIGHT_RATIO = 0.66;
+const TRIP_SHEET_SCROLL_VERTICAL_CHROME = 32;
 const TRIP_MAP_TOP_PADDING = 128;
 const TRIP_MAP_SIDE_PADDING = 44;
 const TRIP_MAP_BOTTOM_GUTTER = 28;
+const TRIP_MAP_MIN_VISIBLE_HEIGHT = 220;
+const PASSENGER_ACTIVE_MAP_MIN_OCCLUDED_BOTTOM = 392;
 const PROTECTED_PASSENGER_TRIP_STATUSES = new Set([
   'accepted',
   'arrived',
@@ -208,6 +216,36 @@ function formatBoardingTimer(seconds) {
   return `${Math.floor(normalizedSeconds / 60)}:${String(normalizedSeconds % 60).padStart(2, '0')}`;
 }
 
+function buildTripSheetMaxHeight({ mapHeight, windowHeight }) {
+  const effectiveMapHeight = Math.max(
+    1,
+    Number(mapHeight) || Number(windowHeight) || 1,
+  );
+  const visibleRouteLimit = Math.max(
+    TRIP_SHEET_MIN_HEIGHT,
+    effectiveMapHeight - TRIP_MAP_MIN_VISIBLE_HEIGHT,
+  );
+  const ratioLimit = Math.max(
+    TRIP_SHEET_MIN_HEIGHT,
+    Math.round(effectiveMapHeight * TRIP_SHEET_MAX_HEIGHT_RATIO),
+  );
+
+  return Math.max(
+    TRIP_SHEET_MIN_HEIGHT,
+    Math.min(visibleRouteLimit, ratioLimit),
+  );
+}
+
+function formatDriverLocationAge(ageSeconds) {
+  const normalizedSeconds = Math.max(0, Math.round(Number(ageSeconds) || 0));
+  if (normalizedSeconds < 60) {
+    return 'há menos de 1 min';
+  }
+
+  const minutes = Math.max(1, Math.round(normalizedSeconds / 60));
+  return minutes === 1 ? 'há 1 min' : `há ${minutes} min`;
+}
+
 function getFirstName(value, fallback = 'Motorista') {
   const firstName = String(value || '').trim().split(/\s+/).filter(Boolean)[0];
   return firstName || fallback;
@@ -258,6 +296,35 @@ function normalizeRouteCoordinateList(value) {
   return Array.isArray(value)
     ? value.map(normalizeMapCoordinate).filter(Boolean)
     : [];
+}
+
+function normalizeRouteTrafficSegments(value) {
+  if (typeof value === 'string') {
+    try {
+      return normalizeRouteTrafficSegments(JSON.parse(value));
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(segment => {
+      const coordinates = normalizeRouteCoordinateList(segment?.coordinates);
+      if (coordinates.length < 2) {
+        return null;
+      }
+
+      return {
+        coordinates,
+        level: String(segment?.level || segment?.trafficLevel || 'normal').trim() || 'normal',
+        color: String(segment?.color || '').trim() || undefined,
+      };
+    })
+    .filter(Boolean);
 }
 
 function pickPassengerPaidAmountFromSource(source = {}, { includeFareFallback = false } = {}) {
@@ -338,6 +405,40 @@ function resolvePassengerTripPaidAmount({
     toPositiveNumber(selectedFare) ??
     pickPassengerPaidAmountFromSource(activeBooking, { includeFareFallback: true }) ??
     null
+  );
+}
+
+function hasPassengerActiveRideIdentity({
+  activeBookingId,
+  activeBooking,
+  driverActiveRide,
+  driverInfo,
+  routeParams,
+} = {}) {
+  return Boolean(
+    String(
+      activeBookingId ||
+        activeBooking?.bookingId ||
+        activeBooking?.id ||
+        activeBooking?.rideId ||
+        driverActiveRide?.bookingId ||
+        driverActiveRide?.id ||
+        routeParams?.bookingId ||
+        routeParams?.rideId ||
+        routeParams?.tripId ||
+        "",
+    ).trim() &&
+      String(
+        driverInfo?.id ||
+          driverInfo?.driverId ||
+          driverInfo?.driver?.id ||
+          activeBooking?.driverId ||
+          activeBooking?.driver?.id ||
+          driverActiveRide?.driverId ||
+          driverActiveRide?.driver?.id ||
+          routeParams?.driverId ||
+          "",
+      ).trim(),
   );
 }
 
@@ -449,6 +550,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     currentHeading,
     currentAddress,
     driverCoordinate,
+    driverLocationHeartbeat,
     driverTripMeta,
     rideLocalSync,
     profileUid,
@@ -457,7 +559,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     respondOperationalContinuationFlow
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const mapRef = useRef(null);
+  const [mapWidth, setMapWidth] = useState(windowWidth);
+  const [mapHeight, setMapHeight] = useState(windowHeight);
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [isBusy, setIsBusy] = useState(false);
   const [isExtensionPaymentVisible, setIsExtensionPaymentVisible] = useState(false);
@@ -465,15 +570,49 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const qaAutoConfirmPix = true;
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
   const sheetBottom = SHEET_BOTTOM_OFFSET;
-  const mapOccludedBottom = sheetBottom + cardHeight;
-  const tripMapViewportPadding = useMemo(
-    () => ({
-      top: insets.top + TRIP_MAP_TOP_PADDING,
-      right: TRIP_MAP_SIDE_PADDING,
-      bottom: mapOccludedBottom + TRIP_MAP_BOTTOM_GUTTER,
-      left: TRIP_MAP_SIDE_PADDING,
+  const tripSheetMaxHeight = useMemo(
+    () => buildTripSheetMaxHeight({
+      mapHeight: mapHeight || windowHeight,
+      windowHeight,
     }),
-    [insets.top, mapOccludedBottom],
+    [mapHeight, windowHeight],
+  );
+  const tripSheetScrollMaxHeight = Math.max(
+    1,
+    tripSheetMaxHeight - TRIP_SHEET_SCROLL_VERTICAL_CHROME - safeBottom,
+  );
+  const effectiveCardHeight = Math.min(cardHeight, tripSheetMaxHeight);
+  const mapOccludedBottom = sheetBottom + effectiveCardHeight;
+  const protectedMapOccludedBottom = Math.max(
+    mapOccludedBottom,
+    PASSENGER_ACTIVE_MAP_MIN_OCCLUDED_BOTTOM + safeBottom,
+  );
+  const tripMapActiveOcclusion = useMemo(
+    () => ({
+      top: 0,
+      bottom: protectedMapOccludedBottom,
+    }),
+    [protectedMapOccludedBottom],
+  );
+  const tripMapViewportPadding = useMemo(
+    () => buildVisibleRouteEdgePadding({
+      mapHeight: mapHeight || windowHeight,
+      activeOcclusion: tripMapActiveOcclusion,
+      insets,
+      sidePadding: TRIP_MAP_SIDE_PADDING,
+      topExtraPadding: 34,
+      bottomExtraPadding: TRIP_MAP_BOTTOM_GUTTER,
+      minVisibleHeight: TRIP_MAP_MIN_VISIBLE_HEIGHT,
+      overlayBiasRatio: 0.24,
+      topPaddingMin: insets.top + TRIP_MAP_TOP_PADDING,
+    }),
+    [
+      insets,
+      insets.top,
+      mapHeight,
+      tripMapActiveOcclusion,
+      windowHeight,
+    ],
   );
   const rideLocalSyncIndicator = useMemo(() => {
     const syncStatus = String(rideLocalSync?.status || '').toLowerCase();
@@ -518,6 +657,28 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         'Aguardando confirmação do servidor para mudar o estado da corrida.',
     };
   }, [bookingStatus, rideLocalSync]);
+  const driverSignalIndicator = useMemo(() => {
+    const normalizedTripStatus = normalizePassengerBookingStatus(bookingStatus);
+    if (
+      !PROTECTED_PASSENGER_TRIP_STATUSES.has(normalizedTripStatus) ||
+      driverLocationHeartbeat?.stale !== true
+    ) {
+      return null;
+    }
+
+    const ageSeconds = Number(driverLocationHeartbeat?.ageSeconds);
+    const ageLabel = formatDriverLocationAge(ageSeconds);
+    return {
+      tone: ageSeconds >= 60 ? 'danger' : 'warning',
+      icon: 'radio-outline',
+      title: 'Sinal do motorista instável',
+      message: `Última localização ${ageLabel}. Mantendo o último ponto confirmado.`,
+    };
+  }, [
+    bookingStatus,
+    driverLocationHeartbeat?.ageSeconds,
+    driverLocationHeartbeat?.stale,
+  ]);
 
   const destination = route?.params?.destination || selectedDestination?.name || 'Destino';
   const destinationAddress = route?.params?.destinationAddress || selectedDestination?.address || destination;
@@ -686,6 +847,16 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       route?.params?.status ||
       ''
   );
+  const isProtectedStatusWithoutRideIdentity = Boolean(
+    PROTECTED_PASSENGER_TRIP_STATUSES.has(normalizedStatus) &&
+      !hasPassengerActiveRideIdentity({
+        activeBookingId,
+        activeBooking,
+        driverActiveRide,
+        driverInfo,
+        routeParams: route?.params,
+      }),
+  );
   const passengerTripSheetExpansionLocked = [
     'operational_interrupted',
     'searching_replacement',
@@ -693,6 +864,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const isAccepted = normalizedStatus === 'accepted' || normalizedStatus === 'arrived';
   const isArrived = normalizedStatus === 'arrived';
   const isStarted = normalizedStatus === 'started';
+  const pickupEtaValue =
+    Number.isFinite(resolvedPickupEtaMin) && resolvedPickupEtaMin > 0
+      ? `${Math.max(1, Math.round(resolvedPickupEtaMin))} min`
+      : null;
   const pickupLegDistanceLabel =
     pickupDistanceLabel && pickupDistanceLabel !== '--'
       ? pickupDistanceLabel
@@ -777,27 +952,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     const candidateRoutes = isAccepted || isArrived
       ? pickupRouteCandidates
       : destinationRouteCandidates;
-    const normalizedCandidate = candidateRoutes
+    return candidateRoutes
       .map(normalizeRouteCoordinateList)
       .find(coordinates => coordinates.length >= 2) || [];
-    if (normalizedCandidate.length >= 2) {
-      return normalizedCandidate;
-    }
-
-    const routeStart =
-      isAccepted || isArrived
-        ? tripDriverCoordinate || tripPickupCoordinate
-        : tripDriverCoordinate || tripPickupCoordinate || normalizeMapCoordinate(currentCoordinate);
-    const routeEnd =
-      isAccepted || isArrived
-        ? tripPickupCoordinate
-        : tripDestinationCoordinate;
-
-    if (routeStart && routeEnd) {
-      return buildFallbackRouteCoordinates(routeStart, routeEnd);
-    }
-
-    return [routeStart, routeEnd].filter(Boolean);
   }, [
     activeBooking?.route,
     activeBooking?.routeCoordinates,
@@ -807,7 +964,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     activeBooking?.routePlan?.pickupCoordinates,
     activeBooking?.driverTripMeta?.routePlan?.destinationCoordinates,
     activeBooking?.driverTripMeta?.routePlan?.pickupCoordinates,
-    currentCoordinate,
     driverActiveRide?.route,
     driverActiveRide?.routeCoordinates,
     driverActiveRide?.driverToPickupRouteCoordinates,
@@ -820,9 +976,66 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     driverTripMeta?.routePlan?.pickupCoordinates,
     isAccepted,
     isArrived,
-    tripDestinationCoordinate,
-    tripDriverCoordinate,
-    tripPickupCoordinate,
+  ]);
+  const tripRouteTrafficSegments = useMemo(() => {
+    const pickupTrafficCandidates = [
+      route?.params?.driverToPickupTrafficSegments,
+      route?.params?.pickupTrafficSegments,
+      activeBooking?.driverToPickupTrafficSegments,
+      activeBooking?.pickupTrafficSegments,
+      activeBooking?.routePlan?.pickupTrafficSegments,
+      activeBooking?.driverTripMeta?.routePlan?.pickupTrafficSegments,
+      driverActiveRide?.driverToPickupTrafficSegments,
+      driverActiveRide?.pickupTrafficSegments,
+      driverActiveRide?.routePlan?.pickupTrafficSegments,
+      driverActiveRide?.driverTripMeta?.routePlan?.pickupTrafficSegments,
+      driverTripMeta?.routePlan?.pickupTrafficSegments,
+    ];
+    const destinationTrafficCandidates = [
+      activeBooking?.routeTrafficSegments,
+      activeBooking?.trafficSegments,
+      activeBooking?.destinationTrafficSegments,
+      activeBooking?.routePlan?.destinationTrafficSegments,
+      activeBooking?.driverTripMeta?.routePlan?.destinationTrafficSegments,
+      driverActiveRide?.routeTrafficSegments,
+      driverActiveRide?.trafficSegments,
+      driverActiveRide?.destinationTrafficSegments,
+      driverActiveRide?.routePlan?.destinationTrafficSegments,
+      driverActiveRide?.driverTripMeta?.routePlan?.destinationTrafficSegments,
+      driverTripMeta?.routePlan?.destinationTrafficSegments,
+    ];
+    const candidateSegments = isAccepted || isArrived
+      ? pickupTrafficCandidates
+      : destinationTrafficCandidates;
+
+    return candidateSegments
+      .map(normalizeRouteTrafficSegments)
+      .find(segments => segments.length > 0) || [];
+  }, [
+    activeBooking?.destinationTrafficSegments,
+    activeBooking?.driverToPickupTrafficSegments,
+    activeBooking?.pickupTrafficSegments,
+    activeBooking?.routeTrafficSegments,
+    activeBooking?.trafficSegments,
+    activeBooking?.routePlan?.destinationTrafficSegments,
+    activeBooking?.routePlan?.pickupTrafficSegments,
+    activeBooking?.driverTripMeta?.routePlan?.destinationTrafficSegments,
+    activeBooking?.driverTripMeta?.routePlan?.pickupTrafficSegments,
+    driverActiveRide?.destinationTrafficSegments,
+    driverActiveRide?.driverToPickupTrafficSegments,
+    driverActiveRide?.pickupTrafficSegments,
+    driverActiveRide?.routeTrafficSegments,
+    driverActiveRide?.trafficSegments,
+    driverActiveRide?.routePlan?.destinationTrafficSegments,
+    driverActiveRide?.routePlan?.pickupTrafficSegments,
+    driverActiveRide?.driverTripMeta?.routePlan?.destinationTrafficSegments,
+    driverActiveRide?.driverTripMeta?.routePlan?.pickupTrafficSegments,
+    driverTripMeta?.routePlan?.destinationTrafficSegments,
+    driverTripMeta?.routePlan?.pickupTrafficSegments,
+    isAccepted,
+    isArrived,
+    route?.params?.driverToPickupTrafficSegments,
+    route?.params?.pickupTrafficSegments,
   ]);
   const tripRouteOriginCoordinate =
     Array.isArray(tripRouteCoordinates) && tripRouteCoordinates.length >= 2
@@ -855,11 +1068,34 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       tripRouteCoordinates,
     ]
   );
+  const tripVisibleRouteRegion = useMemo(
+    () =>
+      buildRouteViewportRegion({
+        coordinates: tripRouteCoordinates,
+        mapWidth: mapWidth || windowWidth,
+        mapHeight: mapHeight || windowHeight,
+        activeOcclusion: tripMapActiveOcclusion,
+        insets,
+        viewportPadding: tripMapViewportPadding,
+        minVisibleHeight: TRIP_MAP_MIN_VISIBLE_HEIGHT,
+      }),
+    [
+      insets,
+      mapHeight,
+      mapWidth,
+      tripMapActiveOcclusion,
+      tripMapViewportPadding,
+      tripRouteCoordinates,
+      windowHeight,
+      windowWidth,
+    ],
+  );
   const tripMapRegion = useMemo(
     () =>
-      buildFallbackTripRegion(mapFocusPoints),
+      tripVisibleRouteRegion || buildFallbackTripRegion(mapFocusPoints),
     [
       mapFocusPoints,
+      tripVisibleRouteRegion,
     ]
   );
   const arrivalLabel =
@@ -910,6 +1146,91 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   ]
     .filter(Boolean)
     .join(':');
+  const passengerSupportContext = useMemo(() => {
+    const bookingId = String(
+      activeBookingId ||
+        activeBooking?.bookingId ||
+        activeBooking?.id ||
+        driverActiveRide?.bookingId ||
+        driverActiveRide?.id ||
+        route?.params?.bookingId ||
+        '',
+    ).trim();
+
+    return {
+      ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
+      bookingStatus: normalizedStatus,
+      source: 'passenger-trip',
+    };
+  }, [
+    activeBooking?.bookingId,
+    activeBooking?.id,
+    activeBookingId,
+    driverActiveRide?.bookingId,
+    driverActiveRide?.id,
+    normalizedStatus,
+    route?.params?.bookingId,
+  ]);
+  const completedReceiptParams = useMemo(() => {
+    const bookingId = String(
+      passengerSupportContext.bookingId ||
+        activeBookingId ||
+        activeBooking?.bookingId ||
+        activeBooking?.id ||
+        route?.params?.bookingId ||
+        '',
+    ).trim();
+    const fare = Number(
+      activeBooking?.grossFare ||
+        activeBooking?.fare ||
+        activeBooking?.amount ||
+        route?.params?.selectedFare ||
+        route?.params?.fare ||
+        selectedFare,
+    );
+
+    return {
+      fromTrip: true,
+      ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
+      ...(Number.isFinite(fare) && fare > 0 ? { fare, grossAmount: fare } : {}),
+      pickupAddress: pickupLabel,
+      destinationAddress: destination,
+      driverId: driverInfo?.id || null,
+      driverName: driverInfo?.name || route?.params?.driverName || null,
+      vehicleLabel: selectedVehicle || route?.params?.vehicle || null,
+      vehiclePlate: driverInfo?.plate || route?.params?.vehiclePlate || null,
+    };
+  }, [
+    activeBooking?.amount,
+    activeBooking?.bookingId,
+    activeBooking?.fare,
+    activeBooking?.grossFare,
+    activeBooking?.id,
+    activeBookingId,
+    destination,
+    driverInfo?.id,
+    driverInfo?.name,
+    driverInfo?.plate,
+    passengerSupportContext.bookingId,
+    pickupLabel,
+    route?.params?.bookingId,
+    route?.params?.driverName,
+    route?.params?.fare,
+    route?.params?.selectedFare,
+    route?.params?.vehicle,
+    route?.params?.vehiclePlate,
+    selectedFare,
+    selectedVehicle,
+  ]);
+  const handleOpenPassengerChat = useCallback(() => {
+    navigation.navigate('RobotaxiPrototypeChat', passengerSupportContext);
+  }, [navigation, passengerSupportContext]);
+  const handleOpenPassengerCancellation = useCallback(() => {
+    navigation.navigate('RobotaxiPrototypeCancellation', {
+      ...passengerSupportContext,
+      source: 'passenger-trip',
+    });
+  }, [navigation, passengerSupportContext]);
   const {
     routeProgress,
     arrivalClockLabel,
@@ -924,10 +1245,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const stableEtaValue =
     Number.isFinite(displayEtaMinutes) && displayEtaMinutes > 0
       ? `${displayEtaMinutes} min`
-      : null;
-  const pickupEtaValue =
-    Number.isFinite(resolvedPickupEtaMin) && resolvedPickupEtaMin > 0
-      ? `${Math.max(1, Math.round(resolvedPickupEtaMin))} min`
       : null;
   const compactEtaValue =
     isArrived && boardingCountdownLabel
@@ -963,29 +1280,39 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     : 'parceiro Leaf';
   const plateLabel = vehiclePlate || 'Placa não informada';
   const driverFirstName = getFirstName(driverName);
-  const passengerHeaderTitle = isStarted
+  const passengerHeaderTitle = isProtectedStatusWithoutRideIdentity
+    ? 'Sincronizando corrida'
+    : isStarted
     ? `A caminho de ${destination}`
     : isArrived
       ? `${driverFirstName} chegou`
       : `${driverFirstName} está a caminho`;
-  const passengerIslandSubtitle = isStarted
+  const passengerIslandSubtitle = isProtectedStatusWithoutRideIdentity
+    ? 'Validando dados da corrida'
+    : isStarted
     ? distanceLabel && distanceLabel !== '--'
       ? `${distanceLabel} restantes`
       : arrivalClockLabel || resolvedTripArrivalText || 'Viagem em andamento'
     : isArrived
       ? pickupPointLabel
       : '';
-  const passengerIslandRightLabel = isStarted
+  const passengerIslandRightLabel = isProtectedStatusWithoutRideIdentity
+    ? 'Sync'
+    : isStarted
     ? 'Em rota'
     : isArrived
       ? 'No ponto'
       : compactEtaValue;
-  const passengerSheetTitle = isStarted
+  const passengerSheetTitle = isProtectedStatusWithoutRideIdentity
+    ? 'Sincronizando corrida'
+    : isStarted
     ? 'Progresso da viagem'
     : isArrived
       ? 'Ponto de encontro'
       : 'Seu motorista';
-  const passengerSheetKicker = isStarted
+  const passengerSheetKicker = isProtectedStatusWithoutRideIdentity
+    ? 'Validando dados da corrida'
+    : isStarted
     ? arrivalClockLabel || resolvedTripArrivalText || compactEtaValue
     : isArrived
       ? pickupPointLabel
@@ -1007,9 +1334,12 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       'Ponto atual';
     return String(interruptionPickup || 'Ponto atual').trim();
   }, [currentAddress, operationalContinuation?.pickupLocation]);
+  const isLifecycleNavigationLocked = PROTECTED_PASSENGER_TRIP_STATUSES.has(
+    normalizedStatus,
+  );
 
   const handleDismiss = () => {
-    if (PROTECTED_PASSENGER_TRIP_STATUSES.has(normalizedStatus)) {
+    if (isLifecycleNavigationLocked) {
       return;
     }
 
@@ -1020,24 +1350,52 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     navigation.navigate('RobotaxiPrototype');
   };
 
+  useEffect(() => {
+    if (
+      !isLifecycleNavigationLocked ||
+      typeof navigation?.addListener !== 'function'
+    ) {
+      return undefined;
+    }
+
+    // Android back actions and navigator state restoration bypass the sheet
+    // backdrop and gesture configuration, so active rides block route removal.
+    const unsubscribe = navigation.addListener('beforeRemove', event => {
+      event?.preventDefault?.();
+    });
+
+    return typeof unsubscribe === 'function' ? unsubscribe : undefined;
+  }, [isLifecycleNavigationLocked, navigation]);
+
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || 'prototype-trip',
-    occludedBottom: mapOccludedBottom
+    occludedBottom: protectedMapOccludedBottom
   });
 
   const handleCardLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
     if (Number.isFinite(nextHeight) && nextHeight > 0) {
-      setCardHeight(nextHeight);
+      const boundedHeight = Math.min(nextHeight, tripSheetMaxHeight);
+      setCardHeight(previous => (previous === boundedHeight ? previous : boundedHeight));
+    }
+  }, [tripSheetMaxHeight]);
+  const handleMapLayout = useCallback(event => {
+    const nextWidth = event?.nativeEvent?.layout?.width;
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextWidth) && nextWidth > 0) {
+      setMapWidth(previous => (previous === nextWidth ? previous : nextWidth));
+    }
+    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+      setMapHeight(previous => (previous === nextHeight ? previous : nextHeight));
     }
   }, []);
 
   useEffect(() => {
-    if (bookingStatus === 'completed') {
-      navigation.replace('RobotaxiPrototypeReceipt', { fromTrip: true });
+    if (normalizedStatus === 'completed') {
+      navigation.replace('RobotaxiPrototypeReceipt', completedReceiptParams);
     }
-  }, [bookingStatus, navigation]);
+  }, [completedReceiptParams, navigation, normalizedStatus]);
 
   useEffect(() => {
     if (extensionStatus === 'pending_payment' && extensionPaymentData?.chargeId) {
@@ -1156,7 +1514,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     });
   }, [activeBookingId, destination, driverName, navigation, resolvedTripArrivalText, vehicleModel, vehiclePlate]);
 
-  const handleCallDriver = useCallback(() => {
+	  const handleCallDriver = useCallback(() => {
     Alert.alert(
       'Ligação pelo app',
       'A chamada direta ainda depende do telefone mascarado do motorista. Use a mensagem ou o suporte por enquanto.',
@@ -1177,14 +1535,14 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         icon="shield-checkmark-outline"
         label="SOS"
         tone="warning"
-        onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
+        onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
         style={styles.startedDockAction}
         testID={passengerCardFieldTestIDs.safety_action}
       />
       <IconActionButton
         icon="chatbubble-ellipses-outline"
         label="Chat"
-        onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+        onPress={handleOpenPassengerChat}
         style={styles.startedDockAction}
         testID="passenger-trip-message-button"
       />
@@ -1224,7 +1582,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           icon="shield-checkmark-outline"
           label="SOS"
           tone="warning"
-          onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
+          onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
           testID={passengerCardFieldTestIDs.safety_action}
         />
       </View>
@@ -1232,11 +1590,52 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     </>
   );
 
+  const renderPassengerMissingIdentityState = () => (
+    <View
+      testID="passenger-trip-missing-identity-card"
+      accessibilityLabel="passenger-trip-missing-identity-card"
+    >
+      <View style={styles.sheetHandle} />
+      <View style={styles.cardStateHeader}>
+        <Text
+          style={styles.cardStateTitle}
+          numberOfLines={2}
+          testID="passenger-trip-missing-identity-title"
+        >
+          Sincronizando corrida
+        </Text>
+      </View>
+      <LeafDivider style={styles.cardStateDivider} />
+      <View style={styles.extensionNotice}>
+        <View style={styles.extensionNoticeHeader}>
+          <Ionicons name="sync-outline" size={16} color={color.text.primary} />
+          <Text style={styles.extensionTitle}>Validando dados do motorista</Text>
+        </View>
+        <Text style={styles.extensionMessage}>
+          Recebemos um estado ativo, mas a identificação canônica da corrida ainda
+          não chegou. Mantemos esta tela travada até o servidor confirmar o booking.
+        </Text>
+      </View>
+      <LeafButton
+        label="Aguardando servidor"
+        tone="primary"
+        disabled
+        style={styles.acceptedPrimary}
+        testID="passenger-trip-missing-identity-button"
+        accessibilityLabel="passenger-trip-missing-identity-button"
+      />
+    </View>
+  );
+
   const renderCompactTripCard = () => (
     <View
       testID="passenger-trip-compact-summary"
       accessibilityLabel="passenger-trip-compact-summary"
     >
+      {isProtectedStatusWithoutRideIdentity ? (
+        renderPassengerMissingIdentityState()
+      ) : (
+        <>
       <View style={styles.sheetHandle} />
       <Text
         style={styles.hiddenText}
@@ -1274,7 +1673,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             icon="shield-checkmark-outline"
             label="SOS"
             tone="warning"
-            onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
+            onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
             style={styles.tripHeaderIconAction}
             testID={passengerCardFieldTestIDs.safety_action}
           />
@@ -1389,7 +1788,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             <IconActionButton
               icon="chatbubble-ellipses-outline"
               label="Mensagem"
-              onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+              onPress={handleOpenPassengerChat}
               style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-message-button"
             />
@@ -1397,7 +1796,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               icon="close-outline"
               label="Cancelar corrida"
               tone="danger"
-              onPress={() => navigation.navigate('RobotaxiPrototypeCancellation', { source: 'trip' })}
+              onPress={handleOpenPassengerCancellation}
               style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-cancel-button"
             />
@@ -1491,7 +1890,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             <IconActionButton
               icon="chatbubble-ellipses-outline"
               label="Mensagem"
-              onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+              onPress={handleOpenPassengerChat}
               style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-message-button"
             />
@@ -1499,7 +1898,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               icon="close-outline"
               label="Cancelar corrida"
               tone="danger"
-              onPress={() => navigation.navigate('RobotaxiPrototypeCancellation', { source: 'trip' })}
+              onPress={handleOpenPassengerCancellation}
               style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-cancel-button"
             />
@@ -1514,6 +1913,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               accessibilityLabel="passenger-trip-share-button"
             />
           </View>
+        </>
+      )}
         </>
       )}
     </View>
@@ -1532,6 +1933,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           driverCoordinate={tripDriverCoordinate}
           driverHeading={tripDriverHeading}
           routeCoordinates={tripRouteCoordinates}
+          routeTrafficSegments={tripRouteTrafficSegments}
+          showTraffic={tripRouteTrafficSegments.length > 0}
           originCoordinate={tripRouteOriginCoordinate}
           destinationCoordinate={tripRouteDestinationCoordinate}
           destinationLabel={isAccepted || isArrived ? 'Embarque' : destination}
@@ -1540,6 +1943,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           originAddress={currentAddress || 'Sua localização atual'}
           interactionEnabled
           viewportPadding={tripMapViewportPadding}
+          routeViewportRegion={tripVisibleRouteRegion}
+          onMapLayout={handleMapLayout}
           animateRoute
           hideRouteEndpointMarkers
           driverMarkerMode="car"
@@ -1564,6 +1969,15 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           message={rideLocalSyncIndicator?.message}
           testID="passenger-trip-local-sync-pill"
         />
+        <PrototypeConnectionStatusPill
+          topOffset={insets.top + (rideLocalSyncIndicator ? 132 : 76)}
+          visible={Boolean(driverSignalIndicator)}
+          tone={driverSignalIndicator?.tone}
+          icon={driverSignalIndicator?.icon}
+          title={driverSignalIndicator?.title}
+          message={driverSignalIndicator?.message}
+          testID="passenger-trip-driver-signal-pill"
+        />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
           backdropDismissEnabled={false}
@@ -1578,8 +1992,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 !passengerTripSheetExpansionLocked &&
                 !isTripExpanded &&
                 styles.compactCard,
-              { paddingBottom: 12 + safeBottom },
+              {
+                maxHeight: tripSheetMaxHeight,
+                paddingBottom: 12 + safeBottom,
+              },
             ]}
+            scrollEnabled
+            scrollStyle={[
+              styles.tripSheetScroll,
+              { maxHeight: tripSheetScrollMaxHeight },
+            ]}
+            showsVerticalScrollIndicator={
+              passengerTripSheetExpansionLocked || isTripExpanded
+            }
             testID="passenger-trip-screen"
             accessibilityLabel="passenger-trip-screen"
           >
@@ -1587,6 +2012,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             !passengerTripSheetExpansionLocked &&
             !isTripExpanded ? (
               renderCompactTripCard()
+            ) : isProtectedStatusWithoutRideIdentity ? (
+              renderPassengerMissingIdentityState()
             ) : (
               <>
             {shouldUseCompactTripCard && !passengerTripSheetExpansionLocked ? (
@@ -1845,7 +2272,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 <TouchableOpacity
                   style={styles.secondaryAction}
                   activeOpacity={0.86}
-                  onPress={() => navigation.navigate('RobotaxiPrototypeChat')}
+	                  onPress={handleOpenPassengerChat}
                 >
                   <Ionicons
                     name="chatbubble-ellipses-outline"
@@ -1856,10 +2283,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.secondaryAction}
-                  activeOpacity={0.86}
-                  onPress={() => navigation.navigate('RobotaxiPrototypeSupport')}
-                >
+	                  style={styles.secondaryAction}
+	                  activeOpacity={0.86}
+	                  onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
+	                >
                   <Ionicons
                     name="shield-checkmark-outline"
                     size={leafButtonMetrics.iconSize}
@@ -1876,7 +2303,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               <TouchableOpacity
                 style={styles.cancelAction}
                 activeOpacity={0.86}
-                onPress={() => navigation.navigate('RobotaxiPrototypeCancellation', { source: 'trip' })}
+                onPress={handleOpenPassengerCancellation}
                 testID="passenger-trip-cancel-button"
                 accessibilityLabel="passenger-trip-cancel-button"
               >
@@ -1939,6 +2366,9 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     paddingTop: 14
+  },
+  tripSheetScroll: {
+    flexGrow: 0
   },
   compactCard: {
     minHeight: 332

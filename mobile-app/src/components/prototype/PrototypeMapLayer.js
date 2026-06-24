@@ -8,6 +8,13 @@ import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 const { color, motion } = robotaxiPrototypeTokens;
 const ROUTE_ANIMATION_DURATION = Math.min(Number(motion.timing.map) || 840, 840);
 const POINTS_PER_SEGMENT = 26;
+const MIN_ANIMATED_ROUTE_POINTS = 6;
+const ZERO_VIEWPORT_PADDING = Object.freeze({
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+});
 const DRIVER_MARKER_SMOOTH_MS = 850;
 const DRIVER_MARKER_HEADING_SMOOTH_MS = 520;
 const DRIVER_MARKER_SMOOTH_SNAP_METERS = 3000;
@@ -114,7 +121,7 @@ function normalizeMapCoordinate(value) {
   return { latitude, longitude };
 }
 
-function resolveVehicleColorToken(value) {
+function resolveSingleVehicleColorToken(value) {
   const normalized = String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -206,6 +213,17 @@ function resolveVehicleColorToken(value) {
   }
   if (normalized.includes('preto') || normalized.includes('black')) {
     return 'black';
+  }
+
+  return null;
+}
+
+export function resolveVehicleColorToken(...values) {
+  for (const value of values) {
+    const token = resolveSingleVehicleColorToken(value);
+    if (token) {
+      return token;
+    }
   }
 
   return null;
@@ -313,6 +331,27 @@ function normalizeTrafficRouteSegments(segments = []) {
       };
     })
     .filter(Boolean);
+}
+
+export function resolveRouteRenderCoordinates({
+  hasRoute,
+  displayedRouteCoordinates = [],
+  staticRouteCoordinates = [],
+  shouldAnimateRoute = false,
+} = {}) {
+  if (!hasRoute) {
+    return [];
+  }
+
+  if (Array.isArray(displayedRouteCoordinates) && displayedRouteCoordinates.length >= 2) {
+    return displayedRouteCoordinates;
+  }
+
+  if (shouldAnimateRoute) {
+    return [];
+  }
+
+  return Array.isArray(staticRouteCoordinates) ? staticRouteCoordinates : [];
 }
 
 function buildRouteMotionMetrics(path = []) {
@@ -1163,6 +1202,8 @@ function PrototypeMapLayer({
   nearbyVehicles = [],
   routeCoordinates,
   routeTrafficSegments = [],
+  routeSynthetic = false,
+  routeSource = '',
   originCoordinate,
   destinationCoordinate,
   destinationLabel,
@@ -1192,6 +1233,7 @@ function PrototypeMapLayer({
   destinationMarkerMode = 'place',
   destinationMarkerLetter = 'P',
   viewportPadding = null,
+  routeViewportRegion = null,
   forceRegionUpdate = false
 }) {
   const mapProvider =
@@ -1210,6 +1252,20 @@ function PrototypeMapLayer({
       windowLayout.width,
     ],
   );
+  const resolvedRouteViewportRegion = useMemo(
+    () => (isValidMapRegion(routeViewportRegion) ? routeViewportRegion : null),
+    [
+      routeViewportRegion?.latitude,
+      routeViewportRegion?.latitudeDelta,
+      routeViewportRegion?.longitude,
+      routeViewportRegion?.longitudeDelta,
+    ],
+  );
+  // routeViewportRegion already accounts for the bottomsheet. Applying native
+  // map padding as well would shift the camera twice on Google Maps.
+  const resolvedMapPadding = resolvedRouteViewportRegion
+    ? ZERO_VIEWPORT_PADDING
+    : resolvedViewportPadding;
   const markerCoordinate = userCoordinate || region;
   const normalizedDriverCoordinate = useMemo(
     () => normalizeMapCoordinate(driverCoordinate),
@@ -1259,7 +1315,9 @@ function PrototypeMapLayer({
     return normalized < 0 ? normalized + 360 : normalized;
   }, [userHeading]);
   const hasRoute = Array.isArray(routeCoordinates) && routeCoordinates.length >= 2;
-  const isSyntheticRoutePreview = hasRoute && routeCoordinates.length <= 4;
+  const isSyntheticRoutePreview =
+    hasRoute &&
+    (routeSynthetic === true || String(routeSource || '').trim().toLowerCase() === 'fallback');
   const normalizedOriginCoordinate = useMemo(
     () => normalizeMapCoordinate(originCoordinate),
     [
@@ -1381,17 +1439,15 @@ function PrototypeMapLayer({
   const displayedRouteCoordinates = shouldAnimateRoute
     ? animatedRouteCoordinates
     : staticRouteCoordinates;
-  const routeRenderCoordinates = useMemo(() => {
-    if (!hasRoute) {
-      return [];
-    }
-
-    if (displayedRouteCoordinates.length >= 2) {
-      return displayedRouteCoordinates;
-    }
-
-    return staticRouteCoordinates.slice(0, 2);
-  }, [displayedRouteCoordinates, hasRoute, staticRouteCoordinates]);
+  const routeRenderCoordinates = useMemo(
+    () => resolveRouteRenderCoordinates({
+      hasRoute,
+      displayedRouteCoordinates,
+      staticRouteCoordinates,
+      shouldAnimateRoute,
+    }),
+    [displayedRouteCoordinates, hasRoute, shouldAnimateRoute, staticRouteCoordinates],
+  );
   const routeViewportFitCoordinates = useMemo(() => {
     if (staticRouteCoordinates.length >= 2) {
       return staticRouteCoordinates;
@@ -1794,13 +1850,22 @@ function PrototypeMapLayer({
   }, []);
 
   useEffect(() => {
-    if (!forceRegionUpdate || !mapRef?.current || !isValidMapRegion(region)) {
+    const targetViewportRegion = resolvedRouteViewportRegion || region;
+    if (!forceRegionUpdate || !mapRef?.current || !isValidMapRegion(targetViewportRegion)) {
       return undefined;
     }
 
-    scheduleAndroidVisibleRegionUpdate(region);
+    scheduleAndroidVisibleRegionUpdate(targetViewportRegion);
     const timeoutId = setTimeout(() => {
       if (!mapRef?.current) {
+        return;
+      }
+
+      if (resolvedRouteViewportRegion && typeof mapRef.current.animateToRegion === 'function') {
+        mapRef.current.animateToRegion(
+          resolvedRouteViewportRegion,
+          Platform.OS === 'android' ? 0 : 180,
+        );
         return;
       }
 
@@ -1830,6 +1895,10 @@ function PrototypeMapLayer({
     region?.latitudeDelta,
     region?.longitude,
     region?.longitudeDelta,
+    resolvedRouteViewportRegion?.latitude,
+    resolvedRouteViewportRegion?.latitudeDelta,
+    resolvedRouteViewportRegion?.longitude,
+    resolvedRouteViewportRegion?.longitudeDelta,
     resolvedViewportPadding.bottom,
     resolvedViewportPadding.left,
     resolvedViewportPadding.right,
@@ -2246,16 +2315,21 @@ function PrototypeMapLayer({
       const eased = progress < 0.5
         ? 4 * progress * progress * progress
         : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-      const visibleCount = Math.max(2, Math.floor(denseRoute.length * eased));
+      const minimumVisibleCount = Math.min(MIN_ANIMATED_ROUTE_POINTS, denseRoute.length);
+      const visibleCount = Math.floor(denseRoute.length * eased);
 
-      setAnimatedRouteCoordinates(denseRoute.slice(0, visibleCount));
+      setAnimatedRouteCoordinates(
+        visibleCount >= minimumVisibleCount
+          ? denseRoute.slice(0, Math.max(minimumVisibleCount, visibleCount))
+          : [],
+      );
 
       if (progress < 1) {
         frameId = requestAnimationFrame(animateStep);
       }
     };
 
-    setAnimatedRouteCoordinates(denseRoute.slice(0, 2));
+    setAnimatedRouteCoordinates([]);
     frameId = requestAnimationFrame(animateStep);
 
     return () => {
@@ -2294,7 +2368,7 @@ function PrototypeMapLayer({
           testID="prototype-map-view"
           accessibilityLabel="prototype-map-view"
           style={StyleSheet.absoluteFillObject}
-          mapPadding={resolvedViewportPadding}
+          mapPadding={resolvedMapPadding}
           onRegionChange={scheduleAndroidVisibleRegionUpdate}
           onRegionChangeComplete={nextRegion => {
             scheduleAndroidVisibleRegionUpdate(nextRegion);

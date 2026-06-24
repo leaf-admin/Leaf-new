@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,6 +13,7 @@ import { leafRideColors } from '../../components/prototype/LeafRideUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 16;
@@ -35,6 +36,22 @@ function formatTimestamp(timestamp) {
   });
 }
 
+function resolveChatReturnRoute(context = {}) {
+  const source = String(context.source || '').toLowerCase();
+  const status = normalizeRuntimeRideStatus(context.bookingStatus);
+
+  if (source === 'receipt' || status === 'completed') {
+    return 'RobotaxiPrototypeReceipt';
+  }
+  if (source === 'driver-trip') {
+    return 'RobotaxiPrototypeDriverTrip';
+  }
+  if (context.bookingId || context.rideId || context.tripId) {
+    return 'RobotaxiPrototypeTrip';
+  }
+  return 'RobotaxiPrototype';
+}
+
 export default function RobotaxiChatScreen({ navigation, route }) {
   const { loadChatSession, sendChatMessage, chatMessages, chatLoading, chatSending, chatError } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
@@ -42,6 +59,23 @@ export default function RobotaxiChatScreen({ navigation, route }) {
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [draft, setDraft] = useState('');
   const messages = Array.isArray(chatMessages) ? chatMessages : [];
+  const hasListError = Boolean(chatError) && !chatLoading && messages.length === 0;
+  const chatScope = useMemo(() => {
+    const params = route?.params || {};
+    const bookingId = String(params.bookingId || params.rideId || params.tripId || '').trim();
+    const bookingStatus = normalizeRuntimeRideStatus(params.bookingStatus);
+    return {
+      ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
+      ...(bookingStatus ? { bookingStatus } : {}),
+      source: params.source || 'prototype-chat',
+    };
+  }, [
+    route?.params?.bookingId,
+    route?.params?.bookingStatus,
+    route?.params?.rideId,
+    route?.params?.source,
+    route?.params?.tripId,
+  ]);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -50,12 +84,12 @@ export default function RobotaxiChatScreen({ navigation, route }) {
   });
 
   useEffect(() => {
-    loadChatSession().catch(() => {});
-  }, [loadChatSession]);
+    loadChatSession(chatScope).catch(() => {});
+  }, [chatScope, loadChatSession]);
 
   const handleDismiss = useCallback(() => {
-    navigation.navigate('RobotaxiPrototype');
-  }, [navigation]);
+    navigation.navigate(resolveChatReturnRoute(chatScope), chatScope);
+  }, [chatScope, navigation]);
 
   const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -63,6 +97,10 @@ export default function RobotaxiChatScreen({ navigation, route }) {
       setPanelHeight(nextHeight);
     }
   }, []);
+
+  const handleRetryLoad = useCallback(() => {
+    loadChatSession({ ...chatScope, forceReload: true }).catch(() => {});
+  }, [chatScope, loadChatSession]);
 
   const handleSend = useCallback(async () => {
     const text = String(draft || '').trim();
@@ -72,12 +110,12 @@ export default function RobotaxiChatScreen({ navigation, route }) {
 
     setDraft('');
     try {
-      await sendChatMessage(text);
+      await sendChatMessage(text, chatScope);
     } catch (error) {
       Alert.alert('Não foi possível enviar', error?.message || 'Falha ao enviar mensagem.');
       setDraft(text);
     }
-  }, [draft, sendChatMessage]);
+  }, [chatScope, draft, sendChatMessage]);
 
   return (
     <PrototypeScreenTransition>
@@ -105,7 +143,13 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                 paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
               }}
               bodyStyle={styles.body}
-              headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+              headerAccessory={(
+                <PrototypeMenuCloseButton
+                  onPress={handleDismiss}
+                  testID="robotaxi-chat-close-button"
+                  accessibilityLabel="robotaxi-chat-close-button"
+                />
+              )}
             >
               <FlatList
                 data={messages}
@@ -125,9 +169,31 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                   );
                 }}
                 ListEmptyComponent={
-                  <View style={styles.emptyWrap}>
+                  <View
+                    style={styles.emptyWrap}
+                    testID={hasListError ? 'prototype-chat-error-state' : 'prototype-chat-empty-state'}
+                    accessibilityLabel={hasListError ? 'Erro ao carregar chat da corrida' : 'Estado vazio do chat da corrida'}
+                  >
                     {chatLoading ? <ActivityIndicator size="small" color={leafRideColors.leaf} /> : null}
-                    <Text style={styles.emptyText}>{chatLoading ? 'Carregando mensagens...' : 'Sem mensagens para esta corrida.'}</Text>
+                    {hasListError ? <Ionicons name="warning-outline" size={18} color={leafRideColors.dangerText} /> : null}
+                    <Text style={[styles.emptyText, hasListError && styles.emptyErrorText]}>
+                      {chatLoading
+                        ? 'Carregando mensagens...'
+                        : hasListError
+                          ? chatError
+                          : 'Sem mensagens para esta corrida.'}
+                    </Text>
+                    {hasListError ? (
+                      <TouchableOpacity
+                        activeOpacity={0.82}
+                        onPress={handleRetryLoad}
+                        style={styles.retryButton}
+                        testID="prototype-chat-retry-button"
+                        accessibilityLabel="Tentar novamente carregar chat"
+                      >
+                        <Text style={styles.retryButtonText}>Tentar novamente</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 }
               />
@@ -156,7 +222,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                 </TouchableOpacity>
               </View>
 
-              {chatError ? <Text style={styles.errorText}>{chatError}</Text> : null}
+              {chatError && !hasListError ? <Text style={styles.errorText}>{chatError}</Text> : null}
             </PrototypeMenuSurface>
           </KeyboardAvoidingView>
         </PrototypeDismissibleSheet>
@@ -231,6 +297,27 @@ const styles = StyleSheet.create({
   emptyText: {
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+    textAlign: 'center',
+  },
+  emptyErrorText: {
+    color: leafRideColors.dangerText,
+    fontFamily: fonts.Medium,
+  },
+  retryButton: {
+    minHeight: 38,
+    borderRadius: 19,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: leafRideColors.bg,
+    borderWidth: 1,
+    borderColor: 'rgba(26,51,14,0.14)',
+  },
+  retryButtonText: {
+    color: leafRideColors.text,
+    fontFamily: fonts.Medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },

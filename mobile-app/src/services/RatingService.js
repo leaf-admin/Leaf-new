@@ -8,6 +8,43 @@ import {
     isSimulatorBuild,
 } from '../config/runtimeAccessPolicy';
 
+const NON_RETRYABLE_RATING_CODES = new Set([
+    'AUTH_REQUIRED',
+    'RATING_ALREADY_SUBMITTED',
+    'RATING_REVIEWER_ROLE_INVALID',
+    'RATING_TARGET_REQUIRED',
+    'RATING_TRIP_NOT_COMPLETED',
+    'RATING_TRIP_SCOPE_MISMATCH',
+    'RATING_TRIP_SCOPE_REQUIRED',
+    'RIDE_SCOPE_DENIED',
+    'RIDE_SCOPE_NOT_FOUND',
+    'RIDE_ROLE_DENIED',
+]);
+
+function shouldQueueRatingRetry(error) {
+    const code = String(error?.code || error?.payload?.code || '').trim().toUpperCase();
+    if (code && NON_RETRYABLE_RATING_CODES.has(code)) {
+        return false;
+    }
+
+    if (code) {
+        return [
+            'RATING_INDEX_UNAVAILABLE',
+            'RATING_SUBMISSION_IN_PROGRESS',
+            'RATING_SUBMIT_TIMEOUT',
+            'WS_DISCONNECTED',
+            'WS_CONNECT_TIMEOUT',
+        ].includes(code);
+    }
+
+    const message = String(error?.message || '').toLowerCase();
+    return message.includes('timeout') ||
+        message.includes('conex') ||
+        message.includes('network') ||
+        message.includes('socket') ||
+        message.includes('temporar');
+}
+
 
 class RatingService {
     constructor() {
@@ -69,8 +106,11 @@ class RatingService {
             if (result.success) {
                 Logger.log('✅ Avaliação enviada com sucesso');
                 
-                // Salvar localmente
-                await this.saveRatingLocally(ratingData);
+                // Keep a local audit record without placing a successful rating in retry.
+                await this.saveRatingLocally({
+                    ...ratingData,
+                    status: 'sent',
+                });
                 
                 // Atualizar Redux store
                 this.updateRatingInStore(ratingData);
@@ -83,8 +123,12 @@ class RatingService {
         } catch (error) {
             Logger.error('❌ Erro ao enviar avaliação:', error);
             
-            // Salvar localmente para envio posterior
-            await this.saveRatingLocally(ratingData);
+            if (shouldQueueRatingRetry(error)) {
+                await this.saveRatingLocally({
+                    ...ratingData,
+                    status: 'pending',
+                });
+            }
             
             throw error;
         }
@@ -336,3 +380,5 @@ class RatingService {
 }
 
 export default new RatingService();
+
+export { shouldQueueRatingRetry };

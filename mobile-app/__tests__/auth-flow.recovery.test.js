@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const {
   buildRestoredAuthFlowData,
   normalizeAuthFlowProfileData,
@@ -94,5 +96,17 @@ describe('auth flow recovery helpers', () => {
         email: 'motorista@leaf.app.br',
       },
     });
+  });
+
+  it('does not reference a stale profilePayload variable when setting customer password', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/auth/AuthFlow.js'),
+      'utf8',
+    );
+
+    expect(source).not.toContain('profilePayload.phoneNumber');
+    expect(source).not.toContain('profilePayload.mobile');
+    expect(source).toContain('persistedProfilePayload.phoneNumber');
+    expect(source).toContain('savedProfilePayload.phoneNumber');
   });
 });

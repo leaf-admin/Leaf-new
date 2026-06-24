@@ -29,8 +29,15 @@ const FALLBACK_CARD_HEIGHT = 286;
 export default function RobotaxiNoDriversScreen({ navigation, route }) {
   const {
     bookingStatus,
+    activeBooking,
+    activeBookingId,
+    lastRideBookingId,
     selectedDestination,
+    selectedFare,
     selectedVehicle,
+    tripDistanceKm,
+    tripDurationMin,
+    tripArrivalText,
     driverInfo,
     clearFlowPreview,
   } =
@@ -65,7 +72,73 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
     [bookingStatus],
   );
   const isSearchStillActive =
-    bookingStatus === "searching" || bookingStatus === "requesting";
+    passengerAutoRoute === "RobotaxiPrototypeDriverSearch";
+  const routeBookingId = String(
+    route?.params?.bookingId ||
+      route?.params?.rideId ||
+      route?.params?.tripId ||
+      activeBookingId ||
+      activeBooking?.bookingId ||
+      activeBooking?.id ||
+      lastRideBookingId ||
+      "",
+  ).trim();
+  const routeFare = Number(
+    route?.params?.fare ||
+      route?.params?.grossAmount ||
+      route?.params?.selectedFare ||
+      activeBooking?.grossFare ||
+      activeBooking?.fare ||
+      activeBooking?.amount ||
+      selectedFare,
+  );
+  const terminalRouteParams = useMemo(() => ({
+    ...(routeBookingId
+      ? {
+          bookingId: routeBookingId,
+          rideId: routeBookingId,
+          tripId: routeBookingId,
+        }
+      : {}),
+    destination,
+    destinationAddress:
+      route?.params?.destinationAddress ||
+      selectedDestination?.address ||
+      activeBooking?.destinationLocation?.add ||
+      destination,
+    originAddress:
+      route?.params?.originAddress ||
+      activeBooking?.pickupLocation?.add ||
+      route?.params?.pickupAddress ||
+      "",
+    vehicle,
+    status: bookingStatus || null,
+    tripDistanceKm: Number.isFinite(Number(tripDistanceKm)) ? Number(tripDistanceKm) : null,
+    tripDurationMin: Number.isFinite(Number(tripDurationMin)) ? Number(tripDurationMin) : null,
+    tripArrivalText: tripArrivalText || null,
+    selectedFare: Number.isFinite(routeFare) && routeFare > 0 ? routeFare : null,
+    driverName: driverInfo?.name || null,
+    vehicleModel: driverInfo?.model || null,
+    vehiclePlate: driverInfo?.plate || null,
+  }), [
+    activeBooking?.destinationLocation?.add,
+    activeBooking?.pickupLocation?.add,
+    bookingStatus,
+    destination,
+    driverInfo?.model,
+    driverInfo?.name,
+    driverInfo?.plate,
+    route?.params?.destinationAddress,
+    route?.params?.originAddress,
+    route?.params?.pickupAddress,
+    routeBookingId,
+    routeFare,
+    selectedDestination?.address,
+    tripArrivalText,
+    tripDistanceKm,
+    tripDurationMin,
+    vehicle,
+  ]);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -82,26 +155,39 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
     }
 
     if (passengerAutoRoute === "RobotaxiPrototypeReceipt") {
-      navigation.replace("RobotaxiPrototypeReceipt", { fromTrip: true });
+      navigation.replace("RobotaxiPrototypeReceipt", {
+        ...terminalRouteParams,
+        fromTrip: true,
+        ...(Number.isFinite(routeFare) && routeFare > 0
+          ? {
+              fare: routeFare,
+              grossAmount: routeFare,
+            }
+          : {}),
+      });
       return;
     }
 
     if (passengerAutoRoute === "RobotaxiPrototypeDriverSearch") {
       navigation.replace("RobotaxiPrototypeDriverSearch", {
-        destination,
-        vehicle,
+        ...terminalRouteParams,
       });
       return;
     }
 
     if (passengerAutoRoute === "RobotaxiPrototypeTrip") {
       navigation.replace("RobotaxiPrototypeTrip", {
-        destination,
-        vehicle,
+        ...terminalRouteParams,
         driverName: driverInfo?.name || "Motorista",
       });
     }
-  }, [destination, driverInfo?.name, navigation, passengerAutoRoute, vehicle]);
+  }, [
+    driverInfo?.name,
+    navigation,
+    passengerAutoRoute,
+    routeFare,
+    terminalRouteParams,
+  ]);
 
   const handleCardLayout = useCallback((event) => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -126,7 +212,12 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
 
   return (
     <PrototypeScreenTransition animated={false}>
-      <View style={styles.container} pointerEvents="box-none">
+      <View
+        style={styles.container}
+        pointerEvents="box-none"
+        testID="passenger-no-drivers-screen"
+        accessibilityLabel="passenger-no-drivers-screen"
+      >
         <StatusBar
           translucent
           backgroundColor="transparent"
@@ -167,6 +258,8 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
               icon="search-outline"
               onPress={handleRetryDestination}
               style={styles.primaryButton}
+              testID="passenger-no-drivers-retry-button"
+              accessibilityLabel="passenger-no-drivers-retry-button"
             />
 
             <View style={styles.rowButtons}>
@@ -174,6 +267,8 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
                 style={styles.secondaryButton}
                 activeOpacity={0.86}
                 onPress={() => navigation.navigate("RobotaxiPrototypeSupport")}
+                testID="passenger-no-drivers-support-button"
+                accessibilityLabel="passenger-no-drivers-support-button"
               >
                 <Ionicons
                   name="help-circle-outline"
@@ -187,6 +282,8 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
                 style={styles.secondaryButton}
                 activeOpacity={0.86}
                 onPress={handleDismiss}
+                testID="passenger-no-drivers-back-to-map-button"
+                accessibilityLabel="passenger-no-drivers-back-to-map-button"
               >
                 <Ionicons
                   name="map-outline"

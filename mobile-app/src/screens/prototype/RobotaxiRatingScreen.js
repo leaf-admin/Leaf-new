@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StackActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
@@ -79,6 +80,29 @@ function normalizeAutoBoolean(value, fallback = null) {
   return fallback;
 }
 
+function resolveSubmittedRatingValue(result, fallbackRating) {
+  const rawRating =
+    result?.rating && typeof result.rating === "object"
+      ? result.rating.rating
+      : result?.rating;
+  const numeric = Number(rawRating);
+  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 5) {
+    return numeric;
+  }
+  return fallbackRating;
+}
+
+function resolveSubmittedComment(result, fallbackComment) {
+  const rawComment =
+    result?.rating && typeof result.rating === "object"
+      ? result.rating.comment
+      : result?.comment;
+  if (typeof rawComment === "string") {
+    return rawComment.trim();
+  }
+  return fallbackComment.trim();
+}
+
 export default function RobotaxiRatingScreen({ navigation, route }) {
   const {
     activeRole,
@@ -125,10 +149,10 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     340,
     windowHeight - insets.top - insets.bottom - 86,
   );
-  const fromReceipt = Boolean(route?.params?.fromReceipt);
   const qaAutoSubmit = isTruthyRouteParam(
     route?.params?.qaAutoSubmit || route?.params?.autoSubmit,
   );
+  const terminalExitRef = useRef(false);
   const qaAutoComment = String(
     route?.params?.qaComment || route?.params?.comment || "",
   ).trim();
@@ -154,21 +178,43 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     }
   }, []);
 
-  const handleDismiss = () => {
-    if (fromReceipt) {
-      navigation.navigate("RobotaxiPrototypeReceipt", {
-        fromTrip: true,
-        fromRating: true,
-      });
+  const replaceWithPrototypeHome = useCallback(() => {
+    terminalExitRef.current = true;
+    if (typeof navigation.replace === "function") {
+      navigation.replace("RobotaxiPrototype");
       return;
     }
 
-    if (navigation.canGoBack()) {
-      navigation.goBack();
+    if (typeof navigation.dispatch === "function") {
+      navigation.dispatch(StackActions.replace("RobotaxiPrototype"));
       return;
     }
+
     navigation.navigate("RobotaxiPrototype");
-  };
+  }, [navigation]);
+
+  const handleDismiss = useCallback(() => {
+    dismissCompletedReceipt();
+    replaceWithPrototypeHome();
+  }, [dismissCompletedReceipt, replaceWithPrototypeHome]);
+
+  useEffect(() => {
+    if (typeof navigation?.addListener !== "function") {
+      return undefined;
+    }
+
+    const unsubscribe = navigation.addListener("beforeRemove", event => {
+      if (terminalExitRef.current) {
+        terminalExitRef.current = false;
+        return;
+      }
+
+      event?.preventDefault?.();
+      handleDismiss();
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [handleDismiss, navigation]);
 
   const toggleTag = useCallback((tag) => {
     setSelectedTags((previous) => {
@@ -245,7 +291,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 : [`Ar-condicionado: ${airConditioningOk ? "Sim" : "Não"}`]),
             ];
 
-      await RatingService.submitRating({
+      const submitResult = await RatingService.submitRating({
         tripId,
         userId: profile.uid,
         reviewerId: profile.uid,
@@ -263,24 +309,26 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
             ? { passengerId: targetUserId, passenger: targetUserId }
             : { driverId: targetUserId, driver: targetUserId },
       });
+      const committedRating = resolveSubmittedRatingValue(submitResult, rating);
+      const committedComment = resolveSubmittedComment(submitResult, comment);
 
       markTripRating(
         tripId,
         reviewerType === "driver"
           ? {
               driverRatedPassengerAt: new Date().toISOString(),
-              driverRatedPassengerValue: rating,
-              driverRatedPassengerComment: comment.trim(),
+              driverRatedPassengerValue: committedRating,
+              driverRatedPassengerComment: committedComment,
             }
           : {
               passengerRatedDriverAt: new Date().toISOString(),
-              passengerRatedDriverValue: rating,
-              passengerRatedDriverComment: comment.trim(),
+              passengerRatedDriverValue: committedRating,
+              passengerRatedDriverComment: committedComment,
             },
       );
 
       dismissCompletedReceipt();
-      navigation.navigate("RobotaxiPrototype");
+      replaceWithPrototypeHome();
       Alert.alert(
         "Avaliação enviada",
         `Sua nota para ${targetName} foi registrada com sucesso.`,
@@ -298,9 +346,9 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     comment,
     dismissCompletedReceipt,
     markTripRating,
-    navigation,
     profile?.uid,
     rating,
+    replaceWithPrototypeHome,
     reviewerType,
     reviewTargetLabel,
     selectedTags,
@@ -508,6 +556,19 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               testID="passenger-rating-submit-button"
               accessibilityLabel="passenger-rating-submit-button"
             />
+            <TouchableOpacity
+              activeOpacity={0.86}
+              disabled={isSubmitting}
+              onPress={handleDismiss}
+              style={[
+                styles.skipButton,
+                isSubmitting && styles.skipButtonDisabled,
+              ]}
+              testID="rating-skip-to-map-button"
+              accessibilityLabel="rating-skip-to-map-button"
+            >
+              <Text style={styles.skipButtonText}>Agora não</Text>
+            </TouchableOpacity>
             </ScrollView>
           </PrototypeCard>
         </KeyboardAvoidingView>
@@ -656,5 +717,24 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     marginTop: 10,
+  },
+  skipButton: {
+    marginTop: 8,
+    minHeight: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.secondary,
+  },
+  skipButtonDisabled: {
+    opacity: 0.5,
+  },
+  skipButtonText: {
+    color: color.text.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
   },
 });

@@ -50,6 +50,8 @@ describe('RideLifecycleOutboxReplayService', () => {
           actorId: 'driver_1',
           eventType: RIDE_EVENT_TYPES.COMPLETE_TRIP,
           idempotencyKey: 'idem_complete_ride_2',
+          clientSequence: 4,
+          clientCreatedAt: '2026-06-23T12:00:00.000Z',
           payload: {
             distanceKm: 12.4,
             fare: 82.53,
@@ -72,7 +74,15 @@ describe('RideLifecycleOutboxReplayService', () => {
       { lat: -22.95, lng: -43.18 },
       12.4,
       82.53,
-      { idempotencyKey: 'idem_complete_ride_2' },
+      {
+        idempotencyKey: 'idem_complete_ride_2',
+        offlineIntent: true,
+        rideEventOutbox: true,
+        source: 'ride_event_outbox',
+        eventType: RIDE_EVENT_TYPES.COMPLETE_TRIP,
+        clientSequence: 4,
+        clientCreatedAt: '2026-06-23T12:00:00.000Z',
+      },
     );
     expect(markAcked).toHaveBeenCalledWith({
       idempotencyKey: 'idem_complete_ride_2',

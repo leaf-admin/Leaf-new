@@ -83,6 +83,8 @@ describe("driver receipt screen", () => {
     };
     const receipt = {
       id: "trip_route_receipt",
+      authoritativeSnapshot: true,
+      financialSnapshotSource: "backend_final",
       fare: 25,
       finalFare: 25,
       driverNetAmount: 21.34,
@@ -116,6 +118,51 @@ describe("driver receipt screen", () => {
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
+  it("opens driver rating with the passenger target from the receipt", () => {
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime());
+    const navigation = {
+      replace: jest.fn(),
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const receipt = {
+      id: "trip_driver_rating",
+      authoritativeSnapshot: true,
+      financialSnapshotSource: "backend_final",
+      fare: 25,
+      finalFare: 25,
+      driverNetAmount: 21.34,
+      totalFees: 3.66,
+      paymentMethod: "pix",
+      passengerId: "passenger_1",
+      passengerName: "Passageiro Rota",
+      pickupAddress: "Rua Origem, Centro",
+      destinationAddress: "Rua Destino, Botafogo",
+      distanceKm: 4.2,
+      durationMin: 16,
+    };
+
+    const screen = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true, receipt } }}
+      />,
+    );
+
+    fireEvent.press(screen.getByTestId("driver-receipt-rate-passenger-button"));
+
+    expect(navigation.replace).toHaveBeenCalledWith(
+      "RobotaxiPrototypeRating",
+      expect.objectContaining({
+        reviewerType: "driver",
+        tripId: "trip_driver_rating",
+        targetUserId: "passenger_1",
+        targetName: "Passageiro Rota",
+      }),
+    );
+  });
+
   it("does not show a gross-only receipt as received net payout", () => {
     usePrototypeRideRuntime.mockReturnValue(buildRuntime());
     const navigation = {
@@ -125,6 +172,8 @@ describe("driver receipt screen", () => {
     };
     const receipt = {
       id: "trip_gross_only",
+      authoritativeSnapshot: true,
+      financialSnapshotSource: "backend_final",
       fare: 25,
       finalFare: 25,
       paymentMethod: "pix",

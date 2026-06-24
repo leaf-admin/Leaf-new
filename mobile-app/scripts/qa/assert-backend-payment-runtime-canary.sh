@@ -61,6 +61,7 @@ if [[ "$effective_environment" != "$EXPECTED_ENVIRONMENT" ]]; then
   echo "[payment-runtime-canary][error] Payment runtime is not ${EXPECTED_ENVIRONMENT} for this smoke context."
   echo "[payment-runtime-canary][error] effectiveEnvironment=$effective_environment profileId=$profile_id contextMatched=$context_matched expiresAt=${expires_at:-none}"
   echo "[payment-runtime-canary][hint] Activate a short-lived payment_runtime_profiles sandbox profile or env allowlist for user/phone."
+  echo "[payment-runtime-canary][hint] Dry-run helper: DRY_RUN=true bash mobile-app/scripts/qa/activate-payment-runtime-sandbox-profile.sh"
   exit 1
 fi
 

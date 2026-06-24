@@ -1,4 +1,5 @@
 import Logger from '../utils/Logger';
+import auth from '@react-native-firebase/auth';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { createAxiosInstance } from '../utils/axiosInterceptor';
 
@@ -39,6 +40,22 @@ class DriverDocumentExtractionService {
     });
   }
 
+  async getAuthHeaders(forceRefresh = false) {
+    const user = auth().currentUser;
+    if (!user) {
+      throw new Error('Usuário não autenticado');
+    }
+
+    const token = await user.getIdToken(Boolean(forceRefresh));
+    if (!token) {
+      throw new Error('Token de autenticação indisponível');
+    }
+
+    return {
+      Authorization: `Bearer ${token}`
+    };
+  }
+
   async extractCNHFromPDF({ pdfAsset, userId }) {
     const file = ensurePdfAsset(pdfAsset);
     const formData = new FormData();
@@ -48,8 +65,10 @@ class DriverDocumentExtractionService {
     }
 
     Logger.log('📄 [DriverDocumentExtraction] Enviando CNH PDF para extração...');
+    const authHeaders = await this.getAuthHeaders(false);
     const response = await this.api.post('/api/ocr/cnh/pdf', formData, {
       headers: {
+        ...authHeaders,
         'Content-Type': 'multipart/form-data',
         Accept: 'application/json'
       }
@@ -66,8 +85,10 @@ class DriverDocumentExtractionService {
     }
 
     Logger.log('📄 [DriverDocumentExtraction] Enviando documento do veículo PDF para extração...');
+    const authHeaders = await this.getAuthHeaders(false);
     const response = await this.api.post('/api/ocr/vehicle/pdf', formData, {
       headers: {
+        ...authHeaders,
         'Content-Type': 'multipart/form-data',
         Accept: 'application/json'
       }

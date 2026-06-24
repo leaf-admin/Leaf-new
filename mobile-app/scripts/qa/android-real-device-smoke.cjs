@@ -894,8 +894,10 @@ async function prepareCanonicalPickupForPayment(current) {
 
   const availability = await checkSocketAvailabilityAtPickup(pickup, carType);
   if (!availability.ok) {
-    failures.push(
-      `blocked_precondition:canonical_app_pickup_no_driver:${availability.result?.code || availability.error || "unknown"}`,
+    const unavailableReason = availability.result?.code || availability.error || "unknown";
+    failures.push("blocked_precondition:driver_unavailable");
+    warnings.push(
+      `Driver availability failed for canonical app pickup before payment: ${unavailableReason}.`,
     );
     return {
       ok: false,

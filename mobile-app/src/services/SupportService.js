@@ -24,7 +24,10 @@ class SupportService {
             };
         } catch (error) {
             Logger.error('❌ Erro ao buscar mensagens:', error);
-            return { success: true, messages: [] };
+            return {
+                success: false,
+                error: error.message || 'Erro ao buscar mensagens'
+            };
         }
     }
 
@@ -82,7 +85,10 @@ class SupportService {
             };
         } catch (error) {
             Logger.error('❌ Erro ao buscar tickets:', error);
-            return { success: true, tickets: [] };
+            return {
+                success: false,
+                error: error.message || 'Erro ao buscar tickets'
+            };
         }
     }
 
@@ -153,4 +159,3 @@ class SupportService {
 }
 
 export default new SupportService();
-

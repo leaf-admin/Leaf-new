@@ -429,6 +429,146 @@ describe('driver online toggle', () => {
     );
   });
 
+  it('replaces the passenger home with receipt when runtime is completed even before receipt hydration', async () => {
+    resolvePassengerAutoRoute.mockReturnValue('RobotaxiPrototypeReceipt');
+    shouldAutoSyncPassengerRoute.mockReturnValue(true);
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'completed',
+        lastReceipt: null,
+        tripHistory: [],
+        activeBookingId: 'booking_completed_1',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_completed_1',
+          fromTrip: true,
+        })
+      );
+    });
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeReceipt',
+      expect.any(Object)
+    );
+  });
+
+  it('routes terminal no-driver passenger home sync to the no-drivers surface', async () => {
+    resolvePassengerAutoRoute.mockReturnValue('RobotaxiPrototypeNoDrivers');
+    shouldAutoSyncPassengerRoute.mockReturnValue(true);
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'no_drivers_available',
+        activeBookingId: 'booking_no_driver_1',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeNoDrivers',
+        expect.objectContaining({
+          bookingId: 'booking_no_driver_1',
+          status: 'no_drivers_available',
+        })
+      );
+    });
+    expect(navigation.replace).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeDriverSearch',
+      expect.any(Object)
+    );
+  });
+
+  it('routes terminal cancelled passenger home sync to the cancellation surface', async () => {
+    resolvePassengerAutoRoute.mockReturnValue('RobotaxiPrototypeCancellation');
+    shouldAutoSyncPassengerRoute.mockReturnValue(true);
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'cancelled',
+        activeBookingId: 'booking_cancelled_1',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeCancellation',
+        expect.objectContaining({
+          bookingId: 'booking_cancelled_1',
+          completed: true,
+          source: 'search',
+          status: 'cancelled',
+        })
+      );
+    });
+    expect(navigation.replace).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeDriverSearch',
+      expect.any(Object)
+    );
+  });
+
+  it.each(['canceled', 'no_drivers_available', 'rejected'])(
+    'renders an actionable driver home after terminal cleared status %s',
+    (bookingStatus) => {
+      usePrototypeRideRuntime.mockReturnValue(
+        buildDriverRuntime({
+          bookingStatus,
+          activeBooking: null,
+          activeBookingId: null,
+          driverActiveRide: null,
+          driverOffers: [],
+        })
+      );
+
+      const navigation = {
+        navigate: jest.fn(),
+        replace: jest.fn(),
+        canGoBack: jest.fn(() => false),
+        goBack: jest.fn(),
+      };
+
+      const { getByTestId, queryByTestId } = render(
+        <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+      );
+
+      expect(getByTestId('driver-home-toggle-online')).toBeTruthy();
+      expect(queryByTestId('passenger-driver-search-sheet')).toBeNull();
+      expect(navigation.replace).not.toHaveBeenCalled();
+      expect(navigation.navigate).not.toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.any(Object)
+      );
+    }
+  );
+
   it('does not show the welcome loader again after the home surface has hydrated', async () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
@@ -569,6 +709,131 @@ describe('driver online toggle', () => {
         'Modo motorista',
         expect.stringContaining('Nenhuma verificação')
       );
+    });
+  });
+
+  it('opens the canonical KYC modal when activation explicitly requests liveness', async () => {
+    const kycServiceMock = require('../src/services/KYCService').default;
+    const navigation = {
+      navigate: jest.fn(),
+      setParams: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByText } = render(
+      <RobotaxiHomeScreen
+        navigation={navigation}
+        route={{
+          params: {
+            notificationType: 'kyc_activation_required',
+            requirement: 'LIVENESS_REQUIRED',
+            reason: 'Conclua a validação facial para finalizar sua ativação.',
+          },
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(kycServiceMock.getPreferredLivenessMode).toHaveBeenCalled();
+      expect(getByText('Conclua a validação facial para finalizar sua ativação.')).toBeTruthy();
+      expect(navigation.setParams).toHaveBeenCalledWith(
+        expect.objectContaining({ notificationType: null, requirement: null })
+      );
+    });
+  });
+
+  it('does not open the driver KYC modal over active driver work', async () => {
+    const kycServiceMock = require('../src/services/KYCService').default;
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'started',
+        driverTripAssist: { status: 'started' },
+        driverActiveRide: {
+          bookingId: 'booking_active_kyc_guard',
+          id: 'booking_active_kyc_guard',
+          status: 'started',
+          pickupAddress: '1540 Mission St, San Francisco',
+          dropoffAddress: '1 Ferry Building, San Francisco',
+          estimatedDriverNetAmount: 15.01,
+        },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      setParams: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { queryByText, queryByTestId } = render(
+      <RobotaxiHomeScreen
+        navigation={navigation}
+        route={{
+          params: {
+            notificationType: 'kyc_activation_required',
+            requirement: 'LIVENESS_REQUIRED',
+            reason: 'Conclua a validação facial para finalizar sua ativação.',
+          },
+        }}
+      />
+    );
+
+    await act(async () => {});
+
+    expect(kycServiceMock.getPreferredLivenessMode).not.toHaveBeenCalled();
+    expect(queryByText('Conclua a validação facial para finalizar sua ativação.')).toBeNull();
+    expect(queryByText('Preparando validação facial...')).toBeNull();
+    expect(queryByTestId('driver-kyc-camera')).toBeNull();
+    expect(navigation.setParams).not.toHaveBeenCalled();
+  });
+
+  it('closes an already visible driver KYC modal when driver work becomes active', async () => {
+    let runtime = buildDriverRuntime();
+    usePrototypeRideRuntime.mockImplementation(() => runtime);
+
+    const navigation = {
+      navigate: jest.fn(),
+      setParams: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const route = {
+      params: {
+        notificationType: 'kyc_activation_required',
+        requirement: 'LIVENESS_REQUIRED',
+        reason: 'Conclua a validação facial para finalizar sua ativação.',
+      },
+    };
+
+    const { getByText, queryByText, queryByTestId, rerender } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={route} />
+    );
+
+    await waitFor(() => {
+      expect(getByText('Conclua a validação facial para finalizar sua ativação.')).toBeTruthy();
+    });
+
+    runtime = buildDriverRuntime({
+      bookingStatus: 'started',
+      driverTripAssist: { status: 'started' },
+      driverActiveRide: {
+        bookingId: 'booking_active_kyc_close',
+        id: 'booking_active_kyc_close',
+        status: 'started',
+        pickupAddress: '1540 Mission St, San Francisco',
+        dropoffAddress: '1 Ferry Building, San Francisco',
+        estimatedDriverNetAmount: 15.01,
+      },
+    });
+
+    rerender(<RobotaxiHomeScreen navigation={navigation} route={route} />);
+
+    await waitFor(() => {
+      expect(queryByText('Conclua a validação facial para finalizar sua ativação.')).toBeNull();
+      expect(queryByText('Preparando validação facial...')).toBeNull();
+      expect(queryByTestId('driver-kyc-camera')).toBeNull();
     });
   });
 
@@ -743,7 +1008,46 @@ describe('driver online toggle', () => {
 
     const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
     expect(latestMapProps.routeCoordinates).toHaveLength(2);
+    expect(latestMapProps.routeSynthetic).toBe(false);
     expect(latestMapProps.showTraffic).toBe(false);
+  });
+
+  it('passes fallback route provenance to the map instead of inferring from point count', async () => {
+    const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+    subscribePrototypeMapRoute.mockImplementation((callback) => {
+      callback({
+        coordinates: [
+          { latitude: -23.55, longitude: -46.63 },
+          { latitude: -23.555, longitude: -46.635 },
+          { latitude: -23.56, longitude: -46.64 },
+          { latitude: -23.565, longitude: -46.645 },
+        ],
+        destination: { latitude: -23.565, longitude: -46.645 },
+        destinationLabel: 'Destino fallback',
+        destinationAddress: 'Rua fallback, 123',
+        synthetic: true,
+        routeSource: 'fallback',
+      });
+      return jest.fn();
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+    });
+
+    const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+    expect(latestMapProps.routeCoordinates).toHaveLength(4);
+    expect(latestMapProps.routeSynthetic).toBe(true);
+    expect(latestMapProps.routeSource).toBe('fallback');
   });
 
   it('colors the passenger pre-booking preview route with the worst traffic level', async () => {
@@ -1078,6 +1382,139 @@ describe('driver online toggle', () => {
     );
   });
 
+  it('keeps the focused passenger active-ride map interactive and fitted above the sheet chrome', async () => {
+    const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+    subscribePrototypeMapRoute.mockImplementation((callback) => {
+      callback({
+        origin: { latitude: 37.7772, longitude: -122.4193 },
+        destination: { latitude: 37.7791, longitude: -122.4171 },
+        coordinates: [
+          { latitude: 37.7772, longitude: -122.4193 },
+          { latitude: 37.7782, longitude: -122.4182 },
+          { latitude: 37.7791, longitude: -122.4171 },
+        ],
+        trafficSegments: [],
+        destinationLabel: 'Ferry Building',
+        destinationAddress: '1 Ferry Building, San Francisco',
+      });
+      return jest.fn();
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        activeBookingId: 'booking_1',
+        activeBooking: {
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: '1 Ferry Building, San Francisco' },
+        },
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+          coordinate: { latitude: 37.7791, longitude: -122.4171 },
+        },
+        driverCoordinate: { latitude: 37.7772, longitude: -122.4193 },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    const { queryByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+      const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+      expect(latestMapProps.interactionEnabled).toBe(true);
+      expect(latestMapProps.forceRegionUpdate).toBe(true);
+      expect(latestMapProps.viewportPadding).toEqual(expect.objectContaining({
+        bottom: expect.any(Number),
+        top: expect.any(Number),
+      }));
+      expect(latestMapProps.viewportPadding.bottom).toBeGreaterThanOrEqual(300);
+      expect(latestMapProps.routeViewportRegion).toEqual(expect.objectContaining({
+        latitude: expect.any(Number),
+        longitude: expect.any(Number),
+        latitudeDelta: expect.any(Number),
+        longitudeDelta: expect.any(Number),
+      }));
+    });
+
+    expect(queryByTestId('passenger-bottom-island')).toBeNull();
+    expect(queryByTestId('prototype-top-controls')).toBeNull();
+  });
+
+  it('keeps the focused driver active-ride map interactive and fitted above the live ride sheet', async () => {
+    const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+    subscribePrototypeMapRoute.mockImplementation((callback) => {
+      callback({
+        origin: { latitude: 37.7772, longitude: -122.4193 },
+        destination: { latitude: 37.7791, longitude: -122.4171 },
+        coordinates: [
+          { latitude: 37.7772, longitude: -122.4193 },
+          { latitude: 37.7782, longitude: -122.4182 },
+          { latitude: 37.7791, longitude: -122.4171 },
+        ],
+        trafficSegments: [],
+        destinationLabel: 'Ferry Building',
+        destinationAddress: '1 Ferry Building, San Francisco',
+      });
+      return jest.fn();
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'started',
+        driverCoordinate: { latitude: 37.7772, longitude: -122.4193 },
+        currentCoordinate: { latitude: 37.7772, longitude: -122.4193 },
+        driverActiveRide: {
+          bookingId: 'booking_driver_started',
+          id: 'booking_driver_started',
+          status: 'started',
+          pickupAddress: '1540 Mission St, San Francisco',
+          dropoffAddress: '1 Ferry Building, San Francisco',
+          estimatedDriverNetAmount: 15.01,
+        },
+        driverTripAssist: { status: 'started' },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer).toHaveBeenCalled();
+      const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
+      expect(latestMapProps.interactionEnabled).toBe(true);
+      expect(latestMapProps.forceRegionUpdate).toBe(true);
+      expect(latestMapProps.viewportPadding).toEqual(expect.objectContaining({
+        bottom: expect.any(Number),
+        top: expect.any(Number),
+      }));
+      expect(latestMapProps.viewportPadding.bottom).toBeGreaterThanOrEqual(300);
+      expect(latestMapProps.routeViewportRegion).toEqual(expect.objectContaining({
+        latitude: expect.any(Number),
+        longitude: expect.any(Number),
+        latitudeDelta: expect.any(Number),
+        longitudeDelta: expect.any(Number),
+      }));
+    });
+  });
+
   it('accepts the driver offer through the home QA automation hook', async () => {
     const acceptDriverOffer = jest.fn().mockResolvedValue({ success: true });
 
@@ -1169,7 +1606,10 @@ describe('driver online toggle', () => {
       expect(completeTripFlow).toHaveBeenCalled();
       expect(navigation.navigate).toHaveBeenCalledWith(
         'RobotaxiPrototypeReceipt',
-        { fromTrip: true }
+        expect.objectContaining({
+          bookingId: 'booking_qa_complete',
+          fromTrip: true,
+        })
       );
     });
   });

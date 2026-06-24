@@ -165,7 +165,15 @@ const buildSyncState = (patch = {}) => ({
 const executeReplay = async ({ intent, state, socket }) => {
   const payload =
     intent.payload && typeof intent.payload === 'object' ? intent.payload : {};
-  const options = { idempotencyKey: intent.idempotencyKey };
+  const options = {
+    idempotencyKey: intent.idempotencyKey,
+    offlineIntent: true,
+    rideEventOutbox: true,
+    source: 'ride_event_outbox',
+    eventType: intent.eventType,
+    clientSequence: intent.clientSequence,
+    clientCreatedAt: intent.clientCreatedAt,
+  };
   const bookingId = intent.bookingId;
 
   if (intent.eventType === RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP) {

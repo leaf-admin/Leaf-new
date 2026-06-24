@@ -1,14 +1,22 @@
 describe('ReceiptService', () => {
-  const originalFetch = global.fetch;
+  let mockApiGet;
+  let mockAxiosInstance;
+  let mockSetupAxiosInterceptor;
 
   beforeEach(() => {
     jest.resetModules();
     delete process.env.EXPO_PUBLIC_RECEIPT_RTDATABASE_FALLBACK;
-    global.fetch = jest.fn();
+    mockApiGet = jest.fn();
+    mockAxiosInstance = { get: mockApiGet };
+    mockSetupAxiosInterceptor = jest.fn();
+    jest.doMock('../src/utils/axiosInterceptor', () => ({
+      createAxiosInstance: jest.fn(() => mockAxiosInstance),
+      setupAxiosInterceptor: mockSetupAxiosInterceptor,
+    }));
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    jest.dontMock('../src/utils/axiosInterceptor');
     jest.dontMock('../src/config/backendBaseUrl');
     jest.dontMock('@react-native-firebase/database');
   });
@@ -24,15 +32,15 @@ describe('ReceiptService', () => {
     jest.doMock('../src/config/backendBaseUrl', () => 'https://api.leaf.test');
 
     const receipt = { rideId: 'booking_123', financial: { totalPaid: { formatted: 'R$ 79,61' } } };
-    global.fetch.mockResolvedValue({
-      ok: true,
-      json: jest.fn().mockResolvedValue({ success: true, receipt }),
-    });
+    mockApiGet.mockResolvedValue({ data: { success: true, receipt } });
 
     const service = require('../src/services/ReceiptService').default;
+    const { createAxiosInstance } = require('../src/utils/axiosInterceptor');
 
     await expect(service.getReceiptByRideId('booking_123')).resolves.toEqual(receipt);
-    expect(global.fetch).toHaveBeenCalledWith('https://api.leaf.test/api/receipts/booking_123');
+    expect(createAxiosInstance).toHaveBeenCalledWith({ baseURL: 'https://api.leaf.test/api' });
+    expect(mockSetupAxiosInterceptor).toHaveBeenCalledWith(mockAxiosInstance);
+    expect(mockApiGet).toHaveBeenCalledWith('/receipts/booking_123');
     expect(databaseRef).not.toHaveBeenCalled();
   });
 
@@ -50,16 +58,14 @@ describe('ReceiptService', () => {
     }));
     jest.doMock('../src/config/backendBaseUrl', () => 'https://api.leaf.test');
 
-    global.fetch.mockResolvedValue({
-      ok: false,
-      json: jest.fn(),
-    });
+    mockApiGet.mockResolvedValue({ data: { success: false } });
 
     const service = require('../src/services/ReceiptService').default;
 
     await expect(service.getReceiptByRideId('booking_legacy')).resolves.toEqual({
       rideId: 'booking_legacy',
     });
+    expect(mockApiGet).toHaveBeenCalledWith('/receipts/booking_legacy');
     expect(ref).toHaveBeenCalledWith('receipts/booking_legacy');
   });
 });

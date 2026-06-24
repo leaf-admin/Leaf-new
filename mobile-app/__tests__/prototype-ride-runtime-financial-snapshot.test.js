@@ -89,6 +89,9 @@ jest.mock('../src/screens/prototype/runtimeCrashRecovery', () => ({
   shouldFlushRuntimeSessionOnAppState: jest.fn(() => false),
   shouldMaintainRealtimeSessionForSnapshot: jest.fn(() => false),
   shouldSyncActiveRideForSnapshot: jest.fn(() => false),
+  normalizeRuntimeLifecycleStatus: jest.fn((value) =>
+    String(value || '').trim().toLowerCase(),
+  ),
 }));
 
 jest.mock('../src/screens/prototype/addressLabelUtils', () => ({
@@ -107,9 +110,118 @@ const {
   normalizeCompletedTripDriverNetAmount,
   resolveCompletedTripFinancialSnapshot,
   resolveDriverPayoutAmount,
+  isRemoteLivenessPassed,
+  resolveSyncedBookingStatus,
+  hasRuntimeActiveRideContext,
+  shouldPreserveActiveRideOnIdleSync,
+  resolveCompletedReceiptRecoveryBookingId,
+  hasBackendFinalRecoveredReceiptForBooking,
 } = require('../src/screens/prototype/prototypeRideRuntime');
 
 describe('prototype ride runtime financial snapshot', () => {
+  it('only treats explicit backend liveness evidence as an approved facial validation', () => {
+    expect(isRemoteLivenessPassed({
+      state: 'APPROVED_NEEDS_LIVENESS',
+      requiresLiveness: true,
+      liveness: { passed: false },
+    })).toBe(false);
+
+    expect(isRemoteLivenessPassed({
+      state: 'ACTIVE',
+      requiresLiveness: false,
+      liveness: { passed: true },
+    })).toBe(true);
+
+    expect(isRemoteLivenessPassed({
+      activationState: 'REJECTED',
+      liveness: { passed: true },
+    })).toBe(false);
+  });
+
+  it('keeps an accepted-driver recovery on the continuation surface until a new driver advances it', () => {
+    expect(resolveSyncedBookingStatus({
+      status: 'NOTIFIED',
+      recoveryMode: 'accepted_driver_reassignment',
+    })).toBe('searching_replacement');
+
+    expect(resolveSyncedBookingStatus({
+      status: 'ACCEPTED',
+      recoveryMode: 'accepted_driver_reassignment',
+    })).toBe('accepted');
+  });
+
+  it('treats operational protected statuses as active ride context', () => {
+    expect(hasRuntimeActiveRideContext({
+      bookingStatus: 'operational_interrupted',
+      activeBookingId: 'booking_operational_hold',
+    })).toBe(true);
+    expect(hasRuntimeActiveRideContext({
+      bookingStatus: 'searching_replacement',
+      activeBooking: { id: 'booking_replacement_search' },
+    })).toBe(true);
+  });
+
+  it('preserves active rides on idle sync unless terminal authority is explicit', () => {
+    const source = {
+      bookingStatus: 'operational_interrupted',
+      activeBookingId: 'booking_operational_hold',
+    };
+
+    expect(shouldPreserveActiveRideOnIdleSync({
+      source,
+      payload: { status: 'idle', hasActiveRide: false },
+      syncedBookingId: 'booking_operational_hold',
+    })).toBe(true);
+    expect(shouldPreserveActiveRideOnIdleSync({
+      source,
+      payload: { status: 'idle', hasActiveRide: false, terminal: true },
+      syncedBookingId: 'booking_operational_hold',
+    })).toBe(false);
+    expect(shouldPreserveActiveRideOnIdleSync({
+      source,
+      payload: { status: 'idle' },
+      syncedBookingId: 'booking_other',
+    })).toBe(false);
+  });
+
+  it('accepts explicit receipt recovery booking ids from route-only receipt screens', () => {
+    expect(resolveCompletedReceiptRecoveryBookingId({
+      explicitBookingId: 'booking_receipt_route',
+    })).toBe('booking_receipt_route');
+    expect(resolveCompletedReceiptRecoveryBookingId(
+      { explicitBookingId: 'booking_receipt_route' },
+      { lastReceipt: { id: 'booking_old_receipt' } },
+    )).toBe('booking_receipt_route');
+    expect(resolveCompletedReceiptRecoveryBookingId(
+      { bookingId: 'booking_direct', explicitBookingId: 'booking_receipt_route' },
+      {},
+    )).toBe('booking_direct');
+  });
+
+  it('only skips completed receipt recovery for backend-final receipts', () => {
+    expect(hasBackendFinalRecoveredReceiptForBooking({
+      id: 'booking_recovery',
+      fare: 83.4,
+      authoritativeSnapshot: false,
+      financialSnapshotSource: 'local_fallback',
+    }, 'booking_recovery')).toBe(false);
+
+    expect(hasBackendFinalRecoveredReceiptForBooking({
+      id: 'booking_recovery',
+      fare: 83.4,
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'stored_receipt_recovery',
+    }, 'booking_recovery')).toBe(false);
+
+    expect(hasBackendFinalRecoveredReceiptForBooking({
+      bookingId: 'booking_recovery',
+      receiptId: 'receipt_recovery',
+      fare: 83.4,
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+    }, 'booking_recovery')).toBe(true);
+  });
+
   it('prefers the locked driver payout over a later gross fare fallback', () => {
     const payout = resolveDriverPayoutAmount(
       { fare: 16.5 },
@@ -252,6 +364,26 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(snapshot.totalFees).toBeCloseTo(1.49, 2);
     expect(snapshot.operationalFee).toBeCloseTo(0.99, 2);
     expect(snapshot.paymentIntermediationFee).toBeCloseTo(0.5, 2);
+  });
+
+  it('does not promote a fee-bearing completion payload without backend-final provenance', () => {
+    const snapshot = resolveCompletedTripFinancialSnapshot(
+      {
+        bookingId: 'booking_untrusted_completion',
+        fare: 14.22,
+        operationalFee: 0.99,
+        paymentIntermediationFee: 0.5,
+        totalFees: 1.49,
+        driverNetAmount: 12.73,
+        authoritativeSnapshot: false,
+        financialSnapshotSource: 'socket_fallback',
+      },
+      { selectedFare: 14.22 },
+    );
+
+    expect(snapshot.finalFare).toBeCloseTo(14.22, 2);
+    expect(snapshot.authoritativeSnapshot).toBe(false);
+    expect(snapshot.financialSnapshotSource).toBe('local_fallback');
   });
 
   it('normalizes merged completed receipts with authoritative fees', () => {

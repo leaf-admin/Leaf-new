@@ -23,6 +23,25 @@ const AUTH_UID_STORAGE_KEY = "@auth_uid";
 const USER_DATA_STORAGE_KEY = "@user_data";
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = "@qa_socket_id_token";
 const QA_SOCKET_ID_TOKEN_MIN_TTL_MS = 60000;
+const TERMINAL_ACTIVE_RIDE_SYNC_STATUSES = new Set([
+  "CANCELED",
+  "CANCELLED",
+  "COMPLETE",
+  "COMPLETED",
+  "COMPLETED_AFTER_REASSIGNMENT",
+  "EARLY_ENDED_BY_RIDER",
+  "EARLY_ENDED_REVIEW",
+  "EXPIRED",
+  "INTERRUPTED_OPERATIONAL_ENDED",
+  "NO_DRIVERS",
+  "NO_DRIVERS_AVAILABLE",
+  "NO_DRIVERS_FOUND",
+  "REJECTED",
+  "SUPERSEDED",
+  "TRIP_CANCELED",
+  "TRIP_CANCELLED",
+  "TRIP_COMPLETED",
+]);
 
 // ✅ CORREÇÃO: Calcular URL dinamicamente para evitar problemas em builds de release
 // Não armazenar como constante, calcular sempre que necessário
@@ -72,6 +91,51 @@ function createSocketRequestId(prefix = "req") {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function buildRideLifecycleCommandMetadata(options = {}) {
+  const metadata = {};
+  [
+    "idempotencyKey",
+    "offlineIntent",
+    "rideEventOutbox",
+    "source",
+    "eventType",
+    "clientSequence",
+    "clientCreatedAt",
+  ].forEach((key) => {
+    const value = options?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      metadata[key] = value;
+    }
+  });
+  return metadata;
+}
+
+function buildSupportScopePayload(context = {}) {
+  if (!context || typeof context !== "object") {
+    return {};
+  }
+
+  const scopedPayload = {};
+  [
+    "bookingId",
+    "rideId",
+    "tripId",
+    "subject",
+    "source",
+    "bookingStatus",
+    "city",
+    "regionHash",
+    "severity",
+  ].forEach((key) => {
+    const value = String(context[key] ?? "").trim();
+    if (value) {
+      scopedPayload[key] = value;
+    }
+  });
+
+  return scopedPayload;
+}
+
 function roundCoordinateForCache(value, precision = 4) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -100,6 +164,40 @@ function cloneSocketPayload(payload) {
   } catch (_error) {
     return payload;
   }
+}
+
+function normalizeSocketRideStatus(...values) {
+  for (const value of values) {
+    const normalized = String(value || "")
+      .trim()
+      .replace(/[\s-]+/g, "_")
+      .toUpperCase();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function isTerminalActiveRideSyncSnapshot(snapshot = {}) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return false;
+  }
+
+  if (snapshot.terminal === true) {
+    return true;
+  }
+
+  const status = normalizeSocketRideStatus(
+    snapshot.status,
+    snapshot.bookingStatus,
+    snapshot.state,
+    snapshot.tripStatus,
+    snapshot.terminalStatus,
+  );
+
+  return TERMINAL_ACTIVE_RIDE_SYNC_STATUSES.has(status);
 }
 
 function decodeBase64UrlJson(segment) {
@@ -381,17 +479,34 @@ class WebSocketManager {
 
   _resolveLifecycleBookingId(eventName, payload = {}) {
     const normalizedEvent = String(eventName || "").trim();
+    const lastActiveSnapshotBookingId = this._getLifecycleSnapshotBookingFallback();
     const bookingId = String(
       payload?.bookingId ||
         payload?.rideId ||
         payload?.booking?.bookingId ||
         payload?.booking?.id ||
-        this.lastActiveRideSnapshot?.bookingId ||
+        lastActiveSnapshotBookingId ||
         this.lastLifecycleBookingByEvent.get(normalizedEvent) ||
         "",
     ).trim();
 
     return bookingId || null;
+  }
+
+  _getLifecycleSnapshotBookingFallback() {
+    if (!this.lastActiveRideSnapshot) {
+      return "";
+    }
+
+    if (this.lastActiveRideSnapshot.hasActiveRide === false) {
+      return "";
+    }
+
+    if (isTerminalActiveRideSyncSnapshot(this.lastActiveRideSnapshot)) {
+      return "";
+    }
+
+    return String(this.lastActiveRideSnapshot.bookingId || "").trim();
   }
 
   _payloadMatchesBookingId(payload = {}, expectedBookingId = null) {
@@ -1279,6 +1394,7 @@ class WebSocketManager {
       "activeRideSync",
       "sessionTerminated",
       "locationUpdated",
+      "locationBatchUpdated",
       "mapH3Refresh",
       "map_h3_refresh",
       "error",
@@ -1336,7 +1452,10 @@ class WebSocketManager {
       this.socket.on("activeRideSync", (snapshot) => {
         if (snapshot?.success) {
           this.lastActiveRideSnapshot = snapshot;
-          if (snapshot?.hasActiveRide !== true) {
+          if (
+            snapshot?.hasActiveRide !== true ||
+            isTerminalActiveRideSyncSnapshot(snapshot)
+          ) {
             this._clearRehydratedRideLifecycle(snapshot?.bookingId);
             this._clearLifecycleDispatchForBooking(snapshot?.bookingId);
           }
@@ -3139,7 +3258,7 @@ class WebSocketManager {
       const requestId =
         String(options?.requestId || "").trim() ||
         createSocketRequestId("arrive_at_pickup");
-      const idempotencyKey = String(options?.idempotencyKey || "").trim();
+      const lifecycleMetadata = buildRideLifecycleCommandMetadata(options);
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -3238,7 +3357,7 @@ class WebSocketManager {
         bookingId,
         location,
         requestId,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...lifecycleMetadata,
       });
     });
   }
@@ -3348,7 +3467,7 @@ class WebSocketManager {
     const requestId =
       String(options?.requestId || "").trim() ||
       createSocketRequestId("start_trip");
-    const idempotencyKey = String(options?.idempotencyKey || "").trim();
+    const lifecycleMetadata = buildRideLifecycleCommandMetadata(options);
     return this._emitLifecycleCommandWithAck({
       commandName: "startTrip",
       eventName: "startTrip",
@@ -3361,7 +3480,7 @@ class WebSocketManager {
         bookingId,
         startLocation,
         requestId,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...lifecycleMetadata,
       },
     });
   }
@@ -3393,7 +3512,7 @@ class WebSocketManager {
     const requestId =
       String(options?.requestId || "").trim() ||
       createSocketRequestId("complete_trip");
-    const idempotencyKey = String(options?.idempotencyKey || "").trim();
+    const lifecycleMetadata = buildRideLifecycleCommandMetadata(options);
     return this._emitLifecycleCommandWithAck({
       commandName: "completeTrip",
       eventName: "completeTrip",
@@ -3408,7 +3527,7 @@ class WebSocketManager {
         distance,
         fare,
         requestId,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...lifecycleMetadata,
       },
     });
   }
@@ -3559,12 +3678,22 @@ class WebSocketManager {
   // Submeter avaliação
   async submitRating(ratingData) {
     if (!this.socket?.connected) {
-      throw new Error("WebSocket não conectado");
+      throw buildSocketError(
+        { code: "WS_DISCONNECTED", error: "WebSocket não conectado" },
+        "WebSocket não conectado",
+        "rating",
+      );
     }
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error("Submit rating timeout"));
+        reject(
+          buildSocketError(
+            { code: "RATING_SUBMIT_TIMEOUT", error: "Submit rating timeout" },
+            "Não foi possível enviar a avaliação agora.",
+            "rating",
+          ),
+        );
       }, 15000);
 
       this.socket.emit("submitRating", ratingData);
@@ -3573,7 +3702,7 @@ class WebSocketManager {
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Submit rating failed"));
+          reject(buildSocketError(data, "Não foi possível enviar a avaliação agora.", "rating"));
         }
       });
     });
@@ -3658,24 +3787,49 @@ class WebSocketManager {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Create chat timeout"));
       }, 10000);
 
-      const onSuccess = (data) => {
+      const expectedChatId =
+        chatData?.chatId || chatData?.bookingId || chatData?.tripId || chatData?.rideId || null;
+      const matchesRequest = (data = {}) => {
+        if (!expectedChatId || !data || typeof data !== "object") {
+          return true;
+        }
+        const receivedId = data.chatId || data.bookingId || data.tripId || data.rideId;
+        return !receivedId || String(receivedId) === String(expectedChatId);
+      };
+      const cleanup = () => {
         clearTimeout(timeout);
         this.socket.off("chat_created", onSuccess);
         this.socket.off("chatCreated", onSuccess);
+        this.socket.off("chatError", onError);
+      };
+      const onSuccess = (data) => {
+        if (!matchesRequest(data)) {
+          return;
+        }
+        cleanup();
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Create chat failed"));
+          reject(buildSocketError(data, "Create chat failed", "chat"));
         }
       };
+      const onError = (data) => {
+        if (!matchesRequest(data)) {
+          return;
+        }
+        cleanup();
+        reject(buildSocketError(data, "Create chat failed", "chat"));
+      };
 
-      this.socket.emit("createChat", chatData);
       this.socket.once("chatCreated", onSuccess);
       // Compatibilidade com payload/evento legado
       this.socket.once("chat_created", onSuccess);
+      this.socket.once("chatError", onError);
+      this.socket.emit("createChat", chatData);
     });
   }
 
@@ -3687,24 +3841,51 @@ class WebSocketManager {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Send message timeout"));
       }, 10000);
 
-      const onSuccess = (data) => {
+      const expectedChatId =
+        messageData?.chatId || messageData?.bookingId || messageData?.tripId || messageData?.rideId || null;
+      const matchesRequest = (data = {}) => {
+        if (!expectedChatId || !data || typeof data !== "object") {
+          return true;
+        }
+        const receivedId = data.chatId || data.bookingId || data.tripId || data.rideId;
+        return !receivedId || String(receivedId) === String(expectedChatId);
+      };
+      const cleanup = () => {
         clearTimeout(timeout);
         this.socket.off("message_sent", onSuccess);
         this.socket.off("messageSent", onSuccess);
+        this.socket.off("messageError", onError);
+        this.socket.off("chatError", onError);
+      };
+      const onSuccess = (data) => {
+        if (!matchesRequest(data)) {
+          return;
+        }
+        cleanup();
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Send message failed"));
+          reject(buildSocketError(data, "Send message failed", "chat"));
         }
       };
+      const onError = (data) => {
+        if (!matchesRequest(data)) {
+          return;
+        }
+        cleanup();
+        reject(buildSocketError(data, "Send message failed", "chat"));
+      };
 
-      this.socket.emit("sendMessage", messageData);
       this.socket.once("messageSent", onSuccess);
       // Compatibilidade com payload/evento legado
       this.socket.once("message_sent", onSuccess);
+      this.socket.once("messageError", onError);
+      this.socket.once("chatError", onError);
+      this.socket.emit("sendMessage", messageData);
     });
   }
 
@@ -3719,15 +3900,25 @@ class WebSocketManager {
         reject(new Error("Load messages timeout"));
       }, 10000);
 
-      this.socket.emit("load_messages", { chatId, page, limit });
-      this.socket.once("messages_loaded", (data) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.socket.off("messages_loaded", onLoaded);
+      };
+      const onLoaded = (data) => {
+        const responseChatId = data?.chatId || data?.bookingId || data?.tripId || data?.rideId;
+        if (responseChatId && String(responseChatId) !== String(chatId)) {
+          return;
+        }
+        cleanup();
         clearTimeout(timeout);
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Load messages failed"));
+          reject(buildSocketError(data, "Load messages failed", "chat"));
         }
-      });
+      };
+      this.socket.once("messages_loaded", onLoaded);
+      this.socket.emit("load_messages", { chatId, page, limit });
     });
   }
 
@@ -3742,15 +3933,25 @@ class WebSocketManager {
         reject(new Error("Mark messages read timeout"));
       }, 10000);
 
-      this.socket.emit("mark_messages_read", { chatId, messageIds });
-      this.socket.once("messages_marked_read", (data) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.socket.off("messages_marked_read", onMarked);
+      };
+      const onMarked = (data) => {
+        const responseChatId = data?.chatId || data?.bookingId || data?.tripId || data?.rideId;
+        if (responseChatId && String(responseChatId) !== String(chatId)) {
+          return;
+        }
+        cleanup();
         clearTimeout(timeout);
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Mark messages read failed"));
+          reject(buildSocketError(data, "Mark messages read failed", "chat"));
         }
-      });
+      };
+      this.socket.once("messages_marked_read", onMarked);
+      this.socket.emit("mark_messages_read", { chatId, messageIds });
     });
   }
 
@@ -4126,6 +4327,96 @@ class WebSocketManager {
     return this.updateLocation(driverId, lat, lng, heading, speed, metadata);
   }
 
+  async updateLocationBatch({
+    driverId,
+    bookingId,
+    tripId,
+    tripStatus = "started",
+    isInTrip = true,
+    source = "location_buffer_batch",
+    locations = [],
+    batchId = null,
+  } = {}) {
+    if (!this.socket?.connected) {
+      throw new Error("WebSocket não conectado");
+    }
+
+    const normalizedLocations = Array.isArray(locations)
+      ? locations
+          .map((item) => {
+            const lat = Number(item?.lat ?? item?.latitude);
+            const lng = Number(item?.lng ?? item?.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+              return null;
+            }
+            return {
+              eventId: item.eventId || null,
+              lat,
+              lng,
+              accuracy: item.accuracy ?? null,
+              heading: item.heading ?? null,
+              speed: item.speed ?? null,
+              timestamp: item.timestamp || item.capturedAt || Date.now(),
+              capturedAt: item.capturedAt || item.timestamp || Date.now(),
+              seq: Number.isInteger(Number(item.seq)) ? Number(item.seq) : null,
+              source: item.source || source,
+              tripStatus: item.tripStatus || tripStatus,
+              isInTrip: item.isInTrip !== undefined ? Boolean(item.isInTrip) : Boolean(isInTrip),
+              bookingId: item.bookingId || bookingId || tripId || null,
+              tripId: item.tripId || tripId || bookingId || null,
+            };
+          })
+          .filter(Boolean)
+      : [];
+
+    if (normalizedLocations.length === 0) {
+      throw new Error("Nenhuma localização válida para sincronizar");
+    }
+
+    return new Promise((resolve, reject) => {
+      const resolvedBatchId =
+        String(batchId || "").trim() || createSocketRequestId("location_batch");
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Update location batch timeout"));
+      }, 15000);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.off("locationBatchUpdated", onBatchUpdated);
+      };
+
+      const onBatchUpdated = (payload = {}) => {
+        if (
+          payload?.batchId &&
+          resolvedBatchId &&
+          String(payload.batchId) !== String(resolvedBatchId)
+        ) {
+          return;
+        }
+        cleanup();
+        if (payload?.success === false) {
+          reject(buildSocketError(payload, "Não foi possível sincronizar localizações.", "location_batch"));
+          return;
+        }
+        resolve(payload);
+      };
+
+      this.on("locationBatchUpdated", onBatchUpdated);
+      this.socket.emit("updateLocationBatch", {
+        batchId: resolvedBatchId,
+        driverId,
+        uid: driverId,
+        bookingId: bookingId || tripId || null,
+        tripId: tripId || bookingId || null,
+        tripStatus,
+        isInTrip,
+        source,
+        locations: normalizedLocations,
+      });
+    });
+  }
+
   // Localização do passageiro durante corrida ativa (monitoramento de tripulação)
   async updatePassengerLocation(bookingId, lat, lng, heading = 0, speed = 0) {
     if (!this.socket?.connected) {
@@ -4376,7 +4667,7 @@ class WebSocketManager {
       const requestId =
         String(options?.requestId || "").trim() ||
         createSocketRequestId("cancel_ride");
-      const idempotencyKey = String(options?.idempotencyKey || "").trim();
+      const lifecycleMetadata = buildRideLifecycleCommandMetadata(options);
 
       this._recordRideTelemetryCommand(
         "cancelRide",
@@ -4392,7 +4683,7 @@ class WebSocketManager {
         reason,
         cancellationFee,
         requestId,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...lifecycleMetadata,
       });
     });
   }
@@ -4400,29 +4691,52 @@ class WebSocketManager {
   // ==================== NOVOS MÉTODOS - SISTEMA DE SEGURANÇA ====================
 
   // Reportar incidente
-  async reportIncident(type, description, evidence = [], location = null) {
+  async reportIncident(
+    type,
+    description,
+    evidence = [],
+    location = null,
+    context = {},
+  ) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      let timeout = null;
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        this.socket?.off?.("incidentReported", onReported);
+        this.socket?.off?.("incidentReportError", onError);
+      };
+      const onReported = (data) => {
+        cleanup();
+        if (data.success) {
+          resolve(data);
+        } else {
+          reject(buildSocketError(data, "Report incident failed", "websocket"));
+        }
+      };
+      const onError = (data) => {
+        cleanup();
+        reject(buildSocketError(data, "Report incident failed", "websocket"));
+      };
+
+      timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Report incident timeout"));
       }, 10000);
 
+      this.socket.once("incidentReported", onReported);
+      this.socket.once("incidentReportError", onError);
       this.socket.emit("reportIncident", {
         type,
         description,
         evidence,
         location,
-      });
-      this.socket.once("incidentReported", (data) => {
-        clearTimeout(timeout);
-        if (data.success) {
-          resolve(data);
-        } else {
-          reject(new Error(data.error || "Report incident failed"));
-        }
+        ...buildSupportScopePayload(context),
       });
     });
   }
@@ -4432,24 +4746,46 @@ class WebSocketManager {
     contactType,
     location = null,
     message = "Solicitação de emergência",
+    context = {},
   ) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("Emergency contact timeout"));
-      }, 10000);
-
-      this.socket.emit("emergencyContact", { contactType, location, message });
-      this.socket.once("emergencyContacted", (data) => {
-        clearTimeout(timeout);
+      let timeout = null;
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        this.socket?.off?.("emergencyContacted", onContacted);
+        this.socket?.off?.("emergencyError", onError);
+      };
+      const onContacted = (data) => {
+        cleanup();
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Emergency contact failed"));
+          reject(buildSocketError(data, "Emergency contact failed", "websocket"));
         }
+      };
+      const onError = (data) => {
+        cleanup();
+        reject(buildSocketError(data, "Emergency contact failed", "websocket"));
+      };
+
+      timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Emergency contact timeout"));
+      }, 10000);
+
+      this.socket.once("emergencyContacted", onContacted);
+      this.socket.once("emergencyError", onError);
+      this.socket.emit("emergencyContact", {
+        contactType,
+        location,
+        message,
+        ...buildSupportScopePayload(context),
       });
     });
   }
@@ -4462,29 +4798,47 @@ class WebSocketManager {
     priority = "N3",
     description,
     attachments = [],
+    context = {},
   ) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      let timeout = null;
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        this.socket?.off?.("supportTicketCreated", onCreated);
+        this.socket?.off?.("supportTicketError", onError);
+      };
+      const onCreated = (data) => {
+        cleanup();
+        if (data.success) {
+          resolve(data);
+        } else {
+          reject(buildSocketError(data, "Create support ticket failed", "websocket"));
+        }
+      };
+      const onError = (data) => {
+        cleanup();
+        reject(buildSocketError(data, "Create support ticket failed", "websocket"));
+      };
+
+      timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Create support ticket timeout"));
       }, 10000);
 
+      this.socket.once("supportTicketCreated", onCreated);
+      this.socket.once("supportTicketError", onError);
       this.socket.emit("createSupportTicket", {
         type,
         priority,
         description,
         attachments,
-      });
-      this.socket.once("supportTicketCreated", (data) => {
-        clearTimeout(timeout);
-        if (data.success) {
-          resolve(data);
-        } else {
-          reject(new Error(data.error || "Create support ticket failed"));
-        }
+        ...buildSupportScopePayload(context),
       });
     });
   }
@@ -4719,7 +5073,7 @@ class WebSocketManager {
    * @param {object} newDrop {lat, lng, add}
    * @param {number} newFare
    */
-  async requestRideExtension(rideId, newDrop, newFare) {
+  async requestRideExtension(rideId, newDrop, newFare, options = {}) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
@@ -4760,6 +5114,12 @@ class WebSocketManager {
         bookingId: rideId,
         newEndLocation: newDrop,
         newFare,
+        routeDistanceKm:
+          options.routeDistanceKm ?? options.routeDistance ?? null,
+        routeDurationSecs:
+          options.routeDurationSecs ?? options.routeDuration ?? null,
+        quoteLockId: options.quoteLockId || null,
+        quoteSessionId: options.quoteSessionId || null,
       });
     });
   }
@@ -5097,7 +5457,18 @@ class WebSocketManager {
       return;
     }
 
-    const status = String(snapshot.status || "").toUpperCase();
+    if (isTerminalActiveRideSyncSnapshot(snapshot)) {
+      this._clearRehydratedRideLifecycle(snapshot?.bookingId);
+      this._clearLifecycleDispatchForBooking(snapshot?.bookingId);
+      return;
+    }
+
+    const status = normalizeSocketRideStatus(
+      snapshot.status,
+      snapshot.bookingStatus,
+      snapshot.state,
+      snapshot.tripStatus,
+    );
     if (!this._shouldEmitRehydratedRideLifecycle(snapshot, status)) {
       return;
     }

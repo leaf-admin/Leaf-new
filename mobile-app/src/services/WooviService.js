@@ -42,6 +42,7 @@ class WooviService {
                 paymentSessionId: paymentData.paymentSessionId,
                 paymentContextKey: paymentData.paymentContextKey,
                 quoteSessionId: paymentData.quoteSessionId,
+                quoteLockId: paymentData.quoteLockId,
                 rideDetails: paymentData.rideDetails,
                 pickupLocation: paymentData.pickupLocation,
                 destinationLocation: paymentData.destinationLocation,

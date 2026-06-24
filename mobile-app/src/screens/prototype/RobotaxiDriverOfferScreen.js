@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, StatusBar, StyleSheet, Text, View } from "react-native";
+import { Alert, StatusBar, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fonts } from "../../theme/runtimeTokens";
@@ -17,6 +17,10 @@ import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from "./robotaxiPrototypeData";
 import {
+  buildRouteViewportRegion,
+  buildVisibleRouteEdgePadding,
+} from "./prototypeRouteViewport";
+import {
   getDriverOfferPayoutLabel,
   hasAuthoritativeDriverOfferPricing,
   selectDisplayableDriverOffer,
@@ -31,6 +35,9 @@ import useCampaignAssetOverride from "../../hooks/useCampaignAssetOverride";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
+const DRIVER_OFFER_MAP_SIDE_PADDING = 44;
+const DRIVER_OFFER_MAP_TOP_PADDING = 118;
+const DRIVER_OFFER_MAP_MIN_VISIBLE_HEIGHT = 220;
 
 const DRIVER_OFFER_RENDERED_CARD_FIELD_IDS = Object.freeze([
   "net_payout",
@@ -290,6 +297,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const [mapWidth, setMapWidth] = useState(windowWidth);
+  const [mapHeight, setMapHeight] = useState(windowHeight);
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [busyAction, setBusyAction] = useState("");
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
@@ -312,6 +322,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     route?.params?.qaKeepVisible || route?.params?.__qaKeepVisible,
   );
   const hadVisibleRequestRef = useRef(false);
+  const protectedOfferExitRef = useRef(false);
 
   const liveRequest = useMemo(
     () => selectDisplayableDriverOffer(driverOffers),
@@ -436,25 +447,11 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       return normalizedCandidate;
     }
 
-    const origin =
-      routeDriverCoordinate ||
-      normalizeMapCoordinate(driverCoordinate) ||
-      normalizeMapCoordinate(currentCoordinate) ||
-      PROTOTYPE_ORIGIN_COORDINATE;
-    const pickup =
-      normalizeMapCoordinate(driverTripMeta?.pickupCoordinate) ||
-      normalizeMapCoordinate(request?.pickupCoordinate) ||
-      origin;
-    return [origin, pickup].filter(Boolean);
+    return [];
   }, [
-    currentCoordinate,
-    driverCoordinate,
-    driverTripMeta?.pickupCoordinate,
     driverTripMeta?.routePlan,
-    request?.pickupCoordinate,
     request?.pickupRouteCoordinates,
     request?.routeCoordinates,
-    routeDriverCoordinate,
   ]);
   const offerOriginCoordinate =
     routeDriverCoordinate ||
@@ -489,29 +486,116 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     normalizeMapCoordinate(request?.pickupCoordinate) ||
     offerRouteCoordinates[offerRouteCoordinates.length - 1] ||
     offerOriginCoordinate;
+  const offerMapOcclusion = useMemo(
+    () => ({
+      top: 0,
+      bottom: sheetBottom + cardHeight,
+    }),
+    [cardHeight, sheetBottom],
+  );
+  const offerViewportPadding = useMemo(
+    () => buildVisibleRouteEdgePadding({
+      mapHeight: mapHeight || windowHeight,
+      activeOcclusion: offerMapOcclusion,
+      insets,
+      sidePadding: DRIVER_OFFER_MAP_SIDE_PADDING,
+      topExtraPadding: 28,
+      bottomExtraPadding: 26,
+      minVisibleHeight: DRIVER_OFFER_MAP_MIN_VISIBLE_HEIGHT,
+      topPaddingMin: insets.top + DRIVER_OFFER_MAP_TOP_PADDING,
+      overlayBiasRatio: 0.26,
+    }),
+    [
+      insets,
+      insets.top,
+      mapHeight,
+      offerMapOcclusion,
+      windowHeight,
+    ],
+  );
+  const offerVisibleRouteRegion = useMemo(
+    () => buildRouteViewportRegion({
+      coordinates: offerRouteCoordinates,
+      mapWidth: mapWidth || windowWidth,
+      mapHeight: mapHeight || windowHeight,
+      activeOcclusion: offerMapOcclusion,
+      insets,
+      viewportPadding: offerViewportPadding,
+      minVisibleHeight: DRIVER_OFFER_MAP_MIN_VISIBLE_HEIGHT,
+    }),
+    [
+      insets,
+      mapHeight,
+      mapWidth,
+      offerMapOcclusion,
+      offerRouteCoordinates,
+      offerViewportPadding,
+      windowHeight,
+      windowWidth,
+    ],
+  );
   const offerMapRegion = useMemo(
     () =>
-      buildFallbackOfferRegion([
+      offerVisibleRouteRegion || buildFallbackOfferRegion([
         offerOriginCoordinate,
         offerPickupCoordinate,
         ...offerRouteCoordinates,
       ]),
-    [offerOriginCoordinate, offerPickupCoordinate, offerRouteCoordinates]
+    [
+      offerOriginCoordinate,
+      offerPickupCoordinate,
+      offerRouteCoordinates,
+      offerVisibleRouteRegion,
+    ]
   );
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || "prototype-driver-offer",
-    occludedBottom: sheetBottom + cardHeight,
+    occludedBottom: offerMapOcclusion.bottom,
   });
 
   const handleDismiss = useCallback(() => {
+    if (hasRequest) {
+      return;
+    }
+
     if (navigation.canGoBack()) {
       navigation.goBack();
       return;
     }
     navigation.navigate("RobotaxiPrototype");
-  }, [navigation]);
+  }, [hasRequest, navigation]);
+
+  useEffect(() => {
+    if (
+      !hasRequest ||
+      typeof navigation?.addListener !== "function"
+    ) {
+      return undefined;
+    }
+
+    // A paid offer can only leave this surface through accept, reject, expiry,
+    // or a competitive resolution acknowledged by the runtime.
+    const unsubscribe = navigation.addListener("beforeRemove", event => {
+      const expectedExit = protectedOfferExitRef.current;
+      const action = event?.data?.action;
+      const actionRouteName = action?.payload?.name;
+      const isExpectedExit = Boolean(
+        expectedExit &&
+          ((expectedExit.routeName && actionRouteName === expectedExit.routeName) ||
+            (expectedExit.actionType && action?.type === expectedExit.actionType)),
+      );
+      if (isExpectedExit) {
+        protectedOfferExitRef.current = null;
+        return;
+      }
+
+      event?.preventDefault?.();
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [hasRequest, navigation]);
 
   useEffect(() => {
     setAllowRouteFallback(Boolean(routeRequest));
@@ -552,6 +636,16 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       setCardHeight(nextHeight);
     }
   }, []);
+  const handleMapLayout = useCallback((event) => {
+    const nextWidth = event?.nativeEvent?.layout?.width;
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextWidth) && nextWidth > 0) {
+      setMapWidth(previous => (previous === nextWidth ? previous : nextWidth));
+    }
+    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+      setMapHeight(previous => (previous === nextHeight ? previous : nextHeight));
+    }
+  }, []);
 
   const handleAccept = useCallback(async () => {
     if (!hasRequest || !request) {
@@ -561,6 +655,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     try {
       setBusyAction("accept");
       await acceptDriverOffer(request);
+      protectedOfferExitRef.current = { routeName: "RobotaxiPrototype" };
       if (typeof navigation.replace === "function") {
         navigation.replace("RobotaxiPrototype", {
           source: "driver-offer-accepted",
@@ -574,6 +669,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       });
     } catch (error) {
       if (isCompetitiveAcceptLossMessage(error?.message || error)) {
+        protectedOfferExitRef.current = { actionType: "GO_BACK" };
         navigation.goBack();
         return;
       }
@@ -594,6 +690,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     try {
       setBusyAction("reject");
       await rejectDriverOffer(request, "Recusada pelo motorista.");
+      protectedOfferExitRef.current = { actionType: "GO_BACK" };
       navigation.goBack();
     } catch (error) {
       Alert.alert(
@@ -629,6 +726,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
           destinationAddress={pickupLabel}
           originLabel="Motorista"
           originAddress="Sua localização atual"
+          viewportPadding={offerViewportPadding}
+          routeViewportRegion={offerVisibleRouteRegion}
+          onMapLayout={handleMapLayout}
           interactionEnabled={false}
           hideRouteEndpointMarkers
           hideUserMarker
@@ -652,6 +752,8 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
         ) : null}
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
+          backdropDismissEnabled={!hasRequest}
+          dragEnabled={!hasRequest}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
           <LeafRideSheet

@@ -35,8 +35,12 @@ const DRIVER_DOCS = [
 function formatStatus(status) {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'approved') return 'aprovado';
-  if (normalized === 'in_review') return 'em análise';
-  if (normalized === 'failed') return 'revisar';
+  if (['in_review', 'analyzing', 'analysis', 'under_review', 'pending_review'].includes(normalized)) {
+    return 'em análise';
+  }
+  if (['failed', 'rejected', 'needs_attention', 'requires_attention', 'review_required'].includes(normalized)) {
+    return 'revisar';
+  }
   return 'pendente';
 }
 

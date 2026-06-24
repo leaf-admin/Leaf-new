@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,7 +14,10 @@ import robotaxiPrototypeTokens from "../../components/design-system/robotaxiProt
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
-import { normalizePassengerBookingStatus } from "./passengerFlowRouting";
+import {
+  normalizePassengerBookingStatus,
+  resolvePassengerAutoRoute,
+} from "./passengerFlowRouting";
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
@@ -23,6 +26,7 @@ const FALLBACK_CARD_HEIGHT = 250;
 export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
   const {
     activeBooking,
+    activeBookingId,
     bookingStatus,
     selectedDestination,
     selectedVehicle,
@@ -31,6 +35,7 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
+  const protectedPaymentSuccessExitRef = useRef(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
 
   const destination =
@@ -56,7 +61,48 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
     activeBooking?.destinationLocation ||
     null;
   const vehicle = route?.params?.vehicle || selectedVehicle || "Leaf Plus";
+  const receiptBookingId = String(
+    route?.params?.bookingId ||
+      route?.params?.rideId ||
+      route?.params?.tripId ||
+      activeBookingId ||
+      activeBooking?.bookingId ||
+      activeBooking?.id ||
+      "",
+  ).trim();
+  const receiptFare = Number(
+    route?.params?.selectedFare ||
+      route?.params?.fare ||
+      activeBooking?.grossFare ||
+      activeBooking?.fare ||
+      activeBooking?.amount,
+  );
+  const completedReceiptParams = useMemo(() => ({
+    fromTrip: true,
+    ...(receiptBookingId
+      ? { bookingId: receiptBookingId, rideId: receiptBookingId, tripId: receiptBookingId }
+      : {}),
+    ...(Number.isFinite(receiptFare) && receiptFare > 0
+      ? { fare: receiptFare, grossAmount: receiptFare }
+      : {}),
+    pickupAddress: originAddress,
+    destinationAddress,
+    driverId: driverInfo?.id || null,
+    driverName: driverInfo?.name || null,
+    vehicleLabel: vehicle,
+    vehiclePlate: driverInfo?.plate || null,
+  }), [
+    destinationAddress,
+    driverInfo?.id,
+    driverInfo?.name,
+    driverInfo?.plate,
+    originAddress,
+    receiptBookingId,
+    receiptFare,
+    vehicle,
+  ]);
   const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
+  const passengerAutoRoute = resolvePassengerAutoRoute(bookingStatus);
   const isRideLifecycleLocked = [
     "requesting",
     "searching",
@@ -65,7 +111,20 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
     "started",
     "operational_interrupted",
     "searching_replacement",
+    "completed",
+    "canceled",
+    "no_drivers",
+    "rejected",
   ].includes(normalizedBookingStatus);
+  const replaceAfterPaymentSuccess = useCallback((routeName, params) => {
+    protectedPaymentSuccessExitRef.current = routeName;
+    if (typeof navigation.replace === "function") {
+      navigation.replace(routeName, params);
+      return;
+    }
+
+    navigation.navigate(routeName, params);
+  }, [navigation]);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -74,12 +133,8 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
   });
 
   useEffect(() => {
-    if (
-      normalizedBookingStatus === "accepted" ||
-      normalizedBookingStatus === "arrived" ||
-      normalizedBookingStatus === "started"
-    ) {
-      navigation.replace("RobotaxiPrototypeTrip", {
+    if (passengerAutoRoute === "RobotaxiPrototypeTrip") {
+      replaceAfterPaymentSuccess("RobotaxiPrototypeTrip", {
         destination,
         destinationAddress,
         destinationCoordinate,
@@ -96,12 +151,12 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
       });
     }
   }, [
-    normalizedBookingStatus,
     destination,
     destinationAddress,
     destinationCoordinate,
     driverInfo?.name,
-    navigation,
+    passengerAutoRoute,
+    replaceAfterPaymentSuccess,
     originAddress,
     route?.params?.fare,
     route?.params?.initialSelectedDestination,
@@ -110,19 +165,43 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
+    if (passengerAutoRoute === "RobotaxiPrototypeReceipt") {
+      replaceAfterPaymentSuccess("RobotaxiPrototypeReceipt", completedReceiptParams);
+      return;
+    }
+
+    if (passengerAutoRoute === "RobotaxiPrototypeCancellation") {
+      replaceAfterPaymentSuccess("RobotaxiPrototypeCancellation", {
+        completed: true,
+        bookingStatus: normalizedBookingStatus,
+        source: "payment_success",
+      });
+      return;
+    }
+
+    if (passengerAutoRoute === "RobotaxiPrototypeNoDrivers") {
+      replaceAfterPaymentSuccess("RobotaxiPrototypeNoDrivers", {
+        reason: "Não há motoristas disponíveis para essa corrida agora.",
+      });
+    }
+  }, [
+    completedReceiptParams,
+    normalizedBookingStatus,
+    passengerAutoRoute,
+    replaceAfterPaymentSuccess,
+  ]);
+
+  useEffect(() => {
     if (route?.params?.autoAdvance === false) {
       return;
     }
 
-    if (
-      normalizedBookingStatus !== "searching" &&
-      normalizedBookingStatus !== "requesting"
-    ) {
+    if (passengerAutoRoute !== "RobotaxiPrototypeDriverSearch") {
       return;
     }
 
     const timer = setTimeout(() => {
-      navigation.replace("RobotaxiPrototypeDriverSearch", {
+      replaceAfterPaymentSuccess("RobotaxiPrototypeDriverSearch", {
         destination,
         destinationAddress,
         destinationCoordinate,
@@ -140,11 +219,11 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
 
     return () => clearTimeout(timer);
   }, [
-    normalizedBookingStatus,
     destination,
     destinationAddress,
     destinationCoordinate,
-    navigation,
+    passengerAutoRoute,
+    replaceAfterPaymentSuccess,
     originAddress,
     route?.params?.autoAdvance,
     route?.params?.fare,
@@ -152,6 +231,30 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
     route?.params?.selectedFare,
     vehicle,
   ]);
+
+  useEffect(() => {
+    if (
+      !isRideLifecycleLocked ||
+      typeof navigation?.addListener !== "function"
+    ) {
+      return undefined;
+    }
+
+    // The successful Pix state is part of the active ride lifecycle. It can
+    // only leave through its next canonical screen, never through back/pop.
+    const unsubscribe = navigation.addListener("beforeRemove", event => {
+      const expectedRouteName = protectedPaymentSuccessExitRef.current;
+      const actionRouteName = event?.data?.action?.payload?.name;
+      if (expectedRouteName && actionRouteName === expectedRouteName) {
+        protectedPaymentSuccessExitRef.current = null;
+        return;
+      }
+
+      event?.preventDefault?.();
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [isRideLifecycleLocked, navigation]);
 
   const handleDismiss = () => {
     if (isRideLifecycleLocked) {
@@ -198,8 +301,28 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
             <PrototypePrimaryButton
               label="Continuar para busca"
               icon="car-sport-outline"
-              onPress={() =>
-                navigation.replace("RobotaxiPrototypeDriverSearch", {
+              onPress={() => {
+                const targetRoute = passengerAutoRoute || "RobotaxiPrototypeDriverSearch";
+                if (targetRoute === "RobotaxiPrototypeReceipt") {
+                  replaceAfterPaymentSuccess("RobotaxiPrototypeReceipt", completedReceiptParams);
+                  return;
+                }
+                if (targetRoute === "RobotaxiPrototypeCancellation") {
+                  replaceAfterPaymentSuccess("RobotaxiPrototypeCancellation", {
+                    completed: true,
+                    bookingStatus: normalizedBookingStatus,
+                    source: "payment_success",
+                  });
+                  return;
+                }
+                if (targetRoute === "RobotaxiPrototypeNoDrivers") {
+                  replaceAfterPaymentSuccess("RobotaxiPrototypeNoDrivers", {
+                    reason: "Não há motoristas disponíveis para essa corrida agora.",
+                  });
+                  return;
+                }
+
+                replaceAfterPaymentSuccess(targetRoute, {
                   destination,
                   destinationAddress,
                   destinationCoordinate,
@@ -213,8 +336,8 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
                   fare: route?.params?.fare,
                   originAddress,
                   vehicle,
-                })
-              }
+                });
+              }}
               style={styles.primaryButton}
               testID="passenger-payment-success-continue-button"
               accessibilityLabel="passenger-payment-success-continue-button"

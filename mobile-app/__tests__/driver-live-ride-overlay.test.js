@@ -243,4 +243,32 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.getByLabelText("Abrir navegação")).toBeTruthy();
     expect(screen.getByLabelText("Iniciar corrida")).toBeTruthy();
   });
+
+  it.each([
+    ["driver_accepted", "Cheguei ao embarque"],
+    ["arrived_at_pickup", "Iniciar viagem"],
+    ["trip_started", "Finalizar corrida"],
+  ])("normalizes backend trip alias %s before rendering driver actions", (bookingStatus, actionLabel) => {
+    const screen = render(
+      <DriverLiveRideOverlay
+        driverActiveRide={{
+          bookingId: `booking_${bookingStatus}`,
+          status: bookingStatus,
+          pickupAddress: "1540 Mission St",
+          dropoffAddress: "1 Ferry Building",
+          estimatedDriverNetAmount: 18.75,
+          passengerName: "Passageiro Leaf",
+        }}
+        bookingStatus={bookingStatus}
+        paymentMethod="pix"
+        markDriverArrived={jest.fn()}
+        startTripFlow={jest.fn()}
+        completeTripFlow={jest.fn()}
+        onOpenNavigation={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("driver-live-trip-compact-summary")).toBeTruthy();
+    expect(screen.getByLabelText(actionLabel)).toBeTruthy();
+  });
 });

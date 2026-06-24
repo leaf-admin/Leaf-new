@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,18 +10,90 @@ import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { isTerminalRideStatus, normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 274;
 
 export default function RobotaxiCancellationScreen({ navigation, route }) {
-  const { cancelRideSearch } = usePrototypeRideRuntime();
+  const runtime = usePrototypeRideRuntime() || {};
+  const {
+    activeBooking,
+    activeBookingId,
+    bookingStatus,
+    cancelActiveRideFlow,
+    cancelRideSearch,
+    driverActiveRide,
+  } = runtime;
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [isCancelling, setIsCancelling] = useState(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
-  const source = route?.params?.source || 'trip';
+  const source = route?.params?.source || 'passenger-trip';
+  const isDriverCancellation = source === 'driver-trip' || source === 'driver';
+  const isPassengerCancellation = source === 'trip' || source === 'passenger-trip' || source === 'search';
+  const cancellationContext = useMemo(() => {
+    const bookingId = String(
+      route?.params?.bookingId ||
+        route?.params?.rideId ||
+        route?.params?.tripId ||
+        activeBookingId ||
+        activeBooking?.bookingId ||
+        activeBooking?.id ||
+        driverActiveRide?.bookingId ||
+        driverActiveRide?.id ||
+        '',
+    ).trim();
+    const normalizedStatus = normalizeRuntimeRideStatus(
+      route?.params?.bookingStatus ||
+        route?.params?.status ||
+        bookingStatus ||
+        driverActiveRide?.status ||
+        activeBooking?.status ||
+        '',
+    );
+
+    return {
+      ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
+      ...(normalizedStatus ? { bookingStatus: normalizedStatus } : {}),
+      source,
+    };
+  }, [
+    activeBooking?.bookingId,
+    activeBooking?.id,
+    activeBooking?.status,
+    activeBookingId,
+    bookingStatus,
+    driverActiveRide?.bookingId,
+    driverActiveRide?.id,
+    driverActiveRide?.status,
+    route?.params?.bookingId,
+    route?.params?.bookingStatus,
+    route?.params?.rideId,
+    route?.params?.status,
+    route?.params?.tripId,
+    source,
+  ]);
+  const isTerminalCancellation = route?.params?.completed === true || source === 'search' || isTerminalRideStatus(cancellationContext.bookingStatus);
+  const terminalCancellationTitle = cancellationContext.bookingStatus === 'completed' ? 'Corrida encerrada' : 'Corrida cancelada';
+
+  const replaceOrNavigate = useCallback((routeName, params) => {
+    if (typeof navigation.replace === 'function') {
+      if (params === undefined) {
+        navigation.replace(routeName);
+      } else {
+        navigation.replace(routeName, params);
+      }
+      return;
+    }
+
+    if (params === undefined) {
+      navigation.navigate(routeName);
+    } else {
+      navigation.navigate(routeName, params);
+    }
+  }, [navigation]);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -37,11 +109,19 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
   }, []);
 
   const handleDismiss = () => {
-    if (navigation.canGoBack()) {
+    if (isTerminalCancellation) {
+      replaceOrNavigate('RobotaxiPrototype');
+      return;
+    }
+
+    if (navigation.canGoBack?.()) {
       navigation.goBack();
       return;
     }
-    navigation.navigate('RobotaxiPrototype');
+    replaceOrNavigate(
+      isDriverCancellation ? 'RobotaxiPrototypeDriverTrip' : 'RobotaxiPrototypeTrip',
+      cancellationContext,
+    );
   };
 
   const handleConfirmCancellation = useCallback(async () => {
@@ -49,16 +129,39 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
       return;
     }
 
+    if (isTerminalCancellation) {
+      replaceOrNavigate('RobotaxiPrototype');
+      return;
+    }
+
     try {
       setIsCancelling(true);
-      await cancelRideSearch();
-      navigation.navigate('RobotaxiPrototype');
+      if (isDriverCancellation && typeof cancelActiveRideFlow === 'function') {
+        await cancelActiveRideFlow({
+          ...cancellationContext,
+          reason: 'Cancelado pelo motorista.',
+        });
+      } else {
+        await cancelRideSearch({
+          ...cancellationContext,
+          reason: 'Cancelado pelo passageiro.',
+        });
+      }
+      replaceOrNavigate('RobotaxiPrototype');
     } catch (error) {
       Alert.alert('Não conseguimos cancelar', error?.message || 'Tente novamente em instantes.');
     } finally {
       setIsCancelling(false);
     }
-  }, [cancelRideSearch, isCancelling, navigation]);
+  }, [
+    cancelActiveRideFlow,
+    cancelRideSearch,
+    cancellationContext,
+    isCancelling,
+    isDriverCancellation,
+    isTerminalCancellation,
+    replaceOrNavigate,
+  ]);
 
   return (
     <PrototypeScreenTransition>
@@ -73,11 +176,15 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
               <Ionicons name="close-circle-outline" size={30} color="#FFFFFF" />
             </View>
 
-            <Text style={styles.title}>Cancelar corrida</Text>
+            <Text style={styles.title}>
+              {isTerminalCancellation ? terminalCancellationTitle : 'Cancelar corrida'}
+            </Text>
             <Text style={styles.subtitle}>
-              {source === 'trip'
-                ? 'Ao cancelar agora, encerramos esta solicitação e você volta para o mapa.'
-                : 'Confirme o cancelamento para voltar ao estado inicial.'}
+              {isTerminalCancellation
+                ? 'A solicitação foi encerrada. Você pode voltar ao mapa e pedir uma nova corrida quando quiser.'
+                : isPassengerCancellation
+                  ? 'Ao cancelar agora, encerramos esta solicitação e você volta para o mapa.'
+                  : 'Confirme o cancelamento para voltar ao estado inicial.'}
             </Text>
 
             <View style={styles.warningBox}>
@@ -85,23 +192,31 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
             </View>
 
             <PrototypePrimaryButton
-              label={isCancelling ? 'Cancelando...' : 'Confirmar cancelamento'}
-              icon="close-outline"
+              label={
+                isTerminalCancellation
+                  ? 'Voltar ao mapa'
+                  : isCancelling
+                    ? 'Cancelando...'
+                    : 'Confirmar cancelamento'
+              }
+              icon={isTerminalCancellation ? 'map-outline' : 'close-outline'}
               onPress={isCancelling ? undefined : handleConfirmCancellation}
               style={styles.cancelButton}
               testID="passenger-cancellation-confirm-button"
               accessibilityLabel="passenger-cancellation-confirm-button"
             />
 
-            <TouchableOpacity
-              style={styles.keepButton}
-              activeOpacity={0.86}
-              onPress={handleDismiss}
-              testID="passenger-cancellation-keep-button"
-              accessibilityLabel="passenger-cancellation-keep-button"
-            >
-              <Text style={styles.keepButtonText}>Continuar corrida</Text>
-            </TouchableOpacity>
+            {!isTerminalCancellation ? (
+              <TouchableOpacity
+                style={styles.keepButton}
+                activeOpacity={0.86}
+                onPress={handleDismiss}
+                testID="passenger-cancellation-keep-button"
+                accessibilityLabel="passenger-cancellation-keep-button"
+              >
+                <Text style={styles.keepButtonText}>Continuar corrida</Text>
+              </TouchableOpacity>
+            ) : null}
           </PrototypeCard>
         </PrototypeDismissibleSheet>
       </View>

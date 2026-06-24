@@ -36,6 +36,7 @@ const FIELD_STATUS = {
   APPROVED: 'approved',
   FAILED: 'failed'
 };
+const EMPTY_ACTIVATION_STAGES = Object.freeze({});
 
 const STAGE_META = {
   [DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA]: {
@@ -127,13 +128,76 @@ function resolveActivationRowTitle(field) {
   return field?.label || 'Etapa';
 }
 
-function resolveActivationRowSubtitle(field, fieldState) {
+function pickFirstNonEmptyString(...values) {
+  return values
+    .map(value => String(value || '').trim())
+    .find(Boolean) || '';
+}
+
+function resolveActivationVehicleLabel({ driverActivationRemote, documentAnalysisState } = {}) {
+  const crlvAnalysis =
+    documentAnalysisState?.byType?.crlv ||
+    documentAnalysisState?.crlv ||
+    {};
+  const crlvDocument =
+    driverActivationRemote?.documents?.crlv ||
+    {};
+  const remoteVehicle =
+    driverActivationRemote?.vehicle ||
+    driverActivationRemote?.summary?.vehicle ||
+    crlvDocument?.vehicle ||
+    {};
+  const crlvData =
+    crlvAnalysis?.data ||
+    crlvAnalysis?.extractedData ||
+    crlvDocument?.data ||
+    crlvDocument?.extractedData ||
+    {};
+
+  const model = pickFirstNonEmptyString(
+    remoteVehicle?.model,
+    remoteVehicle?.modelo,
+    remoteVehicle?.vehicleModel,
+    crlvData?.model,
+    crlvData?.modelo,
+    crlvData?.vehicleModel,
+  );
+  const colorLabel = pickFirstNonEmptyString(
+    remoteVehicle?.color,
+    remoteVehicle?.cor,
+    remoteVehicle?.vehicleColor,
+    remoteVehicle?.carColor,
+    crlvData?.color,
+    crlvData?.cor,
+    crlvData?.vehicleColor,
+    crlvData?.carColor,
+  );
+  const plate = pickFirstNonEmptyString(
+    remoteVehicle?.plate,
+    remoteVehicle?.placa,
+    remoteVehicle?.vehiclePlate,
+    crlvData?.plate,
+    crlvData?.placa,
+    crlvData?.vehiclePlate,
+  );
+  const modelAndColor = [model, colorLabel].filter(Boolean).join(' ');
+
+  if (modelAndColor && plate) {
+    return `${modelAndColor} · ${plate}`;
+  }
+
+  return modelAndColor || plate;
+}
+
+function resolveActivationRowSubtitle(field, fieldState, vehicleLabel = '') {
   const status = fieldState?.status || FIELD_STATUS.PENDING;
   if (fieldState?.fileName) {
     return fieldState.fileName;
   }
   if (field?.kind === 'readonly') {
-    return status === FIELD_STATUS.APPROVED ? 'Honda City branco' : 'Atualizado após CRLV';
+    return status === FIELD_STATUS.APPROVED
+      ? vehicleLabel || 'Veículo aprovado'
+      : 'Atualizado após CRLV';
   }
   return mapFieldStatusLabel(status);
 }
@@ -147,10 +211,6 @@ function resolveActivationRowIcon(field) {
   return 'checkmark-circle-outline';
 }
 
-function waitMs(delay) {
-  return new Promise(resolve => setTimeout(resolve, delay));
-}
-
 function resolveDocumentTypeByField(field) {
   if (field?.validator === 'cnh') return 'cnh';
   if (field?.validator === 'crlv') return 'crlv';
@@ -160,8 +220,12 @@ function resolveDocumentTypeByField(field) {
 function mapRemoteStatusToFieldStatus(status) {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'approved') return FIELD_STATUS.APPROVED;
-  if (normalized === 'failed') return FIELD_STATUS.FAILED;
-  if (normalized === 'in_review') return FIELD_STATUS.IN_REVIEW;
+  if (['failed', 'rejected', 'needs_attention', 'requires_attention', 'review_required'].includes(normalized)) {
+    return FIELD_STATUS.FAILED;
+  }
+  if (['in_review', 'analyzing', 'analysis', 'under_review', 'pending_review'].includes(normalized)) {
+    return FIELD_STATUS.IN_REVIEW;
+  }
   return FIELD_STATUS.PENDING;
 }
 
@@ -215,8 +279,6 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     driverActivationRemote,
     documentAnalysisState,
     driverCanGoOnline,
-    updateDriverActivationChecklist,
-    completeDriverActivationStage,
     refreshDriverActivationRemote,
     submitDriverActivationDocument,
     submitDriverBackgroundCheckConsent
@@ -227,7 +289,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
   const [busyFieldKey, setBusyFieldKey] = useState('');
   const lastInitialRefreshUidRef = useRef('');
   const activation = driverActivation || {};
-  const stages = activation?.stages || {};
+  const stages = activation?.stages || EMPTY_ACTIVATION_STAGES;
 
   useEffect(() => {
     const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
@@ -288,6 +350,14 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     [stageKeys, stages]
   );
   const hiddenLockedStageCount = Math.max(0, stageKeys.length - visibleStageKeys.length);
+  const activationVehicleLabel = useMemo(
+    () =>
+      resolveActivationVehicleLabel({
+        driverActivationRemote,
+        documentAnalysisState,
+      }),
+    [documentAnalysisState, driverActivationRemote],
+  );
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -298,6 +368,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
   useEffect(() => {
     setFieldStates(previous => {
       const next = { ...previous };
+      let changed = false;
 
       stageKeys.forEach(stageKey => {
         const stage = stages?.[stageKey] || { checklist: {} };
@@ -329,6 +400,18 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               fileName: nextFileName,
               summaryRows: nextSummaryRows
             };
+            changed = true;
+            return;
+          }
+
+          const hasSameSummaryRows =
+            JSON.stringify(existing.summaryRows || []) === JSON.stringify(nextSummaryRows || []);
+          if (
+            existing.status === nextStatus &&
+            existing.reason === nextReason &&
+            existing.fileName === nextFileName &&
+            hasSameSummaryRows
+          ) {
             return;
           }
 
@@ -339,10 +422,11 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
             fileName: nextFileName,
             summaryRows: nextSummaryRows
           };
+          changed = true;
         });
       });
 
-      return next;
+      return changed ? next : previous;
     });
   }, [documentAnalysisState?.byType, driverActivationRemote?.documents, stageKeys, stages]);
 
@@ -394,21 +478,6 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     [fieldStates, stages]
   );
 
-  const markChecklistAndMaybeComplete = useCallback(
-    async (stageKey, fieldKey, value) => {
-      const nextState = await updateDriverActivationChecklist(stageKey, fieldKey, value);
-      const stage = nextState?.stages?.[stageKey];
-      const checklist = stage?.checklist || {};
-      const keys = Object.keys(checklist);
-      const allChecked = keys.length === 0 || keys.every(key => Boolean(checklist[key]));
-      if (allChecked) {
-        await completeDriverActivationStage(stageKey);
-      }
-      return nextState;
-    },
-    [completeDriverActivationStage, updateDriverActivationChecklist]
-  );
-
   const pickPdfAsset = useCallback(async () => {
     const picked = await DocumentPicker.getDocumentAsync({
       type: 'application/pdf',
@@ -456,10 +525,6 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                   setBusyFieldKey(stateKey);
                   await submitDriverBackgroundCheckConsent(true);
                   await refreshDriverActivationRemote();
-                  upsertFieldState(stageKey, field.key, {
-                    status: FIELD_STATUS.APPROVED,
-                    reason: ''
-                  });
                 } catch (error) {
                   upsertFieldState(stageKey, field.key, {
                     status: FIELD_STATUS.FAILED,
@@ -476,26 +541,12 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       }
 
       if (field.kind === 'task') {
-        try {
-          setBusyFieldKey(stateKey);
-          upsertFieldState(stageKey, field.key, {
-            status: FIELD_STATUS.IN_REVIEW,
-            reason: ''
-          });
-          await waitMs(1000);
-          await markChecklistAndMaybeComplete(stageKey, field.key, true);
-          upsertFieldState(stageKey, field.key, {
-            status: FIELD_STATUS.APPROVED,
-            reason: ''
-          });
-        } catch (error) {
-          upsertFieldState(stageKey, field.key, {
-            status: FIELD_STATUS.FAILED,
-            reason: error?.message || 'Não foi possível concluir a validação facial.'
-          });
-        } finally {
-          setBusyFieldKey('');
-        }
+        navigation.navigate('RobotaxiPrototype', {
+          notificationType: 'kyc_activation_required',
+          requirement: 'LIVENESS_REQUIRED',
+          reason: 'Conclua a validação facial para finalizar sua ativação.',
+          source: 'driver_activation'
+        });
         return;
       }
 
@@ -540,7 +591,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     },
     [
       getFieldState,
-      markChecklistAndMaybeComplete,
+      navigation,
       pickPdfAsset,
       refreshDriverActivationRemote,
       submitDriverActivationDocument,
@@ -582,12 +633,12 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
           stageBlocked,
           isReadonly,
           title: resolveActivationRowTitle(field),
-          subtitle: resolveActivationRowSubtitle(field, fieldState),
+          subtitle: resolveActivationRowSubtitle(field, fieldState, activationVehicleLabel),
           actionLabel,
         };
       });
     });
-  }, [getFieldState, stages, visibleStageKeys]);
+  }, [activationVehicleLabel, getFieldState, stages, visibleStageKeys]);
 
   const firstActionableRow = activationRows.find(row => {
     const status = row.fieldState?.status || FIELD_STATUS.PENDING;
@@ -701,9 +752,12 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
             </ScrollView>
 
             <TouchableOpacity
+              testID="driver-activation-continue-button"
               activeOpacity={0.88}
               style={styles.activationButton}
               onPress={handleContinueUpload}
+              accessibilityRole="button"
+              accessibilityLabel="Continuar envio"
             >
               <Text style={styles.activationButtonText}>Continuar envio</Text>
             </TouchableOpacity>

@@ -1,6 +1,6 @@
 import Logger from '../../utils/Logger';
 import React, { useState, useCallback } from 'react';
-import { StatusBar, View, StyleSheet } from 'react-native';
+import { Alert, StatusBar, View, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FETCH_USER_SUCCESS } from '../../state/actionTypes';
 import store from '../../state/appStore';
@@ -663,22 +663,43 @@ const AuthFlow = ({
       Logger.warn('⚠️ Falha ao salvar perfil completo no banco durante onboarding:', error?.message || error);
     }
 
-    const fallbackPayload = UserDatabaseService.buildProfilePayload(onboardingData);
-    const profilePayload = savedProfilePayload || fallbackPayload;
-	    const persistedProfilePayload =
-	      await persistAuthenticatedProfile(profilePayload, normalizedUserType) || profilePayload;
+    if (!savedProfilePayload) {
+      Alert.alert(
+        'Cadastro não confirmado',
+        'Não foi possível salvar seu cadastro agora. Verifique sua conexão e tente novamente.',
+      );
+      return false;
+    }
 
-	    if (normalizedUserType === 'customer' && onboardingData?.credentials?.password) {
-	      try {
-	        await UserAuthService.setupPassword(
-	          onboardingData.phoneNumber || profilePayload.phoneNumber || profilePayload.mobile,
-	          onboardingData.credentials.password
-	        );
-	      } catch (error) {
-	        Logger.error('❌ Falha ao configurar senha do passageiro:', error);
-	        throw error;
-	      }
-	    }
+    const persistedProfilePayload =
+      await persistAuthenticatedProfile(savedProfilePayload, normalizedUserType);
+    if (!persistedProfilePayload) {
+      Alert.alert(
+        'Sessão não preparada',
+        'Seu cadastro foi salvo, mas não foi possível preparar a sessão neste aparelho. Tente entrar novamente.',
+      );
+      return false;
+    }
+
+    if (normalizedUserType === 'customer' && onboardingData?.credentials?.password) {
+      const passwordPhoneNumber =
+        onboardingData.phoneNumber ||
+        normalizedProfile.phoneNumber ||
+        normalizedProfile.mobile ||
+        persistedProfilePayload.phoneNumber ||
+        persistedProfilePayload.mobile ||
+        savedProfilePayload.phoneNumber ||
+        savedProfilePayload.mobile;
+      try {
+        await UserAuthService.setupPassword(
+          passwordPhoneNumber,
+          onboardingData.credentials.password
+        );
+      } catch (error) {
+        Logger.error('❌ Falha ao configurar senha do passageiro:', error);
+        throw error;
+      }
+    }
 
     if (persistedProfilePayload?.uid) {
       store.dispatch({
@@ -696,6 +717,8 @@ const AuthFlow = ({
         needsDocumentUpload: normalizedUserType === 'driver'
       });
     }
+
+    return true;
   }
 
   // Função para lidar com a criação das credenciais

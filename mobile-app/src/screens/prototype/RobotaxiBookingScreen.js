@@ -1,10 +1,12 @@
 import React, { useCallback, useMemo, useState } from "react";
 import {
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,10 +22,13 @@ import robotaxiPrototypeTokens from "../../components/design-system/robotaxiProt
 import { VEHICLE_OPTIONS } from "./robotaxiPrototypeData";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
+import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 18;
 const FALLBACK_CARD_HEIGHT = 356;
+const ROUTE_ISLAND_FALLBACK_HEIGHT = 112;
+const MIN_VISIBLE_ROUTE_MAP_HEIGHT = 220;
 
 function normalizeCoordinateParam(value) {
   if (!value) {
@@ -51,9 +56,23 @@ export default function RobotaxiBookingScreen({ navigation, route }) {
   const { selectedDestination, tripDurationMin, currentAddress } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [selectedVehicle, setSelectedVehicle] = useState(VEHICLE_OPTIONS[0].id);
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
+  const [routeIslandHeight, setRouteIslandHeight] = useState(
+    ROUTE_ISLAND_FALLBACK_HEIGHT,
+  );
   const sheetBottom = Math.max(insets.bottom + SHEET_BOTTOM_OFFSET, 28);
+  const routeIslandTop = insets.top + 14;
+  const routeIslandOcclusion = routeIslandTop + routeIslandHeight + 12;
+  const sheetViewport = buildOverlaySheetViewportMetrics({
+    windowHeight,
+    topOcclusion: routeIslandOcclusion,
+    bottomOffset: sheetBottom,
+    measuredHeight: cardHeight,
+    fallbackHeight: FALLBACK_CARD_HEIGHT,
+    minVisibleMapHeight: MIN_VISIBLE_ROUTE_MAP_HEIGHT,
+  });
 
   const destination =
     route?.params?.destination ||
@@ -77,6 +96,10 @@ export default function RobotaxiBookingScreen({ navigation, route }) {
       VEHICLE_OPTIONS[0]
     );
   }, [selectedVehicle]);
+  const selectedFareValue = useMemo(() => {
+    const fare = Number(selected?.fare);
+    return Number.isFinite(fare) && fare > 0 ? fare : null;
+  }, [selected?.fare]);
 
   const originLabel =
     route?.params?.originAddress || currentAddress || "Local atual";
@@ -92,8 +115,16 @@ export default function RobotaxiBookingScreen({ navigation, route }) {
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || "prototype-booking",
-    occludedBottom: sheetBottom + cardHeight,
+    occludedTop: routeIslandOcclusion,
+    occludedBottom: sheetViewport.occludedBottom,
   });
+
+  const handleRouteIslandLayout = useCallback((event) => {
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+      setRouteIslandHeight(nextHeight);
+    }
+  }, []);
 
   const handleCardLayout = useCallback((event) => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -114,9 +145,10 @@ export default function RobotaxiBookingScreen({ navigation, route }) {
           style={[
             styles.routeIsland,
             {
-              top: insets.top + 14,
+              top: routeIslandTop,
             },
           ]}
+          onLayout={handleRouteIslandLayout}
         >
           <View style={styles.routeLineColumn} pointerEvents="none">
             <View style={styles.routeDotStart} />
@@ -145,141 +177,153 @@ export default function RobotaxiBookingScreen({ navigation, route }) {
 
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
+          backdropDismissEnabled={false}
           dragEnabled={false}
           bottomGapFillColor="transparent"
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <PrototypeCard onLayout={handleCardLayout} style={styles.sheet}>
-            <CardHandle />
+          <PrototypeCard
+            onLayout={handleCardLayout}
+            style={[styles.sheet, { maxHeight: sheetViewport.maxSheetHeight }]}
+          >
+            <ScrollView
+              bounces={false}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetScrollContent}
+            >
+              <CardHandle />
 
-            <Text style={styles.sectionLabel}>Escolha a categoria</Text>
+              <Text style={styles.sectionLabel}>Escolha a categoria</Text>
 
-            <View style={styles.vehicleRow}>
-              {VEHICLE_OPTIONS.map((item) => {
-                const active = selectedVehicle === item.id;
+              <View style={styles.vehicleRow}>
+                {VEHICLE_OPTIONS.map((item) => {
+                  const active = selectedVehicle === item.id;
 
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[
-                      styles.vehicleCard,
-                      active && styles.vehicleCardActive,
-                    ]}
-                    activeOpacity={0.86}
-                    onPress={() => setSelectedVehicle(item.id)}
-                  >
-                    <Text style={styles.vehicleName}>{item.name}</Text>
-                    <Text style={styles.vehiclePrice}>{item.price}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <View style={styles.selectedSummary}>
-              <View style={styles.selectedCopy}>
-                <Text style={styles.selectedName}>{selected.name}</Text>
-                <Text style={styles.selectedDescription}>
-                  {selected.description}
-                </Text>
-                <Text style={styles.selectedMeta}>{selected.range}</Text>
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[
+                        styles.vehicleCard,
+                        active && styles.vehicleCardActive,
+                      ]}
+                      activeOpacity={0.86}
+                      onPress={() => setSelectedVehicle(item.id)}
+                    >
+                      <Text style={styles.vehicleName}>{item.name}</Text>
+                      <Text style={styles.vehiclePrice}>{item.price}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
-              <View style={styles.selectedFareWrap}>
-                <Text style={styles.selectedFare}>{selected.price}</Text>
-                <Text style={styles.selectedFareCaption}>valor da corrida</Text>
-              </View>
-            </View>
-
-            <View style={styles.metricsGrid}>
-              <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Tempo ate embarque</Text>
-                <View style={styles.metricValueRow}>
-                  <Ionicons
-                    name="time-outline"
-                    size={14}
-                    color={color.text.primary}
-                  />
-                  <Text style={styles.metricValue}>{selected.eta}</Text>
-                </View>
-              </View>
-
-              <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Chegada prevista</Text>
-                <View style={styles.metricValueRow}>
-                  <Ionicons
-                    name="navigate-outline"
-                    size={14}
-                    color={color.text.primary}
-                  />
-                  <Text style={styles.metricValue}>
-                    {selected.arrival || "--"}
+              <View style={styles.selectedSummary}>
+                <View style={styles.selectedCopy}>
+                  <Text style={styles.selectedName}>{selected.name}</Text>
+                  <Text style={styles.selectedDescription}>
+                    {selected.description}
                   </Text>
+                  <Text style={styles.selectedMeta}>{selected.range}</Text>
+                </View>
+
+                <View style={styles.selectedFareWrap}>
+                  <Text style={styles.selectedFare}>{selected.price}</Text>
+                  <Text style={styles.selectedFareCaption}>valor da corrida</Text>
                 </View>
               </View>
 
-              <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Motorista a</Text>
-                <View style={styles.metricValueRow}>
-                  <Ionicons
-                    name="car-outline"
-                    size={14}
-                    color={color.text.primary}
-                  />
-                  <Text style={styles.metricValue}>{selected.pickupDistance}</Text>
+              <View style={styles.metricsGrid}>
+                <View style={styles.metricItem}>
+                  <Text style={styles.metricLabel}>Tempo ate embarque</Text>
+                  <View style={styles.metricValueRow}>
+                    <Ionicons
+                      name="time-outline"
+                      size={14}
+                      color={color.text.primary}
+                    />
+                    <Text style={styles.metricValue}>{selected.eta}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.metricItem}>
+                  <Text style={styles.metricLabel}>Chegada prevista</Text>
+                  <View style={styles.metricValueRow}>
+                    <Ionicons
+                      name="navigate-outline"
+                      size={14}
+                      color={color.text.primary}
+                    />
+                    <Text style={styles.metricValue}>
+                      {selected.arrival || "--"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.metricItem}>
+                  <Text style={styles.metricLabel}>Motorista a</Text>
+                  <View style={styles.metricValueRow}>
+                    <Ionicons
+                      name="car-outline"
+                      size={14}
+                      color={color.text.primary}
+                    />
+                    <Text style={styles.metricValue}>{selected.pickupDistance}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.metricItem}>
+                  <Text style={styles.metricLabel}>Cancelamento gratis</Text>
+                  <View style={styles.metricValueRow}>
+                    <Ionicons
+                      name="shield-checkmark-outline"
+                      size={14}
+                      color={color.text.primary}
+                    />
+                    <Text style={styles.metricValue}>
+                      {selected.cancellationWindow}
+                    </Text>
+                  </View>
                 </View>
               </View>
 
-              <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Cancelamento gratis</Text>
-                <View style={styles.metricValueRow}>
-                  <Ionicons
-                    name="shield-checkmark-outline"
-                    size={14}
-                    color={color.text.primary}
-                  />
-                  <Text style={styles.metricValue}>
-                    {selected.cancellationWindow}
-                  </Text>
+              <View style={styles.statusRow}>
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusPillText}>Tarifa normal</Text>
+                </View>
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusPillText}>Leaf Delas disponivel</Text>
                 </View>
               </View>
-            </View>
 
-            <View style={styles.statusRow}>
-              <View style={styles.statusPill}>
-                <Text style={styles.statusPillText}>Tarifa normal</Text>
-              </View>
-              <View style={styles.statusPill}>
-                <Text style={styles.statusPillText}>Leaf Delas disponivel</Text>
-              </View>
-            </View>
-
-            <PrototypePrimaryButton
-              label="Confirmar corrida"
-              testID="passenger-booking-reserve-button"
-              accessibilityLabel="passenger-booking-reserve-button"
-              onPress={() =>
-                navigation.navigate("RobotaxiPrototypePayment", {
-                  destination,
-                  destinationAddress,
-                  destinationCoordinate,
-                  initialSelectedDestination: {
-                    name: destination,
-                    address: destinationAddress || destination,
-                    coordinate: destinationCoordinate,
-                  },
-                  originAddress: originLabel,
-                  vehicle: selected.name,
-                  fare: Number(selected.fare) || 22.43,
-                  selectedFare: Number(selected.fare) || 22.43,
-                  initialSelectedPlan: selected.id,
-                  autoOpenPix: true,
-                  durationMin: Number.isFinite(tripDurationMin)
-                    ? tripDurationMin
-                    : undefined,
-                })
-              }
-              style={styles.reserveButton}
-            />
+              <PrototypePrimaryButton
+                label="Confirmar corrida"
+                testID="passenger-booking-reserve-button"
+                accessibilityLabel="passenger-booking-reserve-button"
+                onPress={() =>
+                  navigation.navigate("RobotaxiPrototypePayment", {
+                    destination,
+                    destinationAddress,
+                    destinationCoordinate,
+                    initialSelectedDestination: {
+                      name: destination,
+                      address: destinationAddress || destination,
+                      coordinate: destinationCoordinate,
+                    },
+                    originAddress: originLabel,
+                    vehicle: selected.name,
+                    fare: selectedFareValue,
+                    selectedFare: selectedFareValue,
+                    initialSelectedPlan: selected.id,
+                    autoOpenPix: true,
+                    durationMin: Number.isFinite(tripDurationMin)
+                      ? tripDurationMin
+                      : undefined,
+                  })
+                }
+                style={styles.reserveButton}
+              />
+            </ScrollView>
           </PrototypeCard>
         </PrototypeDismissibleSheet>
       </View>
@@ -302,6 +346,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 14,
     paddingBottom: 24,
+  },
+  sheetScroll: {
+    flexGrow: 0,
+  },
+  sheetScrollContent: {
+    paddingBottom: 2,
   },
   routeIsland: {
     position: "absolute",

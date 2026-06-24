@@ -119,10 +119,11 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
       },
       estimates: { estimateFare: 76.9 },
       passengerId: 'passenger_1',
-      passengerName: 'Passageira Leaf',
-      passengerEmail: 'passageira@leaf.app.br',
-      quoteSessionId: 'quote_session_1',
-    };
+	      passengerName: 'Passageira Leaf',
+	      passengerEmail: 'passageira@leaf.app.br',
+	      quoteSessionId: 'quote_session_1',
+	      quoteLockId: 'ql_persisted_1',
+	    };
 
     const firstRender = render(<WooviPaymentModal {...props} />);
     await act(async () => {
@@ -139,13 +140,15 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
         destinationLocation: { add: 'Destino', lat: -22.9673111, lng: -43.1789541 },
         carType: 'Leaf Plus',
         vehicle: 'Leaf Plus',
-        rideDetails: expect.objectContaining({
-          pickupLocation: { add: 'Origem', lat: -22.920775, lng: -43.406003 },
-          destinationLocation: { add: 'Destino', lat: -22.9673111, lng: -43.1789541 },
-          carType: 'Leaf Plus'
-        })
-      })
-    );
+	        rideDetails: expect.objectContaining({
+	          pickupLocation: { add: 'Origem', lat: -22.920775, lng: -43.406003 },
+	          destinationLocation: { add: 'Destino', lat: -22.9673111, lng: -43.1789541 },
+	          carType: 'Leaf Plus',
+	          quoteLockId: 'ql_persisted_1',
+	        }),
+	        quoteLockId: 'ql_persisted_1',
+	      })
+	    );
     firstRender.unmount();
 
     render(<WooviPaymentModal {...props} />);
@@ -187,10 +190,11 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
       },
       estimates: { estimateFare: 76.9 },
       passengerId: 'passenger_1',
-      passengerName: 'Passageira Leaf',
-      passengerEmail: 'passageira@leaf.app.br',
-      quoteSessionId: 'quote_session_1',
-    };
+	      passengerName: 'Passageira Leaf',
+	      passengerEmail: 'passageira@leaf.app.br',
+	      quoteSessionId: 'quote_session_1',
+	      quoteLockId: 'ql_confirmed_recovery',
+	    };
 
     const firstRender = render(<WooviPaymentModal {...props} />);
     await act(async () => {
@@ -210,18 +214,20 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
       await Promise.resolve();
     });
     await waitFor(() => {
-      expect(onPaymentConfirmed).toHaveBeenCalledWith(
-        expect.objectContaining({
-          chargeId: 'charge_confirmed_recovery',
-          rideId: 'temp_ride_confirmed_recovery',
-          paymentSessionId: expect.stringMatching(/^pay_/),
-        }),
-      );
+        expect(onPaymentConfirmed).toHaveBeenCalledWith(
+          expect.objectContaining({
+            chargeId: 'charge_confirmed_recovery',
+            rideId: 'temp_ride_confirmed_recovery',
+            paymentSessionId: expect.stringMatching(/^pay_/),
+            quoteSessionId: 'quote_session_1',
+            quoteLockId: 'ql_confirmed_recovery',
+          }),
+        );
     });
     expect(WooviService.processAdvancePayment).toHaveBeenCalledTimes(1);
   });
 
-  it('waits for backend payment confirmation before advancing the ride flow', async () => {
+	  it('waits for backend payment confirmation before advancing the ride flow', async () => {
     WooviService.simulateTestWebhook.mockResolvedValue({
       success: true,
       message: 'Webhook de teste processado com sucesso',
@@ -312,5 +318,79 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     });
 
     expect(onClose).toHaveBeenCalled();
-  });
-});
+	  });
+
+	  it('fails closed before creating Pix when the locked quote is missing', async () => {
+	    const screen = render(
+	      <WooviPaymentModal
+	        visible
+	        onClose={jest.fn()}
+	        onPaymentConfirmed={jest.fn()}
+	        tripData={{
+	          rideId: 'temp_ride_missing_quote',
+	          pickup: { add: 'Origem' },
+	          drop: { add: 'Destino' },
+	          carType: 'Leaf Plus',
+	          estimatedFare: 13.42,
+	        }}
+	        estimates={{ estimateFare: 13.42 }}
+	        passengerId="passenger_1"
+	        passengerName="Passageira Leaf"
+	        passengerEmail="passageira@leaf.app.br"
+	        quoteSessionId="quote_session_missing_lock"
+	      />,
+	    );
+
+	    await act(async () => {
+	      jest.advanceTimersByTime(200);
+	      await Promise.resolve();
+	      await Promise.resolve();
+	    });
+
+	    await waitFor(() => {
+	      expect(
+	        WooviService.processAdvancePayment,
+	      ).not.toHaveBeenCalled();
+	      expect(screen.getByText(
+	        'Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.',
+	      )).toBeTruthy();
+	    });
+	  });
+
+	  it('fails closed before creating Pix when the locked quote amount is missing', async () => {
+	    const screen = render(
+	      <WooviPaymentModal
+	        visible
+	        onClose={jest.fn()}
+	        onPaymentConfirmed={jest.fn()}
+	        tripData={{
+	          rideId: 'temp_ride_missing_amount',
+	          pickup: { add: 'Origem' },
+	          drop: { add: 'Destino' },
+	          carType: 'Leaf Plus',
+	        }}
+	        estimates={{}}
+	        passengerId="passenger_1"
+	        passengerName="Passageira Leaf"
+	        passengerEmail="passageira@leaf.app.br"
+	        quoteSessionId="quote_session_missing_amount"
+	        quoteLockId="ql_missing_amount"
+	      />,
+	    );
+
+	    await act(async () => {
+	      jest.advanceTimersByTime(200);
+	      await Promise.resolve();
+	      await Promise.resolve();
+	    });
+
+	    await waitFor(() => {
+	      expect(
+	        WooviService.processAdvancePayment,
+	      ).not.toHaveBeenCalled();
+	      expect(screen.getByText(
+	        'Valor da cotação indisponível. Recalcule a tarifa antes de pagar.',
+	      )).toBeTruthy();
+	    });
+	  });
+	});

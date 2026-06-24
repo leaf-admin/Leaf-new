@@ -68,7 +68,8 @@ export default function WooviPaymentModal({
     qaAutoConfirm = false,
     discountBenefit = null,
     grossEstimatedFare = null,
-    quoteSessionId = null
+    quoteSessionId = null,
+    quoteLockId = null
 }) {
     const qaAutoConfirmEnabled = Boolean(qaAutoConfirm);
     // Estados
@@ -79,6 +80,7 @@ export default function WooviPaymentModal({
     const [isCheckingPayment, setIsCheckingPayment] = useState(false);
     const [paymentStatus, setPaymentStatus] = useState('pending'); // pending, confirmed, expired, cancelled
     const [qaDebugStatus, setQaDebugStatus] = useState('idle');
+    const normalizedQuoteLockId = String(quoteLockId || '').trim();
     
     // Refs
     const countdownIntervalRef = useRef(null);
@@ -179,6 +181,16 @@ export default function WooviPaymentModal({
             discountBenefit: normalizedPayload.discountBenefit || null,
             paymentSessionId: normalizedPayload.paymentSessionId || null,
             paymentContextKey: normalizedPayload.paymentContextKey || null,
+            quoteSessionId:
+                normalizedPayload.quoteSessionId ||
+                paymentData?.quoteSessionId ||
+                quoteSessionId ||
+                null,
+            quoteLockId:
+                normalizedPayload.quoteLockId ||
+                paymentData?.quoteLockId ||
+                normalizedQuoteLockId ||
+                null,
             bypassed: normalizedPayload.bypassed === true,
             mockPayment:
                 normalizedPayload.mockPayment === true ||
@@ -247,6 +259,8 @@ export default function WooviPaymentModal({
                             ? Math.round(Number(prefilledPaymentData.grossAmountInCents))
                             : Math.round(Number(prefilledPaymentData.grossAmount || amountValue || 0) * 100),
                     discountBenefit: prefilledPaymentData.discountBenefit || null,
+                    quoteSessionId: prefilledPaymentData.quoteSessionId || quoteSessionId || null,
+                    quoteLockId: prefilledPaymentData.quoteLockId || normalizedQuoteLockId || null,
                     expiresAt:
                         prefilledPaymentData.expiresAt ||
                         new Date(Date.now() + PAYMENT_TIMEOUT * 1000)
@@ -302,10 +316,11 @@ export default function WooviPaymentModal({
         grossEstimatedFare,
         tripData?.estimatedFare,
         tripData?.grossEstimatedFare,
-        tripData?.rideId,
-        quoteSessionId,
-        visible
-    ]);
+	        tripData?.rideId,
+	        normalizedQuoteLockId,
+	        quoteSessionId,
+	        visible
+	    ]);
 
     // Countdown timer
     useEffect(() => {
@@ -461,7 +476,11 @@ export default function WooviPaymentModal({
                     chargeId: paymentData.chargeId,
                     rideId: paymentData.rideId,
                     amount: paymentData.amount,
-                    amountInCents: paymentData.amountInCents
+                    amountInCents: paymentData.amountInCents,
+                    grossAmount: paymentData.grossAmount,
+                    grossAmountInCents: paymentData.grossAmountInCents,
+                    quoteSessionId: paymentData.quoteSessionId || quoteSessionId || null,
+                    quoteLockId: paymentData.quoteLockId || normalizedQuoteLockId || null
                 },
                 'websocket'
             );
@@ -516,18 +535,24 @@ export default function WooviPaymentModal({
     // Recupera a sessão persistida antes de criar uma cobrança no backend.
     const generatePayment = async () => {
         let paymentRequest = null;
-        try {
-            setLoading(true);
-            setPaymentGenerationError(null);
-            Logger.log('💳 Preparando sessão de pagamento PIX...');
+	        try {
+	            setLoading(true);
+	            setPaymentGenerationError(null);
+	            Logger.log('💳 Preparando sessão de pagamento PIX...');
 
-            const resolvedPassengerId = resolveAuthenticatedPassengerId();
-            if (!resolvedPassengerId) {
-                throw new Error('Sessão de pagamento ainda não está pronta. Tente novamente em alguns segundos.');
-            }
+	            const resolvedPassengerId = resolveAuthenticatedPassengerId();
+	            if (!resolvedPassengerId) {
+	                throw new Error('Sessão de pagamento ainda não está pronta. Tente novamente em alguns segundos.');
+	            }
+	            if (!normalizedQuoteLockId) {
+	                throw new Error('Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.');
+	            }
             
-            // Calcular valor em centavos - usar o mesmo valor do card selecionado
-            const amount = estimates?.estimateFare || tripData?.estimatedFare || 25.00;
+            // Calcular valor em centavos - usar apenas a cotação travada enviada pelo fluxo.
+            const amount = Number(estimates?.estimateFare ?? tripData?.estimatedFare);
+            if (!Number.isFinite(amount) || amount <= 0) {
+                throw new Error('Valor da cotação indisponível. Recalcule a tarifa antes de pagar.');
+            }
             const amountInCents = Math.round(amount * 100);
             const grossAmount = Number(
                 grossEstimatedFare ||
@@ -630,11 +655,12 @@ export default function WooviPaymentModal({
                     expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
                     passengerId: resolvedPassengerId,
                     paymentSessionId: paymentSession.paymentSessionId,
-                    paymentContextKey,
-                    quoteSessionId,
-                    bypassed: true,
-                    mockPayment: true
-                };
+	                    paymentContextKey,
+	                    quoteSessionId,
+	                    quoteLockId: normalizedQuoteLockId,
+	                    bypassed: true,
+	                    mockPayment: true
+	                };
 
                 Logger.log('🧪 [WooviPaymentModal] BYPASS de pagamento habilitado para teste E2E.');
                 await saveRidePaymentSessionData({
@@ -665,16 +691,18 @@ export default function WooviPaymentModal({
                 discountBenefit,
                 rideId: tempRideId,
                 paymentSessionId: paymentSession.paymentSessionId,
-                paymentContextKey,
-                quoteSessionId,
-                rideDetails: {
-                    origin: tripData?.pickup?.add || 'Origem',
-                    destination: tripData?.drop?.add || 'Destino',
-                    pickupLocation: tripData?.pickup || null,
-                    destinationLocation: tripData?.drop || null,
-                    carType: tripData?.carType || null,
-                    preferences: tripData?.preferences || {}
-                },
+	                paymentContextKey,
+	                quoteSessionId,
+	                quoteLockId: normalizedQuoteLockId,
+	                rideDetails: {
+	                    origin: tripData?.pickup?.add || 'Origem',
+	                    destination: tripData?.drop?.add || 'Destino',
+	                    pickupLocation: tripData?.pickup || null,
+	                    destinationLocation: tripData?.drop || null,
+	                    carType: tripData?.carType || null,
+	                    quoteLockId: normalizedQuoteLockId,
+	                    preferences: tripData?.preferences || {}
+	                },
                 pickupLocation: tripData?.pickup || null,
                 destinationLocation: tripData?.drop || null,
                 carType: tripData?.carType || null,
@@ -711,7 +739,8 @@ export default function WooviPaymentModal({
                 paymentSessionId: paymentSession.paymentSessionId,
                 paymentContextKey: result.paymentContextKey || paymentContextKey,
                 quoteSessionId: result.quoteSessionId || quoteSessionId || null,
-            };
+	                quoteLockId: result.quoteLockId || normalizedQuoteLockId || null,
+	            };
 
             await saveRidePaymentSessionData({
                 passengerId: resolvedPassengerId,

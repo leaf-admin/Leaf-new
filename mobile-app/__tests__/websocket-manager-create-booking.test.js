@@ -195,6 +195,54 @@ describe('WebSocketManager createBooking retries', () => {
     );
   });
 
+  it('forwards ride outbox metadata with lifecycle commands', async () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      emit: jest.fn(),
+      on: jest.fn(),
+      off: jest.fn(),
+    };
+
+    const startPromise = manager.startTrip(
+      'booking_offline_1',
+      { lat: -22.97, lng: -43.18 },
+      {
+        idempotencyKey: 'mobile_lifecycle_start_trip_booking_offline_1_driver_1',
+        offlineIntent: true,
+        rideEventOutbox: true,
+        source: 'ride_event_outbox',
+        eventType: 'start_trip',
+        clientSequence: 3,
+        clientCreatedAt: '2026-06-23T12:00:00.000Z',
+      },
+    );
+
+    expect(manager.socket.emit).toHaveBeenCalledWith(
+      'startTrip',
+      expect.objectContaining({
+        bookingId: 'booking_offline_1',
+        idempotencyKey: 'mobile_lifecycle_start_trip_booking_offline_1_driver_1',
+        offlineIntent: true,
+        rideEventOutbox: true,
+        source: 'ride_event_outbox',
+        eventType: 'start_trip',
+        clientSequence: 3,
+        clientCreatedAt: '2026-06-23T12:00:00.000Z',
+      }),
+      expect.any(Function),
+    );
+
+    manager.emit('tripStarted', { success: true, bookingId: 'booking_offline_1' });
+
+    await expect(startPromise).resolves.toEqual(
+      expect.objectContaining({
+        success: true,
+        bookingId: 'booking_offline_1',
+      }),
+    );
+  });
+
   it('rejects completeTrip on server lifecycle errors', async () => {
     const manager = WebSocketManager.getInstance();
     manager.socket = {
@@ -221,5 +269,120 @@ describe('WebSocketManager createBooking retries', () => {
       code: 'FARE_LOCK_MISMATCH',
       message: 'Valor final diverge',
     });
+  });
+
+  it('emits batched driver locations with seq and capturedAt metadata', async () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      emit: jest.fn(),
+      on: jest.fn(),
+      off: jest.fn(),
+    };
+
+    const batchPromise = manager.updateLocationBatch({
+      driverId: 'driver_1',
+      bookingId: 'booking_batch_1',
+      tripStatus: 'started',
+      isInTrip: true,
+      locations: [
+        {
+          eventId: 'loc_1',
+          lat: -22.91,
+          lng: -43.17,
+          seq: 1,
+          capturedAt: 1710000000000,
+          source: 'background_task',
+        },
+      ],
+      batchId: 'batch_1',
+    });
+
+    expect(manager.socket.emit).toHaveBeenCalledWith(
+      'updateLocationBatch',
+      expect.objectContaining({
+        batchId: 'batch_1',
+        driverId: 'driver_1',
+        bookingId: 'booking_batch_1',
+        tripStatus: 'started',
+        isInTrip: true,
+        locations: [
+          expect.objectContaining({
+            eventId: 'loc_1',
+            lat: -22.91,
+            lng: -43.17,
+            seq: 1,
+            capturedAt: 1710000000000,
+            source: 'background_task',
+          }),
+        ],
+      }),
+    );
+
+    manager.emit('locationBatchUpdated', {
+      success: true,
+      batchId: 'batch_1',
+      acceptedCount: 1,
+    });
+
+    await expect(batchPromise).resolves.toEqual(
+      expect.objectContaining({
+        success: true,
+        batchId: 'batch_1',
+      }),
+    );
+  });
+
+  it('sends backend quote metadata with ride extension requests', async () => {
+    const manager = WebSocketManager.getInstance();
+    const listeners = {};
+    manager.socket = {
+      connected: true,
+      emit: jest.fn(),
+      on: jest.fn((event, callback) => {
+        listeners[event] = callback;
+      }),
+      off: jest.fn(),
+    };
+
+    const extensionPromise = manager.requestRideExtension(
+      'booking_extension_1',
+      {
+        lat: -22.8721,
+        lng: -43.3387,
+        add: 'Mercadão de Madureira',
+      },
+      42.75,
+      {
+        routeDistanceKm: 8.4,
+        routeDurationSecs: 1260,
+        quoteLockId: 'ql_extension_4275',
+        quoteSessionId: 'passenger_quote_extension_1',
+      },
+    );
+
+    expect(manager.socket.emit).toHaveBeenCalledWith(
+      'requestRideExtension',
+      expect.objectContaining({
+        bookingId: 'booking_extension_1',
+        newFare: 42.75,
+        routeDistanceKm: 8.4,
+        routeDurationSecs: 1260,
+        quoteLockId: 'ql_extension_4275',
+        quoteSessionId: 'passenger_quote_extension_1',
+      }),
+    );
+
+    listeners.rideExtensionRequestAccepted({
+      success: true,
+      bookingId: 'booking_extension_1',
+    });
+
+    await expect(extensionPromise).resolves.toEqual(
+      expect.objectContaining({
+        success: true,
+        bookingId: 'booking_extension_1',
+      }),
+    );
   });
 });

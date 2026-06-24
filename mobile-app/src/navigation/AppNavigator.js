@@ -44,7 +44,6 @@ import PilotFeatureUnavailableScreen from '../screens/PilotFeatureUnavailableScr
 
 // Telas de Motorista
 import DriverDashboardScreen from '../screens/DriverDashboardScreen';
-import DriverTrips from '../screens/DriverTrips';
 import DriverRating from '../screens/DriverRating';
 import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
 import DriverSearchScreen from '../screens/DriverSearchScreen';
@@ -311,6 +310,12 @@ const legacyPlanScreenParams = {
   title: 'Plano antigo desativado',
   message: 'Assinaturas e repasses seguem o modelo atual de ganhos e saque. Este fluxo antigo ficou em compatibilidade.',
   targetRoute: 'Map'
+};
+
+const legacyDriverTripsScreenParams = {
+  title: 'Aceite antigo desativado',
+  message: 'Aceite de corrida e repasse financeiro acontecem somente pelo fluxo Robotaxi com backend canonico.',
+  targetRoute: 'RobotaxiPrototype'
 };
 
 function normalizeLeafAppLinkPath(path) {
@@ -792,8 +797,9 @@ function renderDriverPrivateScreens() {
       <Stack.Screen name="Dashboard" component={DriverDashboardScreen} />
       <Stack.Screen
         name="Trips"
-        component={DriverTrips}
-        options={{ headerShown: true }}
+        component={PilotFeatureUnavailableScreen}
+        initialParams={legacyDriverTripsScreenParams}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="DriverBalance"
@@ -822,7 +828,12 @@ function renderDriverPrivateScreens() {
       <Stack.Screen name="CarEdit" component={CarEditScreen} />
       <Stack.Screen name="Cars" component={CarsScreen} />
       <Stack.Screen name="DriverDashboard" component={DriverDashboardScreen} />
-      <Stack.Screen name="DriverTrips" component={DriverTrips} />
+      <Stack.Screen
+        name="DriverTrips"
+        component={PilotFeatureUnavailableScreen}
+        initialParams={legacyDriverTripsScreenParams}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen name="MyEarning" component={EarningsReportScreen} />
       <Stack.Screen
         name="UpdateBankInfo"
@@ -879,6 +890,11 @@ function renderSharedPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiPrototypeRating"
         component={RobotaxiRatingScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeCancellation"
+        component={RobotaxiCancellationScreen}
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
@@ -994,11 +1010,6 @@ function renderCustomerPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiPrototypeNoDrivers"
         component={RobotaxiNoDriversScreen}
-        options={prototypeTransparentOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeCancellation"
-        component={RobotaxiCancellationScreen}
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
@@ -1207,7 +1218,10 @@ function MainNavigator() {
   const [prototypeUiEnabled, setPrototypeUiEnabled] = useState(true);
   const [flagsReady, setFlagsReady] = useState(true);
   const isReviewEnv = Constants?.expoConfig?.extra?.isReview === true;
+  const legacyMapOptOutAllowed =
+    __DEV__ && !isReviewEnv && !isE2ETestBuild() && !isSimulatorBuild();
   const forceLegacyMapUi =
+    legacyMapOptOutAllowed &&
     String(process.env.EXPO_PUBLIC_FORCE_LEGACY_MAP_UI || '').trim().toLowerCase() === 'true';
 
   useEffect(() => {
@@ -1230,7 +1244,10 @@ function MainNavigator() {
     const loadPrototypeFlag = async () => {
       try {
         await featureFlagService.initialize();
-        const enabled = await featureFlagService.getFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', false);
+        // The Robotaxi flow is the canonical production lifecycle. A missing
+        // cached flag must never silently route a signed-in rider to the
+        // legacy map flow, which does not share its lifecycle safeguards.
+        const enabled = await featureFlagService.getFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', true);
 
         if (isMounted) {
           setPrototypeUiEnabled(Boolean(enabled));
@@ -1245,7 +1262,7 @@ function MainNavigator() {
       } catch (error) {
         Logger.error('❌ [AppNavigator] Erro ao carregar flag de protótipo:', error);
         if (isMounted) {
-          setPrototypeUiEnabled(false);
+          setPrototypeUiEnabled(true);
           setFlagsReady(true);
         }
       }
@@ -1261,8 +1278,11 @@ function MainNavigator() {
     };
   }, []);
 
+  const effectivePrototypeUiEnabled = legacyMapOptOutAllowed
+    ? prototypeUiEnabled
+    : true;
   const allowPrototypePrivateScreens =
-    !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || prototypeUiEnabled);
+    !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || effectivePrototypeUiEnabled);
   const allowPublicPrototypeQaScreens =
     !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || isSimulatorBuild());
   const mapComponent = allowPrototypePrivateScreens ? RobotaxiPrototypeScreen : NewMapScreen;

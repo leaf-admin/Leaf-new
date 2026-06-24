@@ -6,6 +6,7 @@ import {
   listPendingRideEventIntents,
   markRideEventIntentAcked,
   markRideEventIntentRejected,
+  rejectPendingRideEventIntentsForBooking,
 } from '../src/services/RideEventOutboxService';
 
 describe('RideEventOutboxService', () => {
@@ -83,5 +84,32 @@ describe('RideEventOutboxService', () => {
     expect(retried.idempotencyKey).toBe(intent.idempotencyKey);
     expect(retried.status).toBe('pending');
     expect(retried.attempts).toBe(1);
+  });
+
+  it('rejects all pending intents for a terminal reconciled booking', async () => {
+    await enqueueRideEventIntent({
+      bookingId: 'booking_terminal',
+      actorId: 'driver_4',
+      role: 'driver',
+      eventType: RIDE_EVENT_TYPES.START_TRIP,
+    });
+    await enqueueRideEventIntent({
+      bookingId: 'booking_terminal',
+      actorId: 'driver_4',
+      role: 'driver',
+      eventType: RIDE_EVENT_TYPES.COMPLETE_TRIP,
+    });
+
+    await expect(
+      rejectPendingRideEventIntentsForBooking({
+        bookingId: 'booking_terminal',
+        actorId: 'driver_4',
+        error: 'Backend reconciled ride as completed',
+      }),
+    ).resolves.toBe(2);
+
+    await expect(
+      listPendingRideEventIntents({ bookingId: 'booking_terminal' }),
+    ).resolves.toEqual([]);
   });
 });

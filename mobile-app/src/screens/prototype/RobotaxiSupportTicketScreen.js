@@ -26,6 +26,7 @@ import {
 import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
 const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
@@ -51,6 +52,28 @@ const TICKET_TYPES = [
     icon: 'shield-checkmark-outline',
   },
 ];
+
+function pickTicketContextText(...values) {
+  return values
+    .map(value => String(value || '').trim())
+    .find(Boolean) || '';
+}
+
+function resolveTicketReturnRoute(context = {}) {
+  const source = String(context.source || '').toLowerCase();
+  const status = normalizeRuntimeRideStatus(context.bookingStatus);
+
+  if (source === 'receipt' || status === 'completed') {
+    return 'RobotaxiPrototypeReceipt';
+  }
+  if (source === 'driver-trip') {
+    return 'RobotaxiPrototypeDriverTrip';
+  }
+  if (context.bookingId || context.rideId || context.tripId) {
+    return 'RobotaxiPrototypeTrip';
+  }
+  return 'RobotaxiPrototypeSupport';
+}
 
 function TicketTypeRow({ item, active, onPress }) {
   return (
@@ -83,6 +106,22 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
   const [description, setDescription] = useState(route?.params?.description || '');
   const [createdTicket, setCreatedTicket] = useState(null);
   const { openSupportTicket, supportLoading, supportError } = usePrototypeRideRuntime();
+  const bookingId = pickTicketContextText(
+    route?.params?.bookingId,
+    route?.params?.rideId,
+    route?.params?.tripId,
+    route?.params?.activeBookingId,
+  );
+  const bookingStatus = normalizeRuntimeRideStatus(pickTicketContextText(route?.params?.bookingStatus, route?.params?.status));
+  const supportSource = pickTicketContextText(route?.params?.source, bookingId ? 'support-ticket' : '');
+  const ticketChatContext = useMemo(
+    () => ({
+      ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
+      ...(bookingStatus ? { bookingStatus } : {}),
+      source: supportSource || 'support-ticket',
+    }),
+    [bookingId, bookingStatus, supportSource],
+  );
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -101,8 +140,8 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
       navigation.goBack();
       return;
     }
-    navigation.navigate('RobotaxiPrototypeSupport');
-  }, [navigation]);
+    navigation.navigate(resolveTicketReturnRoute(ticketChatContext), ticketChatContext);
+  }, [navigation, ticketChatContext]);
 
   const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -121,13 +160,40 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
       const result = await openSupportTicket({
         type: selectedType.id,
         priority: selectedType.id === 'safety' ? 'N1' : 'N3',
+        subject: subject.trim() || selectedType.title,
         description: `${subject.trim() || selectedType.title}: ${description.trim()}`,
+        ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
+        ...(bookingStatus ? { bookingStatus } : {}),
+        ...(supportSource ? { source: supportSource } : {}),
       });
       setCreatedTicket(result?.ticket || null);
     } catch (error) {
       Alert.alert('Não foi possível abrir ticket', error?.message || 'Tente novamente em instantes.');
     }
-  }, [canSubmit, description, openSupportTicket, selectedType.id, selectedType.title, subject]);
+  }, [
+    bookingId,
+    bookingStatus,
+    canSubmit,
+    description,
+    openSupportTicket,
+    selectedType.id,
+    selectedType.title,
+    subject,
+    supportSource,
+  ]);
+
+  const handleOpenCreatedTicketChat = useCallback(() => {
+    if (ticketChatContext.bookingId || ticketChatContext.rideId || ticketChatContext.tripId) {
+      navigation.replace('RobotaxiPrototypeChat', ticketChatContext);
+      return;
+    }
+
+    navigation.replace('Support', {
+      initialTab: 'chat',
+      source: ticketChatContext.source || 'support-ticket',
+      ticketId: createdTicket?.id || null,
+    });
+  }, [createdTicket?.id, navigation, ticketChatContext]);
 
   return (
     <PrototypeScreenTransition>
@@ -223,7 +289,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     title={`Ticket #${createdTicket.id} criado`}
                     message="A operação recebeu sua solicitação. Você pode acompanhar pelo chat de suporte."
                     actionLabel="Abrir chat"
-                    onAction={() => navigation.replace('RobotaxiPrototypeChat')}
+                    onAction={handleOpenCreatedTicketChat}
                     testID="robotaxi-support-ticket-created"
                   />
                 ) : null}

@@ -168,6 +168,10 @@ describe("runtimeCrashRecovery", () => {
   it("normalizes backend ride statuses into runtime lifecycle phases", () => {
     expect(normalizeRuntimeLifecycleStatus("AWAITING_PAYMENT")).toBe("requesting");
     expect(normalizeRuntimeLifecycleStatus("NOTIFIED")).toBe("searching");
+    expect(normalizeRuntimeLifecycleStatus("AWAITING_RESPONSE")).toBe("searching");
+    expect(normalizeRuntimeLifecycleStatus("DRIVER_NOTIFIED")).toBe("searching");
+    expect(normalizeRuntimeLifecycleStatus("OFFER_SENT")).toBe("searching");
+    expect(normalizeRuntimeLifecycleStatus("PENDING_DRIVER_RESPONSE")).toBe("searching");
     expect(normalizeRuntimeLifecycleStatus("MATCHED")).toBe("accepted");
     expect(normalizeRuntimeLifecycleStatus("ARRIVED")).toBe("arrived");
     expect(normalizeRuntimeLifecycleStatus("REASSIGNED_IN_PROGRESS")).toBe("started");

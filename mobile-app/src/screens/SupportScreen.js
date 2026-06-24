@@ -73,6 +73,9 @@ export default function SupportScreen({ navigation }) {
   const [faqs, setFaqs] = useState([]);
   const [expandedFaq, setExpandedFaq] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [ticketsError, setTicketsError] = useState('');
+  const [chatLoadError, setChatLoadError] = useState('');
+  const [supportReloadKey, setSupportReloadKey] = useState(0);
 
   const auth = useSelector(state => state.auth);
   const currentUser = auth?.profile;
@@ -134,6 +137,7 @@ export default function SupportScreen({ navigation }) {
         const existingMessages = await SupportChatService.getMessages(userId);
         if (isMounted && Array.isArray(existingMessages)) {
           setChatMessages(existingMessages.map(normalizeMessage));
+          setChatLoadError('');
         }
 
         return SupportChatService.onNewMessage(newMessage => {
@@ -151,6 +155,9 @@ export default function SupportScreen({ navigation }) {
         }, userId);
       } catch (error) {
         Logger.error('❌ Erro ao inicializar chat de suporte:', error);
+        if (isMounted) {
+          setChatLoadError(error?.message || 'Não foi possível carregar o chat de suporte.');
+        }
         return null;
       }
     }
@@ -161,9 +168,11 @@ export default function SupportScreen({ navigation }) {
 
         const userId = getCurrentUserId(currentUser);
         if (!userId) {
+          setTicketsError('Usuário não identificado.');
           return;
         }
 
+        setTicketsError('');
         const [ticketsResult, faqResult] = await Promise.all([
           SupportService.getTickets(userId),
           SupportService.getFAQ()
@@ -171,6 +180,9 @@ export default function SupportScreen({ navigation }) {
 
         if (ticketsResult?.success) {
           setTickets(Array.isArray(ticketsResult.tickets) ? ticketsResult.tickets : []);
+          setTicketsError('');
+        } else {
+          setTicketsError(ticketsResult?.error || 'Não foi possível carregar os tickets.');
         }
 
         if (faqResult?.success) {
@@ -178,13 +190,16 @@ export default function SupportScreen({ navigation }) {
         }
       } catch (error) {
         Logger.error('❌ Erro ao carregar dados de suporte:', error);
+        if (isMounted) {
+          setTicketsError(error?.message || 'Não foi possível carregar os tickets.');
+        }
       } finally {
         if (isMounted) {
           setIsLoading(false);
         }
       }
     }
-  }, [currentUser?.uid, currentUser?.id]);
+  }, [currentUser?.uid, currentUser?.id, supportReloadKey]);
 
   useEffect(() => {
     if (!chatRef.current || !chatMessages.length) {
@@ -319,9 +334,19 @@ export default function SupportScreen({ navigation }) {
             );
           }}
           ListEmptyComponent={
-            <View style={styles.emptyChatWrap}>
-              <Ionicons name="chatbox-ellipses-outline" size={24} color={color.text.muted} />
-              <Text style={styles.emptyChatText}>Nenhuma mensagem ainda. Escreva para começar.</Text>
+            <View
+              style={styles.emptyChatWrap}
+              testID={chatLoadError ? 'support-chat-error-state' : 'support-chat-empty-state'}
+              accessibilityLabel={chatLoadError ? 'Erro ao carregar chat de suporte' : 'Chat de suporte vazio'}
+            >
+              <Ionicons
+                name={chatLoadError ? 'warning-outline' : 'chatbox-ellipses-outline'}
+                size={24}
+                color={chatLoadError ? color.feedback.error : color.text.muted}
+              />
+              <Text style={[styles.emptyChatText, chatLoadError && styles.errorStateSubtitle]}>
+                {chatLoadError || 'Nenhuma mensagem ainda. Escreva para começar.'}
+              </Text>
             </View>
           }
           showsVerticalScrollIndicator={false}
@@ -356,7 +381,26 @@ export default function SupportScreen({ navigation }) {
 
   const renderTicketsTab = () => (
     <ScrollView style={styles.tabPanel} contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
-      {!tickets.length ? (
+      {ticketsError ? (
+        <View
+          style={styles.emptyStateCard}
+          testID="support-tickets-error-state"
+          accessibilityLabel="Erro ao carregar tickets de suporte"
+        >
+          <Ionicons name="warning-outline" size={24} color={color.feedback.error} />
+          <Text style={styles.emptyStateTitle}>Não foi possível carregar tickets</Text>
+          <Text style={styles.errorStateSubtitle}>{ticketsError}</Text>
+          <TouchableOpacity
+            activeOpacity={0.86}
+            style={styles.retryButton}
+            onPress={() => setSupportReloadKey(previous => previous + 1)}
+            testID="support-tickets-retry-button"
+            accessibilityLabel="Tentar novamente carregar tickets"
+          >
+            <Text style={styles.retryButtonText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      ) : !tickets.length ? (
         <View style={styles.emptyStateCard}>
           <Ionicons name="document-text-outline" size={24} color={color.text.muted} />
           <Text style={styles.emptyStateTitle}>Nenhum ticket encontrado</Text>
@@ -805,6 +849,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: color.text.secondary,
     fontFamily: fonts.Regular,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  errorStateSubtitle: {
+    textAlign: 'center',
+    color: color.feedback.error,
+    fontFamily: fonts.Medium,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight
+  },
+  retryButton: {
+    minHeight: 36,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.surface.primary,
+    borderWidth: 1,
+    borderColor: color.border.subtle
+  },
+  retryButtonText: {
+    color: color.text.primary,
+    fontFamily: fonts.Medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },

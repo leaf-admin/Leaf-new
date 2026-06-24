@@ -28,6 +28,7 @@ import {
   getDriverOfferPayoutLabel,
   selectDisplayableDriverOffer,
 } from "../driverOfferPricingSnapshot";
+import { normalizeRuntimeRideStatus } from "../rideLifecycleContract";
 
 const { color } = robotaxiPrototypeTokens;
 
@@ -202,9 +203,7 @@ function resolveOffer(driverOffers = []) {
 }
 
 function resolveTripPhase(activeRide, bookingStatus) {
-  const normalizedStatus = String(bookingStatus || activeRide?.status || "")
-    .trim()
-    .toLowerCase();
+  const normalizedStatus = resolveDriverOverlayStatus(activeRide, bookingStatus);
 
   if (normalizedStatus === "accepted") {
     return {
@@ -262,9 +261,7 @@ function resolveTripPhase(activeRide, bookingStatus) {
 }
 
 function resolveTripPrimaryActionTestID(status) {
-  const normalizedStatus = String(status || "")
-    .trim()
-    .toLowerCase();
+  const normalizedStatus = normalizeRuntimeRideStatus(status);
 
   if (normalizedStatus === "accepted") {
     return "driver-live-primary-action-arrive-button";
@@ -282,15 +279,24 @@ function resolveTripPrimaryActionTestID(status) {
 }
 
 function isCompactTripStatus(status) {
-  const normalizedStatus = String(status || "")
-    .trim()
-    .toLowerCase();
+  const normalizedStatus = normalizeRuntimeRideStatus(status);
 
   return (
     normalizedStatus === "accepted" ||
     normalizedStatus === "arrived" ||
     normalizedStatus === "started"
   );
+}
+
+function resolveDriverOverlayStatus(activeRide, bookingStatus) {
+  const normalizedBookingStatus = normalizeRuntimeRideStatus(bookingStatus);
+  const normalizedRideStatus = normalizeRuntimeRideStatus(activeRide?.status);
+
+  if (normalizedBookingStatus && normalizedBookingStatus !== "idle") {
+    return normalizedBookingStatus;
+  }
+
+  return normalizedRideStatus || normalizedBookingStatus;
 }
 
 function isCompetitiveAcceptLossMessage(message) {
@@ -388,9 +394,7 @@ function DriverLiveRideOverlay({
       return;
     }
 
-    const normalizedStatus = String(bookingStatus || activeRide?.status || "")
-      .trim()
-      .toLowerCase();
+    const normalizedStatus = resolveDriverOverlayStatus(activeRide, bookingStatus);
 
     try {
       setBusyAction("trip");
@@ -505,11 +509,10 @@ function DriverLiveRideOverlay({
     352,
     windowHeight - insetsTop - bottomOffset - 84,
   );
-  const normalizedActiveStatus = String(
-    bookingStatus || activeRide?.status || "",
-  )
-    .trim()
-    .toLowerCase();
+  const normalizedActiveStatus = resolveDriverOverlayStatus(
+    activeRide,
+    bookingStatus,
+  );
   const normalizedExtensionStatus = String(driverExtensionRequest?.status || "")
     .trim()
     .toLowerCase();

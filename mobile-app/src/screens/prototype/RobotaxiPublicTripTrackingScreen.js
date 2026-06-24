@@ -28,16 +28,19 @@ import {
 } from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
 const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
 function resolveStatusLabel(status) {
-  const normalized = String(status || '').trim().toLowerCase();
+  const normalized = normalizeRuntimeRideStatus(status);
   if (normalized === 'started') return 'Em viagem';
   if (normalized === 'arrived') return 'No embarque';
   if (normalized === 'accepted') return 'A caminho';
+  if (normalized === 'operational_interrupted') return 'Acompanhamento ativo';
+  if (normalized === 'searching_replacement') return 'Reatribuindo';
   if (normalized === 'completed') return 'Concluída';
   return 'Em andamento';
 }
@@ -86,10 +89,11 @@ export default function RobotaxiPublicTripTrackingScreen({ navigation, route }) 
     route?.params?.eta ||
     runtime.tripArrivalText ||
     (runtime.tripDurationMin ? `Chega em ${runtime.tripDurationMin} min` : 'ETA em atualização');
-  const statusLabel = resolveStatusLabel(runtime.bookingStatus || route?.params?.status);
+  const resolvedBookingStatus = normalizeRuntimeRideStatus(runtime.bookingStatus || route?.params?.status);
+  const statusLabel = resolveStatusLabel(resolvedBookingStatus);
   const etaStatLabel = eta.replace('Chega em ', '').replace('ETA em atualização', 'Atualizando');
   const statusStatLabel = statusLabel === 'Em andamento' ? 'Em rota' : statusLabel;
-  const progress = String(runtime.bookingStatus || '').toLowerCase() === 'started' ? 0.58 : 0.28;
+  const progress = resolvedBookingStatus === 'started' ? 0.58 : 0.28;
 
   const handleDismiss = useCallback(() => {
     if (navigation.canGoBack?.()) {
