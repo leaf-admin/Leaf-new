@@ -1,0 +1,171 @@
+# Production Readiness Goal Ledger - 2026-06-24
+
+## Purpose
+
+This ledger freezes the current production-readiness goal into a finite closure
+record. It exists to prevent the same ride-cycle topics from being reopened
+without new evidence.
+
+The broader audit remains in:
+
+- `docs/validation/PRODUCTION_READINESS_CORE_AUDIT_2026-06-21.md`
+- `docs/validation/CANONICAL_SMOKE_TEST_DIRECTIVES.md`
+- `docs/QA_RIDE_STATE_GUARDRAILS.md`
+
+## Current PR Snapshot
+
+Pull request: `#52 Production readiness smoke guard rails`
+
+Branch: `codex/production-readiness-audit`
+
+Current PR size:
+
+- Commits: `17`
+- Changed files: `293`
+- Additions: `39,348`
+- Deletions: `4,202`
+- Files by top-level area:
+  - Backend: `170`
+  - Mobile: `99`
+  - Dashboard: `13`
+  - Docs: `7`
+  - Scripts: `4`
+- Test files touched or added: `123`
+
+## Commit Ledger
+
+| Commit | Area | Purpose |
+| --- | --- | --- |
+| `e1127a30` | Backend | Harden ride lifecycle and payment invariants. |
+| `48cc7a76` | Dashboard | Secure reports and ops surfaces. |
+| `454f6db9` | Mobile/QA | Lock ride flow surfaces and smoke tooling. |
+| `2b3c888f` | Docs | Record production-readiness validation gates. |
+| `13bd62cb` | Backend/QA | Allow isolated canary mock payments. |
+| `e27dd784` | Backend/QA | Align runtime canary ride fixture. |
+| `8f187968` | Mobile/payment | Require fresh quote lock for Pix payments. |
+| `0705baa6` | Payment/QA | Expose Pix failure causes for smoke. |
+| `f9aec0cb` | Mobile/payment | Lock payment route snapshot. |
+| `6b558ec2` | Backend/payment | Canonicalize quote lock car type. |
+| `adbe2ce2` | Backend/payment | Canonicalize payment intent car type. |
+| `d0ae00df` | Mobile/payment | Preserve quote locks for recovered Pix sessions. |
+| `e1dc0b22` | Mobile/lifecycle | Separate booking finalization from driver search. |
+| `7d593781` | Mobile/payment | Guard locked quote payment consistency. |
+| `5f7f2efd` | QA/finance | Harden real-smoke payment and fare evidence. |
+| `891b8118` | Mobile/receipt | Remove passenger-visible value reconciliation copy. |
+| `27dfa31f` | Docs/QA | Clarify canonical smoke expectations. |
+
+## Repetition Map
+
+This table counts how often the current PR revisited the same product concern.
+It is intentionally conservative: broad commits are counted once per concern
+only when their headline or changed scope clearly matches that concern.
+
+| Concern | Conservative revisit count | What happened | Current status |
+| --- | ---: | --- | --- |
+| Payment, quote lock, Pix, fare consistency | `11` | Backend and mobile were hardened around quote locks, payment intent binding, car type canonicalization, payment route snapshot, Pix failure evidence, recovered Pix sessions, and receipt authority. | Locally guarded. Needs one real L2 ride proving quote gross = Pix gross = receipt gross = dashboard gross, with driver net and fees from the same backend-final snapshot. |
+| Lifecycle state, no passive regression, receipt/rating closure | `4` | Mobile surfaces were locked against passive navigation, booking finalization was separated from search, receipt/rating closure was protected, and backend lifecycle/payment invariants were tightened. | Locally guarded. Needs real device proof around accepted, arrived, started, completed, rating, relaunch, Android back, map tap, and sheet backdrop. |
+| Smoke/QA criteria and false-failure handling | `7` | Smoke directives, canary fixtures, mock-payment isolation, Pix failure causes, payment/fare evidence, and runner interpretation rules were updated. | Criteria are now explicit. Do not treat blocked preconditions or automation-inconclusive screen reads as product failures. |
+| Map route viewport and bottomsheet | `1` direct broad PR pass, many validation references | The audit records existing bottomsheet-aware viewport work and focused tests. The last user-facing action explicitly stopped new implementation without fresh device evidence. | Do not touch again unless screenshot/XML/video proves route hidden behind the sheet or map cannot be manipulated. |
+| Dashboard/admin/security | `1` broad commit plus QA extensions | Current Next dashboard was secured and smoke coverage expanded for reports, support, financial fields, metrics and provider-call boundaries. | Local `qa:backoffice` evidence exists in the audit. Needs live same-ride dashboard observation during L2. |
+| Support/chat/severity | `2` broad backend/dashboard passes | Support severity classification, support roles, chat sender scope, and visible failure behavior were tightened. | Local backend/mobile/dashboard guards exist. Needs real support actor evidence. |
+| KYC/documents/vehicle identity | `2` broad backend passes | Driver activation, CRLV identity, quick approval, KYC availability fail-closed behavior, and document evidence were tightened. | Local guards exist. Provider-backed liveness/face-compare evidence remains pending. |
+| Offline/local fallback | `1` broad backend/mobile pass plus study | Snapshot/outbox/replay/location buffering and stale-signal behavior were documented and guarded locally. | Needs device airplane-mode/reconnect evidence before production-ready claim. |
+
+## What Is Done
+
+The current branch has materially improved these areas:
+
+- Backend enforcement for ride/payment lifecycle.
+- Mobile protection against passive state regression.
+- Backend-final financial snapshot requirements for receipt and dashboard.
+- Quote lock and payment intent consistency.
+- No-driver/payment precondition policy.
+- Dashboard route/provider-call boundaries.
+- Support/chat scope and severity classification.
+- KYC/driver activation fail-closed behavior.
+- CRLV vehicle identity normalization.
+- Smoke directives for blocked preconditions and inconclusive automation reads.
+
+## What Was Repeated Too Much
+
+The following concerns were revisited repeatedly and should now be treated as
+frozen unless new evidence contradicts the current guards:
+
+1. Payment amount consistency.
+2. Quote lock propagation.
+3. Route viewport above bottomsheet.
+4. Active ride state regression.
+5. Smoke blocked by missing driver.
+6. Smoke falsely marked as failed when automation could not read the device state.
+7. Passenger receipt without backend-final financial authority.
+
+## Finite Closure Gates
+
+The current goal cannot be marked complete until these gates have direct
+evidence:
+
+1. Local baseline passes on the branch:
+   - `git diff --check`
+   - `npm run governance:check`
+   - `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`
+   - `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`
+   - `npm --prefix mobile-app run qa:production-guards`
+   - `npm --prefix leaf-websocket-backend run config:validate`
+   - `npm --prefix leaf-dashboard-js run qa:backoffice`
+2. Full mobile unit suite passes.
+3. Full backend unit suite passes.
+4. Android L2 real smoke is explicitly authorized and starts only after:
+   - passenger and driver runtimes are distinct;
+   - driver is online, eligible, close to pickup, and in the same region;
+   - geofence is valid before payment;
+   - backend/user sandbox profile is confirmed before Pix;
+   - dashboard monitoring is available.
+5. Android L2 captures evidence for:
+   - quote;
+   - payment;
+   - dispatch/search;
+   - driver offer;
+   - accepted;
+   - arrived;
+   - started;
+   - completed;
+   - receipt;
+   - rating;
+   - clean map after rating;
+   - relaunch after completion.
+6. Same ride id proves:
+   - passenger gross quote equals Pix charge;
+   - passenger gross receipt equals dashboard passenger gross;
+   - driver net equals backend-final driver net;
+   - Leaf fee, Woovi fee, tolls and pass-throughs are explicit fields;
+   - no passenger surface shows alternate values.
+7. Device evidence proves route visibility above bottomsheet:
+   - first route render has no synthetic straight-line flash;
+   - final route is provider/backend route;
+   - active passenger and driver maps remain manipulable;
+   - sheet tap/backdrop/back cannot collapse active ride to map-only.
+8. Provider-backed KYC/face-compare/liveness evidence is collected or explicitly
+   deferred as outside the current release closure.
+9. Real support/chat/report-problem evidence is collected with:
+   - passenger to driver chat;
+   - driver to passenger chat;
+   - support ticket;
+   - severity classification;
+   - dashboard/operator visibility.
+
+## Stop Rules Going Forward
+
+- Do not reopen map/bottomsheet code from theory. Require device evidence first.
+- Do not reopen fare/payment code from a broad mismatch claim. Require same-ride
+  quote, payment, receipt, dashboard, ledger and fee data.
+- Do not run L2 smoke without a verified available driver.
+- Do not classify `blocked_precondition` as a product failure.
+- Do not seed or force lifecycle states to push a smoke forward.
+- Do not publish OTA, deploy backend, create Pix, create booking, or run provider
+  actions without explicit operator approval.
+
+## Current Conclusion
+
+The goal is not complete yet. The branch has strong local/unit/contract progress,
+but the missing proof is real-device/provider evidence, not another round of
+implementation on the same subjects.

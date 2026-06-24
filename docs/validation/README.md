@@ -6,6 +6,7 @@ This directory is the source of truth for validation planning and run tracking.
 
 - [master-validation-manifest.json](/Users/izaakdias/Documents/Leaf-new/docs/validation/master-validation-manifest.json): machine-readable scenario registry
 - [PRODUCTION_READINESS_CORE_AUDIT_2026-06-21.md](/Users/izaakdias/Documents/Leaf-new/docs/validation/PRODUCTION_READINESS_CORE_AUDIT_2026-06-21.md): P0 production-readiness to-do, gates, and acceptance record
+- [PRODUCTION_READINESS_GOAL_LEDGER_2026-06-24.md](/Users/izaakdias/Documents/Leaf-new/docs/validation/PRODUCTION_READINESS_GOAL_LEDGER_2026-06-24.md): finite ledger of what this goal changed, what was repeated, and which evidence closes it
 - `reports/validation-runs/<timestamp>_<label>/tracker.md`: generated tracker for a specific run
 - `reports/validation-runs/<timestamp>_<label>/notes.md`: free-form notes for findings and decisions
 
