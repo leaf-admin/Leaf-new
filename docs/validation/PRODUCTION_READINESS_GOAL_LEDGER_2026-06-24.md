@@ -169,3 +169,60 @@ evidence:
 The goal is not complete yet. The branch has strong local/unit/contract progress,
 but the missing proof is real-device/provider evidence, not another round of
 implementation on the same subjects.
+
+## Validation Run - 2026-06-24 15:58 BRT
+
+Run directory:
+`reports/validation-runs/20260624_155808_production-readiness-goal-close`
+
+Command:
+
+```bash
+RUN_EXTENDED_LOCAL_GATES=true RUN_L2_SMOKE=false bash scripts/validation/run-master-validation.sh --label production-readiness-goal-close --wave wave9
+```
+
+Result: `blocked`
+
+This run did not execute backend deploy, OTA, native build, Pix creation,
+booking creation, provider action, or real Android L2 smoke.
+
+Passed local gates:
+
+- `git diff --check`
+- `npm run governance:check`
+- tracked secret scan
+- hardcoded secret guard
+- mobile production guards
+- backend route guards
+- backend no-active-vps-runtime guard
+- full mobile unit suite: `97` suites / `728` tests
+- full backend unit suite: `191` suites / `942` tests
+- dashboard backoffice QA, including protected routes, reports export, financial
+  reconciliation, metrics, observability, runtime flags, and no direct browser
+  calls to Google, Woovi/OpenPix, or Firebase providers
+
+Runtime config classification:
+
+- Firebase configured: `true`
+- Google Maps configured: `true`
+- Runtime config blocker: active financial policy needs explicit approval ref:
+  `LEAF_APPROVED_FINANCIAL_POLICY_ID=runtime_tiered_percent_above_50_v1` and
+  `LEAF_FINANCIAL_POLICY_APPROVAL_REF`
+- KYC production biometrics enabled: `false`
+- FCM configured: `false`
+
+Blocked closure gates:
+
+- Android L2 smoke was not run because `RUN_L2_SMOKE=false`.
+- Same-ride financial consistency remains blocked until authorized L2 artifacts
+  exist.
+- Socket.IO lifecycle replay remains blocked until authorized L2 artifacts exist.
+- KYC provider evidence remains blocked until production biometrics and provider
+  evidence are available.
+- FCM delivery remains blocked until FCM config plus real delivery evidence are
+  available.
+
+Interpretation:
+
+No new implementation should be opened from this run. The local core gates are
+green; remaining work is explicit approval/config/evidence collection.
