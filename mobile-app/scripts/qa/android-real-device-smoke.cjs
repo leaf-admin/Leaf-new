@@ -63,6 +63,8 @@ const CAPTURE_XML_SETTLE_MS = Number(process.env.REAL_SMOKE_CAPTURE_XML_SETTLE_M
 const CAPTURE_XML_RETRY_MS = Number(process.env.REAL_SMOKE_CAPTURE_XML_RETRY_MS || 1200);
 const EXPECTED_PICKUP_LAT = Number(process.env.TEST_PICKUP_LAT);
 const EXPECTED_PICKUP_LNG = Number(process.env.TEST_PICKUP_LNG);
+const EXPECTED_PICKUP_SOURCE_CERTIFIED =
+  process.env.REAL_SMOKE_EXPECTED_PICKUP_SOURCE_CERTIFIED === "true";
 const CANONICAL_PICKUP_TOLERANCE_M = Number(
   process.env.REAL_SMOKE_CANONICAL_PICKUP_TOLERANCE_M || 300,
 );
@@ -190,6 +192,7 @@ function validateCanonicalPickupAgainstExpected(pickup) {
     requested: true,
     ok: Number.isFinite(distanceMeters) && distanceMeters <= toleranceMeters,
     expected,
+    sourceCertified: EXPECTED_PICKUP_SOURCE_CERTIFIED,
     observed: pickup || null,
     distanceMeters: Number.isFinite(distanceMeters)
       ? Number(distanceMeters.toFixed(1))
@@ -225,6 +228,14 @@ function classifySmokeFailure(message) {
         owner: "backend_policy_or_test_data",
       };
     }
+    if (lower.includes("android_location_provider_divergence")) {
+      return {
+        ...base,
+        domain: "execution_environment",
+        severity: "P0",
+        owner: "qa_device_location",
+      };
+    }
     if (
       lower.includes("device") ||
       lower.includes("toolchain") ||
@@ -239,7 +250,8 @@ function classifySmokeFailure(message) {
     }
     if (
       lower.includes("destination_query_input_failed") ||
-      lower.includes("app_canonical_pickup_unavailable")
+      lower.includes("app_canonical_pickup_unavailable") ||
+      lower.includes("expected_pickup_source_uncertified")
     ) {
       return {
         ...base,
@@ -252,6 +264,14 @@ function classifySmokeFailure(message) {
       lower.includes("app_canonical_pickup_mismatch") ||
       lower.includes("stale_quote_state")
     ) {
+      if (lower.includes("app_canonical_pickup_mismatch") && !EXPECTED_PICKUP_SOURCE_CERTIFIED) {
+        return {
+          ...base,
+          domain: "test_harness",
+          severity: "P1",
+          owner: "qa_automation",
+        };
+      }
       return {
         ...base,
         domain: "product",
@@ -1288,7 +1308,10 @@ async function prepareCanonicalPickupForPayment(current) {
   }
 
   if (expectedPickupValidation.requested && !expectedPickupValidation.ok) {
-    failures.push("blocked_precondition:app_canonical_pickup_mismatch");
+    const mismatchReason = expectedPickupValidation.sourceCertified
+      ? "blocked_precondition:app_canonical_pickup_mismatch"
+      : "blocked_precondition:expected_pickup_source_uncertified";
+    failures.push(mismatchReason);
     warnings.push(
       [
         "Smoke bloqueado antes do pagamento: a origem canônica exibida pelo app diverge da origem esperada do device/teste.",
@@ -1296,6 +1319,7 @@ async function prepareCanonicalPickupForPayment(current) {
         `expected=${expectedPickupValidation.expected.lat},${expectedPickupValidation.expected.lng}`,
         `distanceMeters=${expectedPickupValidation.distanceMeters}`,
         `toleranceMeters=${expectedPickupValidation.toleranceMeters}`,
+        `sourceCertified=${expectedPickupValidation.sourceCertified}`,
       ].join(" "),
     );
     return {

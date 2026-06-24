@@ -20,6 +20,8 @@ DESTINATION_LNG="${DESTINATION_LNG:--43.1789541}"
 PREPARE_DRIVER="${PREPARE_DRIVER:-false}"
 ALLOW_DEVICE_MISSING="${ALLOW_DEVICE_MISSING:-false}"
 USE_DEVICE_LOCATION_FOR_PICKUP="${USE_DEVICE_LOCATION_FOR_PICKUP:-true}"
+REQUIRE_ANDROID_LOCATION_PROVIDER_CONVERGENCE="${REQUIRE_ANDROID_LOCATION_PROVIDER_CONVERGENCE:-true}"
+ANDROID_LOCATION_PROVIDER_TOLERANCE_M="${ANDROID_LOCATION_PROVIDER_TOLERANCE_M:-300}"
 REQUIRE_ANDROID_ROLE_PAIR="${REQUIRE_ANDROID_ROLE_PAIR:-true}"
 PASSENGER_RUNTIME="${PASSENGER_RUNTIME:-android_device}"
 DRIVER_RUNTIME="${DRIVER_RUNTIME:-android_emulator}"
@@ -120,6 +122,8 @@ const exists = (file) => fs.existsSync(path.join(artifactsDir, file));
 
 const paymentRuntime = readJson('payment-runtime-canary.json')?.paymentRuntime?.effectiveProfile || null;
 const pickupLocation = readJson('android-location-current.json');
+const androidLocationProviders = readJson('android-location-providers.json');
+const resolvedPickupLocation = pickupLocation || androidLocationProviders?.selected || null;
 const rolePair = readJson('android-role-pair.json');
 const pickupGeofence = readJson('geofence-pickup.json');
 const destinationGeofence = readJson('geofence-destination.json');
@@ -161,14 +165,15 @@ const summary = {
     appVersionCode: rolePair?.deviceAppVersionCode || env.DEVICE_APP_VERSION_CODE || null
   },
   location: {
-    pickup: pickupLocation || {
+    pickup: resolvedPickupLocation || {
       lat: Number(env.PICKUP_LAT),
       lng: Number(env.PICKUP_LNG)
     },
     destination: {
       lat: Number(env.DESTINATION_LAT),
       lng: Number(env.DESTINATION_LNG)
-    }
+    },
+    androidProviders: androidLocationProviders
   },
   geofence: {
     pickupAllowed: pickupGeofence?.isAllowed ?? null,
@@ -460,32 +465,86 @@ else
   if [[ "${USE_DEVICE_LOCATION_FOR_PICKUP}" == "true" ]]; then
     log "Resolving pickup from Android location provider"
     "${ADB_BIN}" -s "${DEVICE_SERIAL}" shell dumpsys location > "${ARTIFACTS_DIR}/android-location-dumpsys.txt" || true
-    DEVICE_LOCATION_JSON="$(node - "${ARTIFACTS_DIR}/android-location-dumpsys.txt" <<'NODE'
+    DEVICE_LOCATION_RESULT_JSON="$(ANDROID_LOCATION_PROVIDER_TOLERANCE_M="${ANDROID_LOCATION_PROVIDER_TOLERANCE_M}" node - "${ARTIFACTS_DIR}/android-location-dumpsys.txt" <<'NODE'
 const fs = require('fs');
 const file = process.argv[2];
 const dump = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-const providers = ['fused', 'gps', 'network'];
-for (const provider of providers) {
-  const escaped = provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`last location=Location\\[${escaped}\\s+(-?\\d+(?:\\.\\d+)?),(-?\\d+(?:\\.\\d+)?)\\b`);
-  const match = dump.match(re);
-  if (match) {
-    console.log(JSON.stringify({
-      provider,
-      lat: Number(match[1]),
-      lng: Number(match[2])
-    }));
-    process.exit(0);
+const providerPreference = ['gps', 'network', 'fused'];
+const toleranceMeters = Number(process.env.ANDROID_LOCATION_PROVIDER_TOLERANCE_M || 300);
+const locations = {};
+const re = /last location=Location\[([a-z]+)\s+(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)([^\]]*)\]/g;
+let match;
+while ((match = re.exec(dump))) {
+  const provider = match[1];
+  if (!providerPreference.includes(provider) || locations[provider]) continue;
+  locations[provider] = {
+    provider,
+    lat: Number(match[2]),
+    lng: Number(match[3]),
+    mock: /\bmock\b/i.test(match[4] || ''),
+  };
+}
+const toRadians = (value) => (Number(value) * Math.PI) / 180;
+const distanceMeters = (first, second) => {
+  if (!first || !second) return null;
+  const dLat = toRadians(second.lat - first.lat);
+  const dLng = toRadians(second.lng - first.lng);
+  const lat1 = toRadians(first.lat);
+  const lat2 = toRadians(second.lat);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+const available = providerPreference.map((provider) => locations[provider]).filter(Boolean);
+const divergences = [];
+for (let i = 0; i < available.length; i += 1) {
+  for (let j = i + 1; j < available.length; j += 1) {
+    const distance = distanceMeters(available[i], available[j]);
+    if (Number.isFinite(distance) && distance > toleranceMeters) {
+      divergences.push({
+        firstProvider: available[i].provider,
+        secondProvider: available[j].provider,
+        distanceMeters: Number(distance.toFixed(1)),
+      });
+    }
   }
 }
-process.exit(2);
+const selected = available.find((item) => item.provider === 'gps') ||
+  available.find((item) => item.provider === 'network') ||
+  available.find((item) => item.provider === 'fused') ||
+  null;
+if (!selected) {
+  console.log(JSON.stringify({
+    ok: false,
+    reason: 'device_location_unavailable',
+    toleranceMeters,
+    providers: locations,
+    selected: null,
+    divergences,
+  }));
+  process.exit(2);
+}
+console.log(JSON.stringify({
+  ok: divergences.length === 0,
+  reason: divergences.length === 0 ? null : 'android_location_provider_divergence',
+  toleranceMeters,
+  providers: locations,
+  selected,
+  divergences,
+}));
 NODE
-)" || DEVICE_LOCATION_JSON=""
-    if [[ -n "${DEVICE_LOCATION_JSON}" ]]; then
-      printf '%s\n' "${DEVICE_LOCATION_JSON}" > "${ARTIFACTS_DIR}/android-location-current.json"
-      PICKUP_LAT="$(printf '%s\n' "${DEVICE_LOCATION_JSON}" | jq -r '.lat')"
-      PICKUP_LNG="$(printf '%s\n' "${DEVICE_LOCATION_JSON}" | jq -r '.lng')"
-      log "Pickup from device GPS: ${PICKUP_LAT}, ${PICKUP_LNG}"
+)" || DEVICE_LOCATION_RESULT_JSON=""
+    if [[ -n "${DEVICE_LOCATION_RESULT_JSON}" ]]; then
+      printf '%s\n' "${DEVICE_LOCATION_RESULT_JSON}" > "${ARTIFACTS_DIR}/android-location-providers.json"
+      printf '%s\n' "${DEVICE_LOCATION_RESULT_JSON}" | jq -c '.selected' > "${ARTIFACTS_DIR}/android-location-current.json"
+      PICKUP_LAT="$(printf '%s\n' "${DEVICE_LOCATION_RESULT_JSON}" | jq -r '.selected.lat')"
+      PICKUP_LNG="$(printf '%s\n' "${DEVICE_LOCATION_RESULT_JSON}" | jq -r '.selected.lng')"
+      PICKUP_PROVIDER="$(printf '%s\n' "${DEVICE_LOCATION_RESULT_JSON}" | jq -r '.selected.provider')"
+      log "Pickup from Android ${PICKUP_PROVIDER}: ${PICKUP_LAT}, ${PICKUP_LNG}"
+      if [[ "$(printf '%s\n' "${DEVICE_LOCATION_RESULT_JSON}" | jq -r '.ok')" != "true" && "${REQUIRE_ANDROID_LOCATION_PROVIDER_CONVERGENCE}" == "true" ]]; then
+        fail "blocked_precondition:android_location_provider_divergence Android gps/network/fused providers disagree; align the device location before smoke"
+      fi
     else
       fail "blocked_precondition:device_location_unavailable"
     fi
@@ -599,6 +658,7 @@ export ANDROID_DRIVER_APK="${ANDROID_DRIVER_APK}"
 export FORCE_INSTALL_DRIVER_APK="\${FORCE_INSTALL_DRIVER_APK:-${FORCE_INSTALL_DRIVER_APK_DEFAULT}}"
 export TEST_PICKUP_LAT="${PICKUP_LAT}"
 export TEST_PICKUP_LNG="${PICKUP_LNG}"
+export REAL_SMOKE_EXPECTED_PICKUP_SOURCE_CERTIFIED="true"
 export TEST_FARE="\${TEST_FARE:-54.05}"
 EOF
 

@@ -91,6 +91,7 @@ Stop and mark the run as `blocked_precondition` when any precondition fails.
 - `blocked_precondition:toolchain_not_ready`
 - `blocked_precondition:device_not_ready`
 - `blocked_precondition:android_role_pair_not_ready`
+- `blocked_precondition:android_location_provider_divergence`
 
 Do not label a blocked precondition as a failed smoke test. Do not continue into
 payment or dispatch when the block is known up front.
@@ -131,8 +132,9 @@ Use these domains before deciding what to fix:
   auto-confirm helper inconclusive while the product state is otherwise visible.
 - `execution_environment`: device, build, provider sandbox, infra, or local
   tooling is not ready. Examples: disconnected device, stale app version,
-  missing ADB/Java, existing active ride from a previous run, backend health
-  unavailable, or provider sandbox outage.
+  missing ADB/Java, divergent Android GPS/network versus fused mock coordinates,
+  existing active ride from a previous run, backend health unavailable, or
+  provider sandbox outage.
 
 Do not mix domains in the conclusion. A run may have several entries, but the
 next action must target the highest-severity classified item, not the last screen

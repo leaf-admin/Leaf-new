@@ -63,10 +63,13 @@ describe('android real-device smoke runner contract', () => {
 
     expect(source).toContain('TEST_PICKUP_LAT');
     expect(source).toContain('TEST_PICKUP_LNG');
+    expect(source).toContain('REAL_SMOKE_EXPECTED_PICKUP_SOURCE_CERTIFIED');
     expect(source).toContain('REAL_SMOKE_CANONICAL_PICKUP_TOLERANCE_M');
     expect(source).toContain('blocked_precondition:app_canonical_pickup_mismatch');
+    expect(source).toContain('blocked_precondition:expected_pickup_source_uncertified');
     expect(source).toContain('paymentBlockedByPrecondition');
     expect(source).toContain('distanceMeters');
+    expect(source).toContain('sourceCertified');
     expect(validationIndex).toBeGreaterThan(-1);
     expect(driverBotIndex).toBeGreaterThan(-1);
     expect(availabilityIndex).toBeGreaterThan(-1);
@@ -167,6 +170,17 @@ describe('android real-device smoke runner contract', () => {
     expect(source).toContain('export ANDROID_EMULATOR_STABILITY_SECONDS="${ANDROID_EMULATOR_STABILITY_SECONDS}"');
     expect(source).toContain('export ANDROID_PASSENGER_SERIAL="${ANDROID_PASSENGER_SERIAL}"');
     expect(source).toContain('export ANDROID_DRIVER_SERIAL="${ANDROID_DRIVER_SERIAL}"');
+  });
+
+  it('blocks smoke when Android location providers diverge before certifying pickup', () => {
+    const source = readRealSmokePreflight();
+
+    expect(source).toContain('REQUIRE_ANDROID_LOCATION_PROVIDER_CONVERGENCE="${REQUIRE_ANDROID_LOCATION_PROVIDER_CONVERGENCE:-true}"');
+    expect(source).toContain('ANDROID_LOCATION_PROVIDER_TOLERANCE_M="${ANDROID_LOCATION_PROVIDER_TOLERANCE_M:-300}"');
+    expect(source).toContain('android-location-providers.json');
+    expect(source).toContain('android_location_provider_divergence');
+    expect(source).toContain("const providerPreference = ['gps', 'network', 'fused'];");
+    expect(source).toContain('export REAL_SMOKE_EXPECTED_PICKUP_SOURCE_CERTIFIED="true"');
   });
 
   it('generates a driver-emulator bootstrap and runtime verifier before smoke execution', () => {
