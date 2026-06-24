@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { normalizeOperationalCarType } = require('../utils/operational-car-type');
 
 const DEFAULT_QUOTE_LOCK_TTL_SECONDS = 120;
 const QUOTE_LOCK_KEY_PREFIX = 'pricing:quote-lock';
@@ -15,7 +16,8 @@ function normalizeText(value) {
 }
 
 function normalizeCarType(value) {
-  return normalizeText(value).toLowerCase();
+  const normalized = normalizeOperationalCarType(value, '');
+  return normalized || normalizeText(value).toLowerCase();
 }
 
 function normalizeNumber(value, fallback = null) {
