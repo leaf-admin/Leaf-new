@@ -1,9 +1,6 @@
 const WooviDriverService = require('./woovi-driver-service');
 const firebaseConfig = require('../firebase-config');
 const { logStructured, logError } = require('../utils/logger');
-const {
-  recomputeDriverActivationStatus
-} = require('./driver-document-analysis-queue');
 
 class DriverApprovalService {
   constructor() {
@@ -182,6 +179,9 @@ class DriverApprovalService {
 
   async resolveCanonicalApprovalEvidence(driverId) {
     try {
+      const {
+        recomputeDriverActivationStatus
+      } = require('./driver-document-analysis-queue');
       const activationStatus = await recomputeDriverActivationStatus(driverId);
       if (activationStatus?.canGoOnline === true) {
         return {

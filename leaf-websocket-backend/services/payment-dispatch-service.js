@@ -2,6 +2,10 @@ const redisPool = require('../utils/redis-pool');
 const RideStateManager = require('./ride-state-manager');
 const GradualRadiusExpander = require('./gradual-radius-expander');
 const { logStructured } = require('../utils/logger');
+const {
+  validatePaymentDriverReservation,
+  consumePaymentDriverReservationForBooking
+} = require('./payment-driver-reservation-service');
 
 const PAYMENT_LINK_TTL_SECONDS = Number.parseInt(
   process.env.PAYMENT_BOOKING_LINK_TTL_SECONDS || '172800',
@@ -402,6 +406,46 @@ async function triggerDispatchAttempt({
       customerId: customerActiveCheck.customerId,
       activeBookingId: customerActiveCheck.activeBookingId
     };
+  }
+
+  const paymentDriverReservationId = String(bookingData.paymentDriverReservationId || '').trim();
+  if (paymentDriverReservationId) {
+    const reservationValidation = await validatePaymentDriverReservation({
+      redis,
+      reservationId: paymentDriverReservationId,
+      passengerId: bookingData.customerId,
+      rideId: bookingData.paymentReferenceRideId,
+      paymentSessionId: bookingData.paymentSessionId,
+      quoteLockId: bookingData.paymentQuoteLockId,
+      bookingId
+    });
+
+    if (!reservationValidation.success) {
+      await redis.hset(bookingKey, {
+        paymentDispatchBlockedReason: reservationValidation.code || 'PAYMENT_DRIVER_RESERVATION_INVALID',
+        paymentDispatchBlockedAt: new Date().toISOString()
+      }).catch(() => null);
+
+      return {
+        success: false,
+        skipped: true,
+        reason: reservationValidation.code || 'PAYMENT_DRIVER_RESERVATION_INVALID',
+        paymentDriverReservationId
+      };
+    }
+
+    await consumePaymentDriverReservationForBooking({
+      redis,
+      reservationId: paymentDriverReservationId,
+      bookingId
+    }).catch((error) => {
+      logStructured('warn', 'Falha ao consumir reserva de motorista no dispatch pós-pagamento', {
+        service: 'payment-dispatch-service',
+        bookingId,
+        paymentDriverReservationId,
+        error: error.message
+      });
+    });
   }
 
   const state = await RideStateManager.getBookingState(redis, bookingId);

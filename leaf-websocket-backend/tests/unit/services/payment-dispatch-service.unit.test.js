@@ -206,4 +206,37 @@ describe('payment-dispatch-service', () => {
       paymentLedgerStatus: 'pending_retry'
     });
   });
+
+  it('does not dispatch a paid booking when the payment driver reservation is missing', async () => {
+    mockRedisState.hashes.set('booking:booking_missing_reservation', {
+      bookingId: 'booking_missing_reservation',
+      customerId: 'passenger_1',
+      paymentStatus: 'in_holding',
+      paymentLedgerStatus: 'posted',
+      paymentDriverReservationId: 'pdr_missing',
+      paymentReferenceRideId: 'temp_ride_1',
+      paymentSessionId: 'pay_session_1',
+      paymentQuoteLockId: 'ql_1',
+      pickupLocation: JSON.stringify({ lat: -22.853586, lng: -43.318168 })
+    });
+
+    const result = await triggerDispatchAfterPayment({
+      bookingId: 'booking_missing_reservation',
+      io: {},
+      pickupLocation: { lat: -22.853586, lng: -43.318168 },
+      source: 'unit_test',
+      force: true,
+      maxAttempts: 1
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      skipped: true,
+      reason: 'PAYMENT_DRIVER_RESERVATION_MISSING',
+      paymentDriverReservationId: 'pdr_missing'
+    });
+    expect(mockRedisState.hashes.get('booking:booking_missing_reservation')).toMatchObject({
+      paymentDispatchBlockedReason: 'PAYMENT_DRIVER_RESERVATION_MISSING'
+    });
+  });
 });

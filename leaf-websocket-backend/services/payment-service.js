@@ -328,6 +328,10 @@ class PaymentService {
       paymentContextKey: existing.paymentContextKey || null,
       quoteSessionId: existing.quoteSessionId || null,
       quoteLockId: existing.quoteLockId || null,
+      paymentDriverReservationId: existing.paymentDriverReservationId || null,
+      paymentDriverReservationDriverId: existing.paymentDriverReservationDriverId || null,
+      paymentDriverReservationExpiresAt: existing.paymentDriverReservationExpiresAt || null,
+      paymentDriverReservationTtlSeconds: existing.paymentDriverReservationTtlSeconds || null,
       splitApplied: false,
       splitDeferred: true,
       settlementPolicy: 'post_ride_ledger',
@@ -359,6 +363,15 @@ class PaymentService {
       paymentData.rideDetails?.quoteLockId ||
       ''
     ).trim() || null;
+    const paymentDriverReservationId = String(paymentData.paymentDriverReservationId || '').trim() || null;
+    const paymentDriverReservationDriverId = String(paymentData.paymentDriverReservationDriverId || '').trim() || null;
+    const paymentDriverReservationExpiresAt = String(paymentData.paymentDriverReservationExpiresAt || '').trim() || null;
+    const paymentDriverReservationTtlSeconds = Number.parseInt(
+      paymentData.paymentDriverReservationTtlSeconds ||
+      process.env.PAYMENT_DRIVER_RESERVATION_TTL_SECONDS ||
+      '180',
+      10
+    ) || null;
     const paymentIntentId = this.buildAdvancePaymentIntentId(rideId);
     const correlationID = this.buildAdvanceChargeCorrelationID(paymentData);
     const nowIso = new Date().toISOString();
@@ -392,6 +405,10 @@ class PaymentService {
         paymentContextKey,
         quoteSessionId,
         quoteLockId,
+        paymentDriverReservationId,
+        paymentDriverReservationDriverId,
+        paymentDriverReservationExpiresAt,
+        paymentDriverReservationTtlSeconds,
         quoteVersion
       };
     }
@@ -411,6 +428,7 @@ class PaymentService {
           const existingPaymentSessionId = String(existing.paymentSessionId || '').trim();
           const existingPaymentContextKey = String(existing.paymentContextKey || '').trim();
           const existingQuoteLockId = String(existing.quoteLockId || '').trim();
+          const existingPaymentDriverReservationId = String(existing.paymentDriverReservationId || '').trim();
 
           if (
             existingRideId !== rideId ||
@@ -419,6 +437,7 @@ class PaymentService {
             (existingPaymentSessionId && paymentSessionId && existingPaymentSessionId !== paymentSessionId) ||
             (existingPaymentContextKey && paymentContextKey && existingPaymentContextKey !== paymentContextKey) ||
             (existingQuoteLockId && quoteLockId && existingQuoteLockId !== quoteLockId) ||
+            (existingPaymentDriverReservationId && paymentDriverReservationId && existingPaymentDriverReservationId !== paymentDriverReservationId) ||
             (existingProviderEnvironment && incomingProviderEnvironment && existingProviderEnvironment !== incomingProviderEnvironment)
           ) {
             return {
@@ -430,6 +449,8 @@ class PaymentService {
               incomingAmountCents: amountCents,
               existingQuoteLockId: existingQuoteLockId || null,
               incomingQuoteLockId: quoteLockId || null,
+              existingPaymentDriverReservationId: existingPaymentDriverReservationId || null,
+              incomingPaymentDriverReservationId: paymentDriverReservationId || null,
               existingProviderEnvironment: existingProviderEnvironment || null,
               incomingProviderEnvironment: incomingProviderEnvironment || null
             };
@@ -463,6 +484,10 @@ class PaymentService {
               paymentProfileId: existing.paymentProfileId || paymentProfile.profileId || null,
               paymentProfileSource: existing.paymentProfileSource || paymentProfile.source || null,
               quoteLockId: existing.quoteLockId || quoteLockId || null,
+              paymentDriverReservationId: existing.paymentDriverReservationId || paymentDriverReservationId || null,
+              paymentDriverReservationDriverId: existing.paymentDriverReservationDriverId || paymentDriverReservationDriverId || null,
+              paymentDriverReservationExpiresAt: existing.paymentDriverReservationExpiresAt || paymentDriverReservationExpiresAt || null,
+              paymentDriverReservationTtlSeconds: existing.paymentDriverReservationTtlSeconds || paymentDriverReservationTtlSeconds || null,
               quoteVersion
             };
           }
@@ -496,6 +521,10 @@ class PaymentService {
           quoteSessionId,
           quoteLockId,
           quoteLockSnapshot: paymentData.quoteLockSnapshot || null,
+          paymentDriverReservationId,
+          paymentDriverReservationDriverId,
+          paymentDriverReservationExpiresAt,
+          paymentDriverReservationTtlSeconds,
           quoteVersion,
           correlationID,
           status: 'creating_charge',
@@ -532,6 +561,10 @@ class PaymentService {
           paymentContextKey,
           quoteSessionId,
           quoteLockId,
+          paymentDriverReservationId,
+          paymentDriverReservationDriverId,
+          paymentDriverReservationExpiresAt,
+          paymentDriverReservationTtlSeconds,
           provider: 'woovi',
           providerEnvironment: paymentProfile.environment || 'production',
           paymentProfileId: paymentProfile.profileId || null,
@@ -576,6 +609,10 @@ class PaymentService {
         paymentContextKey,
         quoteSessionId,
         quoteLockId,
+        paymentDriverReservationId,
+        paymentDriverReservationDriverId,
+        paymentDriverReservationExpiresAt,
+        paymentDriverReservationTtlSeconds,
         quoteVersion,
         intentPersistenceError: error.message
       };
@@ -1200,6 +1237,9 @@ class PaymentService {
         value: paymentIntent.amountCents || paymentData.amount,
         comment,
         correlationID: uniqueCorrelationID,
+        ...(paymentIntent.paymentDriverReservationTtlSeconds
+          ? { expiresIn: paymentIntent.paymentDriverReservationTtlSeconds }
+          : {}),
         additionalInfo: this.buildWooviAdditionalInfo([
           { key: 'passenger_id', value: paymentData.passengerId },
           { key: 'ride_id', value: paymentData.rideId },
@@ -1211,6 +1251,9 @@ class PaymentService {
           { key: 'payment_session_id', value: paymentIntent.paymentSessionId || '' },
           { key: 'quote_session_id', value: paymentIntent.quoteSessionId || '' },
           { key: 'quote_lock_id', value: paymentIntent.quoteLockId || paymentData.quoteLockId || '' },
+          { key: 'payment_driver_reservation_id', value: paymentIntent.paymentDriverReservationId || '' },
+          { key: 'payment_driver_reservation_driver_id', value: paymentIntent.paymentDriverReservationDriverId || '' },
+          { key: 'payment_driver_reservation_expires_at', value: paymentIntent.paymentDriverReservationExpiresAt || '' },
           { key: 'quote_version', value: paymentIntent.quoteVersion || this.normalizeQuoteVersion(paymentData) },
           { key: 'payment_type', value: 'advance_payment' },
           { key: 'provider_environment', value: paymentIntent.providerEnvironment || paymentProfile.environment || 'production' },
@@ -1239,6 +1282,7 @@ class PaymentService {
         value: chargeData.value,
         comment: chargeData.comment,
         correlationID: chargeData.correlationID,
+        expiresIn: chargeData.expiresIn || null,
         customerName: chargeData.customer.name,
         customerEmail: chargeData.customer.email,
         splitEnabled: false,
@@ -1252,6 +1296,26 @@ class PaymentService {
 
       if (!chargeResult.success) {
         await this.markAdvancePaymentIntentFailed(paymentIntent, chargeResult.error || chargeResult.details || {});
+        if (paymentIntent.paymentDriverReservationId) {
+          try {
+            const {
+              releasePaymentDriverReservation
+            } = require('./payment-driver-reservation-service');
+            await redisPool.ensureConnection();
+            await releasePaymentDriverReservation(
+              redisPool.getConnection(),
+              paymentIntent.paymentDriverReservationId
+            );
+          } catch (reservationReleaseError) {
+            logStructured('warn', 'Falha ao liberar reserva de motorista após erro na cobrança Pix', {
+              service: 'PaymentService',
+              rideId: paymentData.rideId,
+              paymentIntentId: paymentIntent.paymentIntentId || null,
+              paymentDriverReservationId: paymentIntent.paymentDriverReservationId,
+              error: reservationReleaseError.message
+            });
+          }
+        }
         logStructured('warn', 'Erro ao criar cobrança na Woovi', {
           service: 'PaymentService',
           error: chargeResult.error,
@@ -1368,6 +1432,10 @@ class PaymentService {
         paymentContextKey: paymentIntent.paymentContextKey || null,
         quoteSessionId: paymentIntent.quoteSessionId || null,
         quoteLockId: paymentIntent.quoteLockId || paymentData.quoteLockId || null,
+        paymentDriverReservationId: paymentIntent.paymentDriverReservationId || null,
+        paymentDriverReservationDriverId: paymentIntent.paymentDriverReservationDriverId || null,
+        paymentDriverReservationExpiresAt: paymentIntent.paymentDriverReservationExpiresAt || null,
+        paymentDriverReservationTtlSeconds: paymentIntent.paymentDriverReservationTtlSeconds || null,
         splitApplied: false,
         splitDeferred: true,
         settlementPolicy: 'post_ride_ledger',

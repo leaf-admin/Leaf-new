@@ -144,13 +144,16 @@ function createRequestPayload(overrides = {}) {
       chargeId: 'charge_1',
       rideId: 'temp_ride_1',
       amountInCents: 8785,
+      paymentSessionId: 'pay_session_1',
+      quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
       paymentStatus: 'confirmed'
     },
     ...overrides
   };
 }
 
-function createHarness({ availabilityResult } = {}) {
+function createHarness({ availabilityResult, reservationPayload = null } = {}) {
   const handlers = {};
   const socket = {
     id: 'socket_1',
@@ -161,8 +164,29 @@ function createHarness({ availabilityResult } = {}) {
     }),
     emit: jest.fn()
   };
+  const resolvedReservationPayload = reservationPayload === null
+    ? {
+        reservationId: 'pdr_create_booking_1',
+        driverId: 'driver_1',
+        passengerId: 'customer_1',
+        rideId: 'temp_ride_1',
+        paymentSessionId: 'pay_session_1',
+        quoteLockId: 'ql_bound_1',
+        expiresAtMs: Date.now() + 180000,
+        expiresAtIso: '2026-06-24T20:00:00.000Z'
+      }
+    : reservationPayload;
   const redis = {
-    get: jest.fn().mockResolvedValue(null),
+    get: jest.fn(async (key) => {
+      if (!resolvedReservationPayload) return null;
+      if (key === `payment_driver_reservation:${resolvedReservationPayload.reservationId}`) {
+        return JSON.stringify(resolvedReservationPayload);
+      }
+      if (key === `driver_payment_reservation:${resolvedReservationPayload.driverId}`) {
+        return resolvedReservationPayload.reservationId;
+      }
+      return null;
+    }),
     set: jest.fn().mockResolvedValue('OK'),
     del: jest.fn().mockResolvedValue(1),
     hset: jest.fn().mockResolvedValue(1),
@@ -299,7 +323,13 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
     mockFirestore = createFirestoreWithDocs();
     mockPaymentServiceInstance.getAdvancePaymentIntent.mockReset().mockResolvedValue({
       found: true,
-      status: 'charge_created'
+      status: 'charge_created',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1',
+      paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 180,
+      paymentSessionId: 'pay_session_1',
+      quoteLockId: 'ql_bound_1'
     });
     mockPaymentServiceInstance.getPaymentStatus.mockReset().mockResolvedValue({
         success: true,
@@ -436,6 +466,37 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
     expect(harness.idempotencyService.cacheResult).not.toHaveBeenCalled();
   });
 
+  it('blocks a provider-confirmed advance payment intent without a valid driver reservation before creating the booking', async () => {
+    mockFirestore = createFirestoreWithDocs({
+      'payment_holdings/temp_ride_1': {
+        status: 'in_holding',
+        source: 'woovi_webhook',
+        chargeId: 'charge_1',
+        paymentId: 'charge_1',
+        amount: 8785
+      }
+    });
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValueOnce({
+      found: true,
+      status: 'charge_created',
+      paymentSessionId: 'pay_session_1',
+      quoteLockId: 'ql_bound_1'
+    });
+    const harness = createHarness({ reservationPayload: false });
+
+    await harness.handlers.createBooking(createRequestPayload());
+
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'bookingError',
+      expect.objectContaining({
+        code: 'PAYMENT_DRIVER_RESERVATION_MISSING'
+      })
+    );
+    expect(harness.findAvailableDriversForPickup).not.toHaveBeenCalled();
+    expect(harness.RequestRideCommand).not.toHaveBeenCalled();
+    expect(harness.idempotencyService.beginRequest).not.toHaveBeenCalled();
+  });
+
   it('rejects a provider-confirmed payment intent bound to a different route before creating the booking', async () => {
     mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
       found: true,
@@ -447,6 +508,10 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       paymentContextKey: 'context_1',
       quoteSessionId: 'quote_session_1',
       quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1',
+      paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 180,
       quoteLockSnapshot: {
         quoteLockId: 'ql_bound_1',
         quoteSessionId: 'quote_session_1',
@@ -478,6 +543,7 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
         paymentContextKey: 'context_1',
         quoteSessionId: 'quote_session_1',
         quoteLockId: 'ql_bound_1',
+        paymentDriverReservationId: 'pdr_create_booking_1',
         paymentStatus: 'confirmed'
       }
     }));
@@ -503,6 +569,10 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       paymentContextKey: 'context_1',
       quoteSessionId: 'quote_session_1',
       quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1',
+      paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 180,
       quoteLockSnapshot: {
         quoteLockId: 'ql_bound_1',
         quoteSessionId: 'quote_session_1',
@@ -535,6 +605,7 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
         paymentContextKey: 'context_1',
         quoteSessionId: 'quote_session_1',
         quoteLockId: 'ql_bound_1',
+        paymentDriverReservationId: 'pdr_create_booking_1',
         paymentStatus: 'confirmed'
       }
     }));
@@ -552,6 +623,7 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
         carType: 'Leaf Plus',
         paymentData: expect.objectContaining({
           quoteLockId: 'ql_bound_1',
+          paymentDriverReservationId: 'pdr_create_booking_1',
           paymentStatus: 'in_holding',
           serverValidated: true
         })
@@ -574,6 +646,7 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
           chargeId: 'charge_1',
           rideId: 'temp_ride_1',
           amountInCents: 8785,
+          paymentDriverReservationId: 'pdr_create_booking_1',
           paymentStatus: 'in_holding',
           serverValidated: true,
           providerProofSource: 'woovi_provider'

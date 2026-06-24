@@ -1,6 +1,8 @@
 const mockRedis = {
   georadius: jest.fn(),
-  hgetall: jest.fn()
+  hgetall: jest.fn(),
+  get: jest.fn(),
+  set: jest.fn()
 };
 
 jest.mock('../../../utils/redis-pool', () => ({
@@ -27,6 +29,10 @@ describe('payment-driver-availability-guard', () => {
   beforeEach(() => {
     mockRedis.georadius.mockReset();
     mockRedis.hgetall.mockReset();
+    mockRedis.get.mockReset();
+    mockRedis.set.mockReset();
+    mockRedis.get.mockResolvedValue(null);
+    mockRedis.set.mockResolvedValue('OK');
     driverLockManager.isDriverLocked.mockReset();
     driverEligibilityService.isDriverEligibleForRide.mockReset();
   });
@@ -91,6 +97,7 @@ describe('payment-driver-availability-guard', () => {
       driverId: 'driver-1',
       rejections: {
         locked: 0,
+        paymentReserved: 0,
         missingState: 0,
         offlineOrIneligible: 0,
         preferenceMismatch: 0,
@@ -133,6 +140,7 @@ describe('payment-driver-availability-guard', () => {
       eligible: 0,
       rejections: {
         locked: 1,
+        paymentReserved: 0,
         missingState: 0,
         offlineOrIneligible: 0,
         preferenceMismatch: 0,
@@ -141,5 +149,92 @@ describe('payment-driver-availability-guard', () => {
     });
     expect(JSON.stringify(result)).not.toContain('driver-locked');
     expect(JSON.stringify(result)).not.toContain('driver-category');
+  });
+
+  it('reserves an eligible driver atomically before Pix creation', async () => {
+    mockRedis.georadius.mockResolvedValue([
+      ['driver-1', '0.3', ['-43.31', '-22.85']]
+    ]);
+    driverLockManager.isDriverLocked.mockResolvedValue({ isLocked: false });
+    mockRedis.hgetall.mockResolvedValue({
+      isOnline: 'true',
+      dispatchEligible: 'true',
+      status: 'AVAILABLE',
+      carType: 'Leaf Plus'
+    });
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({ eligible: true });
+
+    const result = await hasPaymentEligibleDriver({
+      pickupLocation: { lat: -22.85, lng: -43.31 },
+      destinationLocation: { lat: -22.87, lng: -43.34 },
+      carType: 'Leaf Plus',
+      reserveDriver: true,
+      reservationContext: {
+        passengerId: 'passenger-1',
+        rideId: 'temp-ride-1',
+        quoteLockId: 'ql-1'
+      },
+      reservationTtlSeconds: 180
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      hasDrivers: true,
+      code: 'DRIVER_RESERVED_FOR_PAYMENT',
+      driverId: 'driver-1',
+      reservationId: expect.stringMatching(/^pdr_/),
+      reservationTtlSeconds: 180
+    });
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      'driver_payment_reservation:driver-1',
+      result.reservationId,
+      'EX',
+      180,
+      'NX'
+    );
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      `payment_driver_reservation:${result.reservationId}`,
+      expect.stringContaining('"driverId":"driver-1"'),
+      'EX',
+      180
+    );
+  });
+
+  it('does not count a driver reserved for another payment as available', async () => {
+    mockRedis.georadius.mockResolvedValue([
+      ['driver-reserved', '0.3', ['-43.31', '-22.85']]
+    ]);
+    mockRedis.get.mockImplementation(async (key) => {
+      if (key === 'driver_payment_reservation:driver-reserved') return 'pdr_other';
+      if (key === 'payment_driver_reservation:pdr_other') {
+        return JSON.stringify({
+          reservationId: 'pdr_other',
+          driverId: 'driver-reserved',
+          passengerId: 'other-passenger',
+          rideId: 'other-ride'
+        });
+      }
+      return null;
+    });
+
+    const result = await hasPaymentEligibleDriver({
+      pickupLocation: { lat: -22.85, lng: -43.31 },
+      carType: 'Leaf Plus',
+      reserveDriver: true,
+      reservationContext: {
+        passengerId: 'passenger-1',
+        rideId: 'temp-ride-1'
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      hasDrivers: false,
+      code: 'NO_DRIVERS_AVAILABLE',
+      rejections: expect.objectContaining({
+        paymentReserved: 1
+      })
+    });
+    expect(driverLockManager.isDriverLocked).not.toHaveBeenCalled();
   });
 });

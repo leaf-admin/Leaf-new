@@ -367,6 +367,64 @@ describe('PaymentService payment status cache', () => {
     });
   });
 
+  it('persists driver reservation metadata and expires the Pix charge with the reservation TTL', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockCreateCharge.mockResolvedValueOnce({
+      success: true,
+      charge: {
+        id: 'charge_reserved_1',
+        qrCodeImage: 'qr_reserved',
+        paymentLinkUrl: 'https://pay.local/reserved'
+      }
+    });
+    const service = new PaymentService();
+
+    const result = await service.processAdvancePayment({
+      passengerId: 'passenger_reserved',
+      amount: 2750,
+      rideId: 'ride_reserved_1',
+      paymentDriverReservationId: 'pdr_reserved_1',
+      paymentDriverReservationDriverId: 'driver_reserved_1',
+      paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 180,
+      rideDetails: {
+        origin: 'Origem',
+        destination: 'Destino'
+      },
+      passengerName: 'Passageiro',
+      passengerEmail: 'passenger@leaf.app.br'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      chargeId: 'charge_reserved_1',
+      paymentDriverReservationId: 'pdr_reserved_1',
+      paymentDriverReservationDriverId: 'driver_reserved_1',
+      paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 180
+    });
+    expect(mockCreateCharge).toHaveBeenCalledWith(expect.objectContaining({
+      expiresIn: 180,
+      additionalInfo: expect.arrayContaining([
+        expect.objectContaining({
+          key: 'payment_driver_reservation_id',
+          value: 'pdr_reserved_1'
+        }),
+        expect.objectContaining({
+          key: 'payment_driver_reservation_driver_id',
+          value: 'driver_reserved_1'
+        })
+      ])
+    }));
+    expect(firestore.docs.get(`payment_intents/${service.buildAdvancePaymentIntentId('ride_reserved_1')}`)).toMatchObject({
+      paymentDriverReservationId: 'pdr_reserved_1',
+      paymentDriverReservationDriverId: 'driver_reserved_1',
+      paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 180
+    });
+  });
+
   it('derives one canonical ride reference from a persisted payment session', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);

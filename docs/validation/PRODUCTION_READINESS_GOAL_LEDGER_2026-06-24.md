@@ -402,3 +402,93 @@ Interpretation:
 The manual-driver-approval policy decision is closed locally. Provider-backed
 KYC/liveness/face-compare L2 evidence remains a release evidence gate, but there
 is no retained production approval bypass for missing canonical evidence.
+
+## Payment Driver Reservation Policy - 2026-06-24
+
+Decision:
+
+- Payment must not be created when no eligible driver is available.
+- A successful driver availability precheck must not be a best-effort snapshot
+  that can disappear between Pix creation, webhook confirmation, and dispatch.
+- `/api/payment/advance` must reserve one eligible driver before creating Pix.
+- The reservation must be short-lived, payment-scoped, and consumed by the paid
+  booking/dispatch path.
+- Drivers reserved for another payment must not be considered available for a
+  competing passenger payment.
+
+Implementation proof:
+
+- `payment-driver-reservation-service` stores a deterministic reservation record
+  in Redis plus a driver pointer using atomic `NX` semantics.
+- `/api/payment/advance` calls the availability guard with `reserveDriver=true`
+  and refuses Pix creation with `PAYMENT_DRIVER_RESERVATION_FAILED` if no
+  reservation id is produced.
+- `PaymentService` persists reservation id, driver id, expiration, and TTL in the
+  payment intent, forwards them to Woovi additional info, and bounds Pix
+  expiration by the reservation TTL.
+- `createBooking` validates the payment driver reservation before
+  `RequestRideCommand` and propagates reservation metadata into the booking.
+- `payment-dispatch-service` validates and consumes the reservation before
+  dispatch can enter driver search.
+- `driver-notification-dispatcher` excludes drivers reserved for another payment
+  while still allowing the reservation's own booking to continue.
+
+Validation proof:
+
+```bash
+node --check leaf-websocket-backend/services/driver-approval-service.js &&
+node --check leaf-websocket-backend/services/payment-driver-reservation-service.js &&
+node --check leaf-websocket-backend/services/payment-driver-availability-guard.js &&
+node --check leaf-websocket-backend/routes/payment.js &&
+node --check leaf-websocket-backend/services/payment-service.js &&
+node --check leaf-websocket-backend/bootstrap/register-socket-create-booking-handler.js &&
+node --check leaf-websocket-backend/services/payment-dispatch-service.js &&
+node --check leaf-websocket-backend/services/driver-notification-dispatcher.js &&
+node --check leaf-websocket-backend/commands/RequestRideCommand.js
+```
+
+Result: passed.
+
+```bash
+npm --prefix leaf-websocket-backend run test:unit -- --runInBand \
+  tests/unit/services/payment-driver-availability-guard.unit.test.js \
+  tests/unit/routes/payment-advance-availability.unit.test.js \
+  tests/unit/services/payment-service.payment-status-cache.unit.test.js \
+  tests/unit/services/payment-dispatch-service.unit.test.js \
+  tests/unit/bootstrap/register-socket-create-booking-handler.unit.test.js \
+  tests/unit/services/driver-approval-woovi-subaccount.unit.test.js
+```
+
+Result: `6` backend suites / `78` tests passed.
+
+```bash
+npm --prefix leaf-websocket-backend run test:unit -- --runInBand \
+  tests/unit/services/driver-notification-dispatcher.unit.test.js \
+  tests/unit/commands/RequestRideCommand.unit.test.js \
+  tests/unit/services/gradual-radius-expander.unit.test.js \
+  tests/unit/services/create-booking-availability-precheck.unit.test.js
+```
+
+Result: `4` backend suites / `35` tests passed.
+
+Additional local gates:
+
+- `git diff --check`: passed.
+- `npm run governance:check`: passed.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: passed.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`:
+  passed.
+- `LEAF_APPROVED_FINANCIAL_POLICY_ID=runtime_tiered_percent_above_50_v1
+  LEAF_FINANCIAL_POLICY_APPROVAL_REF=thread-2026-06-24-user-approved-current-tiered-policy
+  LEAF_FINANCIAL_POLICY_APPROVAL_ACTOR=izaak-dias npm --prefix
+  leaf-websocket-backend run config:validate`: passed with `ok=true`;
+  Firebase and Google Maps configured; only expected KYC strict-biometrics
+  warning remains.
+
+Interpretation:
+
+The no-driver payment race is closed locally at the backend contract boundary:
+payment creation, intent persistence, booking materialization, dispatch, and
+driver notification now share the same reservation proof. Real L2 still must
+prove the provider/webhook/device/dashboard path with an available driver,
+sandbox Woovi confirmation, same-ride receipt, and dispatch evidence.

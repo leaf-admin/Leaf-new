@@ -13,6 +13,9 @@ const {
   buildPaymentAvailabilityInput,
   hasPaymentEligibleDriver
 } = require('../services/payment-driver-availability-guard');
+const {
+  DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS
+} = require('../services/payment-driver-reservation-service');
 const { validateQuoteLock } = require('../services/quote-lock-service');
 const { logStructured, logError } = require('../utils/logger');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
@@ -747,6 +750,16 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
 
     const availability = await hasPaymentEligibleDriver({
       ...availabilityInput,
+      reserveDriver: true,
+      reservationTtlSeconds: DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS,
+      reservationContext: {
+        passengerId,
+        rideId: rideId || null,
+        paymentSessionId: paymentSessionId || null,
+        paymentContextKey: paymentContextKey || null,
+        quoteSessionId: quoteSessionId || null,
+        quoteLockId: quoteLockValidation?.quoteLock?.quoteLockId || quoteLockId || null
+      },
       logStructured,
       logContext: {
         service: 'payment-routes',
@@ -776,6 +789,15 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       });
     }
 
+    if (!availability.reservationId) {
+      return res.status(503).json({
+        success: false,
+        error: 'Não foi possível reservar motorista antes do Pix. Tente novamente em instantes.',
+        code: 'PAYMENT_DRIVER_RESERVATION_FAILED',
+        radiusKm: availability.radiusKm || null
+      });
+    }
+
     const discountValidation = await validatePassengerDiscountPayload({
       passengerId,
       amount: authoritativeAmountInCents,
@@ -797,6 +819,10 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       quoteSessionId,
       quoteLockId: quoteLockValidation?.quoteLock?.quoteLockId || quoteLockId || null,
       quoteLockSnapshot: quoteLockValidation?.quoteLock || null,
+      paymentDriverReservationId: availability.reservationId,
+      paymentDriverReservationDriverId: availability.driverId || null,
+      paymentDriverReservationExpiresAt: availability.reservationExpiresAt || null,
+      paymentDriverReservationTtlSeconds: availability.reservationTtlSeconds || DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS,
       rideDetails,
       pickupLocation: availabilityInput.pickupLocation,
       destinationLocation: availabilityInput.destinationLocation,

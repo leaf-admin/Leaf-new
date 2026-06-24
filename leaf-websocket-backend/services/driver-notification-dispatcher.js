@@ -31,6 +31,10 @@ const {
     hasRideDispatchPreferences
 } = require('./ride-dispatch-preference-service');
 const driverEligibilityService = require('./driver-eligibility-service');
+const {
+    getDriverPaymentReservation,
+    reservationMatchesContext
+} = require('./payment-driver-reservation-service');
 
 const DISPATCHABLE_SEARCH_STATES = new Set([
     'PENDING',
@@ -491,6 +495,13 @@ class DriverNotificationDispatcher {
                 rideRequirements.vehicleCategory ||
                 null;
             const shouldApplyDriverEligibility = Boolean(requestedCategory);
+            const paymentReservationContext = {
+                bookingId,
+                rideId: bookingData?.paymentReferenceRideId,
+                paymentSessionId: bookingData?.paymentSessionId,
+                quoteLockId: bookingData?.paymentQuoteLockId,
+                reservationId: bookingData?.paymentDriverReservationId
+            };
 
             // 3. Buscar dados completos e calcular scores
             const scoredDrivers = [];
@@ -531,6 +542,15 @@ class DriverNotificationDispatcher {
                 if (lockBookingId && lockBookingId !== bookingId) {
                     logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado: possui lock para outra corrida (${lockBookingId})`);
                     continue; // Motorista ocupado com outra corrida
+                }
+
+                const paymentReservation = await getDriverPaymentReservation(this.redis, driverId);
+                if (
+                    paymentReservation &&
+                    !reservationMatchesContext(paymentReservation, paymentReservationContext)
+                ) {
+                    logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado: reservado para outro pagamento`);
+                    continue;
                 }
 
                 let driverData = null;

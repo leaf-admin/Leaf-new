@@ -238,6 +238,22 @@ class RequestRideCommand extends Command {
                     this.paymentData?.quoteLockId ||
                     ''
                 ).trim();
+                const paymentDriverReservationId = String(
+                    this.paymentData?.paymentDriverReservationId ||
+                    ''
+                ).trim();
+                const paymentDriverReservationDriverId = String(
+                    this.paymentData?.paymentDriverReservationDriverId ||
+                    ''
+                ).trim();
+                const paymentDriverReservationExpiresAt = String(
+                    this.paymentData?.paymentDriverReservationExpiresAt ||
+                    ''
+                ).trim();
+                const paymentDriverReservationTtlSeconds = Number.parseInt(
+                    String(this.paymentData?.paymentDriverReservationTtlSeconds || ''),
+                    10
+                );
                 const parsedPaymentAmountInCents = Number.parseInt(
                     String(this.paymentData?.amountInCents ?? ''),
                     10
@@ -347,6 +363,14 @@ class RequestRideCommand extends Command {
                     paymentGrossAmountInCents: paymentGrossAmountInCents || '',
                     paymentQuoteSessionId,
                     paymentQuoteLockId,
+                    paymentDriverReservationId,
+                    paymentDriverReservationDriverId,
+                    paymentDriverReservationExpiresAt,
+                    paymentDriverReservationTtlSeconds:
+                        Number.isFinite(paymentDriverReservationTtlSeconds) &&
+                        paymentDriverReservationTtlSeconds > 0
+                            ? paymentDriverReservationTtlSeconds
+                            : '',
                     paymentConfirmedAt,
                     preferences: { ...(this.preferences || {}) },
                     femaleDriverOnly: this.preferences?.femaleDriverOnly === true ||

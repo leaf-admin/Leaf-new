@@ -53,6 +53,10 @@ function resolveIncomingPaymentBinding(data = {}) {
             paymentData.quoteLockId ||
             data.quoteLockId
         ),
+        paymentDriverReservationId: normalizeText(
+            paymentData.paymentDriverReservationId ||
+            data.paymentDriverReservationId
+        ),
         payableAmountInCents: normalizeQuoteAmountCents(
             paymentData.amountInCents ??
             data.paymentAmountInCents ??
@@ -134,6 +138,21 @@ function validateAdvancePaymentIntentBinding({
             success: false,
             code: 'PAYMENT_INTENT_CONTEXT_MISMATCH',
             message: 'O contexto de pagamento não confere com a corrida.'
+        };
+    }
+
+    const expectedPaymentDriverReservationId = normalizeText(
+        advancePaymentIntent.paymentDriverReservationId
+    );
+    if (
+        expectedPaymentDriverReservationId &&
+        incoming.paymentDriverReservationId &&
+        incoming.paymentDriverReservationId !== expectedPaymentDriverReservationId
+    ) {
+        return {
+            success: false,
+            code: 'PAYMENT_DRIVER_RESERVATION_MISMATCH',
+            message: 'A reserva de motorista do pagamento não confere com esta corrida.'
         };
     }
 
@@ -228,6 +247,10 @@ function validateAdvancePaymentIntentBinding({
             paymentContextKey: expectedPaymentContextKey || incoming.paymentContextKey || null,
             quoteSessionId: expectedQuoteSessionId || incoming.quoteSessionId || null,
             quoteLockId: expectedQuoteLockId || incoming.quoteLockId || null,
+            paymentDriverReservationId: expectedPaymentDriverReservationId || incoming.paymentDriverReservationId || null,
+            paymentDriverReservationDriverId: normalizeText(advancePaymentIntent.paymentDriverReservationDriverId) || null,
+            paymentDriverReservationExpiresAt: normalizeText(advancePaymentIntent.paymentDriverReservationExpiresAt) || null,
+            paymentDriverReservationTtlSeconds: advancePaymentIntent.paymentDriverReservationTtlSeconds || null,
             payableAmountInCents: expectedPayableAmountInCents || incomingPayableAmountInCents || null,
             grossAmountInCents: expectedGrossAmountInCents || incoming.grossAmountInCents || null,
             routeSignature: expectedRouteSignature || incomingRouteSignature || null
@@ -862,6 +885,70 @@ function registerSocketCreateBookingHandler({
                         resolvedPaymentAmountInCents = paymentIntentBinding.payableAmountInCents;
                     }
 
+                    let paymentDriverReservation = null;
+                    if (hasConfirmedPayment && advancePaymentIntent?.found) {
+                        const paymentDriverReservationId = normalizeText(
+                            paymentIntentBinding.paymentDriverReservationId ||
+                            advancePaymentIntent.paymentDriverReservationId ||
+                            data?.paymentData?.paymentDriverReservationId ||
+                            data?.paymentDriverReservationId
+                        );
+
+                        if (!paymentDriverReservationId) {
+                            socket.emit('bookingError', {
+                                error: 'Reserva de motorista ausente',
+                                message: 'Atualize a cotação e gere um novo Pix para confirmar disponibilidade antes do pagamento.',
+                                code: 'PAYMENT_DRIVER_RESERVATION_REQUIRED',
+                                retryAfterSec: 0
+                            });
+                            recordFailure('active_guard', 'payment_driver_reservation_required');
+                            return;
+                        }
+
+                        try {
+                            const {
+                                validatePaymentDriverReservation
+                            } = require('../services/payment-driver-reservation-service');
+                            const redis = redisPool.getConnection();
+                            const reservationValidation = await validatePaymentDriverReservation({
+                                redis,
+                                reservationId: paymentDriverReservationId,
+                                passengerId: customerId,
+                                rideId: paymentReferenceRideId,
+                                paymentSessionId: paymentIntentBinding.paymentSessionId,
+                                quoteLockId: paymentIntentBinding.quoteLockId
+                            });
+
+                            if (!reservationValidation.success) {
+                                socket.emit('bookingError', {
+                                    error: 'Reserva de motorista expirada',
+                                    message: 'A reserva do motorista expirou ou não confere com este pagamento. Gere um novo Pix.',
+                                    code: reservationValidation.code || 'PAYMENT_DRIVER_RESERVATION_INVALID',
+                                    retryAfterSec: 0
+                                });
+                                recordFailure('active_guard', reservationValidation.code || 'payment_driver_reservation_invalid');
+                                return;
+                            }
+
+                            paymentDriverReservation = reservationValidation.reservation;
+                        } catch (reservationError) {
+                            logStructured('warn', 'Falha ao validar reserva de motorista antes do createBooking', {
+                                userId,
+                                eventType: 'createBooking',
+                                paymentDriverReservationId,
+                                error: reservationError.message
+                            });
+                            socket.emit('bookingError', {
+                                error: 'Reserva de motorista indisponível',
+                                message: 'Não foi possível validar a reserva do motorista agora. Tente novamente em instantes.',
+                                code: 'PAYMENT_DRIVER_RESERVATION_CHECK_FAILED',
+                                retryAfterSec: 2
+                            });
+                            recordFailure('active_guard', 'payment_driver_reservation_check_failed');
+                            return;
+                        }
+                    }
+
                     if (!hasConfirmedPayment) {
                         normalizedPaymentStatus = 'pending_payment';
                     }
@@ -1256,7 +1343,16 @@ function registerSocketCreateBookingHandler({
                     if (paymentReferenceRideId) {
                         commandPaymentData.rideId = paymentReferenceRideId;
                     }
-                    ['paymentSessionId', 'paymentContextKey', 'quoteSessionId', 'quoteLockId'].forEach((key) => {
+                    [
+                        'paymentSessionId',
+                        'paymentContextKey',
+                        'quoteSessionId',
+                        'quoteLockId',
+                        'paymentDriverReservationId',
+                        'paymentDriverReservationDriverId',
+                        'paymentDriverReservationExpiresAt',
+                        'paymentDriverReservationTtlSeconds'
+                    ].forEach((key) => {
                         if (!commandPaymentData[key] && paymentIntentBinding[key]) {
                             commandPaymentData[key] = paymentIntentBinding[key];
                         }
@@ -1678,6 +1774,28 @@ function registerSocketCreateBookingHandler({
                                         chargeId: paymentChargeId
                                     })
                                     : false;
+                                let paymentDriverReservationConsumed = false;
+                                if (paymentDriverReservation?.reservationId) {
+                                    try {
+                                        const {
+                                            consumePaymentDriverReservationForBooking
+                                        } = require('../services/payment-driver-reservation-service');
+                                        const redis = redisPool.getConnection();
+                                        const consumeResult = await consumePaymentDriverReservationForBooking({
+                                            redis,
+                                            reservationId: paymentDriverReservation.reservationId,
+                                            bookingId
+                                        });
+                                        paymentDriverReservationConsumed = Boolean(consumeResult?.success);
+                                    } catch (reservationConsumeError) {
+                                        logStructured('warn', 'createBooking: falha ao consumir reserva de motorista para booking', {
+                                            bookingId,
+                                            eventType: 'createBooking',
+                                            paymentDriverReservationId: paymentDriverReservation.reservationId,
+                                            error: reservationConsumeError.message
+                                        });
+                                    }
+                                }
 
                                 logStructured('info', 'createBooking: pagamento materializado para booking canônico', {
                                     bookingId,
@@ -1688,7 +1806,8 @@ function registerSocketCreateBookingHandler({
                                     temporaryRideId: paymentReferenceRideId || null,
                                     chargeId: paymentChargeId || null,
                                     amountInCents: materializeResult?.amountInCents || null,
-                                    intentConsumed
+                                    intentConsumed,
+                                    paymentDriverReservationConsumed
                                 });
 
                                 const dispatchResult = await paymentDispatchService.triggerDispatchAfterPayment({

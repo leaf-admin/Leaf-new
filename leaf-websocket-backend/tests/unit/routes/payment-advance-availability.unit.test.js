@@ -103,6 +103,19 @@ const validPaymentPayload = {
   }
 };
 
+function buildAvailableDriver(overrides = {}) {
+  return {
+    success: true,
+    hasDrivers: true,
+    code: 'DRIVER_RESERVED_FOR_PAYMENT',
+    driverId: 'driver-1',
+    reservationId: 'pdr_reservation_1',
+    reservationExpiresAt: '2026-06-24T20:00:00.000Z',
+    reservationTtlSeconds: 180,
+    ...overrides
+  };
+}
+
 describe('payment advance availability guard', () => {
   beforeEach(() => {
     mockVerifyIdToken.mockReset();
@@ -202,12 +215,7 @@ describe('payment advance availability guard', () => {
 
   it('continues Pix creation only after availability is confirmed', async () => {
     const app = createApp();
-    mockHasPaymentEligibleDriver.mockResolvedValue({
-      success: true,
-      hasDrivers: true,
-      code: 'DRIVERS_AVAILABLE',
-      driverId: 'driver-1'
-    });
+    mockHasPaymentEligibleDriver.mockResolvedValue(buildAvailableDriver());
     mockProcessAdvancePayment.mockResolvedValue({
       success: true,
       chargeId: 'charge-1',
@@ -230,12 +238,22 @@ describe('payment advance availability guard', () => {
         pickupLocation: validPaymentPayload.pickupLocation,
         destinationLocation: validPaymentPayload.destinationLocation,
         carType: 'Leaf Plus',
-        preferences: validPaymentPayload.preferences
+        preferences: validPaymentPayload.preferences,
+        paymentDriverReservationId: 'pdr_reservation_1',
+        paymentDriverReservationDriverId: 'driver-1',
+        paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+        paymentDriverReservationTtlSeconds: 180
       })
     );
+    expect(mockHasPaymentEligibleDriver).toHaveBeenCalledWith(expect.objectContaining({
+      reserveDriver: true,
+      reservationContext: expect.objectContaining({
+        passengerId: 'passenger-1'
+      })
+    }));
   });
 
-  it('returns a stable code and logs when the payment service refuses Pix creation', async () => {
+  it('blocks Pix creation when availability does not produce a driver reservation', async () => {
     const app = createApp();
     mockHasPaymentEligibleDriver.mockResolvedValue({
       success: true,
@@ -243,6 +261,23 @@ describe('payment advance availability guard', () => {
       code: 'DRIVERS_AVAILABLE',
       driverId: 'driver-1'
     });
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .set('Authorization', 'Bearer passenger-token')
+      .send(validPaymentPayload);
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'PAYMENT_DRIVER_RESERVATION_FAILED'
+    });
+    expect(mockProcessAdvancePayment).not.toHaveBeenCalled();
+  });
+
+  it('returns a stable code and logs when the payment service refuses Pix creation', async () => {
+    const app = createApp();
+    mockHasPaymentEligibleDriver.mockResolvedValue(buildAvailableDriver());
     mockProcessAdvancePayment.mockResolvedValue({
       success: false,
       error: 'Falha ao criar cobrança PIX',
@@ -312,12 +347,7 @@ describe('payment advance availability guard', () => {
 
   it('passes the locked amount and quote lock metadata into Pix creation', async () => {
     const app = createApp();
-    mockHasPaymentEligibleDriver.mockResolvedValue({
-      success: true,
-      hasDrivers: true,
-      code: 'DRIVERS_AVAILABLE',
-      driverId: 'driver-1'
-    });
+    mockHasPaymentEligibleDriver.mockResolvedValue(buildAvailableDriver());
     mockProcessAdvancePayment.mockResolvedValue({
       success: true,
       chargeId: 'charge-1',
@@ -351,7 +381,9 @@ describe('payment advance availability guard', () => {
       quoteLockId: 'ql_valid_1',
       quoteLockSnapshot: expect.objectContaining({
         quoteLockId: 'ql_valid_1'
-      })
+      }),
+      paymentDriverReservationId: 'pdr_reservation_1',
+      paymentDriverReservationDriverId: 'driver-1'
     }));
   });
 });

@@ -20,6 +20,10 @@ function getRideDispatchPreferenceService() {
   return require('./ride-dispatch-preference-service');
 }
 
+function getPaymentDriverReservationService() {
+  return require('./payment-driver-reservation-service');
+}
+
 function normalizeFiniteNumber(value) {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -103,6 +107,9 @@ async function hasPaymentEligibleDriver({
   radiusKm = DEFAULT_RADIUS_KM,
   limit = DEFAULT_LIMIT,
   eligibleGeoKey = ELIGIBLE_DRIVER_GEO_KEY,
+  reserveDriver = false,
+  reservationContext = {},
+  reservationTtlSeconds = null,
   logStructured = () => {},
   logContext = {}
   } = {}) {
@@ -124,6 +131,11 @@ async function hasPaymentEligibleDriver({
     const driverLockManager = getDriverLockManager();
     const driverEligibilityService = getDriverEligibilityService();
     const { driverMatchesRidePreferences } = getRideDispatchPreferenceService();
+    const {
+      getDriverPaymentReservation,
+      reservePaymentDriver,
+      reservationMatchesContext
+    } = getPaymentDriverReservationService();
 
     await redisPool.ensureConnection();
     const redisClient = redis || redisPool.getConnection();
@@ -154,6 +166,7 @@ async function hasPaymentEligibleDriver({
     let eligible = 0;
     const rejections = {
       locked: 0,
+      paymentReserved: 0,
       missingState: 0,
       offlineOrIneligible: 0,
       preferenceMismatch: 0,
@@ -162,6 +175,12 @@ async function hasPaymentEligibleDriver({
     for (const driverEntry of nearbyDrivers) {
       const driverId = Array.isArray(driverEntry) ? driverEntry[0] : driverEntry;
       if (!driverId) continue;
+
+      const paymentReservation = await getDriverPaymentReservation(redisClient, driverId);
+      if (paymentReservation && !reservationMatchesContext(paymentReservation, reservationContext)) {
+        rejections.paymentReserved += 1;
+        continue;
+      }
 
       const lockStatus = await driverLockManager.isDriverLocked(driverId);
       if (lockStatus?.isLocked) {
@@ -201,6 +220,43 @@ async function hasPaymentEligibleDriver({
       }
 
       eligible += 1;
+      if (reserveDriver) {
+        const reservationResult = await reservePaymentDriver({
+          redis: redisClient,
+          driverId,
+          passengerId: reservationContext.passengerId,
+          rideId: reservationContext.rideId,
+          paymentSessionId: reservationContext.paymentSessionId,
+          paymentContextKey: reservationContext.paymentContextKey,
+          quoteSessionId: reservationContext.quoteSessionId,
+          quoteLockId: reservationContext.quoteLockId,
+          pickupLocation: normalizedPickup,
+          destinationLocation: normalizedDestination,
+          carType,
+          ttlSeconds: reservationTtlSeconds
+        });
+
+        if (!reservationResult.success) {
+          rejections.paymentReserved += 1;
+          continue;
+        }
+
+        return {
+          success: true,
+          hasDrivers: true,
+          code: 'DRIVER_RESERVED_FOR_PAYMENT',
+          candidates: nearbyDrivers.length,
+          eligible,
+          rejections,
+          radiusKm: safeRadiusKm,
+          driverId,
+          reservationId: reservationResult.reservationId,
+          reservationExpiresAt: reservationResult.expiresAtIso,
+          reservationTtlSeconds: reservationResult.ttlSeconds,
+          reservation: reservationResult.reservation
+        };
+      }
+
       return {
         success: true,
         hasDrivers: true,
