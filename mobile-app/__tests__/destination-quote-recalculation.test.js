@@ -111,6 +111,10 @@ jest.mock("../src/components/payment/WooviPaymentModal", () => {
           {Number(estimates?.estimateFare ?? tripData?.estimatedFare).toFixed(2)}
         </Text>
         <Text testID="mock-pix-quote-lock-id">{quoteLockId || "no-lock"}</Text>
+        <Text testID="mock-pix-pickup-lat">{String(tripData?.pickup?.lat ?? "")}</Text>
+        <Text testID="mock-pix-pickup-lng">{String(tripData?.pickup?.lng ?? "")}</Text>
+        <Text testID="mock-pix-drop-lat">{String(tripData?.drop?.lat ?? "")}</Text>
+        <Text testID="mock-pix-car-type">{String(tripData?.carType ?? "")}</Text>
         <TouchableOpacity
           testID="mock-confirm-pix"
           onPress={() =>
@@ -847,6 +851,48 @@ describe("RobotaxiDestinationScreen", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("mock-pix-amount").props.children).toBe("83.40");
+      expect(screen.getByTestId("mock-pix-pickup-lat").props.children).toBe(
+        "-22.920816",
+      );
+      expect(screen.getByTestId("mock-pix-pickup-lng").props.children).toBe(
+        "-43.405979",
+      );
+      expect(screen.getByTestId("mock-pix-drop-lat").props.children).toBe(
+        "-22.9985",
+      );
+      expect(screen.getByTestId("mock-pix-car-type").props.children).toBe(
+        "Leaf Plus",
+      );
+    });
+
+    fireEvent.press(screen.getByTestId("mock-confirm-pix"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("passenger-preference-countdown-modal")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId("passenger-preference-confirm-button"));
+
+    await waitFor(() => {
+      expect(runtimeSnapshot.requestRide).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pickupLocation: expect.objectContaining({
+            lat: -22.920816,
+            lng: -43.405979,
+          }),
+          originCoordinate: expect.objectContaining({
+            latitude: -22.920816,
+            longitude: -43.405979,
+          }),
+          destination: expect.objectContaining({
+            coordinate: expect.objectContaining({
+              latitude: -22.9985,
+              longitude: -43.3594,
+            }),
+          }),
+          vehicle: "Leaf Plus",
+        }),
+      );
     });
   });
 

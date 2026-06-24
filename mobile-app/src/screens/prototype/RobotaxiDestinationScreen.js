@@ -451,12 +451,15 @@ function normalizeInitialPricingQuote(value) {
   const quoteLockExpiresAtMs = Date.parse(
     String(value.quoteLockExpiresAt || rawQuote.quoteLockExpiresAt || ""),
   );
+  const quoteRouteSnapshot = resolveQuoteRouteSnapshot(value) ||
+    resolveQuoteRouteSnapshot(rawQuote);
 
   return {
     quote: {
       ...rawQuote,
       estimatedFare,
       grossEstimatedFare,
+      quoteRouteSnapshot,
     },
     carType: String(value.carType || rawQuote.carType || "").trim() || null,
     planId:
@@ -471,6 +474,7 @@ function normalizeInitialPricingQuote(value) {
       String(value.quoteLockExpiresAt || rawQuote.quoteLockExpiresAt || "").trim() ||
       null,
     routeKey: String(value.routeKey || "").trim(),
+    quoteRouteSnapshot,
     distanceKm: normalizeLockedQuoteNumber(value.distanceKm),
     durationMin: normalizeLockedQuoteNumber(value.durationMin),
     arrivalTime: String(value.arrivalTime || "").trim(),
@@ -520,6 +524,12 @@ function buildPaymentQuoteLockFromInitialPricingQuote(initialPricingQuote) {
       initialPricingQuote.quoteLockExpiresAt ||
       initialPricingQuote.quote.quoteLockExpiresAt ||
       null,
+    quoteRouteSnapshot: initialPricingQuote.quoteRouteSnapshot || null,
+    pickupLocation:
+      initialPricingQuote.quoteRouteSnapshot?.pickupLocation || null,
+    destinationLocation:
+      initialPricingQuote.quoteRouteSnapshot?.destinationLocation || null,
+    carType: initialPricingQuote.quoteRouteSnapshot?.carType || null,
     pricingQuoteRequestKey: null,
   };
 }
@@ -543,12 +553,16 @@ function buildReadyPaymentQuoteLock({
   selectedGrossEstimatedFare,
   selectedDiscountBenefit,
   selectedPricingQuoteRequestKey,
+  selectedPlanCarType,
 }) {
   const fare = Number(selectedPlanFare);
   if (!Number.isFinite(fare) || fare <= 0) {
     return null;
   }
 
+  const quoteRouteSnapshot =
+    resolveQuoteRouteSnapshot(selectedPricingQuote) ||
+    resolveQuoteRouteSnapshot(fareQuoteLock);
   const candidate = {
     fare,
     grossEstimatedFare:
@@ -569,6 +583,10 @@ function buildReadyPaymentQuoteLock({
       selectedPricingQuote?.quoteLockExpiresAt ||
       fareQuoteLock?.quoteLockExpiresAt ||
       null,
+    quoteRouteSnapshot,
+    pickupLocation: quoteRouteSnapshot?.pickupLocation || null,
+    destinationLocation: quoteRouteSnapshot?.destinationLocation || null,
+    carType: quoteRouteSnapshot?.carType || selectedPlanCarType || null,
     pricingQuoteRequestKey: selectedPricingQuoteRequestKey || null,
   };
 
@@ -598,6 +616,76 @@ function buildPickupLocationPayload(coordinate, address) {
     add: resolvedAddress,
     address: resolvedAddress,
   };
+}
+
+function normalizeLockedRouteLocation(value) {
+  const latitude = Number(value?.latitude ?? value?.lat);
+  const longitude = Number(value?.longitude ?? value?.lng);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  const resolvedAddress = resolveMeaningfulAddress(
+    value?.address || value?.add || value?.name || "",
+    "",
+  );
+
+  return {
+    lat: latitude,
+    lng: longitude,
+    latitude,
+    longitude,
+    add: resolvedAddress,
+    address: resolvedAddress,
+  };
+}
+
+function normalizeQuoteRouteSnapshot(value = null) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const pickupLocation = normalizeLockedRouteLocation(value.pickupLocation);
+  const destinationLocation = normalizeLockedRouteLocation(
+    value.destinationLocation,
+  );
+  const carType = String(value.carType || "").trim();
+
+  if (!pickupLocation || !destinationLocation || !carType) {
+    return null;
+  }
+
+  return {
+    pickupLocation,
+    destinationLocation,
+    carType,
+  };
+}
+
+function buildQuoteRouteSnapshot({
+  pickupLocation,
+  destinationLocation,
+  carType,
+} = {}) {
+  return normalizeQuoteRouteSnapshot({
+    pickupLocation,
+    destinationLocation,
+    carType,
+  });
+}
+
+function resolveQuoteRouteSnapshot(value = null) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return normalizeQuoteRouteSnapshot(
+    value.quoteRouteSnapshot ||
+      value.routeSnapshot ||
+      value.lockedRouteSnapshot ||
+      value.paymentRouteSnapshot,
+  );
 }
 
 function resolveInitialPickupCoordinate(params = {}) {
@@ -1983,18 +2071,25 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     setPricingQuoteLoading(true);
     setPricingQuoteError("");
 
+    const pricingPickupLocation = buildPickupLocationPayload(
+      { latitude: originLatitude, longitude: originLongitude },
+      resolvedPickupAddress,
+    );
+    const pricingDestinationLocation = normalizeLockedRouteLocation({
+      lat: destinationLatitude,
+      lng: destinationLongitude,
+      add: destinationInfo?.address || destinationInfo?.name || "Destino",
+    });
+    const pricingRouteSnapshot = buildQuoteRouteSnapshot({
+      pickupLocation: pricingPickupLocation,
+      destinationLocation: pricingDestinationLocation,
+      carType: selectedPlanData.title,
+    });
+
     fetchDynamicPricingQuote(
       {
-        pickupLocation: {
-          lat: originLatitude,
-          lng: originLongitude,
-          add: resolvedPickupAddress,
-        },
-        destinationLocation: {
-          lat: destinationLatitude,
-          lng: destinationLongitude,
-          add: destinationInfo?.address || destinationInfo?.name || "Destino",
-        },
+        pickupLocation: pricingPickupLocation,
+        destinationLocation: pricingDestinationLocation,
         carType: selectedPlanData.title,
         routeDistanceKm: distanceKm,
         routeDurationSecs: Math.max(60, Math.round(durationMin * 60)),
@@ -2019,6 +2114,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               quoteFare > 0 &&
               hasValidBackendQuoteLock(normalizedQuote),
           );
+          const normalizedQuoteWithSnapshot = normalizedQuote
+            ? {
+                ...normalizedQuote,
+                quoteRouteSnapshot: pricingRouteSnapshot,
+              }
+            : null;
+
           if (!hasLockedBackendQuote) {
             selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
               quote: null,
@@ -2032,12 +2134,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           }
 
           selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
-            quote: normalizedQuote,
+            quote: normalizedQuoteWithSnapshot,
             expiresAt:
               Number(fareQuoteLock?.expiresAt) ||
               Date.now() + PASSENGER_QUOTE_VALIDITY_MS,
           };
-          setSelectedPricingQuote(normalizedQuote);
+          setSelectedPricingQuote(normalizedQuoteWithSnapshot);
         }
       })
       .catch((error) => {
@@ -2629,15 +2731,53 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
+      const nextPaymentQuoteLock = buildReadyPaymentQuoteLock({
+        selectedPricingQuote,
+        fareQuoteLock,
+        selectedPlanFare,
+        selectedGrossEstimatedFare,
+        selectedDiscountBenefit,
+        selectedPricingQuoteRequestKey,
+        selectedPlanCarType: selectedPlanData.title,
+      });
+
+      if (!nextPaymentQuoteLock) {
+        setPaymentQuoteLock(null);
+        setAvailabilityNotice(
+          "Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.",
+        );
+        return;
+      }
+
+      const lockedPickupLocation =
+        nextPaymentQuoteLock.pickupLocation || pickupLocationPayload;
+      const lockedDestinationLocation =
+        nextPaymentQuoteLock.destinationLocation ||
+        normalizeLockedRouteLocation({
+          lat: destinationCoordinate?.latitude,
+          lng: destinationCoordinate?.longitude,
+          add: destinationInfo?.address || destinationInfo?.name || "Destino",
+        });
+      const lockedOriginCoordinate =
+        normalizePreviewCoordinate(lockedPickupLocation) ||
+        resolvedPickupCoordinate;
+      const lockedDestinationCoordinate =
+        normalizePreviewCoordinate(lockedDestinationLocation) ||
+        destinationCoordinate;
+
       const availabilityPayload = {
         destination: {
           name: destinationInfo?.name || "Destino",
-          address: destinationInfo?.address || "",
-          coordinate: destinationCoordinate,
+          address:
+            lockedDestinationLocation?.address ||
+            lockedDestinationLocation?.add ||
+            destinationInfo?.address ||
+            "",
+          coordinate: lockedDestinationCoordinate,
         },
-        vehicle: selectedPlanData.title,
-        pickupLocation: pickupLocationPayload,
-        originCoordinate: resolvedPickupCoordinate,
+        vehicle: nextPaymentQuoteLock.carType || selectedPlanData.title,
+        pickupLocation: lockedPickupLocation,
+        originCoordinate: lockedOriginCoordinate,
         preferences: ridePreferences,
       };
       const checkFinalAvailability = (attempt) =>
@@ -2681,23 +2821,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           });
           setPlanAvailabilityById(nextAvailability);
         }
-        return;
-      }
-
-      const nextPaymentQuoteLock = buildReadyPaymentQuoteLock({
-        selectedPricingQuote,
-        fareQuoteLock,
-        selectedPlanFare,
-        selectedGrossEstimatedFare,
-        selectedDiscountBenefit,
-        selectedPricingQuoteRequestKey,
-      });
-
-      if (!nextPaymentQuoteLock) {
-        setPaymentQuoteLock(null);
-        setAvailabilityNotice(
-          "Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.",
-        );
         return;
       }
 
@@ -2906,6 +3029,25 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           : Number.isFinite(fallbackFare) && fallbackFare > 0
             ? fallbackFare
             : selectedPlanFare;
+      const lockedPickupLocation =
+        paymentQuoteLock?.pickupLocation || pickupLocationPayload;
+      const lockedDestinationLocation =
+        paymentQuoteLock?.destinationLocation ||
+        normalizeLockedRouteLocation({
+          lat: destinationCoordinate?.latitude,
+          lng: destinationCoordinate?.longitude,
+          add: destinationInfo?.address || destinationInfo?.name || "Destino",
+        });
+      const lockedOriginCoordinate =
+        normalizePreviewCoordinate(lockedPickupLocation) ||
+        resolvedPickupCoordinate;
+      const lockedDestinationCoordinate =
+        normalizePreviewCoordinate(lockedDestinationLocation) ||
+        destinationCoordinate;
+      const lockedOriginAddress =
+        lockedPickupLocation?.address ||
+        lockedPickupLocation?.add ||
+        resolvedPickupAddress;
 
       if (submittingRideGuardRef.current || submittingRide) {
         return;
@@ -2939,13 +3081,17 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         await requestRide({
           destination: {
             name: destinationInfo?.name || "Destino",
-            address: destinationInfo?.address || "",
-            coordinate: destinationCoordinate,
+            address:
+              lockedDestinationLocation?.address ||
+              lockedDestinationLocation?.add ||
+              destinationInfo?.address ||
+              "",
+            coordinate: lockedDestinationCoordinate,
           },
-          originAddress: resolvedPickupAddress,
-          originCoordinate: resolvedPickupCoordinate,
-          pickupLocation: pickupLocationPayload,
-          vehicle: selectedPlanData.title,
+          originAddress: lockedOriginAddress,
+          originCoordinate: lockedOriginCoordinate,
+          pickupLocation: lockedPickupLocation,
+          vehicle: paymentQuoteLock?.carType || selectedPlanData.title,
           fare: confirmedFare,
           paymentMethod: "pix",
           paymentConfirmation,
@@ -2975,8 +3121,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           initialSelectedPlan: selectedPlan,
           selectedFare: confirmedFare,
           fare: confirmedFare,
-          originAddress: resolvedPickupAddress,
-          vehicle: selectedPlanData.title,
+          originAddress: lockedOriginAddress,
+          vehicle: paymentQuoteLock?.carType || selectedPlanData.title,
           autoAdvance: true,
         });
         setPaymentQuoteLock(null);
@@ -2991,8 +3137,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             error?.message || "Falha ao enviar a corrida para o servidor.",
           retryRouteName: "RobotaxiPrototypeDestination",
           retryParams: {
-            initialPickupCoordinate: resolvedPickupCoordinate,
-            initialPickupAddress: resolvedPickupAddress,
+            initialPickupCoordinate: lockedOriginCoordinate,
+            initialPickupAddress: lockedOriginAddress,
             initialPickupAdjustedOnMap: pickupAdjustedOnMap,
             initialSelectedDestination: destinationRoutePayload,
             initialSelectedPlan: selectedPlan,
@@ -3012,6 +3158,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       destinationRoutePayload,
       navigation,
       paymentQuoteLock?.fare,
+      paymentQuoteLock?.carType,
+      paymentQuoteLock?.destinationLocation,
+      paymentQuoteLock?.pickupLocation,
       profileUid,
       pickupAdjustedOnMap,
       pickupLocationPayload,
@@ -3315,6 +3464,17 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       }
     };
   }, [activeRole, qaConnectionAutomationConfig]);
+
+  const lockedPaymentPickupLocation =
+    paymentQuoteLock?.pickupLocation || pickupLocationPayload;
+  const lockedPaymentDestinationLocation =
+    paymentQuoteLock?.destinationLocation ||
+    normalizeLockedRouteLocation({
+      lat: destinationCoordinate?.latitude,
+      lng: destinationCoordinate?.longitude,
+      add: destinationInfo?.address || destinationInfo?.name || "Destino",
+    });
+  const lockedPaymentCarType = paymentQuoteLock?.carType || selectedPlanData.title;
 
   return (
     <PrototypeScreenTransition>
@@ -4268,20 +4428,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             onClose={handleClosePixModal}
             onPaymentConfirmed={handlePixPaymentConfirmed}
             tripData={{
-              pickup: {
-                add: resolvedPickupAddress,
-                lat: resolvedPickupCoordinate?.latitude,
-                lng: resolvedPickupCoordinate?.longitude,
-              },
-              drop: {
-                add:
-                  destinationInfo?.address ||
-                  destinationInfo?.name ||
-                  "Destino",
-                lat: destinationCoordinate?.latitude,
-                lng: destinationCoordinate?.longitude,
-              },
-              carType: selectedPlanData.title,
+              pickup: lockedPaymentPickupLocation,
+              drop: lockedPaymentDestinationLocation,
+              carType: lockedPaymentCarType,
               estimatedFare: lockedPaymentFare,
               grossEstimatedFare: lockedGrossEstimatedFare,
               preferences: ridePreferences,

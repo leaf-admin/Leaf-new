@@ -1658,22 +1658,40 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setHomeBackendQuoteLoading(true);
     setHomeBackendQuoteError('');
 
+    const homePricingPickupLocation = {
+      lat: effectiveHomePickupCoordinate.latitude,
+      lng: effectiveHomePickupCoordinate.longitude,
+      latitude: effectiveHomePickupCoordinate.latitude,
+      longitude: effectiveHomePickupCoordinate.longitude,
+      add: effectiveHomePickupAddress,
+      address: effectiveHomePickupAddress,
+    };
+    const homePricingDestinationLocation = {
+      lat: homeQuoteDestinationCoordinate.latitude,
+      lng: homeQuoteDestinationCoordinate.longitude,
+      latitude: homeQuoteDestinationCoordinate.latitude,
+      longitude: homeQuoteDestinationCoordinate.longitude,
+      add:
+        homeSelectedDestination.address ||
+        homeSelectedDestination.description ||
+        homeSelectedDestination.name ||
+        'Destino',
+      address:
+        homeSelectedDestination.address ||
+        homeSelectedDestination.description ||
+        homeSelectedDestination.name ||
+        'Destino',
+    };
+    const homeQuoteRouteSnapshot = {
+      pickupLocation: homePricingPickupLocation,
+      destinationLocation: homePricingDestinationLocation,
+      carType: selectedHomeRateCard.title,
+    };
+
     fetchDynamicPricingQuote(
       {
-        pickupLocation: {
-          lat: effectiveHomePickupCoordinate.latitude,
-          lng: effectiveHomePickupCoordinate.longitude,
-          add: effectiveHomePickupAddress,
-        },
-        destinationLocation: {
-          lat: homeQuoteDestinationCoordinate.latitude,
-          lng: homeQuoteDestinationCoordinate.longitude,
-          add:
-            homeSelectedDestination.address ||
-            homeSelectedDestination.description ||
-            homeSelectedDestination.name ||
-            'Destino',
-        },
+        pickupLocation: homePricingPickupLocation,
+        destinationLocation: homePricingDestinationLocation,
         carType: selectedHomeRateCard.title,
         routeDistanceKm: homeQuoteDistanceKm,
         routeDurationSecs: Math.max(60, Math.round(homeQuoteDurationMin * 60)),
@@ -1692,7 +1710,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         setHomeBackendQuote({
           key: homeBackendQuoteKey,
           quoteSessionId: homeBackendQuoteSessionId,
-          quote: quote && typeof quote === 'object' ? quote : null,
+          quote: quote && typeof quote === 'object'
+            ? {
+                ...quote,
+                quoteRouteSnapshot: homeQuoteRouteSnapshot,
+              }
+            : null,
+          routeSnapshot: homeQuoteRouteSnapshot,
           distanceKm: homeQuoteDistanceKm,
           durationMin: homeQuoteDurationMin,
           arrivalTime: homeArrivalTime,
@@ -5404,6 +5428,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         carType: selectedHomeRateCard.title,
         quoteSessionId: homeBackendQuote.quoteSessionId,
         routeKey: homeDestinationFareQuoteRouteKey,
+        quoteRouteSnapshot: homeBackendQuote.routeSnapshot,
         distanceKm: homeBackendQuote.distanceKm,
         durationMin: homeBackendQuote.durationMin,
         arrivalTime: homeBackendQuote.arrivalTime,
