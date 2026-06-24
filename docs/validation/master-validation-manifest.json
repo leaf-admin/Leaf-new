@@ -54,7 +54,7 @@
       "runner": "scripts/validation/run-wave3-ideal.sh",
       "scenarios": [
         { "id": "W3-001", "title": "Motorista online e elegível", "mode": "automated", "priority": "P0" },
-        { "id": "W3-002", "title": "Passageiro abre quote e paga via mock", "mode": "mixed", "priority": "P0" },
+        { "id": "W3-002", "title": "Passageiro abre quote e paga via sandbox Woovi por politica backend", "mode": "mixed", "priority": "P0" },
         { "id": "W3-003", "title": "Booking nasce com snapshot financeiro fixo", "mode": "automated", "priority": "P0" },
         { "id": "W3-004", "title": "Driver offer, aceite, chegada, início e conclusão", "mode": "mixed", "priority": "P0" },
         { "id": "W3-005", "title": "Receipt, rating e persistência final", "mode": "mixed", "priority": "P0" }
@@ -118,6 +118,21 @@
         { "id": "W8-UX-001", "title": "Design, tipografia, contraste e motion", "mode": "manual", "priority": "P1" },
         { "id": "W8-TIME-001", "title": "Timeout visual versus timeout real", "mode": "mixed", "priority": "P1" },
         { "id": "W8-ABUSE-001", "title": "Proteção contra taps, requests e eventos duplicados", "mode": "mixed", "priority": "P0" }
+      ]
+    },
+    {
+      "id": "wave9",
+      "title": "Fechamento de Prontidão de Produção",
+      "priority": "P0",
+      "runner": "scripts/validation/run-wave9-production-readiness.sh",
+      "reference": "docs/validation/PRODUCTION_READINESS_CORE_AUDIT_2026-06-21.md",
+      "scenarios": [
+        { "id": "W9-CORE-001", "title": "Baseline local completo sem warnings Firebase/Google e com KYC/FCM classificados", "mode": "automated", "priority": "P0" },
+        { "id": "W9-L2-001", "title": "Smoke L2 Android autorizado com passageiro idle, motorista elegível, geofence e sandbox antes do pagamento", "mode": "mixed", "priority": "P0" },
+        { "id": "W9-FIN-001", "title": "Reconciliação do mesmo rideId entre quote, Pix, recibo, dashboard, distribuição e ledger", "mode": "mixed", "priority": "P0" },
+        { "id": "W9-SOCKET-001", "title": "Replay Socket.IO de aceite, chegada, início, conclusão, rating, chat, relaunch e eventos atrasados", "mode": "mixed", "priority": "P0" },
+        { "id": "W9-KYC-001", "title": "KYC provider-backed com liveness/face compare, mismatch, manual review e retry", "mode": "mixed", "priority": "P0" },
+        { "id": "W9-FCM-001", "title": "Entrega FCM real e evidência de recebimento sem chamada direta do app ao provider", "mode": "mixed", "priority": "P0" }
       ]
     }
   ]

@@ -48,6 +48,10 @@ function looksRemoteWsUrl(wsUrl) {
   return false;
 }
 
+function profileRequiresRemoteCredentials(profile) {
+  return /(?:e2e|smoke|real|remote|capacity|stress)/i.test(String(profile || ''));
+}
+
 const wsUrl = String(process.env.WS_URL || 'https://socket.leaf.app.br').trim();
 const apiBaseUrl = String(process.env.API_BASE_URL || 'https://api.leaf.app.br').trim();
 const remoteSshHost = String(process.env.E2E_REMOTE_SSH_HOST || '(set E2E_REMOTE_SSH_HOST)').trim();
@@ -73,6 +77,17 @@ const gitDirty = Boolean(readCmd('git', ['status', '--porcelain']));
 const nodeVersion = process.version;
 
 const remoteMode = looksRemoteWsUrl(wsUrl);
+const remoteCredentialsRequired = remoteMode && profileRequiresRemoteCredentials(profileId);
+const firebaseTestCredentialPath = resolveExistingPath([
+  process.env.GOOGLE_APPLICATION_CREDENTIALS,
+  path.join(rootDir, 'leaf-websocket-backend', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json'),
+  path.join(rootDir, 'leaf-websocket-backend', 'firebase-credentials.json'),
+]);
+const firebaseTestCredentialConfigured = Boolean(
+  String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim() ||
+    String(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '').trim() ||
+    firebaseTestCredentialPath,
+);
 const warnings = [];
 const blockers = [];
 
@@ -80,18 +95,18 @@ if (appReview === 'true') {
   warnings.push('APP_REVIEW=true ativo. Isso altera autenticação/pagamento e pode mascarar falhas reais.');
 }
 
-if (remoteMode && !detectedSshKey) {
+if (remoteCredentialsRequired && !detectedSshKey) {
   const message = 'Execução remota detectada, mas nenhuma chave SSH Contabo foi encontrada.';
   warnings.push(message);
   blockers.push(message);
 }
 
-if (remoteMode && !String(process.env.E2E_REMOTE_REDIS_PASSWORD || '').trim()) {
+if (remoteCredentialsRequired && !String(process.env.E2E_REMOTE_REDIS_PASSWORD || '').trim()) {
   warnings.push('E2E_REMOTE_REDIS_PASSWORD não definido explicitamente (fallback local será usado).');
 }
 
-if (remoteMode && !String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim()) {
-  warnings.push('GOOGLE_APPLICATION_CREDENTIALS não definido. Geração de token Firebase pode falhar.');
+if (remoteCredentialsRequired && generateFirebaseToken !== 'false' && !firebaseTestCredentialConfigured) {
+  warnings.push('Credencial Firebase não encontrada para geração de token E2E.');
 }
 
 const line = '='.repeat(88);
@@ -112,6 +127,7 @@ console.log(`E2E_REMOTE_REDIS_PASSWORD: ${maskSecret(process.env.E2E_REMOTE_REDI
 console.log(`E2E_RUN_ID: ${runId}`);
 console.log(`E2E_DRIVER_SIM_MODE: ${driverSimMode}`);
 console.log(`E2E_GENERATE_FIREBASE_TOKEN: ${generateFirebaseToken}`);
+console.log(`FIREBASE_TEST_CREDENTIAL: ${firebaseTestCredentialConfigured ? 'configured' : 'unset'}`);
 console.log(`E2E_MOCK_PAYMENT: ${mockPayment}`);
 console.log(`APP_REVIEW: ${appReview}`);
 console.log(line);

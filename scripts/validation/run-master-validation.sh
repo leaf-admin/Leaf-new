@@ -55,6 +55,9 @@ for wave in "${SELECTED_WAVES[@]}"; do
     wave2)
       bash "${SCRIPT_DIR}/run-wave2-eligibility.sh" --run-dir "${RUN_DIR}" --label "${LABEL}"
       ;;
+    wave9)
+      bash "${SCRIPT_DIR}/run-wave9-production-readiness.sh" --run-dir "${RUN_DIR}" --label "${LABEL}"
+      ;;
     *)
       log "wave ${wave} has no automated runner yet; leaving as manual in tracker"
       ;;
@@ -75,6 +78,7 @@ Automated runners currently implemented:
 - wave1 auth/kyc
 - wave2 eligibility/geofence
 - wave3 ideal lifecycle
+- wave9 production-readiness closure
 "
 
 log "master validation ready: ${RUN_DIR}"
