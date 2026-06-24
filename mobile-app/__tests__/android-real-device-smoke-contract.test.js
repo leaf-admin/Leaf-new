@@ -109,6 +109,7 @@ describe('android real-device smoke runner contract', () => {
 
     expect(modal).toContain('payment-modal-error-diagnostics');
     expect(modal).toContain('payment-error:');
+    expect(modal).toContain('providerMessage');
     expect(runner).toContain('function extractPaymentErrorDiagnostics');
     expect(runner).toContain('paymentErrorDiagnostics');
     expect(runner).toContain('Payment error diagnostics');

@@ -65,6 +65,15 @@ function sanitizePaymentDiagnosticValue(value) {
 function buildPaymentErrorDiagnostics(error) {
     const response = error?.response || error?.originalError?.response || null;
     const responseData = response?.data || error?.response?.data || error?.originalError?.response?.data || {};
+    const providerDetails = responseData?.details && typeof responseData.details === 'object'
+        ? responseData.details
+        : {};
+    const providerData = providerDetails?.data && typeof providerDetails.data === 'object'
+        ? providerDetails.data
+        : {};
+    const providerFirstError = Array.isArray(providerData?.errors) && providerData.errors[0]
+        ? providerData.errors[0]
+        : {};
     const diagnostics = {
         status: error?.status || response?.status || null,
         code: error?.code || responseData?.code || responseData?.error?.code || null,
@@ -73,6 +82,11 @@ function buildPaymentErrorDiagnostics(error) {
         paymentProfileId: responseData?.paymentProfileId || null,
         paymentIntentId: responseData?.paymentIntentId || null,
         chargeId: responseData?.chargeId || null,
+        providerStatus: providerDetails?.status || providerData?.status || null,
+        providerStatusText: providerDetails?.statusText || providerData?.statusText || null,
+        providerCode: providerData?.code || providerFirstError?.code || providerDetails?.code || null,
+        providerError: providerData?.error || providerFirstError?.error || providerDetails?.error || null,
+        providerMessage: providerData?.message || providerFirstError?.message || providerDetails?.message || null,
     };
 
     return Object.entries(diagnostics).reduce((acc, [key, value]) => {
