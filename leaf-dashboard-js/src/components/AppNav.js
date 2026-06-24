@@ -49,7 +49,13 @@ const groups = [
       { href: "/promotions", label: "Promoções" },
       { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/financial-simulator", label: "Simulador", blockedRoles: ["support", "development"] },
+      {
+        href: "/financial-simulator",
+        label: "Simulador",
+        blockedRoles: ["support", "development"],
+        featureFlag: "financialSimulatorEnabled",
+        requireExplicitFeatureFlag: true,
+      },
       { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
     ],
   },
@@ -101,8 +107,17 @@ export default function AppNav() {
           ...group,
           items: group.items.filter((item) => {
             if (!canAccessItem(item, user)) return false;
-            if (item.featureFlag && runtimeFlags && !isLaunchFeatureEnabled(runtimeFlags, item.featureFlag)) {
-              return false;
+            if (item.featureFlag) {
+              const launchFlags =
+                runtimeFlags?.launch && typeof runtimeFlags.launch === "object"
+                  ? runtimeFlags.launch
+                  : {};
+              if (item.requireExplicitFeatureFlag) {
+                return launchFlags[item.featureFlag] === true;
+              }
+              if (runtimeFlags && !isLaunchFeatureEnabled(runtimeFlags, item.featureFlag)) {
+                return false;
+              }
             }
             return true;
           }),

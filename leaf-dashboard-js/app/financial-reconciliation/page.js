@@ -25,7 +25,15 @@ function formatDate(value) {
 }
 
 function formatMoneyCents(value) {
-  const numeric = Number(value || 0);
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return "--";
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "--";
+  }
+
   return (numeric / 100).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
@@ -55,8 +63,10 @@ function reportHasIssue(report, matcher) {
 
 function buildMoneyFlowChecklist(report, detail) {
   const totals = report?.totals || {};
-  const paymentAmount = Number(totals.paymentAmountCents || 0);
-  const distributionTotal = Number(totals.distributionTotalCents || 0);
+  const paymentAmount = Number(totals.paymentAmountCents);
+  const distributionTotal = Number(totals.distributionTotalCents);
+  const hasPaymentAmount = Number.isFinite(paymentAmount) && paymentAmount > 0;
+  const hasDistributionTotal = Number.isFinite(distributionTotal) && distributionTotal >= 0;
   const ledgerEventCount = Number(totals.ledgerEventCount || detail?.ledgerEvents?.length || 0);
   const paymentIssue = reportHasIssue(report, /PAYMENT|PIX|WOOVI/i);
   const holdingIssue = reportHasIssue(report, /HOLDING|ESCROW|RESERVE/i);
@@ -67,20 +77,35 @@ function buildMoneyFlowChecklist(report, detail) {
   return [
     {
       label: "Pagamento Pix",
-      status: paymentAmount > 0 && !paymentIssue ? "ok" : "attention",
-      value: formatMoneyCents(paymentAmount),
+      status: hasPaymentAmount && !paymentIssue ? "ok" : "attention",
+      value: formatMoneyCents(totals.paymentAmountCents),
       detail: paymentIssue ? "há divergência no pagamento" : "valor capturado para a corrida",
     },
     {
       label: "Holding backend",
-      status: !holdingIssue && paymentAmount >= distributionTotal ? "ok" : "attention",
-      value: paymentAmount >= distributionTotal ? "coberto" : "revisar",
+      status:
+        hasPaymentAmount &&
+        hasDistributionTotal &&
+        !holdingIssue &&
+        paymentAmount >= distributionTotal
+          ? "ok"
+          : "attention",
+      value:
+        hasPaymentAmount && hasDistributionTotal && paymentAmount >= distributionTotal
+          ? "coberto"
+          : "revisar",
       detail: "pagamento fica reservado até a corrida ser concluída",
     },
     {
       label: "Split e taxa Leaf",
-      status: !splitIssue && distributionTotal <= paymentAmount ? "ok" : "attention",
-      value: formatMoneyCents(distributionTotal),
+      status:
+        hasPaymentAmount &&
+        hasDistributionTotal &&
+        !splitIssue &&
+        distributionTotal <= paymentAmount
+          ? "ok"
+          : "attention",
+      value: formatMoneyCents(totals.distributionTotalCents),
       detail: splitIssue ? "split precisa de auditoria" : "distribuição reconciliada com o total pago",
     },
     {
@@ -350,6 +375,10 @@ export default function FinancialReconciliationPage() {
                     checkedAt: formatDate(selectedReport?.checkedAtIso || selectedReport?.checkedAt),
                     paymentAmount: formatMoneyCents(selectedReport?.totals?.paymentAmountCents),
                     distributionTotal: formatMoneyCents(selectedReport?.totals?.distributionTotalCents),
+                    passengerGross: formatMoneyCents(selectedReport?.totals?.passengerGrossCents),
+                    driverNetAmount: formatMoneyCents(selectedReport?.totals?.driverNetAmountCents),
+                    operationalFee: formatMoneyCents(selectedReport?.totals?.operationalFeeCents),
+                    wooviFee: formatMoneyCents(selectedReport?.totals?.wooviFeeCents),
                     ledgerEvents: selectedReport?.totals?.ledgerEventCount || detail?.ledgerEvents?.length || 0,
                   }}
                   labels={{
@@ -358,6 +387,10 @@ export default function FinancialReconciliationPage() {
                     checkedAt: "Última checagem",
                     paymentAmount: "Pagamento",
                     distributionTotal: "Distribuição",
+                    passengerGross: "Bruto passageiro",
+                    driverNetAmount: "Líquido motorista",
+                    operationalFee: "Taxa operacional Leaf",
+                    wooviFee: "Taxa Woovi",
                     ledgerEvents: "Eventos ledger",
                   }}
                 />

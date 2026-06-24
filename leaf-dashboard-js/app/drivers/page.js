@@ -24,7 +24,6 @@ export default function DriversPage() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -67,33 +66,6 @@ export default function DriversPage() {
     });
     return base;
   }, [applications]);
-
-  const approve = async (driverId) => {
-    if (!window.confirm("Aprovar motorista e todos os documentos?")) return;
-    try {
-      setBusyId(driverId);
-      await leafAPI.approveDriverApplication(driverId);
-      await load();
-    } catch (err) {
-      setError(err?.message || "Falha ao aprovar motorista");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const reject = async (driverId) => {
-    const reason = window.prompt("Motivo da rejeicao:");
-    if (!reason) return;
-    try {
-      setBusyId(driverId);
-      await leafAPI.rejectDriverApplication(driverId, [reason]);
-      await load();
-    } catch (err) {
-      setError(err?.message || "Falha ao rejeitar motorista");
-    } finally {
-      setBusyId(null);
-    }
-  };
 
   return (
     <ProtectedRoute>
@@ -177,7 +149,6 @@ export default function DriversPage() {
                   ) : (
                     applications.map((item, idx) => {
                       const itemId = item?.id;
-                      const isBusy = busyId === itemId;
                       const itemStatus = String(item?.status || "pending").toLowerCase();
                       const badgeClass = statusTone[itemStatus] || "status-warn";
 
@@ -198,12 +169,6 @@ export default function DriversPage() {
                           <td>
                             <div className="actions-cell">
                               {itemId ? <Link href={`/drivers/${itemId}/documents`}>Documentos</Link> : null}
-                              <button disabled={!itemId || isBusy} onClick={() => approve(itemId)}>
-                                Aprovar
-                              </button>
-                              <button disabled={!itemId || isBusy} onClick={() => reject(itemId)}>
-                                Rejeitar
-                              </button>
                             </div>
                           </td>
                         </tr>

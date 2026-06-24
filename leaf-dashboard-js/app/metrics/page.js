@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
@@ -10,6 +10,29 @@ import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid } from "@/src/components/ui/DataViews";
 
 const DASHBOARD_REFRESH_MS = 60000;
+
+function toNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function brlFromValue(value) {
+  return `R$ ${toNumber(value).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function normalizeFinancialMetrics(financial = {}) {
+  return {
+    totalRevenue: toNumber(financial.totalRevenue ?? financial.totalValue),
+    averageTicket: toNumber(financial.averageTicket ?? financial.averageValue),
+    totalRides: toNumber(financial.totalRides),
+    reconciledRides: toNumber(financial.reconciledRides),
+    pendingReconciliationRides: toNumber(financial.pendingReconciliationRides),
+    reserveFundLosses: toNumber(financial.reserveFundLosses),
+  };
+}
 
 export default function MetricsPage() {
   const [data, setData] = useState(null);
@@ -45,6 +68,11 @@ export default function MetricsPage() {
     };
   }, []);
 
+  const financialMetrics = useMemo(
+    () => normalizeFinancialMetrics(data?.financial || {}),
+    [data?.financial],
+  );
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -65,12 +93,12 @@ export default function MetricsPage() {
           />
           <KpiCard
             title="Receita"
-            value={`R$ ${Number(data?.financial?.totalRevenue || 0).toLocaleString("pt-BR")}`}
+            value={brlFromValue(financialMetrics.totalRevenue)}
             tone="positive"
           />
           <KpiCard
             title="Ticket Médio"
-            value={`R$ ${Number(data?.financial?.averageTicket || 0).toLocaleString("pt-BR")}`}
+            value={brlFromValue(financialMetrics.averageTicket)}
           />
         </section>
 
@@ -114,20 +142,21 @@ export default function MetricsPage() {
           </Panel>
           <Panel title="Financeiro">
             <KeyValueGrid
-              data={data?.financial || {}}
+              data={financialMetrics}
               labels={{
                 totalRevenue: "Receita total",
                 averageTicket: "Ticket médio",
                 totalRides: "Corridas contabilizadas",
-                subscriptionRevenue: "Receita de assinatura",
-                operationalCosts: "Custos operacionais",
+                reconciledRides: "Corridas reconciliadas",
+                pendingReconciliationRides: "Pendentes de reconciliação",
+                reserveFundLosses: "Perdas fundo reserva",
               }}
-              valueFormatter={(_, value) =>
-                `R$ ${Number(value || 0).toLocaleString("pt-BR", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}`
-              }
+              valueFormatter={(key, value) => {
+                if (["totalRevenue", "averageTicket", "reserveFundLosses"].includes(key)) {
+                  return brlFromValue(value);
+                }
+                return Number(value || 0).toLocaleString("pt-BR");
+              }}
             />
           </Panel>
           <Panel title="Distribuição de corridas (visual)">

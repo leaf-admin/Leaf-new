@@ -76,6 +76,125 @@ class LeafApiService {
     }
   }
 
+  parseDownloadFilename(contentDisposition = "") {
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1].replace(/^"|"$/g, ""));
+      } catch {
+        return utf8Match[1].replace(/^"|"$/g, "");
+      }
+    }
+
+    const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i);
+    if (quotedMatch?.[1]) return quotedMatch[1];
+
+    const plainMatch = contentDisposition.match(/filename=([^;]+)/i);
+    if (plainMatch?.[1]) return plainMatch[1].trim().replace(/^"|"$/g, "");
+
+    return "";
+  }
+
+  async requestFile(endpoint, options = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const externalSignal = options.signal;
+    const abortFromExternal = () => controller.abort();
+
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalSignal.addEventListener("abort", abortFromExternal, { once: true });
+      }
+    }
+
+    try {
+      const headers = {
+        Accept: "application/octet-stream",
+        ...(options.headers || {}),
+      };
+      const token = authService.getAccessToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      let response = await fetch(`${this.baseURL}${endpoint}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+
+      if (response.status === 401 && token) {
+        const renewed = await authService.refreshToken();
+        if (renewed) {
+          headers.Authorization = `Bearer ${renewed}`;
+          response = await fetch(`${this.baseURL}${endpoint}`, {
+            ...options,
+            headers,
+            signal: controller.signal,
+          });
+        }
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+
+      if (!response.ok) {
+        const payload = contentType.includes("application/json")
+          ? await response.json().catch(() => null)
+          : await response.text().catch(() => "");
+        const apiMessage =
+          (payload && typeof payload === "object" && (payload.error || payload.message)) ||
+          (typeof payload === "string" ? payload : "") ||
+          `API Error ${response.status}`;
+        const err = new Error(apiMessage);
+        err.status = response.status;
+        err.payload = payload;
+        throw err;
+      }
+
+      return {
+        blob: await response.blob(),
+        contentType,
+        filename: this.parseDownloadFilename(response.headers.get("content-disposition") || ""),
+      };
+    } finally {
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", abortFromExternal);
+      }
+      clearTimeout(timeout);
+    }
+  }
+
+  buildReportFilename(reportId, format = "pdf") {
+    const extension = format === "excel" ? "xlsx" : "pdf";
+    const safeReportId = String(reportId || "report")
+      .trim()
+      .replace(/[^a-z0-9_.-]+/gi, "-")
+      .replace(/^-+|-+$/g, "") || "report";
+    return `${safeReportId}.${extension}`;
+  }
+
+  async downloadReport(reportId, format = "pdf", options = {}) {
+    const normalizedFormat = String(format).toLowerCase() === "excel" ? "excel" : "pdf";
+    const accept =
+      normalizedFormat === "excel"
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream"
+        : "application/pdf,application/octet-stream";
+    const file = await this.requestFile(
+      `/reports/generate/${encodeURIComponent(reportId)}?format=${encodeURIComponent(normalizedFormat)}`,
+      {
+        ...options,
+        headers: {
+          Accept: accept,
+          ...(options.headers || {}),
+        },
+      },
+    );
+    return {
+      ...file,
+      filename: file.filename || this.buildReportFilename(reportId, normalizedFormat),
+    };
+  }
+
   isSupportOrchestratorEnabled() {
     return Boolean(this.supportOrchestratorBaseURL);
   }

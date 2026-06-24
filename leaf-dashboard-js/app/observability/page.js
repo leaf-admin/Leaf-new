@@ -835,6 +835,21 @@ export default function ObservabilityPage() {
                   { label: "Aceitas", value: formatCompact(metrics?.rides?.accepted) },
                   { label: "Concluídas", value: formatCompact(metrics?.rides?.completed) },
                   { label: "Tempo até aceite", value: `${toNumber(metrics?.rides?.timeToAcceptAvgSec).toFixed(2)} s` },
+                  {
+                    label: "Reassignment preso",
+                    value: formatCompact(opsOverview?.rideHealth?.reassignmentPending?.stuck),
+                    detail: `${formatCompact(opsOverview?.rideHealth?.reassignmentPending?.total)} pendente(s)`,
+                  },
+                  {
+                    label: "Review encerramento",
+                    value: formatCompact(opsOverview?.rideHealth?.earlyEndedReview?.recent),
+                    detail: `${formatCompact(opsOverview?.rideHealth?.earlyEndedReview?.total)} em revisão`,
+                  },
+                  {
+                    label: "Sinal motorista stale",
+                    value: formatCompact(opsOverview?.rideHealth?.driverSignal?.stale),
+                    detail: `${formatCompact(opsOverview?.rideHealth?.driverSignal?.total)} ativa(s) monitorada(s)`,
+                  },
                   { label: "Backlog suporte", value: formatCompact(opsOverview?.supportQueue?.criticalBacklogCount) },
                   { label: "Disputas abertas", value: formatCompact(opsOverview?.disputes?.openCount) },
                 ]}

@@ -114,7 +114,6 @@ export default function DriverDocumentsPage({ params }) {
   const [documents, setDocuments] = useState(null);
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
-  const [busy, setBusy] = useState(false);
   const [reviewingType, setReviewingType] = useState(null);
   const [vehicleBusy, setVehicleBusy] = useState(false);
   const [uploadingBackgroundDoc, setUploadingBackgroundDoc] = useState(false);
@@ -172,39 +171,6 @@ export default function DriverDocumentsPage({ params }) {
       acceptPlusWithElite: !!config.acceptPlusWithElite,
     }));
   }, [documents]);
-
-  const approveAll = async () => {
-    if (!window.confirm("Aprovar motorista e todos os documentos?")) return;
-    try {
-      setBusy(true);
-      setError("");
-      setActionMessage("");
-      await leafAPI.approveDriverApplication(id);
-      setActionMessage("Motorista aprovado com sucesso.");
-      await load();
-    } catch (err) {
-      setError(err?.message || "Falha ao aprovar motorista");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const rejectAll = async () => {
-    const reason = window.prompt("Motivo da rejeição:");
-    if (!reason) return;
-    try {
-      setBusy(true);
-      setError("");
-      setActionMessage("");
-      await leafAPI.rejectDriverApplication(id, [reason]);
-      setActionMessage("Motorista rejeitado com sucesso.");
-      await load();
-    } catch (err) {
-      setError(err?.message || "Falha ao rejeitar motorista");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const resolveRejectionReason = (documentType) => {
     const selected = String(selectedRejectionReasons?.[documentType] || "").trim();
@@ -346,12 +312,6 @@ export default function DriverDocumentsPage({ params }) {
         <header className="header">
           <h1>Documentos do Motorista</h1>
           <div className="filters">
-            <button onClick={approveAll} disabled={busy}>
-              Aprovar
-            </button>
-            <button onClick={rejectAll} disabled={busy}>
-              Rejeitar
-            </button>
             <Link href="/drivers">Voltar</Link>
           </div>
         </header>

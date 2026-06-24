@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
@@ -15,8 +15,30 @@ export default function FinancialSimulatorPage() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    leafAPI.getRuntimeFlags()
+      .then((payload) => {
+        if (mounted) setRuntimeFlags(payload || null);
+      })
+      .catch(() => {
+        if (mounted) setRuntimeFlags(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const simulatorEnabled = runtimeFlags?.launch?.financialSimulatorEnabled === true;
 
   const run = async () => {
+    if (!simulatorEnabled) {
+      setError("Simulador financeiro desativado no perfil atual.");
+      return;
+    }
+
     try {
       setLoading(true);
       setError("");
@@ -48,7 +70,7 @@ export default function FinancialSimulatorPage() {
               value={hours}
               onChange={(e) => setHours(Number(e.target.value))}
             />
-            <button onClick={run} disabled={loading}>
+            <button onClick={run} disabled={loading || !simulatorEnabled}>
               {loading ? "Executando..." : "Simular"}
             </button>
           </div>
@@ -63,6 +85,13 @@ export default function FinancialSimulatorPage() {
           <KpiCard title="Rejeitadas" value={report?.rejectedByDriver || 0} tone="danger" />
         </section>
         <section className="grid">
+          {!simulatorEnabled ? (
+            <Panel title="Simulador desativado">
+              <p className="text-muted">
+                Esta superfície usa cenários hipotéticos e só pode ser usada com flag explícita de lançamento.
+              </p>
+            </Panel>
+          ) : null}
           <Panel title="Resumo financeiro">
             <div className="table-shell table-shell-tight">
               <table className="table table-compact">

@@ -15,6 +15,9 @@ import { normalizeRole } from "@/src/utils/dashboard-access";
 const OPEN_STATUSES = new Set(["open", "assigned", "in_progress", "escalated"]);
 const SUPPORT_POLL_MS = 60000;
 const MESSAGE_POLL_MS = 30000;
+const SUPPORT_FRESHNESS_TICK_MS = 10000;
+const SUPPORT_TICKET_STALE_MS = SUPPORT_POLL_MS * 2.5;
+const SUPPORT_MESSAGE_STALE_MS = MESSAGE_POLL_MS * 2.5;
 const SUPPORT_QUICK_REPLIES = [
   "Obrigado pelo contato. Vou verificar isso agora e te retorno por aqui.",
   "Recebemos sua mensagem. Para seguir com segurança, vou transformar este atendimento em chamado.",
@@ -126,6 +129,89 @@ function formatAge(value) {
   return `${days}d ${hours % 24}h`;
 }
 
+function formatElapsed(value) {
+  const ms = Math.max(0, Number(value || 0));
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 5) return "agora";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function scopedFreshness(snapshot, scopeId) {
+  if (!scopeId) return null;
+  if (!snapshot?.scopeId || String(snapshot.scopeId) !== String(scopeId)) return null;
+  return snapshot;
+}
+
+function describeSupportFreshness({ label, snapshot, now, staleAfterMs, transport }) {
+  if (!snapshot?.lastSuccessAt && !snapshot?.lastErrorAt) {
+    return {
+      state: "waiting",
+      className: "meta-badge",
+      label: `${label}: aguardando`,
+      detail: `${label} ainda sem leitura confirmada via ${transport}.`,
+    };
+  }
+
+  if (snapshot?.error) {
+    return {
+      state: "error",
+      className: "status-bad",
+      label: `${label}: erro`,
+      detail: `${label} falhou em ${formatDateTime(snapshot.lastErrorAt)}: ${snapshot.error}`,
+    };
+  }
+
+  const ageMs = Math.max(0, Number(now || Date.now()) - Number(snapshot.lastSuccessAt || 0));
+  const stale = ageMs > staleAfterMs;
+  return {
+    state: stale ? "stale" : "fresh",
+    className: stale ? "status-warn" : "status-ok",
+    label: `${label}: ${stale ? "defasado" : "atualizado"}`,
+    detail: `${label} atualizado ${formatDateTime(snapshot.lastSuccessAt)} (${formatElapsed(ageMs)} atrás) via ${transport}.`,
+  };
+}
+
+function summarizeSupportFreshness(items) {
+  const activeItems = items.filter((item) => item && item.state !== "waiting");
+  if (!activeItems.length) {
+    return {
+      state: "waiting",
+      className: "meta-badge",
+      label: "Dados: aguardando",
+      detail: "Aguardando primeira leitura confirmada do suporte.",
+    };
+  }
+  const failed = activeItems.find((item) => item.state === "error");
+  if (failed) {
+    return {
+      state: "error",
+      className: "status-bad",
+      label: "Dados: erro",
+      detail: failed.detail,
+    };
+  }
+  const stale = activeItems.find((item) => item.state === "stale");
+  if (stale) {
+    return {
+      state: "stale",
+      className: "status-warn",
+      label: "Dados: defasados",
+      detail: stale.detail,
+    };
+  }
+  return {
+    state: "fresh",
+    className: "status-ok",
+    label: "Dados: atualizados",
+    detail: activeItems.map((item) => item.detail).join(" "),
+  };
+}
+
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -184,6 +270,30 @@ function getTicketTitle(ticket) {
 
 function getTicketDescription(ticket) {
   return ticket?.description || ticket?.metadata?.description || ticket?.resolution || "";
+}
+
+function getTicketClassification(ticket) {
+  return (
+    ticket?.metadata?.supportClassification ||
+    ticket?.supportClassification ||
+    ticket?.classification ||
+    null
+  );
+}
+
+function formatClassificationReasons(classification) {
+  const reasons = classification?.reasons || classification?.rationale || [];
+  if (Array.isArray(reasons)) return reasons.filter(Boolean).join(", ");
+  return String(reasons || "").trim();
+}
+
+function getTicketClassificationLabel(ticket) {
+  const classification = getTicketClassification(ticket);
+  if (!classification) return "";
+  const priority = classification.priority || ticket?.priority || "N3";
+  const severity = classification.severity || "normal";
+  const source = classification.prioritySource || "classifier";
+  return `${priority} · ${severity} · ${source}`;
 }
 
 function getChatTitle(chat) {
@@ -307,6 +417,8 @@ function ticketMatchesSearch(ticket, term) {
     ticket?.user?.email,
     ticket?.metadata?.bookingId,
     ticket?.metadata?.incidentId,
+    getTicketClassificationLabel(ticket),
+    formatClassificationReasons(getTicketClassification(ticket)),
   ]
     .map((value) => String(value || "").toLowerCase())
     .join(" ");
@@ -374,10 +486,44 @@ export default function SupportPage() {
   const [copilotNoteDraft, setCopilotNoteDraft] = useState("");
   const [copilotEscalationReason, setCopilotEscalationReason] = useState("");
   const [n0TicketForm, setN0TicketForm] = useState(DEFAULT_N0_TICKET_FORM);
+  const [freshnessClock, setFreshnessClock] = useState(() => Date.now());
+  const [supportFreshness, setSupportFreshness] = useState({
+    tickets: {},
+    inbox: {},
+    ticketMessages: {},
+    rideChatMessages: {},
+    n0ChatMessages: {},
+  });
 
   const selectedUserId = selectedTicket?.userId || selectedTicket?.user?.id || null;
   const activeContextUserId = selectedN0Chat?.userId || selectedUserId || null;
   const orchestratorEnabled = leafAPI.isSupportOrchestratorEnabled();
+
+  const markFreshnessSuccess = useCallback((key, scopeId = null) => {
+    const timestamp = Date.now();
+    setSupportFreshness((current) => ({
+      ...current,
+      [key]: {
+        scopeId,
+        lastSuccessAt: timestamp,
+        lastErrorAt: null,
+        error: "",
+      },
+    }));
+  }, []);
+
+  const markFreshnessError = useCallback((key, error, scopeId = null) => {
+    const timestamp = Date.now();
+    setSupportFreshness((current) => ({
+      ...current,
+      [key]: {
+        ...current[key],
+        scopeId,
+        lastErrorAt: timestamp,
+        error: error?.message || String(error || "Falha ao atualizar dados"),
+      },
+    }));
+  }, []);
 
   const loadTickets = useCallback(
     async ({ silent = false } = {}) => {
@@ -417,13 +563,15 @@ export default function SupportPage() {
           if (!current) return sorted[0] || null;
           return sorted.find((ticket) => ticket.id === current.id) || sorted[0] || null;
         });
+        markFreshnessSuccess("tickets");
       } catch (err) {
+        markFreshnessError("tickets", err);
         setError(err?.message || "Falha ao carregar fila de suporte");
       } finally {
         if (!silent) setLoading(false);
       }
     },
-    [priorityFilter, statusFilter],
+    [markFreshnessError, markFreshnessSuccess, priorityFilter, statusFilter],
   );
 
   const loadChatInbox = useCallback(async () => {
@@ -435,10 +583,17 @@ export default function SupportPage() {
         if (!current) return nextChats[0] || null;
         return nextChats.find((chat) => chat.userId === current.userId) || nextChats[0] || null;
       });
+      markFreshnessSuccess("inbox");
     } catch (err) {
+      markFreshnessError("inbox", err);
       setError(err?.message || "Falha ao carregar chats N0");
     }
-  }, [showClosedN0Chats]);
+  }, [markFreshnessError, markFreshnessSuccess, showClosedN0Chats]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setFreshnessClock(Date.now()), SUPPORT_FRESHNESS_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   const loadOrchestratorOverview = useCallback(async () => {
     if (!orchestratorEnabled) return;
@@ -584,9 +739,15 @@ export default function SupportPage() {
     const loadTicketMessages = async () => {
       try {
         const response = await leafAPI.getSupportMessages(selectedTicket.id);
-        if (mounted) setTicketMessages(response?.messages || []);
+        if (mounted) {
+          setTicketMessages(response?.messages || []);
+          markFreshnessSuccess("ticketMessages", selectedTicket.id);
+        }
       } catch (err) {
-        if (mounted) setError(err?.message || "Falha ao carregar mensagens do ticket");
+        if (mounted) {
+          markFreshnessError("ticketMessages", err, selectedTicket.id);
+          setError(err?.message || "Falha ao carregar mensagens do ticket");
+        }
       }
     };
     loadTicketMessages();
@@ -599,7 +760,7 @@ export default function SupportPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [selectedTicket]);
+  }, [markFreshnessError, markFreshnessSuccess, selectedTicket]);
 
   useEffect(() => {
     if (!selectedUserId) {
@@ -611,14 +772,18 @@ export default function SupportPage() {
     const loadChatData = async () => {
       try {
         const [history, status] = await Promise.all([
-          leafAPI.getChatHistory(selectedUserId, 80).catch(() => ({ messages: [] })),
+          leafAPI.getChatHistory(selectedUserId, 80),
           leafAPI.getChatStatus(selectedUserId).catch(() => ({ status: { status: "unknown" } })),
         ]);
         if (!mounted) return;
         setChatMessages(history?.messages || []);
         setChatStatus(status?.status || null);
+        markFreshnessSuccess("rideChatMessages", selectedUserId);
       } catch (err) {
-        if (mounted) setError(err?.message || "Falha ao carregar chat");
+        if (mounted) {
+          markFreshnessError("rideChatMessages", err, selectedUserId);
+          setError(err?.message || "Falha ao carregar chat");
+        }
       }
     };
     loadChatData();
@@ -631,7 +796,7 @@ export default function SupportPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [selectedUserId]);
+  }, [markFreshnessError, markFreshnessSuccess, selectedUserId]);
 
   useEffect(() => {
     if (!selectedN0Chat?.userId) {
@@ -646,11 +811,15 @@ export default function SupportPage() {
         if (!mounted) return;
         const messages = history?.messages || [];
         setN0ChatMessages(messages);
+        markFreshnessSuccess("n0ChatMessages", selectedN0Chat.userId);
         if (messages.some((message) => message.senderType === "user" && message.read !== true)) {
           await leafAPI.markChatRead(selectedN0Chat.userId).catch(() => null);
         }
       } catch (err) {
-        if (mounted) setError(err?.message || "Falha ao carregar chat N0");
+        if (mounted) {
+          markFreshnessError("n0ChatMessages", err, selectedN0Chat.userId);
+          setError(err?.message || "Falha ao carregar chat N0");
+        }
       }
     };
     loadN0Chat();
@@ -663,7 +832,7 @@ export default function SupportPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [selectedN0Chat?.status, selectedN0Chat?.userId, showClosedN0Chats]);
+  }, [markFreshnessError, markFreshnessSuccess, selectedN0Chat?.status, selectedN0Chat?.userId, showClosedN0Chats]);
 
   useEffect(() => {
     if (!activeContextUserId) {
@@ -729,6 +898,58 @@ export default function SupportPage() {
     },
     [chatMessages, mode, n0ChatMessages, ticketMessages],
   );
+  const activeMessagesFreshnessSnapshot = useMemo(() => {
+    if (mode === "n0") return scopedFreshness(supportFreshness.n0ChatMessages, selectedN0Chat?.userId);
+    if (mode === "chat") return scopedFreshness(supportFreshness.rideChatMessages, selectedUserId);
+    return scopedFreshness(supportFreshness.ticketMessages, selectedTicket?.id);
+  }, [
+    mode,
+    selectedN0Chat?.userId,
+    selectedTicket?.id,
+    selectedUserId,
+    supportFreshness.n0ChatMessages,
+    supportFreshness.rideChatMessages,
+    supportFreshness.ticketMessages,
+  ]);
+  const activeMessagesFreshnessLabel = mode === "n0"
+    ? "Chat N0"
+    : mode === "chat"
+      ? "Chat corrida"
+      : "Mensagens";
+  const ticketsFreshness = useMemo(
+    () => describeSupportFreshness({
+      label: "Tickets",
+      now: freshnessClock,
+      snapshot: supportFreshness.tickets,
+      staleAfterMs: SUPPORT_TICKET_STALE_MS,
+      transport: "polling",
+    }),
+    [freshnessClock, supportFreshness.tickets],
+  );
+  const inboxFreshness = useMemo(
+    () => describeSupportFreshness({
+      label: "Inbox N0",
+      now: freshnessClock,
+      snapshot: supportFreshness.inbox,
+      staleAfterMs: SUPPORT_MESSAGE_STALE_MS,
+      transport: chatRealtime === "tempo real" ? "Socket.IO + fallback polling" : "polling",
+    }),
+    [chatRealtime, freshnessClock, supportFreshness.inbox],
+  );
+  const activeMessagesFreshness = useMemo(
+    () => describeSupportFreshness({
+      label: activeMessagesFreshnessLabel,
+      now: freshnessClock,
+      snapshot: activeMessagesFreshnessSnapshot,
+      staleAfterMs: SUPPORT_MESSAGE_STALE_MS,
+      transport: mode === "n0" && chatRealtime === "tempo real" ? "Socket.IO + fallback polling" : "polling",
+    }),
+    [activeMessagesFreshnessLabel, activeMessagesFreshnessSnapshot, chatRealtime, freshnessClock, mode],
+  );
+  const supportFreshnessStatus = useMemo(
+    () => summarizeSupportFreshness([ticketsFreshness, inboxFreshness, activeMessagesFreshness]),
+    [activeMessagesFreshness, inboxFreshness, ticketsFreshness],
+  );
   const filteredTickets = useMemo(() => {
     const term = ticketSearch.trim().toLowerCase();
     return tickets.filter((ticket) => ticketMatchesSearch(ticket, term));
@@ -746,6 +967,7 @@ export default function SupportPage() {
     const searchTerm = ticketSearch.trim().toLowerCase();
     const ticketItems = tickets.map((ticket) => {
       const health = queueHealthBadge(ticket);
+      const classificationLabel = getTicketClassificationLabel(ticket);
       return {
         id: `ticket:${ticket.id}`,
         type: "ticket",
@@ -757,7 +979,7 @@ export default function SupportPage() {
         priority: ticket.priority || "N3",
         status: ticket.status || "open",
         tone: health.className,
-        badge: health.label,
+        badge: classificationLabel || health.label,
         raw: ticket,
       };
     });
@@ -800,11 +1022,15 @@ export default function SupportPage() {
 
   const selectedTicketDetails = useMemo(() => {
     if (!selectedTicket) return {};
+    const classification = getTicketClassification(selectedTicket);
     return {
       id: selectedTicket.id,
       prioridade: selectedTicket.priority || "N3",
       status: selectedTicket.status || "open",
       categoria: selectedTicket.category || "-",
+      classificacao: getTicketClassificationLabel(selectedTicket) || "-",
+      origemSeveridade: classification?.prioritySource || "-",
+      racionalSeveridade: formatClassificationReasons(classification) || "-",
       usuario: selectedTicket.user?.name || selectedTicket.userId || "-",
       tipoUsuario: selectedTicket.userType || "-",
       responsavel: selectedTicket.assignedAgentName || selectedTicket.assignedAgent || "sem dono",
@@ -1044,10 +1270,12 @@ export default function SupportPage() {
         await leafAPI.sendChatMessage(selectedUserId, text);
         const history = await leafAPI.getChatHistory(selectedUserId, 80);
         setChatMessages(history?.messages || []);
+        markFreshnessSuccess("rideChatMessages", selectedUserId);
       } else {
         await leafAPI.sendSupportMessage(selectedTicket.id, text);
         const response = await leafAPI.getSupportMessages(selectedTicket.id);
         setTicketMessages(response?.messages || []);
+        markFreshnessSuccess("ticketMessages", selectedTicket.id);
       }
       setActionMessage(mode === "chat" ? "Mensagem enviada no chat." : "Resposta enviada no ticket.");
       await loadTickets({ silent: true });
@@ -1281,7 +1509,13 @@ export default function SupportPage() {
       setOrchestratorAnalysis(response?.analysis || null);
       await Promise.all([
         loadOrchestratorOverview(),
-        leafAPI.getSupportMessages(selectedTicket.id).then((data) => setTicketMessages(data?.messages || [])).catch(() => null),
+        leafAPI
+          .getSupportMessages(selectedTicket.id)
+          .then((data) => {
+            setTicketMessages(data?.messages || []);
+            markFreshnessSuccess("ticketMessages", selectedTicket.id);
+          })
+          .catch((err) => markFreshnessError("ticketMessages", err, selectedTicket.id)),
       ]);
       setActionMessage("Nota interna aplicada pelo orquestrador com aprovacao humana.");
     } catch (err) {
@@ -1334,7 +1568,14 @@ export default function SupportPage() {
             <p>Fila operacional N1/N2/N3 com SLA, ownership, ticket e chat.</p>
           </div>
           <div className="filters support-header-filters">
-            <span className="meta-badge">Polling: 30s</span>
+            <span className="meta-badge">Tickets {SUPPORT_POLL_MS / 1000}s · mensagens {MESSAGE_POLL_MS / 1000}s</span>
+            <span
+              className={supportFreshnessStatus.className}
+              data-testid="support-freshness-status"
+              title={supportFreshnessStatus.detail}
+            >
+              {supportFreshnessStatus.label}
+            </span>
             <input
               placeholder="Buscar ticket, usuario, corrida"
               value={ticketSearch}
@@ -1466,12 +1707,12 @@ export default function SupportPage() {
             {mode === "n0" ? (
               selectedN0Chat ? (
                 <>
-                  <div className="support-conversation-head">
-                    <div className="support-conversation-avatar">{activeThreadTitle.slice(0, 1).toUpperCase()}</div>
-                    <div>
-                      <h2>{activeThreadTitle}</h2>
-                      <p>{activeThreadSubtitle}</p>
-                    </div>
+	                <div className="support-conversation-head">
+	                  <div className="support-conversation-avatar">{activeThreadTitle.slice(0, 1).toUpperCase()}</div>
+	                  <div>
+	                    <h2>{activeThreadTitle}</h2>
+	                    <p>{activeThreadSubtitle}</p>
+	                  </div>
                     <div className="support-conversation-actions">
                       <button
                         type="button"
@@ -1583,6 +1824,19 @@ export default function SupportPage() {
                     </button>
                   </div>
                 </div>
+                {getTicketClassificationLabel(selectedTicket) ? (
+                  <div className="orchestrator-summary">
+                    <span className={priorityBadge(selectedTicket.priority)}>
+                      {getTicketClassificationLabel(selectedTicket)}
+                    </span>
+                    <span className="meta-badge">
+                      origem: {getTicketClassification(selectedTicket)?.prioritySource || "-"}
+                    </span>
+                    <span className="meta-badge">
+                      racional: {formatClassificationReasons(getTicketClassification(selectedTicket)) || "-"}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="support-messages support-conversation-messages">
                   {filteredMessages.length === 0 ? (
                     <p className="text-muted">Sem mensagens neste canal.</p>
@@ -1747,10 +2001,20 @@ export default function SupportPage() {
               <h2>Operação</h2>
               <div className="orchestrator-summary">
                 <span className={supportOpsStatus.className}>{supportOpsStatus.label}</span>
+                <span
+                  className={supportFreshnessStatus.className}
+                  data-testid="support-freshness-ops"
+                  title={supportFreshnessStatus.detail}
+                >
+                  {supportFreshnessStatus.label}
+                </span>
                 <span className="meta-badge">tempo real: {chatRealtime}</span>
                 <span className="meta-badge">{supportPolicy.label}</span>
               </div>
               <p className="text-muted">{supportOpsStatus.detail}</p>
+              <p className="text-muted" data-testid="support-freshness-detail">
+                {supportFreshnessStatus.detail}
+              </p>
             </div>
           </aside>
         </section>
@@ -1766,6 +2030,9 @@ export default function SupportPage() {
             <div className="orchestrator-summary">
               <span className={supportOpsStatus.className}>{supportOpsStatus.label}</span>
               <span className="meta-badge">chat: {chatRealtime}</span>
+              <span className={ticketsFreshness.className}>{ticketsFreshness.label}</span>
+              <span className={inboxFreshness.className}>{inboxFreshness.label}</span>
+              <span className={activeMessagesFreshness.className}>{activeMessagesFreshness.label}</span>
               <span className="meta-badge">polling tickets: {SUPPORT_POLL_MS / 1000}s</span>
               <span className="meta-badge">polling mensagens: {MESSAGE_POLL_MS / 1000}s</span>
             </div>
@@ -1952,6 +2219,11 @@ export default function SupportPage() {
                       <span className={statusBadge(ticket.status)}>{ticket.status || "open"}</span>
                       <span className={health.className}>{health.label}</span>
                     </span>
+                    {getTicketClassificationLabel(ticket) ? (
+                      <span className="table-muted">
+                        Classificação: {getTicketClassificationLabel(ticket)}
+                      </span>
+                    ) : null}
                     <span>
                       {ticket.user?.name || ticket.userId || "usuario sem identificacao"}
                       {ticket.queue?.ageMs ? ` • ${formatAge(ticket.queue.ageMs)}` : ""}
@@ -2043,6 +2315,9 @@ export default function SupportPage() {
                     prioridade: "Prioridade",
                     status: "Status",
                     categoria: "Categoria",
+                    classificacao: "Classificação",
+                    origemSeveridade: "Origem da severidade",
+                    racionalSeveridade: "Racional",
                     usuario: "Usuario",
                     tipoUsuario: "Tipo",
                     responsavel: "Responsavel",
@@ -2053,7 +2328,7 @@ export default function SupportPage() {
                     bookingId: "Corrida",
                     incidentId: "Incidente",
                   }}
-                  maxItems={13}
+                  maxItems={16}
                 />
 
                 {mode === "chat" ? (
