@@ -170,6 +170,57 @@ The goal is not complete yet. The branch has strong local/unit/contract progress
 but the missing proof is real-device/provider evidence, not another round of
 implementation on the same subjects.
 
+## Financial Policy Approval - 2026-06-24
+
+Decision:
+
+- The current tiered financial policy is approved for the release line.
+- Approved policy id: `runtime_tiered_percent_above_50_v1`
+- Approval reference: `thread-2026-06-24-user-approved-current-tiered-policy`
+- Approval actor: `izaak-dias`
+
+Approved operational fee model:
+
+- Up to `R$ 10,00`: `R$ 0,79`
+- From `R$ 10,01` to `R$ 25,00`: `R$ 0,99`
+- From `R$ 25,01` to `R$ 50,00`: `R$ 1,49`
+- Above `R$ 50,00`: `3%`
+- Woovi/payment intermediation remains separate: `0.8%`, minimum `R$ 0,50`
+
+Required runtime envs:
+
+```bash
+LEAF_APPROVED_FINANCIAL_POLICY_ID=runtime_tiered_percent_above_50_v1
+LEAF_FINANCIAL_POLICY_APPROVAL_REF=thread-2026-06-24-user-approved-current-tiered-policy
+LEAF_FINANCIAL_POLICY_APPROVAL_ACTOR=izaak-dias
+```
+
+Validation proof:
+
+```bash
+LEAF_APPROVED_FINANCIAL_POLICY_ID=runtime_tiered_percent_above_50_v1 \
+LEAF_FINANCIAL_POLICY_APPROVAL_REF=thread-2026-06-24-user-approved-current-tiered-policy \
+LEAF_FINANCIAL_POLICY_APPROVAL_ACTOR=izaak-dias \
+npm --prefix leaf-websocket-backend run config:validate
+```
+
+Result:
+
+- `ok=true`
+- financial policy `approved=true`
+- Firebase configured: `true`
+- Google Maps configured: `true`
+- no financial-policy blockers
+- remaining warning: `KYC_PRODUCTION_BIOMETRICS_ENABLED=false`
+- FCM configured: `false`
+
+Interpretation:
+
+The finance-policy decision is closed. Production/runtime still needs the envs
+above applied before deploy validation. Same-ride L2 evidence is still required
+to prove quote, Pix, receipt, dashboard, ledger, Leaf fee, Woovi fee, tolls and
+driver net on one real ride id.
+
 ## Validation Run - 2026-06-24 15:58 BRT
 
 Run directory:
