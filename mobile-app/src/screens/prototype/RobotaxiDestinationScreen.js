@@ -43,7 +43,7 @@ import {
 import WooviPaymentModal from "../../components/payment/WooviPaymentModal";
 import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
-import { isE2ETestBuild } from "../../config/runtimeAccessPolicy";
+import { isE2ETestBuild, isSimulatorBuild } from "../../config/runtimeAccessPolicy";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
@@ -1029,6 +1029,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         isExtensionFlow,
         isDev: __DEV__,
         isE2E: isE2ETestBuild(),
+        isSimulator: isSimulatorBuild(),
       }),
     [isExtensionFlow, route?.params],
   );

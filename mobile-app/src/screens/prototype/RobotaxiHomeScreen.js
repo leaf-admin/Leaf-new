@@ -76,7 +76,7 @@ import {
   publishPrototypeHomeAutomationPayload,
   subscribePrototypeHomeAutomationPayload,
 } from './prototypeHomeAutomationBus';
-import { isE2ETestBuild } from '../../config/runtimeAccessPolicy';
+import { isE2ETestBuild, isSimulatorBuild } from '../../config/runtimeAccessPolicy';
 import { buildTripFinancialTotals, formatCurrencyBRL } from './tripFinancialSummary';
 import {
   NAVIGATION_CAMERA_ANCHOR_Y,
@@ -2309,6 +2309,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         isHomeRoute,
         isDev: Boolean(__DEV__),
         isE2E: isE2ETestBuild(),
+        isSimulator: isSimulatorBuild(),
       }),
     [effectiveRouteParams, isDriverRole, isHomeRoute]
   );
@@ -2345,6 +2346,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           isHomeRoute,
           isDev: Boolean(__DEV__),
           isE2E: isE2ETestBuild(),
+          isSimulator: isSimulatorBuild(),
         }
       ),
     [
@@ -2363,6 +2365,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         isHomeRoute,
         isDev: Boolean(__DEV__),
         isE2E: isE2ETestBuild(),
+        isSimulator: isSimulatorBuild(),
       }),
     [effectivePassengerRouteParams, isDriverRole, isHomeRoute]
   );
@@ -2447,6 +2450,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                     isHomeRoute: true,
                     isDev: Boolean(__DEV__),
                     isE2E: isE2ETestBuild(),
+                    isSimulator: isSimulatorBuild(),
                   }
                 ).action || '',
               bookingId: qaParams.qaBookingId || '',

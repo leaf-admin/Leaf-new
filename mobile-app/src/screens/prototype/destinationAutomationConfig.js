@@ -17,7 +17,7 @@ function sanitizeTextParam(value) {
 
 function resolveDestinationAutomationConfig(
   routeParams = {},
-  { isExtensionFlow = false, isDev = false, isE2E = false } = {},
+  { isExtensionFlow = false, isDev = false, isE2E = false, isSimulator = false } = {},
 ) {
   if (isExtensionFlow) {
     return {
@@ -32,13 +32,14 @@ function resolveDestinationAutomationConfig(
   }
 
   const automationEnabled =
-    (isDev || isE2E) &&
+    (isDev || isE2E || isSimulator) &&
     (isE2E ||
+      isSimulator ||
       isTruthyRouteParam(routeParams?.e2e) ||
       isTruthyRouteParam(routeParams?.automation) ||
       isTruthyRouteParam(routeParams?.qaAutomation));
 
-  const allowAutomationParams = isDev || automationEnabled;
+  const allowAutomationParams = isDev || isSimulator || automationEnabled;
   const autoFlowMode = allowAutomationParams
     ? normalizeFlowMode(routeParams?.qaAutoFlow || routeParams?.autoFlow)
     : "";
