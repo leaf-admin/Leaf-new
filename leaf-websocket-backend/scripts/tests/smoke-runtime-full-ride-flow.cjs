@@ -28,6 +28,7 @@ const EXISTING_RUNTIME_URL = (process.env.RUNTIME_FULL_FLOW_TARGET_URL || '').re
 const USE_EXISTING_RUNTIME = Boolean(EXISTING_RUNTIME_URL);
 const CLEANUP_REDIS_KEYS = process.env.RUNTIME_FULL_FLOW_CLEANUP_REDIS === 'true' || USE_EXISTING_RUNTIME;
 const VERBOSE = process.env.RUNTIME_FULL_FLOW_VERBOSE === 'true' || USE_EXISTING_RUNTIME;
+const INCLUDE_RIDE_CATEGORY = process.env.RUNTIME_FULL_FLOW_INCLUDE_RIDE_CATEGORY !== 'false';
 
 const PICKUP = {
   lat: Number(process.env.RUNTIME_FULL_FLOW_PICKUP_LAT || -22.971964),
@@ -725,8 +726,10 @@ async function runFlowForRuntime({ runtimeInfo, redisOptions, flushBeforeRun = t
         amountInCents: 2750,
         paymentStatus: preseededPaymentFlow ? 'confirmed' : 'pending_payment'
       },
-      carType: 'leafplus',
-      selectedVehicle: 'leafplus',
+      ...(INCLUDE_RIDE_CATEGORY ? {
+        carType: 'leafplus',
+        selectedVehicle: 'leafplus'
+      } : {}),
       preferences: {
         temperature: 'cool',
         music: 'quiet',

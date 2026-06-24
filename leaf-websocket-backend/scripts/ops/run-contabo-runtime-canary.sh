@@ -131,6 +131,7 @@ services:
       VEHICLE_LOCK_RECOVERY_FIREBASE_LOOKUP_ENABLED: "false"
       ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE: "false"
       LOG_LEVEL: warn
+      RUNTIME_FULL_FLOW_INCLUDE_RIDE_CATEGORY: "false"
     ports:
       - "127.0.0.1:${CANARY_PORT}:3001"
     volumes:
