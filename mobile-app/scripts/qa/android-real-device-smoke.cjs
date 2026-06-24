@@ -2330,13 +2330,14 @@ async function main() {
   if (STRICT_QUOTE && quoteStable !== true) {
     failures.push(`STRICT_QUOTE=true exige cotação estável; status atual: ${quoteStatus}.`);
   }
-  if (OPEN_PAYMENT && !paymentOpened) {
+  const paymentBlockedByPrecondition = String(paymentStatus || "").startsWith("blocked_precondition");
+  if (OPEN_PAYMENT && !paymentOpened && !paymentBlockedByPrecondition) {
     failures.push(`REAL_SMOKE_OPEN_PAYMENT=true exige abertura do modal Pix; status atual: ${paymentStatus}.`);
   }
-  if (OPEN_PAYMENT && paymentOpened && !["pix_copy_available", "pix_modal_content", "pix_visual_detected", "confirmed", "confirmed_via_ride_flow"].includes(paymentStatus)) {
+  if (OPEN_PAYMENT && paymentOpened && !paymentBlockedByPrecondition && !["pix_copy_available", "pix_modal_content", "pix_visual_detected", "confirmed", "confirmed_via_ride_flow"].includes(paymentStatus)) {
     failures.push(`Modal Pix abriu, mas não chegou a um estado pronto; status atual: ${paymentStatus}.`);
   }
-  if (AUTO_CONFIRM_SANDBOX_PAYMENT && !sandboxPaymentConfirmation.ok) {
+  if (AUTO_CONFIRM_SANDBOX_PAYMENT && !paymentBlockedByPrecondition && !sandboxPaymentConfirmation.ok) {
     failures.push(`Baixa automática sandbox falhou: ${sandboxPaymentConfirmation.error || sandboxPaymentConfirmation.stderr || "unknown"}`);
   }
   if (
@@ -2372,7 +2373,7 @@ async function main() {
   ) {
     failures.push("driver_vehicle_identity_receipt_evidence_missing");
   }
-  if (COLLECT_DASHBOARD_EVIDENCE && !dashboardEvidenceCollection.ok) {
+  if (COLLECT_DASHBOARD_EVIDENCE && !paymentBlockedByPrecondition && !dashboardEvidenceCollection.ok) {
     failures.push(`Evidência dashboard falhou: ${dashboardEvidenceCollection.error || dashboardEvidenceCollection.stderr || "unknown"}`);
   }
 

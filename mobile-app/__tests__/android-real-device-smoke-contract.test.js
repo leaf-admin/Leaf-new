@@ -65,6 +65,7 @@ describe('android real-device smoke runner contract', () => {
     expect(source).toContain('TEST_PICKUP_LNG');
     expect(source).toContain('REAL_SMOKE_CANONICAL_PICKUP_TOLERANCE_M');
     expect(source).toContain('blocked_precondition:app_canonical_pickup_mismatch');
+    expect(source).toContain('paymentBlockedByPrecondition');
     expect(source).toContain('distanceMeters');
     expect(validationIndex).toBeGreaterThan(-1);
     expect(driverBotIndex).toBeGreaterThan(-1);
