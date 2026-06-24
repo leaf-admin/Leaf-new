@@ -54,6 +54,31 @@ describe('android real-device smoke runner contract', () => {
     expect(firstReadinessIndex).toBeLessThan(firstPaymentTapIndex);
   });
 
+  it('recognizes the post-payment preference sheet before active trip background content', () => {
+    const source = readAndroidSmokeRunner();
+    const detectScreenSource = source.slice(
+      source.indexOf('function detectScreen'),
+      source.indexOf('function detectPaymentStatus'),
+    );
+    const preferenceIndex = detectScreenSource.indexOf('passenger-preference-countdown-modal');
+    const activeTripIndex = detectScreenSource.indexOf('passenger-trip-screen');
+
+    expect(preferenceIndex).toBeGreaterThan(-1);
+    expect(activeTripIndex).toBeGreaterThan(-1);
+    expect(preferenceIndex).toBeLessThan(activeTripIndex);
+    expect(source).toContain('confirmed_via_ride_flow');
+  });
+
+  it('includes managed driver gross fare in smoke fare consistency evidence', () => {
+    const source = readAndroidSmokeRunner();
+
+    expect(source).toContain('extractManagedDriverFareEvidence');
+    expect(source).toContain('driver_offer_gross');
+    expect(source).toContain('driver_completion_gross');
+    expect(source).toContain('Driver net evidence');
+    expect(source).toContain('Driver fee evidence');
+  });
+
   it('requires distinct Android device and emulator roles before the L2 smoke', () => {
     const source = readRealSmokePreflight();
 

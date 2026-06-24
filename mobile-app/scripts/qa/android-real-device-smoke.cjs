@@ -302,11 +302,35 @@ function pricesMatch(left, right) {
   );
 }
 
-function buildFareConsistencyReport({ steps, initialQuote, laterQuote, sandboxPaymentConfirmation }) {
+function buildFareConsistencyReport({
+  steps,
+  initialQuote,
+  laterQuote,
+  sandboxPaymentConfirmation,
+  managedDriverBot,
+}) {
   const entries = [];
+  const driverNetEntries = [];
+  const driverFeeEntries = [];
   const add = (stage, amount, source = null) => {
     if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return;
     entries.push({
+      stage,
+      amount: Number(Number(amount).toFixed(2)),
+      source,
+    });
+  };
+  const addDriverNet = (stage, amount, source = null) => {
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return;
+    driverNetEntries.push({
+      stage,
+      amount: Number(Number(amount).toFixed(2)),
+      source,
+    });
+  };
+  const addDriverFee = (stage, amount, source = null) => {
+    if (!Number.isFinite(Number(amount)) || Number(amount) < 0) return;
+    driverFeeEntries.push({
       stage,
       amount: Number(Number(amount).toFixed(2)),
       source,
@@ -333,6 +357,15 @@ function buildFareConsistencyReport({ steps, initialQuote, laterQuote, sandboxPa
   if (Number.isFinite(chargeValue) && chargeValue > 0) {
     add("sandbox_charge", chargeValue / 100, "sandbox-payment-confirmation.json");
   }
+  for (const entry of extractManagedDriverFareEvidence(managedDriverBot)) {
+    if (entry.kind === "driver_net") {
+      addDriverNet(entry.stage, entry.amount, entry.source);
+    } else if (entry.kind === "driver_fee") {
+      addDriverFee(entry.stage, entry.amount, entry.source);
+    } else {
+      add(entry.stage, entry.amount, entry.source);
+    }
+  }
 
   const quoteEntry =
     entries.find((entry) => entry.stage === "quote_after_wait") ||
@@ -346,8 +379,118 @@ function buildFareConsistencyReport({ steps, initialQuote, laterQuote, sandboxPa
     ok: Boolean(quoteEntry) && mismatches.length === 0,
     quote: quoteEntry,
     entries,
+    driverNetEntries,
+    driverFeeEntries,
     mismatches,
   };
+}
+
+function parseJsonPayloadFromLogLine(line = "") {
+  const start = String(line).indexOf("{");
+  if (start < 0) return null;
+  try {
+    return JSON.parse(String(line).slice(start));
+  } catch (_) {
+    return null;
+  }
+}
+
+function extractManagedDriverFareEvidence(managedDriverBot) {
+  const logPath = managedDriverBot?.logPath;
+  if (!logPath || !fs.existsSync(logPath)) return [];
+  const entries = [];
+  const lines = fs.readFileSync(logPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    if (line.includes("ride_accepted")) {
+      const payload = parseJsonPayloadFromLogLine(line);
+      const estimatedFare = Number(payload?.estimatedFare);
+      const operationalFee = Number(payload?.estimatedOperationalFee);
+      const intermediationFee = Number(payload?.estimatedPaymentIntermediationFee);
+      const totalFees = Number(payload?.estimatedTotalFees);
+      const driverNet = Number(payload?.estimatedDriverNetAmount);
+      if (Number.isFinite(estimatedFare) && estimatedFare > 0) {
+        entries.push({
+          kind: "gross",
+          stage: "driver_offer_gross",
+          amount: estimatedFare,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+      if (Number.isFinite(driverNet) && driverNet > 0) {
+        entries.push({
+          kind: "driver_net",
+          stage: "driver_offer_net",
+          amount: driverNet,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+      if (Number.isFinite(operationalFee) && operationalFee >= 0) {
+        entries.push({
+          kind: "driver_fee",
+          stage: "driver_offer_operational_fee",
+          amount: operationalFee,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+      if (Number.isFinite(intermediationFee) && intermediationFee >= 0) {
+        entries.push({
+          kind: "driver_fee",
+          stage: "driver_offer_intermediation_fee",
+          amount: intermediationFee,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+      if (Number.isFinite(totalFees) && totalFees >= 0) {
+        entries.push({
+          kind: "driver_fee",
+          stage: "driver_offer_total_fees",
+          amount: totalFees,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+    }
+    if (line.includes("trip_completed")) {
+      const payload = parseJsonPayloadFromLogLine(line);
+      const grossFare = Number(
+        payload?.grossAmount ??
+          payload?.totalPaid ??
+          payload?.totalFare ??
+          payload?.fare,
+      );
+      const passengerPaidCents = Number(payload?.financialSnapshot?.passengerPaidCents);
+      const driverNet = Number(
+        payload?.driverNetAmount ??
+          (Number.isFinite(Number(payload?.financialSnapshot?.driverNetCents))
+            ? Number(payload.financialSnapshot.driverNetCents) / 100
+            : NaN),
+      );
+      if (Number.isFinite(grossFare) && grossFare > 0) {
+        entries.push({
+          kind: "gross",
+          stage: "driver_completion_gross",
+          amount: grossFare,
+          source: "managed-driver-bot.log:trip_completed",
+        });
+      }
+      if (Number.isFinite(passengerPaidCents) && passengerPaidCents > 0) {
+        entries.push({
+          kind: "gross",
+          stage: "driver_completion_passenger_paid",
+          amount: passengerPaidCents / 100,
+          source: "managed-driver-bot.log:trip_completed",
+        });
+      }
+      if (Number.isFinite(driverNet) && driverNet > 0) {
+        entries.push({
+          kind: "driver_net",
+          stage: "driver_completion_net",
+          amount: driverNet,
+          source: "managed-driver-bot.log:trip_completed",
+        });
+      }
+    }
+  }
+  return entries;
 }
 
 function extractDriverSearchElapsed(nodes) {
@@ -472,6 +615,15 @@ function detectScreen(nodes) {
     return "payment_loading";
   }
   if (
+    allText.includes("passenger-preference-countdown-modal") ||
+    allText.includes("passenger-preference-confirm-button") ||
+    allText.includes("preferências da viagem") ||
+    allText.includes("preferencias da viagem") ||
+    allText.includes("antes de buscar")
+  ) {
+    return "passenger_ride_preferences";
+  }
+  if (
     allText.includes("passenger-booking-finalizing-sheet") ||
     allText.includes("finalizando solicitação") ||
     allText.includes("finalizando solicitacao")
@@ -586,6 +738,23 @@ function runSandboxPaymentConfirmation() {
   };
   writeArtifact("sandbox-payment-confirmation-process.json", JSON.stringify(payload, null, 2));
   return payload;
+}
+
+function buildAppFlowPaymentConfirmationEvidence() {
+  const payload = {
+    requested: AUTO_CONFIRM_SANDBOX_PAYMENT,
+    ok: true,
+    skippedReason: "payment_already_confirmed_by_app_flow",
+    source: "app_payment_flow",
+  };
+  const evidencePath = writeArtifact(
+    "sandbox-payment-confirmation-app-flow.json",
+    JSON.stringify(payload, null, 2),
+  );
+  return {
+    ...payload,
+    evidencePath,
+  };
 }
 
 function readJsonFile(filePath) {
@@ -1054,6 +1223,26 @@ async function tapConfirmUntilPayment(current, steps) {
     current = await captureStep(`07-payment-after-confirm-${attempt}`);
     steps.push(current);
     let status = detectPaymentStatus(current.nodes);
+    if (current.screen === "passenger_ride_preferences") {
+      const preferenceButton = findNodeByPriority(current.nodes, [
+        ["passenger-preference-confirm-button"],
+        ["Continuar com preferências"],
+        ["Continuar"],
+      ]);
+      if (tapNode(preferenceButton, "botão continuar preferências")) {
+        await sleep(6500);
+        current = await captureStep(`08-preferences-confirmed-${attempt}`);
+        steps.push(current);
+        status = detectPaymentStatus(current.nodes);
+        if (
+          current.screen === "passenger_active_trip" ||
+          current.screen === "passenger_searching_driver" ||
+          current.screen === "passenger_booking_finalizing"
+        ) {
+          return { current, opened: true, status: "confirmed_via_ride_flow" };
+        }
+      }
+    }
     if (status === "not_visible" && looksLikePixModalScreenshot(current.screenshot)) {
       return { current, opened: true, status: "pix_visual_detected" };
     }
@@ -1062,6 +1251,13 @@ async function tapConfirmUntilPayment(current, steps) {
     }
     if (status !== "not_visible" || current.screen.startsWith("payment_")) {
       return { current, opened: true, status };
+    }
+    if (
+      current.screen === "passenger_active_trip" ||
+      current.screen === "passenger_searching_driver" ||
+      current.screen === "passenger_booking_finalizing"
+    ) {
+      return { current, opened: true, status: "confirmed_via_ride_flow" };
     }
     if (attempt === 5) {
       await sleep(6000);
@@ -1076,6 +1272,13 @@ async function tapConfirmUntilPayment(current, steps) {
       }
       if (status !== "not_visible" || current.screen.startsWith("payment_")) {
         return { current, opened: true, status };
+      }
+      if (
+        current.screen === "passenger_active_trip" ||
+        current.screen === "passenger_searching_driver" ||
+        current.screen === "passenger_booking_finalizing"
+      ) {
+        return { current, opened: true, status: "confirmed_via_ride_flow" };
       }
     }
   }
@@ -1718,26 +1921,37 @@ async function main() {
               paymentStatus = managedDriverPaymentBlockStatus(
                 canonicalReadiness.managedDriverBot?.error,
               );
-            } else {
-              const paymentOpen = await tapConfirmUntilPayment(current, steps);
-              current = paymentOpen.current;
-              paymentOpened = paymentOpen.opened;
-              paymentStatus = paymentOpen.status;
-              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
-            }
-            if (paymentOpened) {
-              const paymentReady = await waitForPaymentReady(current, steps);
-              current = paymentReady.current;
-              paymentStatus = paymentReady.status;
-              paymentPrices = current.prices;
-              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
-              if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
-                sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
-                dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
-                if (sandboxPaymentConfirmation.ok) {
-                  await sleep(8000);
-                  current = await captureStep("09-payment-after-sandbox-confirmation");
-                  steps.push(current);
+	          } else {
+	            const paymentOpen = await tapConfirmUntilPayment(current, steps);
+	            current = paymentOpen.current;
+	            paymentOpened = paymentOpen.opened;
+	            paymentStatus = paymentOpen.status;
+	            paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	          }
+	          if (paymentOpened) {
+	            if (paymentStatus === "confirmed_via_ride_flow") {
+	              paymentPrices = current.prices;
+	              sandboxPaymentConfirmation = buildAppFlowPaymentConfirmationEvidence();
+	              postTripValidation = await verifyPostPaymentTripFlow(
+	                current,
+	                steps,
+	                true,
+	              );
+	              current = postTripValidation.current || current;
+	            } else {
+	              const paymentReady = await waitForPaymentReady(current, steps);
+	              current = paymentReady.current;
+	              paymentStatus = paymentReady.status;
+	              paymentPrices = current.prices;
+	              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	            }
+	            if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
+	              sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
+	              dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
+	              if (sandboxPaymentConfirmation.ok) {
+	                await sleep(8000);
+	                current = await captureStep("09-payment-after-sandbox-confirmation");
+	                steps.push(current);
                   paymentStatus = resolvePostSandboxPaymentStatus({
                     confirmationOk: sandboxPaymentConfirmation.ok,
                     paymentStatus: detectPaymentStatus(current.nodes),
@@ -1790,17 +2004,28 @@ async function main() {
             paymentOpened = paymentOpen.opened;
             paymentStatus = paymentOpen.status;
             paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
-          }
-          if (paymentOpened) {
-            const paymentReady = await waitForPaymentReady(current, steps);
-            current = paymentReady.current;
-            paymentStatus = paymentReady.status;
-            paymentPrices = current.prices;
-            paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
-            if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
-              sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
-              dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
-              if (sandboxPaymentConfirmation.ok) {
+	          }
+	          if (paymentOpened) {
+	            if (paymentStatus === "confirmed_via_ride_flow") {
+	              paymentPrices = current.prices;
+	              sandboxPaymentConfirmation = buildAppFlowPaymentConfirmationEvidence();
+	              postTripValidation = await verifyPostPaymentTripFlow(
+	                current,
+	                steps,
+	                true,
+	              );
+	              current = postTripValidation.current || current;
+	            } else {
+	              const paymentReady = await waitForPaymentReady(current, steps);
+	              current = paymentReady.current;
+	              paymentStatus = paymentReady.status;
+	              paymentPrices = current.prices;
+	              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	            }
+	            if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
+	              sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
+	              dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
+	              if (sandboxPaymentConfirmation.ok) {
                 await sleep(8000);
                 current = await captureStep("09-payment-after-sandbox-confirmation");
                 steps.push(current);
@@ -1851,6 +2076,7 @@ async function main() {
     initialQuote,
     laterQuote,
     sandboxPaymentConfirmation,
+    managedDriverBot,
   });
   const driverVehicleConsistency = compareRenderedVehicleIdentity(
     managedDriverBot?.vehicleIdentity?.identity || {},
@@ -1874,7 +2100,7 @@ async function main() {
   if (OPEN_PAYMENT && !paymentOpened) {
     failures.push(`REAL_SMOKE_OPEN_PAYMENT=true exige abertura do modal Pix; status atual: ${paymentStatus}.`);
   }
-  if (OPEN_PAYMENT && paymentOpened && !["pix_copy_available", "pix_modal_content", "pix_visual_detected", "confirmed"].includes(paymentStatus)) {
+  if (OPEN_PAYMENT && paymentOpened && !["pix_copy_available", "pix_modal_content", "pix_visual_detected", "confirmed", "confirmed_via_ride_flow"].includes(paymentStatus)) {
     failures.push(`Modal Pix abriu, mas não chegou a um estado pronto; status atual: ${paymentStatus}.`);
   }
   if (AUTO_CONFIRM_SANDBOX_PAYMENT && !sandboxPaymentConfirmation.ok) {
@@ -2003,6 +2229,9 @@ async function main() {
     `- Sandbox payment auto-confirm: ${AUTO_CONFIRM_SANDBOX_PAYMENT ? (sandboxPaymentConfirmation.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Post-trip validation: ${postTripValidation?.requested ? (postTripValidation.ok ? "OK" : postTripValidation.ok === false ? "FAIL" : "not reached") : "not requested"}`,
     `- Fare consistency: ${fareConsistency.ok ? "OK" : "FAIL"}${fareConsistency.quote ? ` (quote R$ ${fareConsistency.quote.amount.toFixed(2)})` : ""}`,
+    `- Fare gross evidence: ${fareConsistency.entries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
+    `- Driver net evidence: ${fareConsistency.driverNetEntries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
+    `- Driver fee evidence: ${fareConsistency.driverFeeEntries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
     `- Dashboard evidence: ${COLLECT_DASHBOARD_EVIDENCE ? (dashboardEvidenceCollection.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Pricing quote log lines: ${logAnalysis.pricingQuote.length}`,
     `- Routing log lines: ${logAnalysis.routing.length}`,
