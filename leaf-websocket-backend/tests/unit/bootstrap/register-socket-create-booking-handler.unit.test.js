@@ -492,6 +492,73 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
     expect(harness.RequestRideCommand).not.toHaveBeenCalled();
   });
 
+  it('accepts equivalent car type labels between quote lock and createBooking payload', async () => {
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
+      found: true,
+      status: 'charge_created',
+      passengerId: 'customer_1',
+      amountCents: 8785,
+      payableAmountInCents: 8785,
+      paymentSessionId: 'pay_session_1',
+      paymentContextKey: 'context_1',
+      quoteSessionId: 'quote_session_1',
+      quoteLockId: 'ql_bound_1',
+      quoteLockSnapshot: {
+        quoteLockId: 'ql_bound_1',
+        quoteSessionId: 'quote_session_1',
+        passengerId: 'customer_1',
+        payableAmountInCents: 8785,
+        grossAmountInCents: 8785,
+        routeSignature: '-22.90000|-43.20000|-22.91000|-43.21000|leaf_plus',
+        carType: 'leaf_plus'
+      }
+    });
+    mockFirestore = createFirestoreWithDocs({
+      'payment_holdings/temp_ride_1': {
+        status: 'in_holding',
+        source: 'woovi_webhook',
+        chargeId: 'charge_1',
+        paymentId: 'charge_1',
+        amount: 8785
+      }
+    });
+    const harness = createHarness();
+
+    await harness.handlers.createBooking(createRequestPayload({
+      carType: 'Leaf Plus',
+      paymentData: {
+        chargeId: 'charge_1',
+        rideId: 'temp_ride_1',
+        amountInCents: 8785,
+        grossAmountInCents: 8785,
+        paymentSessionId: 'pay_session_1',
+        paymentContextKey: 'context_1',
+        quoteSessionId: 'quote_session_1',
+        quoteLockId: 'ql_bound_1',
+        paymentStatus: 'confirmed'
+      }
+    }));
+
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'bookingCreated',
+      expect.objectContaining({
+        success: true,
+        bookingId: 'booking_1'
+      })
+    );
+    expect(harness.socket.emit.mock.calls.filter(([event]) => event === 'bookingError')).toEqual([]);
+    expect(harness.RequestRideCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        carType: 'Leaf Plus',
+        paymentData: expect.objectContaining({
+          quoteLockId: 'ql_bound_1',
+          paymentStatus: 'in_holding',
+          serverValidated: true
+        })
+      })
+    );
+  });
+
   it('creates a paid booking only after provider proof and availability are both confirmed', async () => {
     const harness = createHarness();
 

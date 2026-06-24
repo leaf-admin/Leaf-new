@@ -9,13 +9,14 @@ const {
     buildRouteSignature,
     normalizeAmountCents: normalizeQuoteAmountCents
 } = require('../services/quote-lock-service');
+const { normalizeOperationalCarType } = require('../utils/operational-car-type');
 
 function normalizeText(value) {
     return String(value || '').trim();
 }
 
-function normalizeComparableText(value) {
-    return normalizeText(value).toLowerCase();
+function normalizeComparableCarType(value) {
+    return normalizeOperationalCarType(value, '');
 }
 
 function resolvePaymentIntentValue(intent = {}, snapshot = {}, ...keys) {
@@ -136,11 +137,11 @@ function validateAdvancePaymentIntentBinding({
         };
     }
 
-    const expectedCarType = normalizeComparableText(
+    const expectedCarType = normalizeComparableCarType(
         quoteLockSnapshot.carType ||
         advancePaymentIntent.carType
     );
-    if (expectedCarType && normalizeComparableText(requestedCarType) !== expectedCarType) {
+    if (expectedCarType && normalizeComparableCarType(requestedCarType) !== expectedCarType) {
         return {
             success: false,
             code: 'PAYMENT_INTENT_CAR_TYPE_MISMATCH',
