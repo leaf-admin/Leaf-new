@@ -173,15 +173,71 @@ function onceStatusAck(driverClient, payload, timeoutMs = 12000) {
     driverClient.socket.emit('setDriverStatus', payload);
   });
 }
+function emitDriverLocationAndWait(driverClient, payload, timeoutMs = 12000) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    let timer = null;
+    const expectedSeq = Number(payload?.seq);
+    const done = (result) => {
+      if (resolved) return;
+      resolved = true;
+      if (timer) clearTimeout(timer);
+      driverClient.socket.removeListener('locationUpdated', successHandler);
+      driverClient.socket.removeListener('locationError', locationErrorHandler);
+      driverClient.socket.removeListener('driverStatusError', statusErrorHandler);
+      resolve(result);
+    };
+    const successHandler = (data = {}) => {
+      const receivedSeq = Number(data?.seq);
+      if (Number.isFinite(expectedSeq) && receivedSeq !== expectedSeq) return;
+      done({ ok: true, data });
+    };
+    const locationErrorHandler = (error) => done({
+      ok: false,
+      event: 'locationError',
+      error
+    });
+    const statusErrorHandler = (error) => done({
+      ok: false,
+      event: 'driverStatusError',
+      error
+    });
+
+    timer = setTimeout(() => {
+      done({
+        ok: false,
+        event: 'locationUpdatedTimeout',
+        error: { code: 'LOCATION_SYNC_TIMEOUT', error: 'Timeout aguardando locationUpdated' }
+      });
+    }, timeoutMs);
+
+    driverClient.socket.on('locationUpdated', successHandler);
+    driverClient.socket.once('locationError', locationErrorHandler);
+    driverClient.socket.once('driverStatusError', statusErrorHandler);
+    driverClient.socket.emit('updateLocation', payload);
+  });
+}
 async function primeDriverLocation(driverClient, attempt = 0) {
-  driverClient.socket.emit('updateLocation', {
+  const payload = {
     lat: PICKUP.lat + 0.0002 + attempt * 0.00001,
     lng: PICKUP.lng + 0.0002 + attempt * 0.00001,
     tripStatus: 'idle',
     isInTrip: false,
     seq: Date.now() % 100000
-  });
-  await sleep(1200);
+  };
+  const result = await emitDriverLocationAndWait(driverClient, payload);
+  console.log('driver_location_prime', JSON.stringify({
+    attempt,
+    ok: result.ok,
+    event: result.event || 'locationUpdated',
+    seq: payload.seq,
+    error: result.error || null
+  }));
+  if (!result.ok) {
+    const code = String(result.error?.code || result.error?.reason || result.event || 'LOCATION_SYNC_FAILED');
+    throw new Error(`driver_location_sync_failed:${code}:${result.error?.error || result.error?.message || 'unknown'}`);
+  }
+  return result.data;
 }
 async function ensureDriverOnline(driverClient) {
   await primeDriverLocation(driverClient);
