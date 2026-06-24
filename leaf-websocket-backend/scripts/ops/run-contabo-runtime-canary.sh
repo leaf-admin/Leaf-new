@@ -92,6 +92,9 @@ services:
       NODE_ENV: production
       APP_ENV: runtime-canary
       LEAF_ENV: runtime-canary
+      # The isolated canary full-flow uses socket mock payment on purpose.
+      # Public production deploys remain protected by runtime config validation.
+      APP_REVIEW: "true"
       PORT: 3001
       HOST: 0.0.0.0
       RUNTIME_ROLE: gateway
