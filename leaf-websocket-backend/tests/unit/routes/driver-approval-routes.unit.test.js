@@ -112,4 +112,69 @@ describe('driver approval routes', () => {
       error: 'APPROVAL_AUDIT_REQUIRED'
     });
   });
+
+  it('returns conflict when canonical driver evidence blocks manual approval', async () => {
+    mockApproveDriver.mockResolvedValueOnce({
+      success: false,
+      error: 'CANONICAL_DRIVER_EVIDENCE_REQUIRED',
+      details: 'Aprovação manual não substitui CNH válida, CRLV/veículo ativo, liveness, face compare e demais evidências canônicas.',
+      activationStatus: {
+        canGoOnline: false,
+        activationState: 'APPROVED_NEEDS_LIVENESS'
+      }
+    });
+
+    const response = await request(createApp())
+      .post('/driver-approval/approve')
+      .set('Authorization', 'Bearer admin')
+      .send({
+        driverId: 'driver_1',
+        name: 'Motorista Leaf',
+        email: 'driver@leaf.test',
+        phone: '+5521999990000',
+        cpf: '12345678909',
+        approvalReason: 'Documentos e KYC revisados manualmente',
+        provenance: 'driver_approval_dashboard',
+        evidenceRefs: ['doc_review_1']
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      success: false,
+      error: 'CANONICAL_DRIVER_EVIDENCE_REQUIRED',
+      activationStatus: {
+        canGoOnline: false,
+        activationState: 'APPROVED_NEEDS_LIVENESS'
+      }
+    });
+  });
+
+  it('returns unavailable when canonical driver evidence cannot be checked', async () => {
+    mockApproveDriver.mockResolvedValueOnce({
+      success: false,
+      error: 'CANONICAL_DRIVER_EVIDENCE_CHECK_FAILED',
+      details: 'activation read failed'
+    });
+
+    const response = await request(createApp())
+      .post('/driver-approval/approve')
+      .set('Authorization', 'Bearer admin')
+      .send({
+        driverId: 'driver_1',
+        name: 'Motorista Leaf',
+        email: 'driver@leaf.test',
+        phone: '+5521999990000',
+        cpf: '12345678909',
+        approvalReason: 'Documentos e KYC revisados manualmente',
+        provenance: 'driver_approval_dashboard',
+        evidenceRefs: ['doc_review_1']
+      });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      success: false,
+      error: 'CANONICAL_DRIVER_EVIDENCE_CHECK_FAILED',
+      activationStatus: null
+    });
+  });
 });

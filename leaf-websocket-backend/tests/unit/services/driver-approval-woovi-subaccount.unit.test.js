@@ -1,6 +1,7 @@
 const mockCreateSubaccount = jest.fn();
 const mockCreateDriverBaaSAccount = jest.fn();
 const mockCreateDriverClient = jest.fn();
+const mockRecomputeDriverActivationStatus = jest.fn();
 
 jest.mock('../../../services/woovi-driver-service', () =>
   jest.fn().mockImplementation(() => ({
@@ -13,6 +14,10 @@ jest.mock('../../../services/woovi-driver-service', () =>
 jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn(),
   logError: jest.fn()
+}));
+
+jest.mock('../../../services/driver-document-analysis-queue', () => ({
+  recomputeDriverActivationStatus: (...args) => mockRecomputeDriverActivationStatus(...args)
 }));
 
 const docs = new Map();
@@ -61,6 +66,26 @@ describe('DriverApprovalService Woovi subaccount integration', () => {
     docs.clear();
     jest.clearAllMocks();
     firebaseConfig.getFirestore.mockReturnValue(createFirestoreMock());
+    mockRecomputeDriverActivationStatus.mockResolvedValue({
+      canGoOnline: true,
+      activationState: 'ACTIVE',
+      checklist: {
+        cnhEar: true,
+        vehicleRegistration: true,
+        backgroundCheckConsent: true
+      },
+      vehicle: {
+        approved: true,
+        plate: 'LEF2042',
+        color: 'Prata'
+      },
+      liveness: {
+        passed: true
+      },
+      faceCompare: {
+        passed: true
+      }
+    });
     mockCreateSubaccount.mockResolvedValue({
       success: true,
       pixKey: 'driver-pix-key',
@@ -117,6 +142,11 @@ describe('DriverApprovalService Woovi subaccount integration', () => {
     expect(docs.get('users/driver_1').approvalAuditTrail).toMatchObject({
       actorId: 'admin_1',
       reason: 'Documentos e KYC revisados manualmente',
+      canonicalEvidenceConfirmed: true,
+      activationStatus: expect.objectContaining({
+        canGoOnline: true,
+        activationState: 'ACTIVE'
+      }),
       previousState: {
         exists: false
       },
@@ -124,6 +154,75 @@ describe('DriverApprovalService Woovi subaccount integration', () => {
         driverStatus: 'approved'
       })
     });
+  });
+
+  it('rejects manual approval when canonical driver evidence is incomplete before calling Woovi', async () => {
+    mockRecomputeDriverActivationStatus.mockResolvedValueOnce({
+      canGoOnline: false,
+      activationState: 'APPROVED_NEEDS_LIVENESS',
+      blockingReason: 'Primeira validacao facial obrigatoria antes de ficar online.',
+      checklist: {
+        cnhEar: true,
+        vehicleRegistration: true,
+        backgroundCheckConsent: true
+      },
+      vehicle: {
+        approved: true
+      },
+      liveness: {
+        passed: false
+      },
+      faceCompare: {
+        passed: false
+      }
+    });
+    const service = new DriverApprovalService();
+
+    const result = await service.approveDriver({
+      id: 'driver_missing_liveness',
+      name: 'Motorista Leaf',
+      email: 'driver4@leaf.app.br',
+      phone: '+5521999990004',
+      cpf: '12345678909',
+      pixKey: 'driver-pix-key',
+      approvalAudit: buildApprovalAudit()
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: 'CANONICAL_DRIVER_EVIDENCE_REQUIRED',
+      activationStatus: expect.objectContaining({
+        canGoOnline: false,
+        activationState: 'APPROVED_NEEDS_LIVENESS'
+      })
+    });
+    expect(mockCreateSubaccount).not.toHaveBeenCalled();
+    expect(mockCreateDriverClient).not.toHaveBeenCalled();
+    expect(docs.get('users/driver_missing_liveness')).toEqual(undefined);
+  });
+
+  it('fails closed when canonical driver evidence cannot be checked', async () => {
+    mockRecomputeDriverActivationStatus.mockRejectedValueOnce(new Error('activation read failed'));
+    const service = new DriverApprovalService();
+
+    const result = await service.approveDriver({
+      id: 'driver_evidence_unavailable',
+      name: 'Motorista Leaf',
+      email: 'driver5@leaf.app.br',
+      phone: '+5521999990005',
+      cpf: '12345678909',
+      pixKey: 'driver-pix-key',
+      approvalAudit: buildApprovalAudit()
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: 'CANONICAL_DRIVER_EVIDENCE_CHECK_FAILED',
+      details: 'activation read failed'
+    });
+    expect(mockCreateSubaccount).not.toHaveBeenCalled();
+    expect(mockCreateDriverClient).not.toHaveBeenCalled();
+    expect(docs.get('users/driver_evidence_unavailable')).toEqual(undefined);
   });
 
   it('rejects manual driver approval without audit trail before calling Woovi', async () => {
@@ -144,6 +243,7 @@ describe('DriverApprovalService Woovi subaccount integration', () => {
     });
     expect(mockCreateSubaccount).not.toHaveBeenCalled();
     expect(mockCreateDriverClient).not.toHaveBeenCalled();
+    expect(mockRecomputeDriverActivationStatus).not.toHaveBeenCalled();
   });
 
   it('falls back to customer flow without creating legacy BaaS when driver pix key is missing', async () => {
@@ -172,5 +272,31 @@ describe('DriverApprovalService Woovi subaccount integration', () => {
       isApproved: true,
       approvalAuditActorId: 'admin_1'
     });
+  });
+
+  it('does not mark an existing driver approved when only creating a Woovi subaccount', async () => {
+    const service = new DriverApprovalService();
+
+    const result = await service.createWooviAccountForExistingDriver({
+      id: 'driver_payment_account_only',
+      name: 'Motorista Leaf',
+      email: 'driver6@leaf.app.br',
+      phone: '+5521999990006',
+      cpf: '12345678909',
+      pixKey: 'driver-pix-key'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      wooviClientId: 'subaccount_1'
+    });
+    expect(docs.get('users/driver_payment_account_only')).toMatchObject({
+      wooviSubaccountId: 'subaccount_1',
+      wooviSubaccountPixKey: 'driver-pix-key',
+      wooviSubaccountCreated: true
+    });
+    expect(docs.get('users/driver_payment_account_only')).not.toHaveProperty('isApproved');
+    expect(docs.get('users/driver_payment_account_only')).not.toHaveProperty('approvedAt');
+    expect(docs.get('users/driver_payment_account_only')).not.toHaveProperty('approvalAuditTrail');
   });
 });

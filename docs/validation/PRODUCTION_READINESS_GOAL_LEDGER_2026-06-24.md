@@ -336,3 +336,69 @@ Interpretation:
 
 No new implementation should be opened from this run. The local core gates are
 green; remaining work is explicit approval/config/evidence collection.
+
+## Manual Driver Approval Non-Bypass Policy - 2026-06-24
+
+Decision:
+
+- Manual driver approval cannot bypass CNH, CRLV/active vehicle, liveness, face
+  compare/KYC, consent, or any backend activation evidence required for
+  `canGoOnline=true`.
+- Dashboard quick approval and `/driver-approval/approve` are audit-confirmation
+  flows only after canonical activation evidence is complete.
+- Creating a Woovi/payment account for an existing driver must not accidentally
+  mark the driver approved.
+- Any future test-driver exception must be an explicit isolated test-user flow,
+  not a production approval bypass.
+
+Implementation proof:
+
+- `DriverApprovalService.approveDriver` validates audit metadata first, then
+  recomputes canonical activation and fails closed unless `canGoOnline=true`.
+- Incomplete canonical evidence returns `CANONICAL_DRIVER_EVIDENCE_REQUIRED`
+  before Woovi calls or approval persistence.
+- Activation-read failure returns `CANONICAL_DRIVER_EVIDENCE_CHECK_FAILED`
+  before Woovi calls or approval persistence.
+- `/driver-approval/approve` maps canonical incomplete evidence to `409` and
+  activation-read failure to `503`.
+- Woovi subaccount creation without an approval audit trail no longer writes
+  `isApproved`, `approvedAt`, or approval audit fields.
+
+Validation proof:
+
+```bash
+node --check leaf-websocket-backend/services/driver-approval-service.js
+node --check leaf-websocket-backend/routes/driver-approval.js
+```
+
+Result: passed.
+
+```bash
+npm --prefix leaf-websocket-backend run test:unit -- --runInBand \
+  tests/unit/services/driver-approval-woovi-subaccount.unit.test.js \
+  tests/unit/routes/driver-approval-routes.unit.test.js \
+  tests/unit/routes/dashboard-driver-quick-approval-boundary.unit.test.js \
+  tests/unit/services/driver-activation-state-service.unit.test.js
+```
+
+Result: `4` backend suites / `23` tests passed.
+
+Additional local gates:
+
+- `git diff --check`: passed.
+- `npm run governance:check`: passed.
+- `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`: passed.
+- `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`:
+  passed.
+- `LEAF_APPROVED_FINANCIAL_POLICY_ID=runtime_tiered_percent_above_50_v1
+  LEAF_FINANCIAL_POLICY_APPROVAL_REF=thread-2026-06-24-user-approved-current-tiered-policy
+  LEAF_FINANCIAL_POLICY_APPROVAL_ACTOR=izaak-dias npm --prefix
+  leaf-websocket-backend run config:validate`: passed with `ok=true`;
+  Firebase and Google Maps configured; only expected KYC strict-biometrics
+  warning remains.
+
+Interpretation:
+
+The manual-driver-approval policy decision is closed locally. Provider-backed
+KYC/liveness/face-compare L2 evidence remains a release evidence gate, but there
+is no retained production approval bypass for missing canonical evidence.

@@ -1,6 +1,9 @@
 const WooviDriverService = require('./woovi-driver-service');
 const firebaseConfig = require('../firebase-config');
 const { logStructured, logError } = require('../utils/logger');
+const {
+  recomputeDriverActivationStatus
+} = require('./driver-document-analysis-queue');
 
 class DriverApprovalService {
   constructor() {
@@ -177,6 +180,32 @@ class DriverApprovalService {
     };
   }
 
+  async resolveCanonicalApprovalEvidence(driverId) {
+    try {
+      const activationStatus = await recomputeDriverActivationStatus(driverId);
+      if (activationStatus?.canGoOnline === true) {
+        return {
+          valid: true,
+          activationStatus
+        };
+      }
+
+      return {
+        valid: false,
+        error: 'CANONICAL_DRIVER_EVIDENCE_REQUIRED',
+        details: 'Aprovação manual não substitui CNH válida, CRLV/veículo ativo, liveness, face compare e demais evidências canônicas.',
+        activationStatus: activationStatus || null
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        error: 'CANONICAL_DRIVER_EVIDENCE_CHECK_FAILED',
+        details: error?.message || String(error),
+        activationStatus: null
+      };
+    }
+  }
+
   buildDriverSubaccountPayload(driverData = {}) {
     const pixKey = this.normalizePixKey(
       driverData.wooviSubaccountPixKey ||
@@ -247,6 +276,20 @@ class DriverApprovalService {
       subaccountPixKey;
 
     const nowIso = new Date().toISOString();
+    const approvalFields = driverData.approvalAuditTrail
+      ? {
+          isApproved: true,
+          approvedAt: nowIso,
+          ...this.buildApprovalAuditFields(driverData, {
+            approved: true,
+            isApproved: true,
+            driverStatus: 'approved',
+            wooviSubaccountCreated: true,
+            fallbackToCustomer: false
+          })
+        }
+      : {};
+
     const dataToSave = {
       wooviAccountId: subaccountId,
       wooviClientId: subaccountId,
@@ -259,15 +302,7 @@ class DriverApprovalService {
       fallbackToCustomer: false,
       baasUpgradePending: false,
       wooviAccountCreatedAt: nowIso,
-      isApproved: true,
-      approvedAt: nowIso,
-      ...this.buildApprovalAuditFields(driverData, {
-        approved: true,
-        isApproved: true,
-        driverStatus: 'approved',
-        wooviSubaccountCreated: true,
-        fallbackToCustomer: false
-      })
+      ...approvalFields
     };
 
     await this.persistDriverWooviAccount(driverData.id, dataToSave);
@@ -304,9 +339,22 @@ class DriverApprovalService {
           details: audit.details
         };
       }
+      const canonicalEvidence = await this.resolveCanonicalApprovalEvidence(driverData.id);
+      if (!canonicalEvidence.valid) {
+        return {
+          success: false,
+          error: canonicalEvidence.error,
+          details: canonicalEvidence.details,
+          activationStatus: canonicalEvidence.activationStatus
+        };
+      }
       const driverDataWithAudit = {
         ...driverData,
-        approvalAuditTrail: audit.auditTrail
+        approvalAuditTrail: {
+          ...audit.auditTrail,
+          activationStatus: canonicalEvidence.activationStatus,
+          canonicalEvidenceConfirmed: true
+        }
       };
 
       const subaccountResult = await this.tryCreateDriverSubaccount(driverDataWithAudit);

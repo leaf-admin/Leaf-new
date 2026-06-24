@@ -8,6 +8,18 @@ const driverApprovalService = new DriverApprovalService();
 const DRIVER_APPROVAL_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const ADMIN_ROUTE_MIDDLEWARE = [authenticateJWT, requireRole(DRIVER_APPROVAL_ADMIN_ROLES)];
 
+function getDriverApprovalFailureStatus(errorCode) {
+  if (errorCode === 'CANONICAL_DRIVER_EVIDENCE_REQUIRED') {
+    return 409;
+  }
+
+  if (errorCode === 'CANONICAL_DRIVER_EVIDENCE_CHECK_FAILED') {
+    return 503;
+  }
+
+  return 400;
+}
+
 // Aprovar motorista e criar conta Woovi
 router.post('/approve', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
@@ -66,10 +78,11 @@ router.post('/approve', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
         wooviClientId: result.wooviClientId
       });
     } else {
-      res.status(400).json({
+      res.status(getDriverApprovalFailureStatus(result.error)).json({
         success: false,
         error: result.error,
-        details: result.details
+        details: result.details,
+        activationStatus: result.activationStatus || null
       });
     }
   } catch (error) {
@@ -195,7 +208,6 @@ router.post('/create-woovi-account', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res)
 });
 
 module.exports = router;
-
 
 
 
