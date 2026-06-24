@@ -3390,6 +3390,52 @@ describe('prototype ride screens', () => {
     expect(getByText('Ferry Building')).toBeTruthy();
   });
 
+  it('renders booking finalization separately from driver search while createBooking is pending', () => {
+    const cancelRideSearch = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'requesting',
+        searchingElapsedSeconds: 44,
+        selectedVehicle: 'Leaf Plus',
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+        },
+        currentAddress: '1540 Mission St, San Francisco',
+        activeBookingId: '',
+        activeBooking: {
+          status: 'REQUESTING',
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+        },
+        paymentState: {
+          status: 'processing',
+          paymentId: 'pix_pending_create',
+          chargeId: 'pix_pending_create',
+        },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getAllByText, getByText, getByTestId, queryByTestId, queryByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('passenger-booking-finalizing-sheet')).toBeTruthy();
+    expect(queryByTestId('passenger-driver-search-sheet')).toBeNull();
+    expect(queryByText('Buscando motorista')).toBeNull();
+    expect(getAllByText('Criando corrida').length).toBeGreaterThan(0);
+    expect(getByText('Pagamento confirmado. Estamos criando sua corrida com segurança.')).toBeTruthy();
+    expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('Criando corrida');
+
+    fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+
   it('does not promote the passenger to driver-on-way before the driver accepts', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({

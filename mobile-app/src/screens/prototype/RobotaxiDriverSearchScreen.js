@@ -182,9 +182,8 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
   const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
   const passengerAutoRoute = resolvePassengerAutoRoute(bookingStatus);
-  const isCanonicalSearchActive =
-    normalizedBookingStatus === "searching" ||
-    normalizedBookingStatus === "requesting";
+  const isBookingFinalizing = normalizedBookingStatus === "requesting";
+  const isCanonicalSearchActive = normalizedBookingStatus === "searching";
   const resolvedActiveBookingId = String(
     activeBooking?.bookingId ||
       activeBooking?.id ||
@@ -215,11 +214,13 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     normalizedBookingStatus,
   );
   const isSearchReconciling =
+    !isBookingFinalizing &&
     !isCanonicalSearchActive &&
     !isTerminalSearchStatus &&
     !lastError &&
     hasPaidOrActiveBookingEvidence;
-  const isSearchActive = isCanonicalSearchActive || isSearchReconciling;
+  const isSearchActive =
+    isBookingFinalizing || isCanonicalSearchActive || isSearchReconciling;
   const searchAnchorTimestamp =
     activeBooking?.timestamp ||
     activeBooking?.createdAt ||
@@ -228,7 +229,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     null;
   const elapsed = useSearchElapsedClock(
     searchingElapsedSeconds,
-    isSearchActive,
+    isCanonicalSearchActive || isSearchReconciling,
     searchAnchorTimestamp,
   );
   const searchPresentation = useMemo(
@@ -318,6 +319,23 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     vehicle,
   ]);
   const fareLabel = formatFareLabel(protectedFareAmount);
+  const sheetTestID = isBookingFinalizing
+    ? "passenger-booking-finalizing-sheet"
+    : "passenger-driver-search-sheet";
+  const headerTitle = isBookingFinalizing
+    ? "Criando corrida"
+    : "Buscando motorista";
+  const cardTitle = isBookingFinalizing
+    ? "Solicitação em andamento"
+    : "Detalhes da corrida";
+  const progressPrimaryText = isBookingFinalizing
+    ? "Criando corrida"
+    : searchPresentation.elapsedLabel;
+  const progressMetaText = isBookingFinalizing
+    ? "Pagamento confirmado. Estamos criando sua corrida com segurança."
+    : isSearchReconciling
+      ? "sincronizando estado"
+      : "tempo de busca";
   const searchMilestoneLabel = searchPresentation.isMaxRadius
     ? "Buscando no maior raio disponível para esta corrida"
     : `Buscando em ${searchPresentation.diameterLabel} neste momento`;
@@ -364,7 +382,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
-    if (isCanonicalSearchActive || isSearchReconciling) {
+    if (isSearchActive) {
       terminalRouteHandledRef.current = false;
       return;
     }
@@ -449,8 +467,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     completedReceiptParams,
     destination,
     destinationCoordinate,
-    isCanonicalSearchActive,
-    isSearchReconciling,
+    isSearchActive,
     lastError,
     normalizedBookingStatus,
     passengerAutoRoute,
@@ -549,7 +566,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           barStyle="dark-content"
         />
         <LeafStateHeader
-          title="Buscando motorista"
+          title={headerTitle}
           subtitle="Pagamento confirmado"
           rightLabel="Ativo"
           rightTone="dark"
@@ -565,12 +582,12 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           <LeafRideSheet
             onLayout={handleCardLayout}
             style={styles.searchingCard}
-            testID="passenger-driver-search-sheet"
-            accessibilityLabel="passenger-driver-search-sheet"
+            testID={sheetTestID}
+            accessibilityLabel={sheetTestID}
           >
             <View style={styles.sheetHandle} />
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardTitle}>Detalhes da corrida</Text>
+              <Text style={styles.cardTitle}>{cardTitle}</Text>
               <LeafPill label={fareLabel} tone="ghost" />
             </View>
 
@@ -586,10 +603,10 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
               testID="passenger-driver-search-elapsed"
               accessibilityLabel="passenger-driver-search-elapsed"
             >
-              {searchPresentation.elapsedLabel}
+              {progressPrimaryText}
             </Text>
               <Text style={styles.elapsedMetaText}>
-                {isSearchReconciling ? "sincronizando estado" : "tempo de busca"}
+                {progressMetaText}
               </Text>
 
             <View style={styles.routeSummaryRow}>
@@ -620,7 +637,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
               label={
                 isSearchReconciling
                   ? "Sincronizando..."
-                  : normalizedBookingStatus === "requesting"
+                  : isBookingFinalizing
                     ? "Criando corrida..."
                     : cancelPending
                     ? "Cancelando..."
@@ -628,21 +645,21 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
               }
               onPress={
                 isSearchReconciling ||
-                normalizedBookingStatus === "requesting" ||
+                isBookingFinalizing ||
                 cancelPending
                   ? undefined
                   : handleCancelSearch
               }
               icon={
                 isSearchReconciling ||
-                normalizedBookingStatus === "requesting" ||
+                isBookingFinalizing ||
                 cancelPending
                   ? "time-outline"
                   : "close-circle-outline"
               }
               disabled={
                 isSearchReconciling ||
-                normalizedBookingStatus === "requesting" ||
+                isBookingFinalizing ||
                 cancelPending
               }
               tone="ghost"

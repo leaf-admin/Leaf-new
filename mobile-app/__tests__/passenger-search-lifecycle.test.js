@@ -36,4 +36,25 @@ describe("passenger search lifecycle", () => {
       }),
     ).toBe(false);
   });
+
+  it("does not treat booking creation as driver-search timeout", () => {
+    expect(
+      isPassengerSearchExpired({
+        role: "customer",
+        bookingStatus: "requesting",
+        elapsedSeconds: 180,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreservePassengerSearchOnIdleSync({
+        role: "customer",
+        syncedStatus: "idle",
+        bookingStatus: "requesting",
+        elapsedSeconds: 180,
+        activeBookingId: "",
+        activeBooking: { status: "REQUESTING" },
+        paymentStatus: "processing",
+      }),
+    ).toBe(true);
+  });
 });

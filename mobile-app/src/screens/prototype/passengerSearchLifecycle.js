@@ -1,9 +1,13 @@
 import { SEARCH_TOTAL_DURATION_SECONDS } from "./searchPresentation";
 
-const PASSENGER_SEARCH_STATUSES = new Set([
-  "requesting",
+const PASSENGER_DRIVER_SEARCH_STATUSES = new Set([
   "searching",
   "searching_replacement",
+]);
+
+const PASSENGER_PROTECTED_PRE_ACCEPT_STATUSES = new Set([
+  "requesting",
+  ...PASSENGER_DRIVER_SEARCH_STATUSES,
 ]);
 
 export const SEARCH_TIMEOUT_RECONCILING_MESSAGE =
@@ -19,7 +23,7 @@ export function isPassengerSearchExpired({
 
   return (
     (normalizedRole === "customer" || normalizedRole === "passenger") &&
-    PASSENGER_SEARCH_STATUSES.has(normalizedStatus) &&
+    PASSENGER_DRIVER_SEARCH_STATUSES.has(normalizedStatus) &&
     Number(elapsedSeconds || 0) >= SEARCH_TOTAL_DURATION_SECONDS
   );
 }
@@ -43,7 +47,7 @@ export function shouldPreservePassengerSearchOnIdleSync({
 
   if (
     normalizedSyncedStatus !== "idle" ||
-    !PASSENGER_SEARCH_STATUSES.has(normalizedStatus) ||
+    !PASSENGER_PROTECTED_PRE_ACCEPT_STATUSES.has(normalizedStatus) ||
     isPassengerSearchExpired({ role, bookingStatus, elapsedSeconds })
   ) {
     return false;

@@ -6787,8 +6787,7 @@ function startSearchingTimer({ preserveElapsed = false } = {}) {
   runtimeSearchTimer = setInterval(() => {
     setRuntimeState((previous) => {
       if (
-        previous.bookingStatus !== "searching" &&
-        previous.bookingStatus !== "requesting"
+        previous.bookingStatus !== "searching"
       ) {
         stopSearchingTimer();
         return previous;
@@ -12685,8 +12684,10 @@ async function requestPrototypeRide(profile, payload) {
   });
 
   stopBoardingCountdownTimer();
+  stopSearchingTimer();
   setRuntimeState({
     bookingStatus: "requesting",
+    searchingElapsedSeconds: 0,
     activeBooking: {
       ...(runtimeState.activeBooking && typeof runtimeState.activeBooking === "object"
         ? runtimeState.activeBooking
