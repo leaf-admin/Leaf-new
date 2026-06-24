@@ -66,8 +66,14 @@ backend event monitoring.
 
 5. Fare and route are canonical.
    - Passenger UI must not show a provisional fare after destination entry.
-   - The fare shown at quote, payment, receipt, dashboard, and driver settlement
-     must reconcile across gross amount, net amount, and explicit fees.
+   - Passenger gross fare is the canonical user-facing amount. It must match
+     quote, Pix charge, passenger receipt, and dashboard passenger gross.
+   - Driver net, Leaf fee, Woovi fee, tolls, and pass-through values are separate
+     canonical fields. They must add up from the same backend-final snapshot, not
+     appear as alternate passenger fares.
+   - Passenger UI must never describe fare as "in reconciliation". If the
+     backend-final financial snapshot is missing, the UI must fail closed with no
+     alternate currency amount and no rating release.
    - The route preview must be backend/provider-derived. A synthetic straight or
      fallback route is not valid evidence for ride request.
    - Polyline traffic coloring must reflect available backend route traffic data.
@@ -89,6 +95,20 @@ Stop and mark the run as `blocked_precondition` when any precondition fails.
 Do not label a blocked precondition as a failed smoke test. Do not continue into
 payment or dispatch when the block is known up front.
 
+## Runner Interpretation Rules
+
+- A smoke runner must classify only observed product failures as `failed`.
+- If automation cannot identify the current screen but the device visibly
+  advanced, record the current screen, screenshot/XML, backend status, and
+  classify the step as `automation_inconclusive` until evidence is reviewed.
+- Do not seed or force a later lifecycle state to make a blocked run pass. Fix
+  the precondition or stop with `blocked_precondition:<reason>`.
+- Do not infer fare mismatch by comparing passenger gross to driver net. Compare
+  passenger gross to passenger gross, driver net to driver net, and fees to their
+  explicit backend-final fields.
+- Do not report a state regression until the captured screen, route name, active
+  booking id, and latest backend event all point to a previous lifecycle state.
+
 ## Smoke Levels
 
 - L0 quote smoke: validates device launch, destination entry, quote stability,
@@ -97,8 +117,8 @@ payment or dispatch when the block is known up front.
   validate dispatch or trip completion.
 - L2 full ride smoke: validates passenger plus driver, payment confirmation,
   dispatch offer, driver accept, arrival, trip start, trip completion, rating,
-  receipt, dashboard, backend events, and reconciliation. Only L2 can be called a
-  complete ride smoke.
+  receipt, dashboard, backend events, and canonical fare consistency. Only L2 can
+  be called a complete ride smoke.
 
 ## Canonical Commands
 
@@ -138,14 +158,14 @@ Every real smoke report must include:
   are distinct for Android L2.
 - Pickup/destination coordinates and geofence mode.
 - Driver availability evidence before request/payment.
-- Canonical driver vehicle identity, provenance, and reconciliation across the
+- Canonical driver vehicle identity and provenance across the
   accepted trip UI, receipt, and dashboard projection.
 - Quote id/session id, gross fare, net fare, fee/tax breakdown, expiration time.
 - Payment sandbox charge id and confirmation event.
 - Booking id and ordered lifecycle events.
 - Route source and whether traffic segments were rendered.
 - Rating and receipt result.
-- Dashboard fare and status reconciliation.
+- Dashboard fare/status consistency for the same ride id.
 - Backend logs or event stream correlation id.
 - Final status: `passed`, `failed`, or `blocked_precondition:<reason>`.
 
