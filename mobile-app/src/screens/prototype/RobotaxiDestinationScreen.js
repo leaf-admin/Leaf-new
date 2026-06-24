@@ -56,7 +56,6 @@ import {
   resolvePrototypeConnectionAutomationConfig,
   shouldRunPrototypeConnectionAutomation,
 } from "./prototypeConnectionStatus";
-import { PROTOTYPE_ORIGIN_COORDINATE } from "./robotaxiPrototypeData";
 import {
   clearPrototypeMapRoute,
   setPrototypeMapRoute,
@@ -97,7 +96,7 @@ const PASSENGER_QUOTE_COORDINATE_PRECISION = Math.max(
     10,
   ) || 3,
 );
-const ORIGIN_ADDRESS = "Rua das Pastorinhas, Taquara, Rio de Janeiro";
+const ORIGIN_ADDRESS = "Localização atual";
 const TEMPERATURE_OPTIONS = Object.freeze([
   {
     id: "cool",
@@ -1490,8 +1489,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const resolvedPickupCoordinate = useMemo(
     () =>
       normalizePreviewCoordinate(pickupCoordinate) ||
-      normalizePreviewCoordinate(currentCoordinate) ||
-      normalizePreviewCoordinate(PROTOTYPE_ORIGIN_COORDINATE),
+      normalizePreviewCoordinate(currentCoordinate),
     [
       currentCoordinate?.latitude,
       currentCoordinate?.longitude,
@@ -2759,10 +2757,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, []);
 
   const handleUseCurrentPickup = useCallback(() => {
-    setPickupCoordinate(
-      normalizePreviewCoordinate(currentCoordinate) ||
-        normalizePreviewCoordinate(PROTOTYPE_ORIGIN_COORDINATE),
-    );
+    setPickupCoordinate(normalizePreviewCoordinate(currentCoordinate));
     setPickupAddress(originAddress);
     setPickupAdjustedOnMap(false);
   }, [currentCoordinate, originAddress]);
@@ -4039,8 +4034,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     activeOpacity={0.86}
                     onPress={() => {
                       setPickupCoordinate(
-                        normalizePreviewCoordinate(currentCoordinate) ||
-                          normalizePreviewCoordinate(PROTOTYPE_ORIGIN_COORDINATE),
+                        normalizePreviewCoordinate(currentCoordinate),
                       );
                       setPickupAddress(originAddress);
                       setPickupAdjustedOnMap(false);
