@@ -68,9 +68,12 @@ describe('RequestRideExtensionCommand', () => {
   let activeBooking;
   let redis;
   let pipeline;
+  let previousRouteRecalculationCostCents;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    previousRouteRecalculationCostCents = process.env.RIDE_EXTENSION_ROUTE_RECALCULATION_COST_CENTS;
+    process.env.RIDE_EXTENSION_ROUTE_RECALCULATION_COST_CENTS = '25';
     bookingHash = {
       customerId: 'customer_1',
       driverId: 'driver_1',
@@ -109,6 +112,14 @@ describe('RequestRideExtensionCommand', () => {
     });
   });
 
+  afterEach(() => {
+    if (previousRouteRecalculationCostCents === undefined) {
+      delete process.env.RIDE_EXTENSION_ROUTE_RECALCULATION_COST_CENTS;
+    } else {
+      process.env.RIDE_EXTENSION_ROUTE_RECALCULATION_COST_CENTS = previousRouteRecalculationCostCents;
+    }
+  });
+
   it('uses the backend fare estimate as the authoritative extension fare', async () => {
     const command = new RequestRideExtensionCommand({
       bookingId: 'booking_1',
@@ -123,7 +134,12 @@ describe('RequestRideExtensionCommand', () => {
 
     expect(result.success).toBe(true);
     expect(result.data.newFare).toBe(91.23);
-    expect(result.data.diffFare).toBe(11.23);
+    expect(result.data.fareDelta).toBe(11.23);
+    expect(result.data.diffFare).toBe(11.98);
+    expect(result.data.passengerPayableFare).toBe(91.98);
+    expect(result.data.extensionOperationalCost).toBe(0.75);
+    expect(result.data.routeRecalculationCost).toBe(0.25);
+    expect(result.data.paymentIntermediationFee).toBe(0.5);
     expect(fareEstimationService.estimateRideFare).toHaveBeenCalledWith(expect.objectContaining({
       redis,
       pickupLocation: expect.objectContaining({ lat: -22.91, lng: -43.21 }),
@@ -135,7 +151,14 @@ describe('RequestRideExtensionCommand', () => {
     const extensionRequest = JSON.parse(persistedPatch.activeExtensionRequest);
     expect(extensionRequest).toEqual(expect.objectContaining({
       newFare: 91.23,
-      diffFare: 11.23,
+      fareDelta: 11.23,
+      diffFare: 11.98,
+      passengerPayableFare: 91.98,
+      paymentAmountBeforeExtensionCents: 8000,
+      extensionChargeAmountCents: 1198,
+      extensionOperationalCostCents: 75,
+      routeRecalculationCostCents: 25,
+      paymentIntermediationFeeCents: 50,
       requestedClientFare: 91,
       serverEstimatedFare: 91.23,
       fareAuthority: 'backend_extension_estimate'

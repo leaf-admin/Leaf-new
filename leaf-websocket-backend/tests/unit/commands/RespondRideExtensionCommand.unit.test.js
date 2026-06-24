@@ -122,7 +122,13 @@ describe('RespondRideExtensionCommand', () => {
       status: 'DRIVER_DECISION_PENDING',
       requestedBy: 'customer_1',
       newFare: 91.23,
-      diffFare: 11.23,
+      fareDelta: 11.23,
+      diffFare: 11.98,
+      extensionChargeAmount: 11.98,
+      extensionChargeAmountCents: 1198,
+      extensionOperationalCost: 0.75,
+      routeRecalculationCost: 0.25,
+      paymentIntermediationFee: 0.5,
       fareAuthority: 'backend_extension_estimate',
       newEndLocation: { lat: -22.99, lng: -43.31 }
     });
@@ -139,7 +145,14 @@ describe('RespondRideExtensionCommand', () => {
     expect(ExtendRideCommand).toHaveBeenCalledWith(expect.objectContaining({
       bookingId: 'booking_1',
       customerId: 'customer_1',
-      newFare: 91.23
+      newFare: 91.23,
+      fareDelta: 11.23,
+      diffFare: 11.98,
+      extensionChargeAmount: 11.98,
+      extensionChargeAmountCents: 1198,
+      extensionOperationalCost: 0.75,
+      routeRecalculationCost: 0.25,
+      paymentIntermediationFee: 0.5
     }));
     expect(lifecycleService.persistBookingPatch).toHaveBeenCalledWith(
       {},

@@ -221,6 +221,65 @@ above applied before deploy validation. Same-ride L2 evidence is still required
 to prove quote, Pix, receipt, dashboard, ledger, Leaf fee, Woovi fee, tolls and
 driver net on one real ride id.
 
+## Ride Extension Pricing Approval - 2026-06-24
+
+Decision:
+
+- Active-trip destination extension pricing is approved as backend-authoritative
+  pricing from the current vehicle position to the new destination.
+- The extension Pix charge is not only the pure fare delta.
+- Approved charge formula:
+  `extension Pix = positive fare delta + route recalculation operational cost + Pix processing fee`.
+
+Implementation rule:
+
+- `newFare` remains the backend route fare for the new destination.
+- `fareDelta` is the pure positive delta between `newFare` and the current paid
+  fare.
+- `diffFare` remains the passenger-payable Pix complement for compatibility with
+  existing mobile payment surfaces.
+- The backend persists `routeRecalculationCost`,
+  `paymentIntermediationFee`, `extensionOperationalCost`,
+  `extensionChargeAmount`, and `passengerPayableFare`.
+- On extension confirmation, the booking's paid amount is aggregated and the
+  final backend financial snapshot retains extension operational costs so they
+  do not become driver net.
+
+Runtime/config:
+
+- `RIDE_EXTENSION_ROUTE_RECALCULATION_COST_CENTS` sets the explicit route
+  recalculation pass-through cost.
+- If unset, the backend derives a conservative value from route SKU telemetry
+  defaults and `RIDE_COST_TELEMETRY_USD_BRL_RATE`.
+
+Validation proof:
+
+```bash
+npm --prefix leaf-websocket-backend run test:unit -- --runInBand \
+  tests/unit/services/ride-financial-contract.unit.test.js \
+  tests/unit/services/ride-lifecycle-service.unit.test.js \
+  tests/unit/commands/RequestRideExtensionCommand.unit.test.js \
+  tests/unit/commands/RespondRideExtensionCommand.unit.test.js \
+  tests/unit/commands/CompleteTripCommand.unit.test.js
+```
+
+Result: `5` backend suites / `35` tests passed.
+
+```bash
+npm --prefix mobile-app run test:unit -- --runInBand \
+  __tests__/destination-quote-recalculation.test.js \
+  __tests__/websocket-manager-create-booking.test.js \
+  __tests__/prototype-ride-screens.test.js
+```
+
+Result: `3` mobile suites / `173` tests passed.
+
+Interpretation:
+
+The extension-pricing decision is closed locally. Same-ride L2 evidence is still
+required to prove extension Pix amount, webhook confirmation, receipt,
+dashboard, ledger, retained operational costs, and driver net on the real flow.
+
 ## Validation Run - 2026-06-24 15:58 BRT
 
 Run directory:

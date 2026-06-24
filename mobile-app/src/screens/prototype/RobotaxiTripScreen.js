@@ -2188,6 +2188,11 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                         Pagar complemento de {formatCurrency(rideExtension?.diffFare)}
                       </Text>
                     </TouchableOpacity>
+                    {Number(rideExtension?.extensionOperationalCost) > 0 ? (
+                      <Text style={styles.extensionCostDetail}>
+                        Inclui novo Pix e recotação de rota: {formatCurrency(rideExtension?.extensionOperationalCost)}
+                      </Text>
+                    ) : null}
                     <SecurePaymentBadge style={styles.extensionSecurePaymentBadge} />
                   </>
                 ) : null}
@@ -2868,6 +2873,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.Medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight + 2
+  },
+  extensionCostDetail: {
+    marginTop: 6,
+    color: color.text.muted,
+    fontFamily: fonts.Medium,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight + 2
   },
   extensionPayAction: {
     marginTop: 10,

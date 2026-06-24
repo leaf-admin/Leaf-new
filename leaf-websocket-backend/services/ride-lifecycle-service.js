@@ -1,4 +1,8 @@
 const { logStructured } = require('../utils/logger');
+const {
+  buildPaymentInclusiveCharge,
+  toCents
+} = require('./ride-financial-contract');
 
 function toFiniteNumber(value) {
   const parsed = Number(value);
@@ -12,6 +16,61 @@ function clamp(value, min, max) {
 function roundMoney(value) {
   const normalized = Number.isFinite(Number(value)) ? Number(value) : 0;
   return Math.round(normalized * 100) / 100;
+}
+
+function centsToMoney(value) {
+  return roundMoney(toCents(value) / 100);
+}
+
+function parseCentsValue(rawValue, fallback = 0) {
+  const parsed = Number.parseInt(String(rawValue ?? ''), 10);
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return toCents(fallback);
+}
+
+function parsePositiveNumberFromEnv(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function resolveRideExtensionRouteRecalculationCostCents() {
+  const explicitCents = parsePositiveNumberFromEnv(
+    process.env.RIDE_EXTENSION_ROUTE_RECALCULATION_COST_CENTS,
+    process.env.RIDE_EXTENSION_REQUOTE_COST_CENTS
+  );
+  if (explicitCents !== null) {
+    return Math.round(explicitCents);
+  }
+
+  const explicitBrl = parsePositiveNumberFromEnv(
+    process.env.RIDE_EXTENSION_ROUTE_RECALCULATION_COST_BRL,
+    process.env.RIDE_EXTENSION_REQUOTE_COST_BRL
+  );
+  if (explicitBrl !== null) {
+    return Math.ceil(explicitBrl * 100);
+  }
+
+  const routeCostUsd = parsePositiveNumberFromEnv(
+    process.env.RIDE_EXTENSION_ROUTE_RECALCULATION_COST_USD,
+    process.env.RIDE_COST_TELEMETRY_SKU_DIRECTIONS_ADVANCED_USD,
+    process.env.RIDE_COST_TELEMETRY_SKU_DIRECTIONS_USD,
+    0.01
+  );
+  const usdBrlRate = parsePositiveNumberFromEnv(
+    process.env.RIDE_COST_TELEMETRY_USD_BRL_RATE,
+    process.env.USD_BRL_EXCHANGE_RATE,
+    5.2
+  );
+
+  return Math.ceil((routeCostUsd || 0) * (usdBrlRate || 0) * 100);
 }
 
 function resolveRideExtensionPaymentTimeoutSec() {
@@ -115,6 +174,33 @@ function resolveContractualFare(bookingHash = {}) {
 
   const prepaidAmount = resolvePrepaidAmount(bookingHash);
   return roundMoney(Math.max(bookingFare, prepaidAmount));
+}
+
+function resolveExtensionCurrentFare(bookingHash = {}) {
+  const contractedRideFare = parseMoneyValue(
+    bookingHash.contractedRideFare ||
+      bookingHash.currentContractedFare ||
+      bookingHash.routeFare ||
+      0,
+    0
+  );
+
+  if (contractedRideFare > 0) {
+    return roundMoney(contractedRideFare);
+  }
+
+  return resolveContractualFare(bookingHash);
+}
+
+function resolvePrepaidAmountCents(bookingHash = {}) {
+  const explicitPaymentCents = parseCentsValue(
+    bookingHash.paymentAmountInCents || bookingHash.amountInCents || 0,
+    0
+  );
+  if (explicitPaymentCents > 0) {
+    return explicitPaymentCents;
+  }
+  return Math.round(resolveContractualFare(bookingHash) * 100);
 }
 
 function parseHistoryField(rawValue) {
@@ -544,9 +630,25 @@ function buildExtensionRequest({
   traceId = null,
   correlationId = null
 }) {
-  const currentFare = resolveContractualFare(bookingHash);
+  const currentFare = resolveExtensionCurrentFare(bookingHash);
   const normalizedNewFare = roundMoney(newFare);
-  const diffFare = roundMoney(Math.max(0, normalizedNewFare - currentFare));
+  const fareDelta = roundMoney(Math.max(0, normalizedNewFare - currentFare));
+  const routeRecalculationCostCents = resolveRideExtensionRouteRecalculationCostCents();
+  const chargeBreakdown = buildPaymentInclusiveCharge({
+    baseAmountCents: Math.round(fareDelta * 100),
+    operationalCostCents: routeRecalculationCostCents
+  });
+  const diffFare = centsToMoney(chargeBreakdown.passengerChargeCents);
+  const paymentIntermediationFee = centsToMoney(chargeBreakdown.paymentIntermediationFeeCents);
+  const routeRecalculationCost = centsToMoney(routeRecalculationCostCents);
+  const roundingBuffer = centsToMoney(chargeBreakdown.roundingBufferCents);
+  const extensionOperationalCost = roundMoney(
+    paymentIntermediationFee +
+      routeRecalculationCost +
+      roundingBuffer
+  );
+  const paymentAmountBeforeExtensionCents = resolvePrepaidAmountCents(bookingHash);
+  const passengerPayableFare = roundMoney((paymentAmountBeforeExtensionCents / 100) + diffFare);
 
   return {
     requestId: `ext_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -555,7 +657,24 @@ function buildExtensionRequest({
     requestedBy: customerId,
     currentFare: roundMoney(currentFare),
     newFare: normalizedNewFare,
+    fareDelta,
     diffFare,
+    passengerPayableFare,
+    paymentAmountBeforeExtensionCents,
+    extensionChargeAmount: diffFare,
+    extensionChargeAmountCents: chargeBreakdown.passengerChargeCents,
+    extensionOperationalCost,
+    extensionOperationalCostCents:
+      routeRecalculationCostCents +
+      chargeBreakdown.paymentIntermediationFeeCents +
+      chargeBreakdown.roundingBufferCents,
+    routeRecalculationCost,
+    routeRecalculationCostCents,
+    paymentIntermediationFee,
+    paymentIntermediationFeeCents: chargeBreakdown.paymentIntermediationFeeCents,
+    roundingBuffer,
+    roundingBufferCents: chargeBreakdown.roundingBufferCents,
+    chargeBreakdown,
     newEndLocation,
     routeDistanceKm: routeDistanceKm !== null ? roundMoney(routeDistanceKm) : null,
     routeDurationSecs: routeDurationSecs !== null ? Math.round(routeDurationSecs) : null,
@@ -626,6 +745,24 @@ async function applyConfirmedRideExtension({
       : null,
     source
   };
+  const extensionPaidAmountInCents = Number.isFinite(Number(amountInCents))
+    ? Math.round(Number(amountInCents))
+    : parseCentsValue(extensionRequest.extensionChargeAmountCents, 0);
+  const paymentAmountBeforeExtensionCents = parseCentsValue(
+    extensionRequest.paymentAmountBeforeExtensionCents,
+    resolvePrepaidAmountCents(context.bookingHash)
+  );
+  const totalPaymentAmountInCents = paymentAmountBeforeExtensionCents + extensionPaidAmountInCents;
+  const passengerPayableFare = roundMoney(
+    Number(extensionRequest.passengerPayableFare || 0) > 0
+      ? extensionRequest.passengerPayableFare
+      : (totalPaymentAmountInCents / 100)
+  );
+  const contractedRideFare = roundMoney(
+    Number(extensionRequest.newFare || 0) > 0
+      ? extensionRequest.newFare
+      : passengerPayableFare
+  );
 
   const bookingPatch = {
     destinationLocation: confirmedExtension.newEndLocation,
@@ -634,7 +771,19 @@ async function applyConfirmedRideExtension({
       confirmedExtension.newEndLocation?.address ||
       confirmedExtension.newEndLocation?.formattedAddress ||
       '',
-    estimatedFare: confirmedExtension.newFare,
+    estimatedFare: passengerPayableFare,
+    contractedRideFare,
+    paymentAmountInCents: totalPaymentAmountInCents,
+    extensionPaidAmountInCents,
+    extensionFareDelta: confirmedExtension.fareDelta,
+    extensionChargeAmount: confirmedExtension.extensionChargeAmount || confirmedExtension.diffFare,
+    extensionChargeAmountCents: confirmedExtension.extensionChargeAmountCents,
+    extensionOperationalCost: confirmedExtension.extensionOperationalCost,
+    extensionOperationalCostCents: confirmedExtension.extensionOperationalCostCents,
+    extensionRouteRecalculationCost: confirmedExtension.routeRecalculationCost,
+    extensionRouteRecalculationCostCents: confirmedExtension.routeRecalculationCostCents,
+    extensionPaymentIntermediationFee: confirmedExtension.paymentIntermediationFee,
+    extensionPaymentIntermediationFeeCents: confirmedExtension.paymentIntermediationFeeCents,
     ...(confirmedExtension.routeDistanceKm !== null
       ? { routeDistanceKm: confirmedExtension.routeDistanceKm }
       : {}),
@@ -666,7 +815,10 @@ async function applyConfirmedRideExtension({
     chargeId,
     status: 'CONFIRMED',
     newFare: confirmedExtension.newFare,
+    passengerPayableFare,
     diffFare: confirmedExtension.diffFare,
+    fareDelta: confirmedExtension.fareDelta,
+    extensionOperationalCost: confirmedExtension.extensionOperationalCost,
     destinationLocation: confirmedExtension.newEndLocation,
     routeDistanceKm: confirmedExtension.routeDistanceKm,
     routeDurationSecs: confirmedExtension.routeDurationSecs,
@@ -809,7 +961,10 @@ module.exports = {
   normalizeLocation,
   parseMoneyValue,
   resolvePrepaidAmount,
+  resolvePrepaidAmountCents,
   resolveContractualFare,
+  resolveExtensionCurrentFare,
+  resolveRideExtensionRouteRecalculationCostCents,
   loadBookingContext,
   persistBookingPatch,
   appendJsonHistoryField,

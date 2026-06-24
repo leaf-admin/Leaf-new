@@ -352,7 +352,12 @@ const DEFAULT_RIDE_EXTENSION_STATE = Object.freeze({
   requestId: null,
   currentFare: 0,
   newFare: 0,
+  fareDelta: 0,
   diffFare: 0,
+  passengerPayableFare: 0,
+  extensionOperationalCost: 0,
+  routeRecalculationCost: 0,
+  paymentIntermediationFee: 0,
   destination: null,
   chargeId: null,
   paymentLink: null,
@@ -372,7 +377,12 @@ const DEFAULT_DRIVER_EXTENSION_REQUEST = Object.freeze({
   requestId: null,
   currentFare: 0,
   newFare: 0,
+  fareDelta: 0,
   diffFare: 0,
+  passengerPayableFare: 0,
+  extensionOperationalCost: 0,
+  routeRecalculationCost: 0,
+  paymentIntermediationFee: 0,
   destination: null,
   chargeId: null,
   paymentLink: null,
@@ -3549,7 +3559,33 @@ function buildRideExtensionState(payload = {}, overrides = {}) {
     currentFare:
       Number(extensionRequest?.currentFare ?? payload?.currentFare ?? 0) || 0,
     newFare: Number(extensionRequest?.newFare ?? payload?.newFare ?? 0) || 0,
+    fareDelta:
+      Number(extensionRequest?.fareDelta ?? payload?.fareDelta ?? 0) || 0,
     diffFare: Number(extensionRequest?.diffFare ?? payload?.diffFare ?? 0) || 0,
+    passengerPayableFare:
+      Number(
+        extensionRequest?.passengerPayableFare ??
+          payload?.passengerPayableFare ??
+          0,
+      ) || 0,
+    extensionOperationalCost:
+      Number(
+        extensionRequest?.extensionOperationalCost ??
+          payload?.extensionOperationalCost ??
+          0,
+      ) || 0,
+    routeRecalculationCost:
+      Number(
+        extensionRequest?.routeRecalculationCost ??
+          payload?.routeRecalculationCost ??
+          0,
+      ) || 0,
+    paymentIntermediationFee:
+      Number(
+        extensionRequest?.paymentIntermediationFee ??
+          payload?.paymentIntermediationFee ??
+          0,
+      ) || 0,
     destination,
     chargeId: sanitizeText(extensionRequest?.chargeId || payload?.chargeId, ""),
     paymentLink: sanitizeText(
@@ -18325,6 +18361,14 @@ export function usePrototypeRideRuntime() {
           destination: resolvedDestination,
           currentFare: contractualFare,
           newFare: normalizedNewFare,
+          fareDelta:
+            Number.isFinite(Number(response?.fareDelta)) &&
+            Number(response.fareDelta) > 0
+              ? Number(response.fareDelta)
+              : Math.max(
+                  0,
+                  Number((normalizedNewFare - contractualFare).toFixed(2)),
+                ),
           diffFare:
             Number.isFinite(Number(response?.diffFare)) &&
             Number(response.diffFare) > 0
@@ -18333,6 +18377,26 @@ export function usePrototypeRideRuntime() {
                   0,
                   Number((normalizedNewFare - contractualFare).toFixed(2)),
                 ),
+          passengerPayableFare:
+            Number.isFinite(Number(response?.passengerPayableFare)) &&
+            Number(response.passengerPayableFare) > 0
+              ? Number(response.passengerPayableFare)
+              : 0,
+          extensionOperationalCost:
+            Number.isFinite(Number(response?.extensionOperationalCost)) &&
+            Number(response.extensionOperationalCost) > 0
+              ? Number(response.extensionOperationalCost)
+              : 0,
+          routeRecalculationCost:
+            Number.isFinite(Number(response?.routeRecalculationCost)) &&
+            Number(response.routeRecalculationCost) > 0
+              ? Number(response.routeRecalculationCost)
+              : 0,
+          paymentIntermediationFee:
+            Number.isFinite(Number(response?.paymentIntermediationFee)) &&
+            Number(response.paymentIntermediationFee) > 0
+              ? Number(response.paymentIntermediationFee)
+              : 0,
           error: "",
           message:
             response?.message ||

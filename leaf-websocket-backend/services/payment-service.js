@@ -2380,10 +2380,11 @@ class PaymentService {
    * @param {number} tollFee - Valor do pedágio em centavos (padrão 0)
    * @returns {Object} - Cálculo detalhado
    */
-  calculateNetAmount(totalAmount, tollFee = 0) {
+  calculateNetAmount(totalAmount, tollFee = 0, subscriptionRetainedFee = 0) {
     const financialContract = this.buildRideFinancialContract({
       passengerPaidCents: totalAmount,
-      tollFeeCents: tollFee
+      tollFeeCents: tollFee,
+      subscriptionRetainedFeeCents: subscriptionRetainedFee
     });
     const totalAmountCents = financialContract.passengerPaidCents;
     const operationalFee = financialContract.leafOperationalFeeCents;
@@ -2415,16 +2416,26 @@ class PaymentService {
    * @param {number} totalFareReais
    * @param {number} tollFeeReais
    */
-  calculateFareBreakdownFromReais(totalFareReais, tollFeeReais = 0) {
+  calculateFareBreakdownFromReais(totalFareReais, tollFeeReais = 0, options = {}) {
     const normalizedFareReais = Number.isFinite(Number(totalFareReais)) ? Math.max(0, Number(totalFareReais)) : 0;
     const normalizedTollReais = Number.isFinite(Number(tollFeeReais)) ? Math.max(0, Number(tollFeeReais)) : 0;
     const totalAmountCents = this.toCents(normalizedFareReais);
     const tollFeeCents = this.toCents(normalizedTollReais);
-    const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents);
+    const subscriptionRetainedFeeCents = Number.isFinite(Number(options.subscriptionRetainedFeeCents))
+      ? Math.max(0, Math.round(Number(options.subscriptionRetainedFeeCents)))
+      : this.toCents(options.subscriptionRetainedFeeReais || 0);
+    const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents, subscriptionRetainedFeeCents);
 
     const operationalFee = this.toReais(calculation.operationalFee);
     const paymentIntermediationFee = this.toReais(calculation.wooviFee);
-    const totalFees = this.toReais(calculation.operationalFee + calculation.wooviFee);
+    const subscriptionRetainedFee = this.toReais(
+      calculation.financialContract.subscriptionRetainedFeeCents || 0
+    );
+    const totalFees = this.toReais(
+      calculation.operationalFee +
+        calculation.wooviFee +
+        (calculation.financialContract.subscriptionRetainedFeeCents || 0)
+    );
     const driverNetAmount = this.toReais(calculation.netAmount);
     const tollFee = this.toReais(calculation.tollFee);
 
@@ -2433,6 +2444,7 @@ class PaymentService {
       tollFee,
       operationalFee,
       paymentIntermediationFee,
+      subscriptionRetainedFee,
       totalFees,
       driverNetAmount,
       calculation

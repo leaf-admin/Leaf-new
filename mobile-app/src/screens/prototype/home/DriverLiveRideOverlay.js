@@ -1525,7 +1525,11 @@ function DriverLiveRideOverlay({
 
                   <Text style={styles.extensionMessageText}>
                     {normalizedExtensionStatus === "driver_decision_pending"
-                      ? `Complemento do passageiro: ${formatCurrency(driverExtensionRequest?.diffFare)}`
+                      ? `Complemento do passageiro: ${formatCurrency(driverExtensionRequest?.diffFare)}${
+                          Number(driverExtensionRequest?.extensionOperationalCost) > 0
+                            ? " com custos operacionais"
+                            : ""
+                        }`
                       : normalizedExtensionStatus === "pending_payment"
                         ? "Você aprovou a alteração. A rota muda quando o pagamento for confirmado."
                         : driverExtensionRequest?.message ||

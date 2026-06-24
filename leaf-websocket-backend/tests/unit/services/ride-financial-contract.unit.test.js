@@ -1,5 +1,6 @@
 const {
   buildAuthoritativeFinancialSnapshot,
+  buildPaymentInclusiveCharge,
   buildRideFinancialContract,
   describeFinancialPolicy,
   resolveOperationalFee,
@@ -44,6 +45,21 @@ describe('ride-financial-contract', () => {
 
   it('applies minimum payment intermediation fee for regular low fares', () => {
     expect(resolvePaymentIntermediationFee(2500)).toBe(50);
+  });
+
+  it('grosses up an incremental charge to cover the new Pix processing fee', () => {
+    expect(buildPaymentInclusiveCharge({
+      baseAmountCents: 1123,
+      operationalCostCents: 25
+    })).toMatchObject({
+      baseAmountCents: 1123,
+      operationalCostCents: 25,
+      paymentIntermediationFeeCents: 50,
+      passengerChargeCents: 1198,
+      netCoveredCents: 1148,
+      roundingBufferCents: 0,
+      balanced: true
+    });
   });
 
   it('keeps toll as pass-through and balances the full passenger payment', () => {

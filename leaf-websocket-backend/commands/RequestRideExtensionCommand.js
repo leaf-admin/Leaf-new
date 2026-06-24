@@ -224,7 +224,7 @@ class RequestRideExtensionCommand extends Command {
           correlationId: this.correlationId
         });
 
-        if (extensionRequest.diffFare <= 0) {
+        if (extensionRequest.fareDelta <= 0) {
           return CommandResult.failure('O novo destino não aumenta o valor da corrida. Use alteração direta de destino.');
         }
 
@@ -247,8 +247,13 @@ class RequestRideExtensionCommand extends Command {
           bookingId: this.bookingId,
           requestId: extensionRequest.requestId,
           diffFare: roundMoney(extensionRequest.diffFare),
+          fareDelta: roundMoney(extensionRequest.fareDelta),
           currentFare: roundMoney(extensionRequest.currentFare),
           newFare: roundMoney(extensionRequest.newFare),
+          passengerPayableFare: roundMoney(extensionRequest.passengerPayableFare),
+          extensionOperationalCost: roundMoney(extensionRequest.extensionOperationalCost),
+          routeRecalculationCost: roundMoney(extensionRequest.routeRecalculationCost),
+          paymentIntermediationFee: roundMoney(extensionRequest.paymentIntermediationFee),
           status: extensionRequest.status,
           newEndLocation: extensionRequest.newEndLocation
         });

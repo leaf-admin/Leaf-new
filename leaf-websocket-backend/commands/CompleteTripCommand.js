@@ -128,6 +128,56 @@ function safeJsonParse(value, fallback = null) {
     }
 }
 
+function parseCentsField(value) {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function resolveConfirmedExtensionRequest(bookingData = {}) {
+    const activeExtensionRequest = safeJsonParse(bookingData.activeExtensionRequest, null);
+    if (
+        activeExtensionRequest &&
+        typeof activeExtensionRequest === 'object' &&
+        activeExtensionRequest.status === 'CONFIRMED'
+    ) {
+        return activeExtensionRequest;
+    }
+
+    const extensionHistory = safeJsonParse(bookingData.extensionHistory, []);
+    if (Array.isArray(extensionHistory)) {
+        return [...extensionHistory]
+            .reverse()
+            .find((entry) => entry && typeof entry === 'object' && entry.status === 'CONFIRMED') || null;
+    }
+
+    return null;
+}
+
+function resolveExtensionRetainedOperationalFeeCents(bookingData = {}) {
+    const confirmedExtension = resolveConfirmedExtensionRequest(bookingData) || {};
+    const explicitTotal = parseCentsField(
+        confirmedExtension.extensionOperationalCostCents ||
+            bookingData.extensionOperationalCostCents
+    );
+    const routeRecalculationCost = parseCentsField(
+        confirmedExtension.routeRecalculationCostCents ||
+            bookingData.extensionRouteRecalculationCostCents
+    );
+    const paymentIntermediationFee = parseCentsField(
+        confirmedExtension.paymentIntermediationFeeCents ||
+            bookingData.extensionPaymentIntermediationFeeCents
+    );
+    const roundingBuffer = parseCentsField(
+        confirmedExtension.roundingBufferCents ||
+            bookingData.extensionRoundingBufferCents
+    );
+
+    return Math.max(
+        explicitTotal,
+        routeRecalculationCost + paymentIntermediationFee + roundingBuffer
+    );
+}
+
 function resolveCompletedFinancialResultFields(bookingData = {}) {
     const financialSnapshot = safeJsonParse(bookingData.financialSnapshot, null);
     const hasFinancialSnapshot =
@@ -157,6 +207,7 @@ function resolveCompletedFinancialResultFields(bookingData = {}) {
     const moneyFields = [
         'operationalFee',
         'paymentIntermediationFee',
+        'subscriptionRetainedFee',
         'totalFees',
         'driverNetAmount'
     ];
@@ -368,9 +419,11 @@ class CompleteTripCommand extends Command {
                 }
 
                 const paymentDistribution = buildPendingPaymentDistribution(offlineSettlementReview);
+                const extensionRetainedOperationalFeeCents = resolveExtensionRetainedOperationalFeeCents(bookingData);
                 let completedFareBreakdown = paymentService.calculateFareBreakdownFromReais(
                     Number(this.finalFare || 0),
-                    Number(this.tollFee || 0)
+                    Number(this.tollFee || 0),
+                    { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
                 );
                 const finalFinancialSnapshot = buildAuthoritativeFinancialSnapshot({
                     passengerPaidCents: Math.round(Number(this.finalFare || 0) * 100),
@@ -378,6 +431,9 @@ class CompleteTripCommand extends Command {
                     operationalFeeCents: Math.round(Number(completedFareBreakdown.operationalFee || 0) * 100),
                     paymentIntermediationFeeCents: Math.round(
                         Number(completedFareBreakdown.paymentIntermediationFee || 0) * 100
+                    ),
+                    subscriptionRetainedFeeCents: Math.round(
+                        Number(completedFareBreakdown.subscriptionRetainedFee || 0) * 100
                     ),
                     driverNetAmountCents: Math.round(Number(completedFareBreakdown.driverNetAmount || 0) * 100)
                 });
@@ -451,6 +507,7 @@ class CompleteTripCommand extends Command {
                         routeDurationSecs: this.duration,
                         operationalFee: completedFareBreakdown.operationalFee,
                         paymentIntermediationFee: completedFareBreakdown.paymentIntermediationFee,
+                        subscriptionRetainedFee: completedFareBreakdown.subscriptionRetainedFee,
                         totalFees: completedFareBreakdown.totalFees,
                         driverNetAmount: completedFareBreakdown.driverNetAmount,
                         authoritativeSnapshot: true,
@@ -477,6 +534,7 @@ class CompleteTripCommand extends Command {
                     routeDurationSecs: String(this.duration),
                     operationalFee: String(completedFareBreakdown.operationalFee || 0),
                     paymentIntermediationFee: String(completedFareBreakdown.paymentIntermediationFee || 0),
+                    subscriptionRetainedFee: String(completedFareBreakdown.subscriptionRetainedFee || 0),
                     totalFees: String(completedFareBreakdown.totalFees || 0),
                     driverNetAmount: String(completedFareBreakdown.driverNetAmount || 0),
                     authoritativeSnapshot: 'true',
@@ -607,6 +665,7 @@ class CompleteTripCommand extends Command {
                     paymentDistribution,
                     operationalFee: completedFareBreakdown.operationalFee,
                     paymentIntermediationFee: completedFareBreakdown.paymentIntermediationFee,
+                    subscriptionRetainedFee: completedFareBreakdown.subscriptionRetainedFee,
                     totalFees: completedFareBreakdown.totalFees,
                     driverNetAmount: completedFareBreakdown.driverNetAmount,
                     authoritativeSnapshot: true,
