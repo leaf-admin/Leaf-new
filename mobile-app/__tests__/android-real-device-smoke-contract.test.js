@@ -100,6 +100,22 @@ describe('android real-device smoke runner contract', () => {
     expect(reportBuilder).toContain('Failure Classification');
   });
 
+  it('captures Pix modal failure diagnostics for payment runtime triage', () => {
+    const runner = readAndroidSmokeRunner();
+    const modal = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/payment/WooviPaymentModal.js'),
+      'utf8',
+    );
+
+    expect(modal).toContain('payment-modal-error-diagnostics');
+    expect(modal).toContain('payment-error:');
+    expect(runner).toContain('function extractPaymentErrorDiagnostics');
+    expect(runner).toContain('paymentErrorDiagnostics');
+    expect(runner).toContain('Payment error diagnostics');
+    expect(runner).toContain('payment_profile_credentials_missing');
+    expect(runner).toContain('payment_runtime_config');
+  });
+
   it('recognizes the post-payment preference sheet before active trip background content', () => {
     const source = readAndroidSmokeRunner();
     const detectScreenSource = source.slice(

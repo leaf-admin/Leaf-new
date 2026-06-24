@@ -38,6 +38,7 @@ const { color, typography, radius, spacing, elevation } = robotaxiPrototypeToken
 const PAYMENT_TIMEOUT = 300;
 const CONFIRMED_PAYMENT_STATUSES = new Set(['completed', 'confirmed', 'paid', 'in_holding']);
 const TERMINAL_PAYMENT_STATUSES = new Set(['cancelled', 'canceled', 'expired', 'refunded']);
+const PAYMENT_ERROR_DIAGNOSTIC_PREFIX = 'payment-error:';
 const PIX_SURFACE = {
     bg: '#F8FBF9',
     sheet: 'rgba(255,255,255,0.97)',
@@ -51,6 +52,43 @@ const PIX_SURFACE = {
     danger: '#B5533E',
     progress: '#1FA76F'
 };
+
+function sanitizePaymentDiagnosticValue(value) {
+    if (value === null || value === undefined) return null;
+    const text = String(value)
+        .replace(/[;\n\r\t]/g, '_')
+        .replace(/\s+/g, '_')
+        .trim();
+    return text ? text.slice(0, 120) : null;
+}
+
+function buildPaymentErrorDiagnostics(error) {
+    const response = error?.response || error?.originalError?.response || null;
+    const responseData = response?.data || error?.response?.data || error?.originalError?.response?.data || {};
+    const diagnostics = {
+        status: error?.status || response?.status || null,
+        code: error?.code || responseData?.code || responseData?.error?.code || null,
+        provider: responseData?.provider || null,
+        providerEnvironment: responseData?.providerEnvironment || null,
+        paymentProfileId: responseData?.paymentProfileId || null,
+        paymentIntentId: responseData?.paymentIntentId || null,
+        chargeId: responseData?.chargeId || null,
+    };
+
+    return Object.entries(diagnostics).reduce((acc, [key, value]) => {
+        const sanitized = sanitizePaymentDiagnosticValue(value);
+        if (sanitized) acc[key] = sanitized;
+        return acc;
+    }, {});
+}
+
+function serializePaymentErrorDiagnostics(diagnostics) {
+    const entries = Object.entries(diagnostics || {});
+    if (!entries.length) return null;
+    return `${PAYMENT_ERROR_DIAGNOSTIC_PREFIX}${entries
+        .map(([key, value]) => `${key}=${value}`)
+        .join(';')}`;
+}
 
 export default function WooviPaymentModal({ 
     visible, 
@@ -76,6 +114,7 @@ export default function WooviPaymentModal({
     const [loading, setLoading] = useState(false);
     const [paymentData, setPaymentData] = useState(null);
     const [paymentGenerationError, setPaymentGenerationError] = useState(null);
+    const [paymentGenerationDiagnostics, setPaymentGenerationDiagnostics] = useState(null);
     const [countdown, setCountdown] = useState(PAYMENT_TIMEOUT); // 5 minutos
     const [isCheckingPayment, setIsCheckingPayment] = useState(false);
     const [paymentStatus, setPaymentStatus] = useState('pending'); // pending, confirmed, expired, cancelled
@@ -535,18 +574,19 @@ export default function WooviPaymentModal({
     // Recupera a sessão persistida antes de criar uma cobrança no backend.
     const generatePayment = async () => {
         let paymentRequest = null;
-	        try {
-	            setLoading(true);
-	            setPaymentGenerationError(null);
-	            Logger.log('💳 Preparando sessão de pagamento PIX...');
+        try {
+            setLoading(true);
+            setPaymentGenerationError(null);
+            setPaymentGenerationDiagnostics(null);
+            Logger.log('💳 Preparando sessão de pagamento PIX...');
 
-	            const resolvedPassengerId = resolveAuthenticatedPassengerId();
-	            if (!resolvedPassengerId) {
-	                throw new Error('Sessão de pagamento ainda não está pronta. Tente novamente em alguns segundos.');
-	            }
-	            if (!normalizedQuoteLockId) {
-	                throw new Error('Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.');
-	            }
+            const resolvedPassengerId = resolveAuthenticatedPassengerId();
+            if (!resolvedPassengerId) {
+                throw new Error('Sessão de pagamento ainda não está pronta. Tente novamente em alguns segundos.');
+            }
+            if (!normalizedQuoteLockId) {
+                throw new Error('Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.');
+            }
             
             // Calcular valor em centavos - usar apenas a cotação travada enviada pelo fluxo.
             const amount = Number(estimates?.estimateFare ?? tripData?.estimatedFare);
@@ -716,7 +756,10 @@ export default function WooviPaymentModal({
             const result = await WooviService.processAdvancePayment(paymentRequest);
             
             if (!result.success) {
-                throw new Error(result.error || 'Falha ao gerar pagamento');
+                const resultError = new Error(result.error || 'Falha ao gerar pagamento');
+                resultError.code = result.code || null;
+                resultError.response = { status: result.status || 400, data: result };
+                throw resultError;
             }
             
             Logger.log('✅ Pagamento gerado com sucesso:', result.chargeId);
@@ -760,11 +803,13 @@ export default function WooviPaymentModal({
             
         } catch (error) {
             const serverResponse = error?.response?.data;
+            const diagnostics = buildPaymentErrorDiagnostics(error);
             Logger.error('❌ Erro ao gerar pagamento:', serverResponse || error);
             if (paymentRequest) {
                 Logger.log('📦 Payload enviado para /api/payment/advance:', paymentRequest);
             }
             setPaymentData(null);
+            setPaymentGenerationDiagnostics(diagnostics);
             setPaymentGenerationError(
                 error?.message || 'Não foi possível gerar o pagamento PIX no momento.'
             );
@@ -957,6 +1002,8 @@ export default function WooviPaymentModal({
 
     // Renderizar conteúdo do modal
     const renderContent = () => {
+        const paymentErrorDiagnosticsLabel = serializePaymentErrorDiagnostics(paymentGenerationDiagnostics);
+
         if (loading) {
             return (
                 <View
@@ -988,6 +1035,15 @@ export default function WooviPaymentModal({
                         <Text style={[styles.errorSubtitle, { color: color.text.secondary }]}>
                             {paymentGenerationError}
                         </Text>
+                        {paymentErrorDiagnosticsLabel ? (
+                            <Text
+                                style={styles.qaHiddenText}
+                                testID="payment-modal-error-diagnostics"
+                                accessibilityLabel={paymentErrorDiagnosticsLabel}
+                            >
+                                {paymentErrorDiagnosticsLabel}
+                            </Text>
+                        ) : null}
 
                         <View style={styles.errorActions}>
                             <TouchableOpacity
@@ -1285,6 +1341,13 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Medium,
         fontSize: typography.micro.size,
         lineHeight: typography.micro.lineHeight,
+    },
+    qaHiddenText: {
+        position: 'absolute',
+        width: 1,
+        height: 1,
+        opacity: 0.01,
+        overflow: 'hidden',
     },
     closeButton: {
         width: 30,

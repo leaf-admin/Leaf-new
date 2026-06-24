@@ -294,6 +294,27 @@ function classifySmokeFailure(message) {
     };
   }
 
+  if (lower.includes("payment_profile_credentials_missing")) {
+    return {
+      ...base,
+      domain: "execution_environment",
+      severity: "P0",
+      owner: "payment_runtime_config",
+    };
+  }
+
+  if (
+    lower.includes("payment_provider_charge_failed") ||
+    lower.includes("payment_provider_charge_id_missing")
+  ) {
+    return {
+      ...base,
+      domain: "product",
+      severity: "P0",
+      owner: "payment_integration",
+    };
+  }
+
   if (
     lower.includes("pix") ||
     lower.includes("payment") ||
@@ -507,6 +528,48 @@ function extractVisiblePaymentError(nodes) {
       /sess[aã]o expirou|n[aã]o h[aá] motorista|atualize a cota[cç][aã]o|n[aã]o foi poss[ií]vel gerar o pix/i.test(text),
     ) || null
   );
+}
+
+function parsePaymentErrorDiagnosticsValue(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/payment-error:([^\s"]+)/i);
+  if (!match) return null;
+  return match[1]
+    .split(";")
+    .map((entry) => entry.split("="))
+    .reduce((acc, [key, ...valueParts]) => {
+      const normalizedKey = String(key || "").trim();
+      const normalizedValue = valueParts.join("=").trim();
+      if (normalizedKey && normalizedValue) acc[normalizedKey] = normalizedValue;
+      return acc;
+    }, {});
+}
+
+function extractPaymentErrorDiagnostics(nodes) {
+  for (const node of nodes || []) {
+    for (const value of [node.text, node["content-desc"], node["resource-id"]]) {
+      const diagnostics = parsePaymentErrorDiagnosticsValue(value);
+      if (diagnostics && Object.keys(diagnostics).length > 0) return diagnostics;
+    }
+  }
+  return null;
+}
+
+function formatPaymentErrorDiagnostics(diagnostics) {
+  return diagnostics && Object.keys(diagnostics).length > 0
+    ? JSON.stringify(diagnostics)
+    : "not captured";
+}
+
+function paymentErrorDiagnosticSuffix(diagnostics) {
+  if (!diagnostics || Object.keys(diagnostics).length === 0) return "";
+  const parts = [
+    diagnostics.code,
+    diagnostics.status ? `status=${diagnostics.status}` : null,
+    diagnostics.providerEnvironment ? `env=${diagnostics.providerEnvironment}` : null,
+    diagnostics.paymentProfileId ? `profile=${diagnostics.paymentProfileId}` : null,
+  ].filter(Boolean);
+  return parts.length ? ` (${parts.join(";")})` : "";
 }
 
 function parseBrlPriceLabel(value) {
@@ -1882,6 +1945,7 @@ async function captureStep(name) {
   const vehicleIdentity = extractRenderedVehicleIdentity(nodes, screen);
   const driverSearchElapsed = extractDriverSearchElapsed(nodes);
   const paymentErrorMessage = extractVisiblePaymentError(nodes);
+  const paymentErrorDiagnostics = extractPaymentErrorDiagnostics(nodes);
   return {
     name,
     screenshot,
@@ -1894,6 +1958,7 @@ async function captureStep(name) {
     vehicleIdentity,
     driverSearchElapsed,
     paymentErrorMessage,
+    paymentErrorDiagnostics,
   };
 }
 
@@ -2044,6 +2109,7 @@ async function main() {
   let paymentOpened = false;
   let paymentPrices = null;
   let paymentErrorMessage = null;
+  let paymentErrorDiagnostics = null;
   let sandboxPaymentConfirmation = { requested: AUTO_CONFIRM_SANDBOX_PAYMENT, ok: null, skippedReason: "not_reached" };
   let dashboardEvidenceCollection = { requested: COLLECT_DASHBOARD_EVIDENCE, ok: null, skippedReason: "not_reached" };
   let appCanonicalPickup = null;
@@ -2184,6 +2250,7 @@ async function main() {
 	            paymentOpened = paymentOpen.opened;
 	            paymentStatus = paymentOpen.status;
 	            paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	            paymentErrorDiagnostics = current.paymentErrorDiagnostics || paymentErrorDiagnostics;
 	          }
 	          if (paymentOpened) {
 	            if (paymentStatus === "confirmed_via_ride_flow") {
@@ -2201,6 +2268,7 @@ async function main() {
 	              paymentStatus = paymentReady.status;
 	              paymentPrices = current.prices;
 	              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	              paymentErrorDiagnostics = current.paymentErrorDiagnostics || paymentErrorDiagnostics;
 	            }
 	            if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
 	              sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
@@ -2261,6 +2329,7 @@ async function main() {
             paymentOpened = paymentOpen.opened;
             paymentStatus = paymentOpen.status;
             paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+            paymentErrorDiagnostics = current.paymentErrorDiagnostics || paymentErrorDiagnostics;
 	          }
 	          if (paymentOpened) {
 	            if (paymentStatus === "confirmed_via_ride_flow") {
@@ -2278,6 +2347,7 @@ async function main() {
 	              paymentStatus = paymentReady.status;
 	              paymentPrices = current.prices;
 	              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	              paymentErrorDiagnostics = current.paymentErrorDiagnostics || paymentErrorDiagnostics;
 	            }
 	            if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
 	              sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
@@ -2359,7 +2429,7 @@ async function main() {
     failures.push(`REAL_SMOKE_OPEN_PAYMENT=true exige abertura do modal Pix; status atual: ${paymentStatus}.`);
   }
   if (OPEN_PAYMENT && paymentOpened && !paymentBlockedByPrecondition && !["pix_copy_available", "pix_modal_content", "pix_visual_detected", "confirmed", "confirmed_via_ride_flow"].includes(paymentStatus)) {
-    failures.push(`Modal Pix abriu, mas não chegou a um estado pronto; status atual: ${paymentStatus}.`);
+    failures.push(`Modal Pix abriu, mas não chegou a um estado pronto; status atual: ${paymentStatus}${paymentErrorDiagnosticSuffix(paymentErrorDiagnostics)}.`);
   }
   if (AUTO_CONFIRM_SANDBOX_PAYMENT && !paymentBlockedByPrecondition && !sandboxPaymentConfirmation.ok) {
     failures.push(`Baixa automática sandbox falhou: ${sandboxPaymentConfirmation.error || sandboxPaymentConfirmation.stderr || "unknown"}`);
@@ -2422,6 +2492,7 @@ async function main() {
         prices: step.prices,
         driverSearchElapsed: step.driverSearchElapsed,
         paymentErrorMessage: step.paymentErrorMessage || null,
+        paymentErrorDiagnostics: step.paymentErrorDiagnostics || null,
         canonicalPickup: step.canonicalPickup
           ? {
               lat: step.canonicalPickup.lat,
@@ -2442,6 +2513,7 @@ async function main() {
         status: paymentStatus,
         prices: paymentPrices,
         errorMessage: paymentErrorMessage,
+        errorDiagnostics: paymentErrorDiagnostics,
         appCanonicalPickup,
         appPickupAvailability,
         managedDriverBot,
@@ -2483,6 +2555,7 @@ async function main() {
     `- Payment status: ${paymentStatus}`,
     `- Payment prices: ${(paymentPrices || []).join(", ") || "not captured"}`,
     `- Payment error: ${paymentErrorMessage || "not captured"}`,
+    `- Payment error diagnostics: ${formatPaymentErrorDiagnostics(paymentErrorDiagnostics)}`,
     `- App canonical pickup: ${appCanonicalPickup ? `${appCanonicalPickup.lat}, ${appCanonicalPickup.lng}` : "not captured"}`,
     `- App pickup availability: ${appPickupAvailability ? (appPickupAvailability.ok ? "OK" : "FAIL") : "not captured"}`,
     `- Managed driver bot: ${managedDriverBot?.requested ? (managedDriverBot.ok ? "OK" : "FAIL") : "not requested"}`,
