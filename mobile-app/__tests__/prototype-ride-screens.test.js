@@ -2956,7 +2956,7 @@ describe('prototype ride screens', () => {
       goBack: jest.fn(),
     };
 
-    const { getByTestId, getByText, getAllByText } = render(
+    const { getByTestId, getByText, getAllByText, queryByText } = render(
       <RobotaxiReceiptScreen
         navigation={navigation}
         route={{ params: { fromTrip: true } }}
@@ -2964,7 +2964,9 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByTestId('receipt-recovery-state-card')).toBeTruthy();
-    expect(getByText('Recibo em sincronização')).toBeTruthy();
+    expect(getByText('Recibo final pendente')).toBeTruthy();
+    expect(getByText('Recibo pendente')).toBeTruthy();
+    expect(queryByText(/reconciliação/i)).toBeNull();
     expect(getAllByText('--').length).toBeGreaterThan(0);
 
     const rateButton = getByTestId('passenger-receipt-rate-trip-button');
@@ -3109,7 +3111,9 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByTestId('receipt-recovery-state-card')).toBeTruthy();
-    expect(getByText('Valores em reconciliação')).toBeTruthy();
+    expect(getByText('Recibo final indisponível')).toBeTruthy();
+    expect(getByText('Recibo pendente')).toBeTruthy();
+    expect(queryByText(/reconciliação/i)).toBeNull();
     expect(getByText('Origem em verificação')).toBeTruthy();
     expect(getByText('Destino em verificação')).toBeTruthy();
     expect(getAllByText('--').length).toBeGreaterThan(0);
@@ -3166,7 +3170,9 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByTestId('receipt-recovery-state-card')).toBeTruthy();
-    expect(getByText('Valores em reconciliação')).toBeTruthy();
+    expect(getByText('Recibo final indisponível')).toBeTruthy();
+    expect(getByText('Recibo pendente')).toBeTruthy();
+    expect(queryByText(/reconciliação/i)).toBeNull();
     expect(queryByText('R$ 38,40')).toBeNull();
     expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(true);
 

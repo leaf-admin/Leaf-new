@@ -1195,7 +1195,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       : "PIX seguro"
     : receiptRecoveryState === "failed"
       ? "Verificar"
-      : "Sincronizando";
+      : "Recibo pendente";
   const ratingButtonLabel = isDriverView
     ? driverRateButtonLabel
     : passengerRatingSubmitted
@@ -1423,15 +1423,15 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                     {!hasSelectedReceipt
                       ? receiptRecoveryState === "failed"
                         ? "Recibo em verificação"
-                        : "Recibo em sincronização"
-                      : "Valores em reconciliação"}
+                        : "Recibo final pendente"
+                      : "Recibo final indisponível"}
                   </Text>
                   <Text style={styles.receiptRecoverySubtitle}>
                     {!hasSelectedReceipt
                       ? receiptRecoveryState === "failed"
-                        ? "A corrida foi encerrada, mas ainda estamos buscando os dados finais. Você pode voltar ao mapa sem reabrir a corrida."
-                        : "A corrida foi encerrada. Estamos buscando o recibo final para evitar valores incompletos na tela."
-                      : "Encontramos o recibo da corrida, mas os valores finais ainda não estão completos. A tela permanece bloqueada para evitar divergência de tarifa."}
+                        ? "A corrida foi encerrada, mas o recibo final autorizado ainda não foi carregado. Você pode voltar ao mapa sem reabrir a corrida."
+                        : "A corrida foi encerrada. O app aguarda o recibo final autorizado pelo servidor antes de liberar detalhes e avaliação."
+                      : "Este recibo não tem confirmação financeira final do servidor. Por segurança, não exibimos outro valor nem liberamos avaliação."}
                   </Text>
                 </View>
               </View>
