@@ -108,6 +108,35 @@ payment or dispatch when the block is known up front.
   explicit backend-final fields.
 - Do not report a state regression until the captured screen, route name, active
   booking id, and latest backend event all point to a previous lifecycle state.
+- Every failed or blocked run must include a machine-readable
+  `failureClassification` section with `status`, `domain`, `severity`, `owner`,
+  and original message.
+
+## Failure Domains
+
+Use these domains before deciding what to fix:
+
+- `product`: observed behavior that would affect a real passenger, driver, or
+  operator in the app/backend/dashboard. Examples: stale pickup used for quote
+  or payment, Pix modal failing to become usable, lifecycle state regression,
+  quote instability, route fallback rendered as valid route, or critical runtime
+  errors.
+- `business_rule`: violation of a canonical product policy. Examples: payment
+  before driver availability/geofence, fare mismatch across canonical gross
+  surfaces, non-canonical driver vehicle identity, driver active without required
+  KYC/CRLV/liveness, or missing explicit fee/toll fields.
+- `test_harness`: automation could not read or drive the current product state
+  reliably. Examples: selector/testID missing, ADB input failure, dashboard
+  evidence collector unable to authenticate, log parser failure, or sandbox
+  auto-confirm helper inconclusive while the product state is otherwise visible.
+- `execution_environment`: device, build, provider sandbox, infra, or local
+  tooling is not ready. Examples: disconnected device, stale app version,
+  missing ADB/Java, existing active ride from a previous run, backend health
+  unavailable, or provider sandbox outage.
+
+Do not mix domains in the conclusion. A run may have several entries, but the
+next action must target the highest-severity classified item, not the last screen
+the script happened to capture.
 
 ## Smoke Levels
 

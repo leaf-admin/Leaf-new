@@ -2133,6 +2133,17 @@ function sanitizePersistedRuntimeSessionForProfile(session, profile = null) {
       "operational_interrupted",
       "searching_replacement",
     ].includes(normalizedBookingStatus);
+    const shouldPreservePassengerLocationContext =
+      Boolean(persistedActiveRideBookingId) ||
+      [
+        "requesting",
+        "searching",
+        "accepted",
+        "arrived",
+        "started",
+        "operational_interrupted",
+        "searching_replacement",
+      ].includes(normalizedBookingStatus);
 
     restored.driverOffers = [];
     restored.driverOnline = false;
@@ -2140,6 +2151,11 @@ function sanitizePersistedRuntimeSessionForProfile(session, profile = null) {
     restored.driverOnlineMutationSource = "activation_sync_non_driver";
     restored.driverDestinationMode = DEFAULT_DRIVER_DESTINATION_MODE;
     restored.driverActivationRemote = null;
+    if (!shouldPreservePassengerLocationContext) {
+      restored.currentCoordinate = null;
+      restored.currentHeading = null;
+      restored.currentAddress = "";
+    }
     if (!shouldPreservePassengerDriverContext) {
       restored.driverActiveRide = null;
       restored.driverCoordinate = null;

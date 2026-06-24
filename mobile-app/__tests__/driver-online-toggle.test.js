@@ -76,10 +76,15 @@ jest.mock('../src/components/prototype/PrototypeScaffold', () => {
 jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
   const React = require('react');
   const { Text, View } = require('react-native');
-  const PassengerHomeOverlay = ({ pickupLabel, pickupAddress }) => (
+  const PassengerHomeOverlay = ({ pickupLabel, pickupAddress, pickupCoordinate }) => (
     <View testID="passenger-home-overlay">
       <Text>{pickupLabel}</Text>
       <Text>{pickupAddress}</Text>
+      <Text testID="passenger-home-overlay-pickup-coordinate">
+        {pickupCoordinate
+          ? `${pickupCoordinate.latitude},${pickupCoordinate.longitude}`
+          : 'none'}
+      </Text>
     </View>
   );
   const PassengerHomeOverlaySkeleton = () => (
@@ -635,6 +640,53 @@ describe('driver online toggle', () => {
 
     expect(getByText('Rua das Pastorinhas, 12')).toBeTruthy();
     expect(queryByText('Minha localização')).toBeNull();
+  });
+
+  it('does not expose a default pickup coordinate before live passenger location is resolved', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        currentCoordinate: null,
+        currentAddress: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getAllByText, getByTestId, queryByText } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getAllByText('Local atual').length).toBeGreaterThan(0);
+    expect(queryByText('Rua das Pastorinhas')).toBeNull();
+    expect(getByTestId('passenger-home-overlay-pickup-coordinate')).toHaveTextContent('none');
+  });
+
+  it('uses the live passenger location as the home pickup coordinate', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        currentCoordinate: { latitude: -22.853586, longitude: -43.318168 },
+        currentAddress: 'Carioca Shopping, Rio de Janeiro',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByText('Carioca Shopping')).toBeTruthy();
+    expect(getByTestId('passenger-home-overlay-pickup-coordinate')).toHaveTextContent(
+      '-22.853586,-43.318168',
+    );
   });
 
   it('surfaces a failed online toggle result to the driver', async () => {

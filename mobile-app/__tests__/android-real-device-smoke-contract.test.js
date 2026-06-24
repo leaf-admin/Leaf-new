@@ -54,6 +54,48 @@ describe('android real-device smoke runner contract', () => {
     expect(firstReadinessIndex).toBeLessThan(firstPaymentTapIndex);
   });
 
+  it('blocks payment when the app canonical pickup diverges from the expected device pickup', () => {
+    const source = readAndroidSmokeRunner();
+    const validationIndex = source.indexOf('validateCanonicalPickupAgainstExpected(pickup)');
+    const driverBotIndex = source.indexOf('await startManagedDriverBotAtPickup(pickup)');
+    const availabilityIndex = source.indexOf('await checkSocketAvailabilityAtPickup(pickup, carType)');
+    const paymentTapIndex = source.indexOf('await tapConfirmUntilPayment(current, steps)');
+
+    expect(source).toContain('TEST_PICKUP_LAT');
+    expect(source).toContain('TEST_PICKUP_LNG');
+    expect(source).toContain('REAL_SMOKE_CANONICAL_PICKUP_TOLERANCE_M');
+    expect(source).toContain('blocked_precondition:app_canonical_pickup_mismatch');
+    expect(source).toContain('distanceMeters');
+    expect(validationIndex).toBeGreaterThan(-1);
+    expect(driverBotIndex).toBeGreaterThan(-1);
+    expect(availabilityIndex).toBeGreaterThan(-1);
+    expect(paymentTapIndex).toBeGreaterThan(-1);
+    expect(validationIndex).toBeLessThan(driverBotIndex);
+    expect(validationIndex).toBeLessThan(availabilityIndex);
+    expect(validationIndex).toBeLessThan(paymentTapIndex);
+  });
+
+  it('emits a failure classification taxonomy in smoke reports', () => {
+    const runner = readAndroidSmokeRunner();
+    const reportBuilder = fs.readFileSync(
+      path.resolve(__dirname, '../scripts/qa/build-smoke-evidence-report.cjs'),
+      'utf8',
+    );
+
+    expect(runner).toContain('function classifySmokeFailure');
+    expect(runner).toContain('function buildFailureClassification');
+    expect(runner).toContain('failureClassification');
+    expect(runner).toContain('product');
+    expect(runner).toContain('business_rule');
+    expect(runner).toContain('test_harness');
+    expect(runner).toContain('execution_environment');
+    expect(runner).toContain('Final status');
+    expect(runner).toContain('Failure Classification');
+    expect(reportBuilder).toContain('failureClassificationItems');
+    expect(reportBuilder).toContain('Final status');
+    expect(reportBuilder).toContain('Failure Classification');
+  });
+
   it('recognizes the post-payment preference sheet before active trip background content', () => {
     const source = readAndroidSmokeRunner();
     const detectScreenSource = source.slice(

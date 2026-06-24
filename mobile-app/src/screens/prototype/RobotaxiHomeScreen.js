@@ -1485,7 +1485,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const profileInitial = useMemo(() => resolveProfileInitial(profile), [profile]);
   const profileFirstName = useMemo(() => resolveProfileFirstName(profile), [profile]);
   const effectiveHomePickupCoordinate = useMemo(() => {
-    if (isFiniteCoordinate(homePickupCoordinate)) {
+    if (homePickupAdjustedOnMap && isFiniteCoordinate(homePickupCoordinate)) {
       return homePickupCoordinate;
     }
 
@@ -1493,8 +1493,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return currentCoordinate;
     }
 
-    return DEFAULT_USER_COORDINATE;
-  }, [currentCoordinate, homePickupCoordinate]);
+    return null;
+  }, [currentCoordinate, homePickupAdjustedOnMap, homePickupCoordinate]);
   const currentPickupAddressCandidate = useMemo(
     () => resolvePickupAddressCandidate(cachedHomePickupAddress, currentAddress),
     [cachedHomePickupAddress, currentAddress],
@@ -4099,7 +4099,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   const targetRegion = useMemo(() => {
     const baseCoordinate = homePickupPickerVisible
-      ? effectiveHomePickupCoordinate
+      ? effectiveHomePickupCoordinate || currentCoordinate || DEFAULT_USER_COORDINATE
       : currentCoordinate || DEFAULT_USER_COORDINATE;
     const effectiveHeight = Math.max(1, mapHeight || windowHeight);
     const maxTop = Math.max(0, effectiveHeight - MAP_MIN_VISIBLE_HEIGHT);
@@ -5188,7 +5188,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, []);
 
   const handleOpenHomePickupPicker = useCallback(() => {
-    const nextCoordinate = isFiniteCoordinate(homePickupCoordinate)
+    const nextCoordinate = homePickupAdjustedOnMap && isFiniteCoordinate(homePickupCoordinate)
       ? homePickupCoordinate
       : effectiveHomePickupCoordinate;
     homePickupDraftBeforePickerRef.current = {
@@ -5224,14 +5224,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const handleUseCurrentHomePickup = useCallback(() => {
     const nextCoordinate = isFiniteCoordinate(currentCoordinate)
       ? currentCoordinate
-      : DEFAULT_USER_COORDINATE;
+      : null;
     setHomePickupCoordinate(nextCoordinate);
-    setHomePickupAddress(effectiveHomePickupAddress);
+    setHomePickupAddress(currentPickupAddressCandidate || 'Local atual');
     setHomePickupAdjustedOnMap(false);
     focusHomePickupCoordinate(nextCoordinate);
   }, [
     currentCoordinate,
-    effectiveHomePickupAddress,
+    currentPickupAddressCandidate,
     focusHomePickupCoordinate,
   ]);
 

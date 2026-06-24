@@ -54,6 +54,13 @@ function main() {
     ...(Array.isArray(smoke?.failures) ? smoke.failures : []),
     ...(Array.isArray(dashboard?.failures) ? dashboard.failures : []),
   ];
+  const failureClassificationItems = Array.isArray(smoke?.failureClassification?.items)
+    ? smoke.failureClassification.items
+    : [];
+  const finalStatus =
+    smoke?.failureClassification?.finalStatus ||
+    smoke?.finalStatus ||
+    (failures.length === 0 ? "passed" : "failed");
 
   const lines = [
     "# Leaf Smoke E2E Final Report",
@@ -61,6 +68,7 @@ function main() {
     `- Generated at: ${new Date().toISOString()}`,
     `- Artifacts: ${ARTIFACTS_DIR}`,
     `- Overall: ${failures.length === 0 ? "OK" : "FAIL"}`,
+    `- Final status: ${finalStatus}`,
     "",
     "## Device/App",
     `- Device: ${smoke?.deviceInfo?.model || "not captured"}`,
@@ -93,6 +101,13 @@ function main() {
     "",
     "## Failures",
     failures.length ? failures.map((failure) => `- ${failure}`).join("\n") : "- None",
+    "",
+    "## Failure Classification",
+    failureClassificationItems.length
+      ? failureClassificationItems
+          .map((item) => `- [${item.domain || "unknown"}/${item.status || "unknown"}/${item.severity || "unknown"}] ${item.message || ""} (owner: ${item.owner || "unknown"})`)
+          .join("\n")
+      : "- None",
     "",
     "## Evidence Index",
     `- Screenshots: ${screenshots.length}`,
