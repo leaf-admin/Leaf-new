@@ -375,6 +375,42 @@ function buildPassengerFareQuoteRouteKey({
   ].join("|");
 }
 
+function quoteCoordinatesMatch(left, right) {
+  const leftCoordinate = normalizePreviewCoordinate(left);
+  const rightCoordinate = normalizePreviewCoordinate(right);
+
+  if (!leftCoordinate || !rightCoordinate) {
+    return false;
+  }
+
+  const tolerance = 10 ** -PASSENGER_QUOTE_COORDINATE_PRECISION;
+  return (
+    Math.abs(leftCoordinate.latitude - rightCoordinate.latitude) <= tolerance &&
+    Math.abs(leftCoordinate.longitude - rightCoordinate.longitude) <= tolerance
+  );
+}
+
+function quoteRouteSnapshotMatchesSelection({
+  quoteRouteSnapshot,
+  originCoordinate,
+  destinationCoordinate,
+  selectedPlanTitle,
+}) {
+  const snapshot = normalizeQuoteRouteSnapshot(quoteRouteSnapshot);
+  if (!snapshot) {
+    return false;
+  }
+
+  const snapshotPlanId = getPlanIdFromCarName(snapshot.carType);
+  const selectedPlanId = getPlanIdFromCarName(selectedPlanTitle);
+
+  return Boolean(
+    quoteCoordinatesMatch(snapshot.pickupLocation, originCoordinate) &&
+      quoteCoordinatesMatch(snapshot.destinationLocation, destinationCoordinate) &&
+      (!snapshotPlanId || !selectedPlanId || snapshotPlanId === selectedPlanId),
+  );
+}
+
 function normalizeLockedQuoteNumber(value, fallback = null) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue) || numericValue <= 0) {
@@ -544,6 +580,81 @@ function hasReadyPaymentQuoteLock(value, expectedRequestKey = null) {
       hasValidBackendQuoteLock(value) &&
       (!expectedRequestKey || !requestKey || requestKey === expectedRequestKey),
   );
+}
+
+function normalizePaymentConfirmationForQuoteLock({
+  paymentConfirmation = null,
+  paymentQuoteLock = null,
+  selectedPlanFare = null,
+}) {
+  const lockedFare = normalizeLockedQuoteNumber(
+    paymentQuoteLock?.fare,
+    normalizeLockedQuoteNumber(selectedPlanFare),
+  );
+  if (!lockedFare) {
+    return {
+      ok: false,
+      code: "QUOTE_LOCK_AMOUNT_MISSING",
+      message: "Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.",
+    };
+  }
+
+  const lockedAmountInCents = Math.round(lockedFare * 100);
+  const confirmedAmountInCents = Number(paymentConfirmation?.amountInCents);
+  const canonicalAmountInCents =
+    Number.isFinite(confirmedAmountInCents) && confirmedAmountInCents > 0
+      ? Math.round(confirmedAmountInCents)
+      : lockedAmountInCents;
+
+  if (canonicalAmountInCents !== lockedAmountInCents) {
+    return {
+      ok: false,
+      code: "PAYMENT_AMOUNT_MISMATCH",
+      message:
+        "O valor confirmado pelo Pix diverge da cotação exibida. Recalcule a tarifa antes de solicitar a corrida.",
+    };
+  }
+
+  const lockedQuoteLockId = String(paymentQuoteLock?.quoteLockId || "").trim();
+  const confirmedQuoteLockId = String(paymentConfirmation?.quoteLockId || "").trim();
+  if (
+    lockedQuoteLockId &&
+    confirmedQuoteLockId &&
+    lockedQuoteLockId !== confirmedQuoteLockId
+  ) {
+    return {
+      ok: false,
+      code: "PAYMENT_QUOTE_LOCK_MISMATCH",
+      message:
+        "A confirmação Pix pertence a outra cotação. Recalcule a tarifa antes de solicitar a corrida.",
+    };
+  }
+
+  const grossEstimatedFare = normalizeLockedQuoteNumber(
+    paymentQuoteLock?.grossEstimatedFare,
+    lockedFare,
+  );
+  const grossAmountInCents = Math.round(grossEstimatedFare * 100);
+
+  return {
+    ok: true,
+    paymentConfirmation: {
+      ...(paymentConfirmation && typeof paymentConfirmation === "object"
+        ? paymentConfirmation
+        : {}),
+      amountInCents: lockedAmountInCents,
+      grossAmountInCents,
+      quoteSessionId:
+        paymentConfirmation?.quoteSessionId ||
+        paymentQuoteLock?.quoteSessionId ||
+        null,
+      quoteLockId: confirmedQuoteLockId || lockedQuoteLockId || null,
+      discountBenefit:
+        paymentConfirmation?.discountBenefit ||
+        paymentQuoteLock?.discountBenefit ||
+        null,
+    },
+  };
 }
 
 function buildReadyPaymentQuoteLock({
@@ -2015,9 +2126,36 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       initialPricingQuote?.quote?.carType,
     ],
   );
+  const initialPricingQuoteRouteMatchesCurrentSelection = useMemo(
+    () =>
+      Boolean(
+        initialPricingQuote?.quote &&
+          (initialPricingQuote.routeKey === fareQuoteRouteKey ||
+            quoteRouteSnapshotMatchesSelection({
+              quoteRouteSnapshot:
+                initialPricingQuote.quoteRouteSnapshot ||
+                initialPricingQuote.quote?.quoteRouteSnapshot,
+              originCoordinate: resolvedPickupCoordinate,
+              destinationCoordinate,
+              selectedPlanTitle: selectedPlanData?.title,
+            })),
+      ),
+    [
+      destinationCoordinate?.latitude,
+      destinationCoordinate?.longitude,
+      fareQuoteRouteKey,
+      initialPricingQuote?.quote,
+      initialPricingQuote?.quoteRouteSnapshot,
+      initialPricingQuote?.routeKey,
+      initialPricingQuote?.quote?.quoteRouteSnapshot,
+      resolvedPickupCoordinate?.latitude,
+      resolvedPickupCoordinate?.longitude,
+      selectedPlanData?.title,
+    ],
+  );
   const initialPricingQuoteMatchesCurrentSelection = Boolean(
     initialPricingQuote?.quote &&
-      initialPricingQuote.routeKey === fareQuoteRouteKey &&
+      initialPricingQuoteRouteMatchesCurrentSelection &&
       hasValidBackendQuoteLock(initialPricingQuote) &&
       (!initialPricingQuotePlanId ||
         initialPricingQuotePlanId === selectedPlanData?.id),
@@ -3032,8 +3170,19 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
   const submitRideAfterPreferences = useCallback(
     async (paymentConfirmation = null, preferencesOverride = null) => {
-      const confirmedChargeId = String(paymentConfirmation?.chargeId || "").trim();
-      const confirmedAmountInCents = Number(paymentConfirmation?.amountInCents);
+      const canonicalPaymentConfirmation = normalizePaymentConfirmationForQuoteLock({
+        paymentConfirmation,
+        paymentQuoteLock,
+        selectedPlanFare,
+      });
+      const effectivePaymentConfirmation =
+        canonicalPaymentConfirmation.paymentConfirmation || paymentConfirmation || {};
+      const confirmedChargeId = String(
+        effectivePaymentConfirmation?.chargeId || "",
+      ).trim();
+      const confirmedAmountInCents = Number(
+        effectivePaymentConfirmation?.amountInCents,
+      );
       const fallbackFare = Number(paymentQuoteLock?.fare ?? selectedPlanFare);
       const confirmedFare =
         Number.isFinite(confirmedAmountInCents) && confirmedAmountInCents > 0
@@ -3081,6 +3230,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
+      if (!canonicalPaymentConfirmation.ok) {
+        Alert.alert(
+          "Pagamento inconsistente",
+          canonicalPaymentConfirmation.message ||
+            "Recalcule a tarifa antes de solicitar a corrida.",
+        );
+        return;
+      }
+
       try {
         submittingRideGuardRef.current = true;
         if (confirmedChargeId) {
@@ -3106,7 +3264,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           vehicle: paymentQuoteLock?.carType || selectedPlanData.title,
           fare: confirmedFare,
           paymentMethod: "pix",
-          paymentConfirmation,
+          paymentConfirmation: effectivePaymentConfirmation,
           preferences:
             preferencesOverride ||
             latestRidePreferencesRef.current ||
@@ -3115,8 +3273,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
         await clearRidePaymentSession({
           passengerId: profileUid || riderProfile?.uid || riderProfile?.id || "",
-          paymentSessionId: paymentConfirmation?.paymentSessionId,
-          contextKey: paymentConfirmation?.paymentContextKey,
+          paymentSessionId: effectivePaymentConfirmation?.paymentSessionId,
+          contextKey: effectivePaymentConfirmation?.paymentContextKey,
           chargeId: confirmedChargeId,
         }).catch(() => false);
 
@@ -3169,10 +3327,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       destinationInfo?.name,
       destinationRoutePayload,
       navigation,
+      paymentQuoteLock?.discountBenefit,
       paymentQuoteLock?.fare,
       paymentQuoteLock?.carType,
       paymentQuoteLock?.destinationLocation,
+      paymentQuoteLock?.grossEstimatedFare,
       paymentQuoteLock?.pickupLocation,
+      paymentQuoteLock?.quoteLockId,
+      paymentQuoteLock?.quoteSessionId,
       profileUid,
       pickupAdjustedOnMap,
       pickupLocationPayload,
@@ -3240,19 +3402,50 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
+      const canonicalPaymentConfirmation = normalizePaymentConfirmationForQuoteLock({
+        paymentConfirmation,
+        paymentQuoteLock,
+        selectedPlanFare,
+      });
+      if (!canonicalPaymentConfirmation.ok) {
+        if (confirmedChargeId) {
+          lastHandledPaymentChargeIdRef.current = "";
+        }
+        pendingPaymentConfirmationRef.current = null;
+        setPixModalVisible(false);
+        setPaymentQuoteLock(null);
+        setAvailabilityNotice(
+          canonicalPaymentConfirmation.message ||
+            "Recalcule a tarifa antes de solicitar a corrida.",
+        );
+        Alert.alert(
+          "Pagamento inconsistente",
+          canonicalPaymentConfirmation.message ||
+            "Recalcule a tarifa antes de solicitar a corrida.",
+        );
+        return;
+      }
+
       if (confirmedChargeId) {
         lastHandledPaymentChargeIdRef.current = confirmedChargeId;
       }
-      pendingPaymentConfirmationRef.current = paymentConfirmation || {};
+      pendingPaymentConfirmationRef.current =
+        canonicalPaymentConfirmation.paymentConfirmation || {};
       setPixModalVisible(false);
       setPreferenceProgress(0);
       setPreferenceModalVisible(true);
     },
     [
       canRequestRide,
+      paymentQuoteLock?.discountBenefit,
+      paymentQuoteLock?.fare,
+      paymentQuoteLock?.grossEstimatedFare,
+      paymentQuoteLock?.quoteLockId,
+      paymentQuoteLock?.quoteSessionId,
       preferenceModalVisible,
       routeGuardBlocked,
       routeGuardMessage,
+      selectedPlanFare,
       submittingRide,
     ],
   );

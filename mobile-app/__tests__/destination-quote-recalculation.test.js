@@ -1,5 +1,6 @@
 import React from "react";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { Alert } from "react-native";
 
 import RobotaxiDestinationScreen from "../src/screens/prototype/RobotaxiDestinationScreen";
 import { usePrototypeRideRuntime } from "../src/screens/prototype/prototypeRideRuntime";
@@ -104,12 +105,13 @@ jest.mock("../src/components/prototype/PrototypeUI", () => {
 jest.mock("../src/components/payment/WooviPaymentModal", () => {
   const React = require("react");
   const { Text, TouchableOpacity, View } = require("react-native");
-  return ({ visible, onPaymentConfirmed, estimates, tripData, quoteSessionId, quoteLockId }) =>
-    visible ? (
+  return ({ visible, onPaymentConfirmed, estimates, tripData, quoteSessionId, quoteLockId }) => {
+    const amount = Number(estimates?.estimateFare ?? tripData?.estimatedFare);
+    const confirmationOverrides =
+      global.__LEAF_TEST_PIX_CONFIRMATION_OVERRIDES__ || {};
+    return visible ? (
       <View>
-        <Text testID="mock-pix-amount">
-          {Number(estimates?.estimateFare ?? tripData?.estimatedFare).toFixed(2)}
-        </Text>
+        <Text testID="mock-pix-amount">{amount.toFixed(2)}</Text>
         <Text testID="mock-pix-quote-lock-id">{quoteLockId || "no-lock"}</Text>
         <Text testID="mock-pix-pickup-lat">{String(tripData?.pickup?.lat ?? "")}</Text>
         <Text testID="mock-pix-pickup-lng">{String(tripData?.pickup?.lng ?? "")}</Text>
@@ -121,9 +123,10 @@ jest.mock("../src/components/payment/WooviPaymentModal", () => {
             onPaymentConfirmed?.({
               chargeId: "charge_test_1",
               rideId: "ride_test_1",
-              amountInCents: 1777,
+              amountInCents: Math.round(amount * 100),
               quoteSessionId,
               quoteLockId,
+              ...confirmationOverrides,
             })
           }
         >
@@ -131,11 +134,13 @@ jest.mock("../src/components/payment/WooviPaymentModal", () => {
         </TouchableOpacity>
       </View>
     ) : null;
+  };
 });
 
 describe("RobotaxiDestinationScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    global.__LEAF_TEST_PIX_CONFIRMATION_OVERRIDES__ = null;
     fetchDynamicPricingQuote.mockReset();
     fetchDynamicPricingQuote.mockResolvedValue({
       estimatedFare: 13.42,
@@ -1007,6 +1012,122 @@ describe("RobotaxiDestinationScreen", () => {
     });
   });
 
+  it("keeps the home quote locked by route snapshot when route keys differ", async () => {
+    const destination = {
+      id: "destination_carioca_shopping",
+      name: "Carioca Shopping",
+      address: "Av. Vicente de Carvalho, 909 - Vila da Penha, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.84578,
+        longitude: -43.31093,
+      },
+      eta: "12",
+    };
+    const pickup = {
+      latitude: -22.853586,
+      longitude: -43.318168,
+    };
+    const quoteLockExpiresAt = new Date(Date.now() + 120000).toISOString();
+    const quoteRouteSnapshot = {
+      pickupLocation: {
+        lat: pickup.latitude,
+        lng: pickup.longitude,
+        address: "Carioca Shopping",
+      },
+      destinationLocation: {
+        lat: destination.coordinate.latitude,
+        lng: destination.coordinate.longitude,
+        address: destination.address,
+      },
+      carType: "Leaf Plus",
+    };
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "Carioca Shopping",
+      currentCoordinate: pickup,
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 84.19,
+      selectedDestination: destination,
+      tripDistanceKm: 2.9,
+      tripDurationMin: 9,
+      tripArrivalText: "18:20",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability: jest.fn().mockResolvedValue({ available: true }),
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={{
+          navigate: jest.fn(),
+          replace: jest.fn(),
+          canGoBack: jest.fn(() => false),
+          goBack: jest.fn(),
+        }}
+        route={{
+          params: {
+            initialPickupCoordinate: pickup,
+            initialPickupAddress: "Carioca Shopping",
+            initialSelectedDestination: destination,
+            initialSelectedPlan: "plus",
+            startAtConfirmation: true,
+            skipDestinationSearch: true,
+            initialPricingQuote: {
+              quote: {
+                estimatedFare: 97.76,
+                grossEstimatedFare: 97.76,
+                carType: "Leaf Plus",
+                quoteLockId: "ql_home_snapshot_lock",
+                quoteLockExpiresAt,
+                pricingPayload: {},
+                quoteRouteSnapshot,
+              },
+              planId: "plus",
+              carType: "Leaf Plus",
+              quoteSessionId: "passenger_home_snapshot_quote",
+              quoteLockId: "ql_home_snapshot_lock",
+              quoteLockExpiresAt,
+              routeKey: "stale-route-key-from-previous-normalization",
+              quoteRouteSnapshot,
+              distanceKm: 2.9,
+              durationMin: 9,
+              arrivalTime: "18:20",
+              expiresAt: Date.now() + 120000,
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/R\$ 97,76/)).toBeTruthy();
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+    });
+
+    expect(fetchDynamicPricingQuote).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("97.76");
+      expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
+        "ql_home_snapshot_lock",
+      );
+    });
+  });
+
   it("refreshes an expired home quote lock before opening PIX", async () => {
     fetchDynamicPricingQuote.mockResolvedValueOnce({
       estimatedFare: 82.41,
@@ -1216,6 +1337,14 @@ describe("RobotaxiDestinationScreen", () => {
   });
 
   it("opens the post-PIX preference countdown before sending the ride request", async () => {
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 17.77,
+      grossEstimatedFare: 17.77,
+      quoteLockId: "ql_preference_countdown_1777",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
+
     const destination = {
       id: "destination_shopping_leblon",
       name: "Shopping Leblon",
@@ -1327,6 +1456,104 @@ describe("RobotaxiDestinationScreen", () => {
         expect.objectContaining({ autoAdvance: true }),
       );
     });
+  });
+
+  it("blocks ride creation when the confirmed PIX amount differs from the locked quote", async () => {
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 97.76,
+      grossEstimatedFare: 97.76,
+      quoteLockId: "ql_payment_amount_guard",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
+    global.__LEAF_TEST_PIX_CONFIRMATION_OVERRIDES__ = {
+      amountInCents: 8419,
+      quoteLockId: "ql_payment_amount_guard",
+    };
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(jest.fn());
+
+    const destination = {
+      id: "destination_mercadao_madureira",
+      name: "Mercadão de Madureira",
+      address: "Av. Min. Edgard Romero, 239 - Madureira, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.8712,
+        longitude: -43.3376,
+      },
+      eta: "15",
+    };
+    const requestRide = jest.fn();
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "Carioca Shopping",
+      currentCoordinate: {
+        latitude: -22.853586,
+        longitude: -43.318168,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 84.19,
+      selectedDestination: destination,
+      tripDistanceKm: 8.1,
+      tripDurationMin: 18,
+      tripArrivalText: "18:45",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability: jest.fn().mockResolvedValue({ available: true }),
+      requestRide,
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={{
+          navigate: jest.fn(),
+          replace: jest.fn(),
+          canGoBack: jest.fn(() => false),
+          goBack: jest.fn(),
+        }}
+        route={{ params: {} }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Mercadão de Madureira")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText("Mercadão de Madureira"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+      expect(screen.getByText(/R\$ 97,76/)).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-confirm-pix")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId("mock-confirm-pix"));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        "Pagamento inconsistente",
+        expect.stringContaining("diverge da cotação"),
+      );
+      expect(requestRide).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("passenger-preference-countdown-modal")).toBeNull();
+    });
+
+    alertSpy.mockRestore();
   });
 
   it("rechecks final availability once before blocking payment on no-driver result", async () => {
