@@ -1,5 +1,6 @@
 const firebaseConfig = require('../firebase-config');
 const supportTicketService = require('./support-ticket-service');
+const { classifySupportTicketSeverity } = require('./support-severity-classifier');
 
 const TICKETS_COLLECTION = 'support_tickets';
 const DEFAULT_PRIORITY = 'N3';
@@ -74,21 +75,32 @@ class SupportQueueService {
     userType = 'passenger',
     userInfo = {},
     metadata = {},
+    requesterIsAgent = false,
     ipAddress = null,
     userAgent = null
   }) {
     const createdAt = new Date().toISOString();
-    const queue = this.buildQueueMetadata(priority, createdAt);
+    const classification = classifySupportTicketSeverity({
+      subject,
+      description,
+      category,
+      requestedPriority: priority,
+      metadata,
+      requesterIsAgent
+    });
+    const effectivePriority = classification.priority;
+    const queue = this.buildQueueMetadata(effectivePriority, createdAt);
     const result = await this.ticketService.createTicket({
       subject,
       description,
       category,
-      priority,
+      priority: effectivePriority,
       requesterId,
       userType,
       userInfo,
       metadata: {
         ...metadata,
+        supportClassification: classification,
         queue
       },
       ipAddress,
@@ -214,7 +226,7 @@ class SupportQueueService {
   async getBacklog({
     priority = null,
     status = null,
-    autoEscalate = true,
+    autoEscalate = false,
     limit = 100,
     offset = 0
   } = {}) {
@@ -264,7 +276,7 @@ class SupportQueueService {
     };
   }
 
-  async getQueueSummary({ autoEscalate = true } = {}) {
+  async getQueueSummary({ autoEscalate = false } = {}) {
     const backlog = await this.getBacklog({ autoEscalate, limit: 500, offset: 0 });
     const tickets = backlog.tickets;
     const firstResponses = tickets

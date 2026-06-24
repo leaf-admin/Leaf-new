@@ -5,8 +5,9 @@ const firebaseConfig = require('../firebase-config');
 const { resolveJwtSecretList } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
 
-const ADMIN_ROLES = new Set(['admin', 'manager', 'super-admin', 'viewer', 'support', 'development']);
-const AGENT_ROLES = new Set(['admin', 'manager', 'super-admin', 'support', 'development']);
+const SUPPORT_TIER_ROLES = ['support', 'support_n1', 'support_n2', 'support_n3'];
+const ADMIN_ROLES = new Set(['admin', 'manager', 'super-admin', 'viewer', ...SUPPORT_TIER_ROLES, 'development']);
+const AGENT_ROLES = new Set(['admin', 'manager', 'super-admin', ...SUPPORT_TIER_ROLES, 'development']);
 
 const JWT_SECRETS = resolveJwtSecretList(
   ['JWT_SECRET', 'ADMIN_JWT_SECRET'],
@@ -161,5 +162,6 @@ module.exports = {
   authenticateSupport,
   requireSupportRoles,
   isSupportAgent,
-  canAccessUserScope
+  canAccessUserScope,
+  SUPPORT_TIER_ROLES
 };

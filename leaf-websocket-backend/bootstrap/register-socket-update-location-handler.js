@@ -4,6 +4,7 @@ const {
 } = require('../utils/active-trip-index');
 const driverEligibilityService = require('../services/driver-eligibility-service');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
+const rideHealthMonitor = require('../services/ride-health-monitor');
 const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
 
 const ENABLE_ACTIVE_TRIP_INDEX = process.env.ENABLE_ACTIVE_TRIP_INDEX !== 'false';
@@ -16,6 +17,10 @@ const ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT =
 const MAX_SHARED_ROUTE_COORDINATES = Number.parseInt(
     process.env.MAX_SHARED_ROUTE_COORDINATES || '700',
     10
+);
+const MAX_LOCATION_BATCH_SIZE = Math.max(
+    1,
+    Number.parseInt(process.env.MAX_LOCATION_BATCH_SIZE || '50', 10) || 50
 );
 
 function normalizeSharedRouteCoordinate(coordinate) {
@@ -42,6 +47,33 @@ function normalizeSharedRouteMetric(value) {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+function normalizeSharedTrafficLevel(value) {
+    const normalized = String(value || 'normal').trim().toLowerCase();
+    return ['normal', 'moderate', 'heavy'].includes(normalized) ? normalized : 'normal';
+}
+
+function normalizeSharedRouteTrafficSegments(segments) {
+    if (!Array.isArray(segments)) {
+        return [];
+    }
+
+    return segments
+        .map((segment) => {
+            const coordinates = normalizeSharedRouteCoordinates(segment?.coordinates);
+            if (coordinates.length < 2) {
+                return null;
+            }
+
+            const color = String(segment?.color || '').trim();
+            return {
+                coordinates,
+                level: normalizeSharedTrafficLevel(segment?.level || segment?.trafficLevel),
+                ...(color ? { color } : {})
+            };
+        })
+        .filter(Boolean);
+}
+
 function normalizeSharedRoutePlan(routePlan) {
     if (!routePlan || typeof routePlan !== 'object') {
         return null;
@@ -50,6 +82,8 @@ function normalizeSharedRoutePlan(routePlan) {
     const pickupCoordinates = normalizeSharedRouteCoordinates(routePlan.pickupCoordinates);
     const destinationCoordinates = normalizeSharedRouteCoordinates(routePlan.destinationCoordinates);
     const combinedCoordinates = normalizeSharedRouteCoordinates(routePlan.combinedCoordinates);
+    const pickupTrafficSegments = normalizeSharedRouteTrafficSegments(routePlan.pickupTrafficSegments);
+    const destinationTrafficSegments = normalizeSharedRouteTrafficSegments(routePlan.destinationTrafficSegments);
 
     if (pickupCoordinates.length < 2 || destinationCoordinates.length < 2) {
         return null;
@@ -62,6 +96,8 @@ function normalizeSharedRoutePlan(routePlan) {
             combinedCoordinates.length >= 2
                 ? combinedCoordinates
                 : [...pickupCoordinates, ...destinationCoordinates.slice(1)],
+        pickupTrafficSegments,
+        destinationTrafficSegments,
         pickupDistanceKm: normalizeSharedRouteMetric(routePlan.pickupDistanceKm),
         pickupDurationMinutes: normalizeSharedRouteMetric(routePlan.pickupDurationMinutes),
         destinationDistanceKm: normalizeSharedRouteMetric(routePlan.destinationDistanceKm),
@@ -170,7 +206,11 @@ function registerSocketUpdateLocationHandler({
                     dataDriverId: data.driverId
                 });
                 emitLocationError({ message: 'Dados de localização incompletos ou motorista não autenticado' });
-                return;
+                return {
+                    success: false,
+                    code: 'INVALID_LOCATION_PAYLOAD',
+                    error: 'Dados de localização incompletos ou motorista não autenticado'
+                };
             }
 
             // Verificar se é motorista
@@ -183,7 +223,11 @@ function registerSocketUpdateLocationHandler({
                     socketId: socket.id
                 });
                 emitLocationError({ message: 'Apenas motoristas podem atualizar localização' });
-                return;
+                return {
+                    success: false,
+                    code: 'DRIVER_ONLY_LOCATION_UPDATE',
+                    error: 'Apenas motoristas podem atualizar localização'
+                };
             }
 
             // ✅ OTIMIZAÇÃO 4: TTL diferenciado por estado
@@ -225,7 +269,11 @@ function registerSocketUpdateLocationHandler({
                         code: subscriptionGate.code,
                         subscriptionRequired: true
                     });
-                    return;
+                    return {
+                        success: false,
+                        code: subscriptionGate.code || 'SUBSCRIPTION_REQUIRED',
+                        error: 'Assinatura pendente. Regularize para ficar online.'
+                    };
                 }
 
                 try {
@@ -246,7 +294,11 @@ function registerSocketUpdateLocationHandler({
                             challengeId: dailyKYC.challenge?.challengeId || null,
                             challenge: dailyKYC.challenge || null
                         });
-                        return;
+                        return {
+                            success: false,
+                            code: dailyKYC.code || 'KYC_REQUIRED',
+                            error: 'Verificação facial diária necessária para ficar online.'
+                        };
                     }
                 } catch (kycError) {
                     await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
@@ -261,7 +313,11 @@ function registerSocketUpdateLocationHandler({
                         code: 'kycCheckFailed',
                         kycRequired: true
                     });
-                    return;
+                    return {
+                        success: false,
+                        code: 'KYC_CHECK_FAILED',
+                        error: 'Não foi possível validar KYC agora. Tente novamente.'
+                    };
                 }
 
                 // Elegibilidade é validada no momento de ficar online.
@@ -286,7 +342,11 @@ function registerSocketUpdateLocationHandler({
                         code: 'driverNotEligible',
                         eligibilityRequired: true
                     });
-                    return;
+                    return {
+                        success: false,
+                        code: dispatchEligibility.code || 'NOT_ELIGIBLE',
+                        error: 'Cadastro pendente de aprovação para receber corridas.'
+                    };
                 }
             }
 
@@ -322,7 +382,11 @@ function registerSocketUpdateLocationHandler({
                         code: 'driverNotEligible',
                         eligibilityRequired: true
                     });
-                    return;
+                    return {
+                        success: false,
+                        code: dispatchEligibility.code || 'NOT_ELIGIBLE',
+                        error: 'Cadastro pendente de aprovação para receber corridas.'
+                    };
                 }
             }
 
@@ -484,7 +548,15 @@ function registerSocketUpdateLocationHandler({
                                 lastAcceptedSeq,
                                 outOfOrderWindow: TRIP_LOCATION_OUT_OF_ORDER_WINDOW
                             });
-                            return;
+                            return {
+                                success: true,
+                                ignored: true,
+                                stale: true,
+                                tripId: activeTripId,
+                                seq: parsedSeq,
+                                orderStatus,
+                                lastAcceptedSeq
+                            };
                         }
 
                         const dedupeKey = `trip_loc_dedupe:${activeTripId}:${driverId}:${parsedSeq}`;
@@ -499,8 +571,31 @@ function registerSocketUpdateLocationHandler({
                                 lastAcceptedSeq,
                                 duplicate: true
                             });
-                            return;
+                            return {
+                                success: true,
+                                ignored: true,
+                                duplicate: true,
+                                tripId: activeTripId,
+                                seq: parsedSeq,
+                                orderStatus: 'duplicate_dedupe',
+                                lastAcceptedSeq
+                            };
                         }
+                    }
+
+                    if (activeTripId) {
+                        await rideHealthMonitor.syncDriverSignalForRide(redis, {
+                            bookingId: activeTripId,
+                            lastLocationAt: capturedAtValue
+                        }).catch((signalError) => {
+                            logStructured('warn', 'Falha ao sincronizar health index de sinal do motorista', {
+                                service: 'websocket',
+                                operation: 'updateLocation',
+                                driverId,
+                                bookingId: activeTripId,
+                                error: signalError.message
+                            });
+                        });
                     }
 
                     if (activeTripId && ENABLE_TRIP_LOCATION_STREAM) {
@@ -604,7 +699,7 @@ function registerSocketUpdateLocationHandler({
             }
 
             // Emitir confirmação
-            socket.emit('locationUpdated', {
+            const successPayload = {
                 success: true,
                 message: 'Localização atualizada',
                 location: { lat: latNum, lng: lngNum },
@@ -618,7 +713,8 @@ function registerSocketUpdateLocationHandler({
                     speed: normalizedSpeed,
                     timestamp: normalizedTimestamp
                 }
-            });
+            };
+            socket.emit('locationUpdated', successPayload);
             scheduleMapH3Refresh(io, {
                 reason: 'location_updated',
                 driverId,
@@ -635,6 +731,7 @@ function registerSocketUpdateLocationHandler({
                     status: isInTripState ? 'em viagem' : 'online'
                 });
             }
+            return successPayload;
 
         } catch (error) {
             logStructured('error', 'Erro ao atualizar localização (updateLocation)', {
@@ -646,11 +743,73 @@ function registerSocketUpdateLocationHandler({
             });
             // Stack já está incluído no logStructured acima
             emitLocationError({ message: 'Erro ao atualizar localização' });
+            return {
+                success: false,
+                error: error.message || 'Erro ao atualizar localização'
+            };
         }
     };
 
     socket.on('updateLocation', (data) => {
         handleUpdateLocation(data, 'updateLocation');
+    });
+
+    socket.on('updateLocationBatch', async (payload = {}) => {
+        const locations = Array.isArray(payload.locations)
+            ? payload.locations.slice(0, MAX_LOCATION_BATCH_SIZE)
+            : [];
+        const batchId = String(payload.batchId || '').trim() || `location_batch_${Date.now()}`;
+        const bookingId = String(payload.bookingId || payload.tripId || '').trim();
+
+        if (locations.length === 0) {
+            socket.emit('locationBatchUpdated', {
+                success: false,
+                code: 'EMPTY_LOCATION_BATCH',
+                message: 'Nenhuma localização enviada para sincronização',
+                batchId,
+                bookingId: bookingId || null
+            });
+            return;
+        }
+
+        const results = [];
+        for (let index = 0; index < locations.length; index += 1) {
+            const point = locations[index] || {};
+            const itemPayload = {
+                ...payload,
+                ...point,
+                uid: payload.uid || payload.driverId || point.uid || point.driverId,
+                driverId: payload.driverId || point.driverId,
+                bookingId: point.bookingId || payload.bookingId,
+                tripId: point.tripId || payload.tripId || point.bookingId || payload.bookingId,
+                tripStatus: point.tripStatus || payload.tripStatus || 'started',
+                isInTrip: point.isInTrip !== undefined ? point.isInTrip : payload.isInTrip !== false,
+                source: point.source || payload.source || 'location_batch',
+                batchId,
+                batchIndex: index
+            };
+            const result = await handleUpdateLocation(itemPayload, 'updateLocationBatch');
+            results.push({
+                eventId: point.eventId || null,
+                seq: Number.isInteger(Number(point.seq)) ? Number(point.seq) : null,
+                success: result?.success === true,
+                stale: result?.stale === true,
+                duplicate: result?.duplicate === true,
+                code: result?.code || null,
+                error: result?.error || null
+            });
+        }
+
+        const acceptedCount = results.filter((item) => item.success).length;
+        socket.emit('locationBatchUpdated', {
+            success: acceptedCount > 0,
+            batchId,
+            bookingId: bookingId || null,
+            totalCount: locations.length,
+            acceptedCount,
+            rejectedCount: locations.length - acceptedCount,
+            results
+        });
     });
 
     // Compatibilidade com clientes legados: usa o mesmo pipeline de validação/elegibilidade.
@@ -662,3 +821,6 @@ function registerSocketUpdateLocationHandler({
 }
 
 module.exports = registerSocketUpdateLocationHandler;
+module.exports.__private__ = {
+    normalizeSharedRoutePlan
+};

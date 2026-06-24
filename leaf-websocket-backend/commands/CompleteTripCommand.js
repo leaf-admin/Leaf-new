@@ -35,11 +35,17 @@ const {
     resolveOperationalContinuation,
     buildContinuationRideLeg
 } = require('../services/ride-lifecycle-service');
+const { buildAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 
 function toMoney(value) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return null;
     return Math.round(parsed * 100) / 100;
+}
+
+function toMoneyIfPresent(value) {
+    if (value === undefined || value === null || value === '') return null;
+    return toMoney(value);
 }
 
 function paymentAmountInCentsToReais(value) {
@@ -65,6 +71,53 @@ function resolveFareToleranceReais() {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0.01;
 }
 
+function buildPendingPaymentDistribution(settlementReview = null) {
+    if (settlementReview) {
+        return {
+            status: 'UNDER_REVIEW',
+            message: 'Ajuste financeiro requer liquidação explícita antes do crédito automático do motorista',
+            reason: settlementReview.settlementType,
+            settlementReviewRequired: true
+        };
+    }
+
+    return { status: 'PENDING', message: 'Processamento assíncrono em andamento' };
+}
+
+function buildDriverOfflineSettlementReview({
+    bookingId,
+    driverId,
+    finalFare,
+    duration,
+    offlineSeconds
+}) {
+    const normalizedOfflineSeconds = Math.max(0, Math.floor(Number(offlineSeconds || 0)));
+    if (normalizedOfflineSeconds <= 0) return null;
+
+    const originalDurationSecs = Math.max(0, parseInt(duration || 0, 10) || 0);
+    const rateCents = Number.parseInt(process.env.DRIVER_OFFLINE_ADJUSTMENT_RATE_CENTS_PER_MINUTE || '50', 10);
+    const safeRateCents = Number.isFinite(rateCents) && rateCents >= 0 ? rateCents : 50;
+    const estimatedAdjustmentCents = Math.floor((normalizedOfflineSeconds / 60) * safeRateCents);
+    const estimatedAdjustmentAmount = toMoney(estimatedAdjustmentCents / 100) || 0;
+
+    return {
+        settlementType: 'DRIVER_OFFLINE_TIME_ADJUSTMENT_REVIEW',
+        status: 'PENDING_EXPLICIT_LEDGER_SETTLEMENT',
+        bookingId,
+        driverId,
+        reason: 'DRIVER_OFFLINE_DURING_ACTIVE_RIDE',
+        offlineSeconds: normalizedOfflineSeconds,
+        originalDurationSecs,
+        adjustedDurationSecs: Math.max(0, originalDurationSecs - normalizedOfflineSeconds),
+        grossFareLocked: toMoney(finalFare) || 0,
+        estimatedAdjustmentAmount,
+        estimatedAdjustmentCents,
+        rateCentsPerMinute: safeRateCents,
+        requiresExplicitLedgerSettlement: true,
+        createdAt: new Date().toISOString()
+    };
+}
+
 function safeJsonParse(value, fallback = null) {
     if (!value) return fallback;
     if (typeof value === 'object') return value;
@@ -73,6 +126,48 @@ function safeJsonParse(value, fallback = null) {
     } catch (_error) {
         return fallback;
     }
+}
+
+function resolveCompletedFinancialResultFields(bookingData = {}) {
+    const financialSnapshot = safeJsonParse(bookingData.financialSnapshot, null);
+    const hasFinancialSnapshot =
+        financialSnapshot &&
+        typeof financialSnapshot === 'object' &&
+        !Array.isArray(financialSnapshot);
+    const fields = {};
+
+    if (hasFinancialSnapshot) {
+        fields.financialSnapshot = financialSnapshot;
+    }
+
+    if (
+        hasFinancialSnapshot ||
+        bookingData.authoritativeSnapshot !== undefined ||
+        bookingData.financialSnapshotSource
+    ) {
+        fields.authoritativeSnapshot =
+            financialSnapshot?.authoritativeSnapshot === true ||
+            String(bookingData.authoritativeSnapshot || '').toLowerCase() === 'true';
+        fields.financialSnapshotSource =
+            financialSnapshot?.financialSnapshotSource ||
+            bookingData.financialSnapshotSource ||
+            null;
+    }
+
+    const moneyFields = [
+        'operationalFee',
+        'paymentIntermediationFee',
+        'totalFees',
+        'driverNetAmount'
+    ];
+    moneyFields.forEach((field) => {
+        const value = toMoneyIfPresent(bookingData[field]);
+        if (value !== null) {
+            fields[field] = value;
+        }
+    });
+
+    return fields;
 }
 
 async function applyDeferredIdentityReverification(driverId, context = {}) {
@@ -197,6 +292,7 @@ class CompleteTripCommand extends Command {
                         paymentDistribution: bookingData.paymentDistribution
                             ? safeJsonParse(bookingData.paymentDistribution, { status: 'PENDING', message: 'Processamento assíncrono em andamento' })
                             : { status: 'PENDING', message: 'Processamento assíncrono em andamento' },
+                        ...resolveCompletedFinancialResultFields(bookingData),
                         idempotentReplay: true
                     });
                 }
@@ -242,36 +338,49 @@ class CompleteTripCommand extends Command {
                 }
                 this.finalFare = normalizedFinalFare;
 
-                // ✅ CAOS SCENARIO: Descontar tempo offline do motorista para resiliência de faturamento
+                let offlineSettlementReview = null;
+
+                // Offline durante corrida não pode reduzir o bruto Pix/recibo implicitamente.
+                // A penalidade fica pendente de liquidação explícita no ledger/refund.
                 try {
                     const heartbeatService = require('../services/heartbeat-service');
                     const offlineTimeMs = await heartbeatService.getAndResetOfflineTime(this.driverId);
                     const offlineSeconds = Math.floor(offlineTimeMs / 1000);
 
                     if (offlineSeconds > 0) {
-                        const originalDuration = parseInt(this.duration || 0);
-                        const offlineMinutes = offlineSeconds / 60;
-                        const defaultMinuteRateCents = 50; // R$ 0,50 por minuto (taxa base dinâmica aproximação)
+                        offlineSettlementReview = buildDriverOfflineSettlementReview({
+                            bookingId: this.bookingId,
+                            driverId: this.driverId,
+                            finalFare: this.finalFare,
+                            duration: this.duration,
+                            offlineSeconds
+                        });
 
-                        // O motorista deve ser penalizado/faturamento deve ser corrigido retirando o tempo ocioso offline
-                        const discountAmountCents = Math.floor(offlineMinutes * defaultMinuteRateCents);
-                        const discountAmountReais = discountAmountCents / 100;
-
-                        this.duration = Math.max(0, originalDuration - offlineSeconds);
-                        this.finalFare = toMoney(Math.max(0, Number(this.finalFare || 0) - discountAmountReais));
-
-                        logger.info(`🔌 [CompleteTripCommand] Motorista esteve offline por ${offlineSeconds}s. Desconto aplicado: R$ ${discountAmountReais.toFixed(2)}. Duração corrigida para ${this.duration}s.`, {
-                            bookingId: this.bookingId, driverId: this.driverId
+                        logger.info('🔌 [CompleteTripCommand] Motorista teve tempo offline; ajuste financeiro enviado para liquidação explícita.', {
+                            bookingId: this.bookingId,
+                            driverId: this.driverId,
+                            offlineSeconds,
+                            estimatedAdjustmentAmount: offlineSettlementReview?.estimatedAdjustmentAmount || 0
                         });
                     }
                 } catch (hbErr) {
                     logger.warn(`⚠️ [CompleteTripCommand] Falha ao processar resiliência offline: ${hbErr.message}`);
                 }
 
+                const paymentDistribution = buildPendingPaymentDistribution(offlineSettlementReview);
                 let completedFareBreakdown = paymentService.calculateFareBreakdownFromReais(
                     Number(this.finalFare || 0),
                     Number(this.tollFee || 0)
                 );
+                const finalFinancialSnapshot = buildAuthoritativeFinancialSnapshot({
+                    passengerPaidCents: Math.round(Number(this.finalFare || 0) * 100),
+                    tollFeeCents: Math.round(Number(this.tollFee || 0) * 100),
+                    operationalFeeCents: Math.round(Number(completedFareBreakdown.operationalFee || 0) * 100),
+                    paymentIntermediationFeeCents: Math.round(
+                        Number(completedFareBreakdown.paymentIntermediationFee || 0) * 100
+                    ),
+                    driverNetAmountCents: Math.round(Number(completedFareBreakdown.driverNetAmount || 0) * 100)
+                });
                 const existingRideLegs = resolveRideLegs(bookingData);
                 const operationalContinuation = resolveOperationalContinuation(bookingData);
                 const completedAt = new Date().toISOString();
@@ -346,10 +455,13 @@ class CompleteTripCommand extends Command {
                         driverNetAmount: completedFareBreakdown.driverNetAmount,
                         authoritativeSnapshot: true,
                         financialSnapshotSource: 'backend_final',
+                        financialSnapshot: finalFinancialSnapshot,
                         completedAt,
                         rideLegs: rideLegSettlements,
                         operationalContinuation: completedContinuation,
-                        paymentDistribution: { status: 'PENDING', message: 'Processamento assíncrono em andamento' }
+                        offlineSettlementReview,
+                        settlementReviewRequired: !!offlineSettlementReview,
+                        paymentDistribution
                     }
                 );
 
@@ -369,7 +481,11 @@ class CompleteTripCommand extends Command {
                     driverNetAmount: String(completedFareBreakdown.driverNetAmount || 0),
                     authoritativeSnapshot: 'true',
                     financialSnapshotSource: 'backend_final',
+                    financialSnapshot: JSON.stringify(finalFinancialSnapshot),
                     completedAt,
+                    paymentDistribution: JSON.stringify(paymentDistribution),
+                    ...(offlineSettlementReview ? { offlineSettlementReview: JSON.stringify(offlineSettlementReview) } : {}),
+                    ...(offlineSettlementReview ? { settlementReviewRequired: 'true' } : {}),
                     ...(rideLegSettlements.length > 0 ? { rideLegs: JSON.stringify(rideLegSettlements) } : {}),
                     ...(completedContinuation ? { operationalContinuation: JSON.stringify(completedContinuation) } : {})
                 });
@@ -455,6 +571,10 @@ class CompleteTripCommand extends Command {
                     duration: this.duration,
                     rideLegSettlements,
                     operationalContinuation: completedContinuation,
+                    offlineSettlementReview,
+                    settlementReviewRequired: !!offlineSettlementReview,
+                    paymentDistribution,
+                    financialSnapshot: finalFinancialSnapshot,
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
@@ -482,7 +602,16 @@ class CompleteTripCommand extends Command {
                     tollFee: this.tollFee,
                     distance: this.distance,
                     duration: this.duration,
-                    paymentDistribution: { status: 'PENDING', message: 'Processamento assíncrono em andamento' }
+                    offlineSettlementReview,
+                    settlementReviewRequired: !!offlineSettlementReview,
+                    paymentDistribution,
+                    operationalFee: completedFareBreakdown.operationalFee,
+                    paymentIntermediationFee: completedFareBreakdown.paymentIntermediationFee,
+                    totalFees: completedFareBreakdown.totalFees,
+                    driverNetAmount: completedFareBreakdown.driverNetAmount,
+                    authoritativeSnapshot: true,
+                    financialSnapshotSource: 'backend_final',
+                    financialSnapshot: finalFinancialSnapshot
                 });
 
             } catch (error) {

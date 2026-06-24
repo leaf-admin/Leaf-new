@@ -1308,7 +1308,8 @@ io.on('connection', async (socket) => {
     registerSocketSafetySupportHandlers({
         socket,
         io,
-        logStructured
+        logStructured,
+        redisPool
     });
 
     registerSocketEngagementChatHandlers({
@@ -1360,6 +1361,7 @@ io.on('connection', async (socket) => {
         registerSocketRatingHandler({
             socket,
             io,
+            redisPool,
             logStructured
         });
     }

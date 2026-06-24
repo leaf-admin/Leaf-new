@@ -1,7 +1,10 @@
 const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const {
-  countActiveRidesFromActiveHash
+  countActiveRidesFromActiveHash,
+  isRideRevenuePendingFinalSnapshot,
+  resolveRideOperationalFee,
+  resolveRideRevenue
 } = require('./dashboard-ride-monitoring-service');
 
 let firebaseConfig = null;
@@ -126,22 +129,11 @@ function inWindow(value, start, end) {
 }
 
 function getRideRevenue(ride) {
-  return toNumber(
-    ride?.finalPrice,
-    toNumber(
-      ride?.estimatedFare,
-      toNumber(ride?.financialBreakdown?.totalAmount) / 100
-    )
-  );
+  return resolveRideRevenue(ride);
 }
 
 function getRideOperationalFee(ride) {
-  const cents = toNumber(ride?.financialBreakdown?.operationalFee);
-  if (cents > 0) {
-    return cents / 100;
-  }
-
-  return Math.max(0, toNumber(ride?.finalPrice) - toNumber(ride?.driverEarnings || ride?.netFare));
+  return resolveRideOperationalFee(ride);
 }
 
 function roundMoney(value) {
@@ -373,15 +365,21 @@ class ModernMetricsService {
     const rides = await this.getRidesForWindow({ period, startDate, endDate });
     const { start, end } = getWindow(period, startDate, endDate);
     const completedRides = rides.filter((ride) => COMPLETED_STATUSES.has(ride.status));
+    const reconciledCompletedRides = completedRides.filter(
+      (ride) => !isRideRevenuePendingFinalSnapshot(ride)
+    );
     const totalValue = roundMoney(
       completedRides.reduce((sum, ride) => sum + getRideRevenue(ride), 0)
     );
     const totalRides = completedRides.length;
+    const reconciledRides = reconciledCompletedRides.length;
 
     return {
       totalValue,
       totalRides,
-      averageValue: totalRides > 0 ? Number((totalValue / totalRides).toFixed(2)) : 0,
+      reconciledRides,
+      pendingReconciliationRides: totalRides - reconciledRides,
+      averageValue: reconciledRides > 0 ? Number((totalValue / reconciledRides).toFixed(2)) : 0,
       reserveFundLosses: await getReserveFundLosses(),
       period,
       startDate: start.toISOString(),
@@ -423,13 +421,30 @@ class ModernMetricsService {
     } else {
       const rides = await this.getRidesForWindow({ period, startDate, endDate });
       const completedRides = rides.filter((ride) => COMPLETED_STATUSES.has(ride.status));
+      const reconciledCompletedRides = completedRides.filter(
+        (ride) => !isRideRevenuePendingFinalSnapshot(ride)
+      );
       totalRides = completedRides.length;
       totalOperationalFee = completedRides.reduce((sum, ride) => sum + getRideOperationalFee(ride), 0);
+      return {
+        totalOperationalFee: roundMoney(totalOperationalFee),
+        totalRides,
+        reconciledRides: reconciledCompletedRides.length,
+        pendingReconciliationRides: totalRides - reconciledCompletedRides.length,
+        averageFee: reconciledCompletedRides.length > 0
+          ? Number((totalOperationalFee / reconciledCompletedRides.length).toFixed(2))
+          : 0,
+        period,
+        startDate: start.toISOString(),
+        endDate: end.toISOString()
+      };
     }
 
     return {
       totalOperationalFee: roundMoney(totalOperationalFee),
       totalRides,
+      reconciledRides: totalRides,
+      pendingReconciliationRides: 0,
       averageFee: totalRides > 0 ? Number((totalOperationalFee / totalRides).toFixed(2)) : 0,
       period,
       startDate: start.toISOString(),
@@ -440,6 +455,9 @@ class ModernMetricsService {
   async getRidesStats({ period = 'today', startDate, endDate } = {}) {
     const rides = await this.getRidesForWindow({ period, startDate, endDate });
     const completedRides = rides.filter((ride) => COMPLETED_STATUSES.has(ride.status));
+    const reconciledCompletedRides = completedRides.filter(
+      (ride) => !isRideRevenuePendingFinalSnapshot(ride)
+    );
     const totalValue = roundMoney(
       completedRides.reduce((sum, ride) => sum + getRideRevenue(ride), 0)
     );
@@ -448,8 +466,12 @@ class ModernMetricsService {
       totalRides: rides.length,
       activeRides: await getActiveRidesCount(),
       completedToday: period === 'today' ? completedRides.length : 0,
-      averageValue: completedRides.length > 0 ? Number((totalValue / completedRides.length).toFixed(2)) : 0,
+      averageValue: reconciledCompletedRides.length > 0
+        ? Number((totalValue / reconciledCompletedRides.length).toFixed(2))
+        : 0,
       totalValue,
+      reconciledRides: reconciledCompletedRides.length,
+      pendingReconciliationRides: completedRides.length - reconciledCompletedRides.length,
       reserveFundLosses: await getReserveFundLosses(),
       growthRate: 0
     };

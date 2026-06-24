@@ -527,6 +527,27 @@ class ValidationService {
               max: this.limits.fare.max * 100,
               label: 'Valor do pagamento em centavos'
             },
+            grossAmountInCents: {
+              type: 'number',
+              required: false,
+              min: 0,
+              max: this.limits.fare.max * 100,
+              label: 'Valor bruto do pagamento em centavos'
+            },
+            quoteSessionId: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 200,
+              label: 'Sessão da cotação'
+            },
+            quoteLockId: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 200,
+              label: 'Lock da cotação'
+            },
             paymentStatus: {
               type: 'string',
               required: false,

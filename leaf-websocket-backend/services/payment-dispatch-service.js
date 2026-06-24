@@ -377,6 +377,22 @@ async function triggerDispatchAttempt({
     return { success: false, skipped: true, reason: 'BOOKING_NOT_FOUND' };
   }
 
+  const paymentStatus = String(bookingData.paymentStatus || '').trim().toLowerCase();
+  const paymentLedgerStatus = String(bookingData.paymentLedgerStatus || bookingData.ledgerStatus || '').trim().toLowerCase();
+  if (
+    paymentStatus === 'ledger_pending' ||
+    paymentLedgerStatus === 'pending_retry' ||
+    paymentLedgerStatus === 'failed'
+  ) {
+    return {
+      success: false,
+      skipped: true,
+      reason: 'PAYMENT_LEDGER_PENDING',
+      paymentStatus: paymentStatus || null,
+      paymentLedgerStatus: paymentLedgerStatus || null
+    };
+  }
+
   const customerActiveCheck = await ensureCustomerActiveBooking(redis, bookingId, bookingData);
   if (!customerActiveCheck.ok) {
     return {

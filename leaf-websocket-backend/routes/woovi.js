@@ -2345,16 +2345,88 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
       metadata
     });
 
-    if (!storeResult.success) {
-      logError(new Error(storeResult.error), 'Falha ao armazenar pagamento confirmado', {
-        service: 'woovi-routes',
-        rideId: resolvedBookingId,
-        chargeId
-      });
-    }
+	    if (!storeResult.success) {
+	      logError(new Error(storeResult.error), 'Falha ao armazenar pagamento confirmado', {
+	        service: 'woovi-routes',
+	        rideId: resolvedBookingId,
+	        chargeId
+	      });
+	    }
 
-    try {
-      await paymentService.savePaymentHolding(resolvedBookingId, {
+	    if (!storeResult.success || storeResult.ledgerPosted !== true) {
+	      const ledgerError =
+	        storeResult.ledgerError ||
+	        storeResult.error ||
+	        'PAYMENT_LEDGER_NOT_POSTED';
+
+	      logStructured('error', 'Pagamento confirmado sem ledger postado; dispatch bloqueado', {
+	        service: 'woovi-routes',
+	        rideId: resolvedBookingId,
+	        chargeId,
+	        ledgerStatus: storeResult.ledgerStatus || 'pending_retry',
+	        ledgerError
+	      });
+
+	      try {
+	        await paymentService.savePaymentHolding(resolvedBookingId, {
+	          status: 'ledger_pending',
+	          amount: amountInCents,
+	          paymentMethod: 'pix',
+	          paymentId: chargeId,
+	          chargeId,
+	          passengerId: passengerId || null,
+	          paidAt: metadata?.paidAt || new Date().toISOString(),
+	          confirmedAt: new Date().toISOString(),
+	          temporaryRideId: rideId || null,
+	          source: 'woovi_webhook_ledger_pending',
+	          ledgerStatus: storeResult.ledgerStatus || 'pending_retry',
+	          ledgerError,
+	          dispatchBlockedReason: 'PAYMENT_LEDGER_PENDING'
+	        });
+	      } catch (holdingError) {
+	        logStructured('warn', 'Falha ao registrar payment holding ledger_pending', {
+	          service: 'woovi-routes',
+	          rideId: resolvedBookingId,
+	          chargeId,
+	          error: holdingError.message
+	        });
+	      }
+
+	      try {
+	        await paymentDispatchService.markBookingPaymentConfirmed({
+	          bookingId: resolvedBookingId,
+	          chargeId,
+	          temporaryRideId: rideId,
+	          amountInCents,
+	          paymentStatus: 'ledger_pending',
+	          source: 'woovi_webhook_ledger_pending'
+	        });
+	      } catch (markError) {
+	        logStructured('warn', 'Falha ao marcar booking como ledger_pending no webhook', {
+	          service: 'woovi-routes',
+	          rideId: resolvedBookingId,
+	          chargeId,
+	          error: markError.message
+	        });
+	      }
+
+	      emitPassengerStatus('PAYMENT_LEDGER_PENDING', {
+	        ledgerStatus: storeResult.ledgerStatus || 'pending_retry'
+	      });
+
+	      return {
+	        success: false,
+	        rideId: resolvedBookingId,
+	        chargeId,
+	        status: 'LEDGER_PENDING',
+	        error: 'PAYMENT_LEDGER_PENDING',
+	        ledgerStatus: storeResult.ledgerStatus || 'pending_retry',
+	        ledgerError
+	      };
+	    }
+
+	    try {
+	      await paymentService.savePaymentHolding(resolvedBookingId, {
         status: 'in_holding',
         amount: amountInCents,
         paymentMethod: 'pix',

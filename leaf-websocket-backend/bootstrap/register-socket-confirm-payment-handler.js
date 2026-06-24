@@ -1,3 +1,7 @@
+const {
+    performCreateBookingAvailabilityPrecheck
+} = require('../services/create-booking-availability-precheck');
+
 function parseBookingPreferences(value) {
     if (!value) {
         return {};
@@ -11,6 +15,252 @@ function parseBookingPreferences(value) {
     } catch (_error) {
         return {};
     }
+}
+
+const PAID_PAYMENT_STATUSES = new Set([
+    'approved',
+    'completed',
+    'confirmed',
+    'credited',
+    'distributed',
+    'in_holding',
+    'paid',
+    'settled'
+]);
+
+const AUTHORITATIVE_PAYMENT_RECORD_SOURCES = new Set([
+    'provider_verification',
+    'sandbox_provider_verification',
+    'woovi_provider_verification',
+    'woovi_webhook',
+    'woovi_extension_webhook',
+    'socket_confirmpayment_provider_verified',
+    'createbooking_paid_immediate'
+]);
+
+const NON_AUTHORITATIVE_PAYMENT_STATUS_SOURCES = new Set([
+    'booking_cache',
+    'payment_holding_doc',
+    'payment_holding_query',
+    'payment_holding_retry',
+    'payment_status_cache',
+    'ride_payments_query'
+]);
+
+function boolEnv(name, fallback = false) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') {
+        return fallback;
+    }
+    return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
+}
+
+function isProductionRuntime() {
+    return [
+        process.env.NODE_ENV,
+        process.env.APP_ENV,
+        process.env.LEAF_ENV,
+        process.env.ENVIRONMENT
+    ].some((value) => ['production', 'prod'].includes(String(value || '').trim().toLowerCase()));
+}
+
+function normalizePaymentStatus(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function isPaidPaymentStatus(value) {
+    return PAID_PAYMENT_STATUSES.has(normalizePaymentStatus(value));
+}
+
+function normalizePaymentAmountCents(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return 0;
+    }
+    return numeric < 1000 ? Math.round(numeric * 100) : Math.round(numeric);
+}
+
+function collectPaymentReferences(...values) {
+    return Array.from(new Set(
+        values
+            .flat()
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+    ));
+}
+
+function isSocketMockPaymentAllowed(data = {}) {
+    const requestedMockPayment =
+        data?.mockPayment === true ||
+        data?.__mockPayment === true ||
+        boolEnv('MOCK_PAYMENT_FOR_TESTS', false);
+
+    if (!requestedMockPayment) {
+        return false;
+    }
+
+    if (boolEnv('APP_REVIEW', false)) {
+        return true;
+    }
+
+    if (boolEnv('MOCK_PAYMENT_FOR_TESTS', false)) {
+        return !isProductionRuntime();
+    }
+
+    if (boolEnv('ALLOW_SOCKET_MOCK_PAYMENT_CONFIRMATION', false)) {
+        return !isProductionRuntime();
+    }
+
+    return false;
+}
+
+function shouldRequireProviderPaymentConfirmation() {
+    return isProductionRuntime() || boolEnv('SOCKET_CONFIRM_PAYMENT_REQUIRE_PROVIDER', false);
+}
+
+function recordMatchesAnyReference(record = {}, references = []) {
+    if (!references.length) {
+        return false;
+    }
+    const candidates = collectPaymentReferences(
+        record.chargeId,
+        record.paymentId,
+        record.paymentIntentId,
+        record.extensionChargeId,
+        record.correlationID,
+        record.metadata?.chargeId,
+        record.metadata?.paymentId,
+        record.metadata?.paymentIntentId,
+        record.metadata?.correlationID
+    );
+    return candidates.some((candidate) => references.includes(candidate));
+}
+
+function amountMatchesExpected(record = {}, expectedAmountInCents = 0) {
+    if (!expectedAmountInCents) {
+        return true;
+    }
+    const recordAmount = normalizePaymentAmountCents(
+        record.amountInCents ??
+        record.amount ??
+        record.metadata?.amountInCents ??
+        record.metadata?.amount
+    );
+    return recordAmount > 0 && recordAmount === expectedAmountInCents;
+}
+
+function isAuthoritativePaymentRecord(record = {}, { references = [], expectedAmountInCents = 0 } = {}) {
+    const source = normalizePaymentStatus(record.source || record.metadata?.source);
+    return (
+        isPaidPaymentStatus(record.status || record.paymentStatus) &&
+        AUTHORITATIVE_PAYMENT_RECORD_SOURCES.has(source) &&
+        recordMatchesAnyReference(record, references) &&
+        amountMatchesExpected(record, expectedAmountInCents)
+    );
+}
+
+function isAuthoritativeProviderStatus(status = {}, expectedAmountInCents = 0) {
+    const source = normalizePaymentStatus(status.source);
+    if (!status?.success || !isPaidPaymentStatus(status.status)) {
+        return false;
+    }
+    if (NON_AUTHORITATIVE_PAYMENT_STATUS_SOURCES.has(source)) {
+        return false;
+    }
+    if (source && source !== 'woovi_provider' && !AUTHORITATIVE_PAYMENT_RECORD_SOURCES.has(source)) {
+        return false;
+    }
+    if (!amountMatchesExpected(status, expectedAmountInCents)) {
+        return false;
+    }
+    return source === 'woovi_provider' || Boolean(status.providerEnvironment || status.paymentProfileId);
+}
+
+async function getFirestoreDocData(firestore, collectionName, docId) {
+    if (!firestore || !collectionName || !docId) {
+        return null;
+    }
+    const doc = await firestore.collection(collectionName).doc(docId).get();
+    return doc?.exists ? doc.data() : null;
+}
+
+async function queryFirstDocData(firestore, collectionName, field, value) {
+    if (!firestore || !collectionName || !field || !value) {
+        return null;
+    }
+    const collection = firestore.collection(collectionName);
+    if (typeof collection?.where !== 'function') {
+        return null;
+    }
+    const query = collection.where(field, '==', value).limit(1);
+    const snapshot = await query.get();
+    if (!snapshot || snapshot.empty) {
+        return null;
+    }
+    return snapshot.docs?.[0]?.data?.() || null;
+}
+
+async function resolveAuthoritativePaymentConfirmation({
+    paymentService,
+    firestore,
+    bookingId,
+    references = [],
+    expectedAmountInCents = 0
+} = {}) {
+    const safeReferences = collectPaymentReferences(references);
+    if (!safeReferences.length) {
+        return {
+            success: false,
+            code: 'PAYMENT_PROVIDER_REFERENCE_REQUIRED',
+            message: 'Referência de pagamento ausente para confirmação provider-backed.'
+        };
+    }
+
+    const localRecords = [];
+    const localDocIds = collectPaymentReferences(bookingId, safeReferences);
+    for (const docId of localDocIds) {
+        localRecords.push(await getFirestoreDocData(firestore, 'payment_holdings', docId));
+        localRecords.push(await getFirestoreDocData(firestore, 'ride_payments', docId));
+    }
+
+    for (const reference of safeReferences) {
+        localRecords.push(await queryFirstDocData(firestore, 'payment_holdings', 'paymentId', reference));
+        localRecords.push(await queryFirstDocData(firestore, 'payment_holdings', 'chargeId', reference));
+        localRecords.push(await queryFirstDocData(firestore, 'ride_payments', 'chargeId', reference));
+    }
+
+    const authoritativeLocalRecord = localRecords.find((record) =>
+        record && isAuthoritativePaymentRecord(record, {
+            references: safeReferences,
+            expectedAmountInCents
+        })
+    );
+    if (authoritativeLocalRecord) {
+        return {
+            success: true,
+            source: authoritativeLocalRecord.source || authoritativeLocalRecord.metadata?.source || 'authoritative_local_record',
+            record: authoritativeLocalRecord
+        };
+    }
+
+    if (paymentService && typeof paymentService.getPaymentStatus === 'function') {
+        for (const reference of safeReferences) {
+            const providerStatus = await paymentService.getPaymentStatus(reference);
+            if (isAuthoritativeProviderStatus(providerStatus, expectedAmountInCents)) {
+                return {
+                    success: true,
+                    source: providerStatus.source || 'woovi_provider',
+                    record: providerStatus
+                };
+            }
+        }
+    }
+
+    return {
+        success: false,
+        code: 'PAYMENT_NOT_PROVIDER_CONFIRMED',
+        message: 'Pagamento ainda não possui confirmação autoritativa do provedor.'
+    };
 }
 
 function registerSocketConfirmPaymentHandler({
@@ -99,10 +349,7 @@ function registerSocketConfirmPaymentHandler({
 
                 // Usar dados sanitizados
                 const { bookingId, paymentMethod, paymentId, amount } = validation.sanitized;
-                const paymentMockEnabled =
-                    data?.mockPayment === true ||
-                    data?.__mockPayment === true ||
-                    String(process.env.MOCK_PAYMENT_FOR_TESTS || '').toLowerCase() === 'true';
+                const paymentMockEnabled = isSocketMockPaymentAllowed(data);
 
                 // Guarda de negócio: só confirma pagamento se houver motorista elegível no momento.
                 let bookingPickupLocation = null;
@@ -130,42 +377,78 @@ function registerSocketConfirmPaymentHandler({
                 const pickupLocationToValidate = bookingPickupLocation || payloadPickupLocation;
 
                 const skipAvailabilityCheck =
-                    String(process.env.CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK || 'true').toLowerCase() === 'true';
+                    boolEnv('CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK', false);
 
-                if (!paymentMockEnabled && !skipAvailabilityCheck && pickupLocationToValidate?.lat && pickupLocationToValidate?.lng) {
-                    try {
-                        const availabilityTimeoutMs = Number.parseInt(
-                            process.env.CONFIRM_PAYMENT_AVAILABILITY_TIMEOUT_MS || '800',
-                            10
-                        );
-                        const availability = await Promise.race([
-                            findAvailableDriversForPickup(pickupLocationToValidate, {
-                                carType: bookingCarType,
-                                destinationLocation: bookingDestinationLocation,
-                                preferences: bookingPreferences
-                            }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('availability_check_timeout')), availabilityTimeoutMs))
-                        ]);
+                if (skipAvailabilityCheck) {
+                    logStructured('warn', 'confirmPayment: pre-check de disponibilidade ignorado por flag explícita', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        code: 'AVAILABILITY_CHECK_SKIPPED'
+                    });
+                } else {
+                    const availabilityTimeoutMs = Number.parseInt(
+                        process.env.CONFIRM_PAYMENT_AVAILABILITY_TIMEOUT_MS || '800',
+                        10
+                    );
+                    const availability = await performCreateBookingAvailabilityPrecheck({
+                        hasConfirmedPayment: true,
+                        pickupLocation: pickupLocationToValidate,
+                        destinationLocation: bookingDestinationLocation,
+                        preferences: bookingPreferences,
+                        requestedCarType: bookingCarType,
+                        checkAvailability: findAvailableDriversForPickup,
+                        logStructured,
+                        logContext: {
+                            userId,
+                            bookingId,
+                            eventType: 'confirmPayment'
+                        },
+                        timeoutMs: availabilityTimeoutMs,
+                        operationLabel: 'confirmPayment'
+                    });
 
-                        if (!availability.success) {
-                            logStructured('warn', 'confirmPayment: falha no pre-check de disponibilidade, seguindo fluxo', {
-                                bookingId,
-                                eventType: 'confirmPayment',
-                                code: 'AVAILABILITY_CHECK_FAILED'
-                            });
-                        } else if ((availability.drivers || []).length === 0) {
-                            logStructured('warn', 'confirmPayment: sem motoristas no pre-check, mantendo corrida em busca', {
-                                bookingId,
-                                eventType: 'confirmPayment',
-                                code: 'NO_DRIVERS_AVAILABLE'
-                            });
-                        }
-                    } catch (availabilityError) {
-                        logStructured('warn', 'confirmPayment: erro no pre-check de disponibilidade, seguindo fluxo', {
+                    if (availability.code === 'NO_DRIVERS_AVAILABLE') {
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || null, {
+                            error: 'Sem motorista elegível antes de confirmar pagamento',
+                            code: 'NO_DRIVERS_AVAILABLE',
+                            radiusKm: availability.radiusKm || null
+                        }, false, 'Sem motorista elegível para confirmar pagamento', metadata);
+
+                        socket.emit('paymentError', {
+                            error: 'Não há motorista disponível',
+                            message: 'Não há motorista disponível para essa corrida agora. O pagamento não será confirmado.',
+                            code: 'NO_DRIVERS_AVAILABLE',
+                            retryAfterSec: 15
+                        });
+                        logStructured('warn', 'confirmPayment bloqueado por ausência de motorista elegível', {
                             bookingId,
                             eventType: 'confirmPayment',
-                            error: availabilityError.message
+                            code: 'NO_DRIVERS_AVAILABLE'
                         });
+                        return;
+                    }
+
+                    if (!availability.success || availability.skipped) {
+                        const availabilityCode = availability.code || 'AVAILABILITY_CHECK_FAILED';
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || null, {
+                            error: 'Falha ao validar motorista elegível antes de confirmar pagamento',
+                            code: availabilityCode,
+                            reason: availability.reason || null
+                        }, false, 'Falha no guard de disponibilidade antes do pagamento', metadata);
+
+                        socket.emit('paymentError', {
+                            error: 'Não foi possível validar disponibilidade agora',
+                            message: 'Não foi possível validar motorista disponível agora. Tente novamente em instantes.',
+                            code: availabilityCode,
+                            retryAfterSec: 5
+                        });
+                        logStructured('warn', 'confirmPayment bloqueado por falha no guard de disponibilidade', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            code: availabilityCode,
+                            error: availability.error || null
+                        });
+                        return;
                     }
                 }
 
@@ -217,14 +500,67 @@ function registerSocketConfirmPaymentHandler({
                 }
                 outerIdempotencyOwner = true;
 
+                const PaymentService = require('../services/payment-service');
+                const paymentService = new PaymentService();
+                const firebaseConfig = require('../firebase-config');
+                const firestore = firebaseConfig.getFirestore();
+                const amountInCents = normalizePaymentAmountCents(amount);
+                const chargeReference = String(data?.chargeId || data?.paymentData?.chargeId || '').trim();
+                const paymentIntentReference = String(data?.paymentIntentId || data?.paymentData?.paymentIntentId || '').trim();
+                const paymentReferenceRideId = String(data?.rideId || data?.temporaryRideId || data?.paymentData?.rideId || '').trim();
+                const paymentConfirmationReferences = collectPaymentReferences(
+                    chargeReference,
+                    paymentId,
+                    paymentIntentReference,
+                    bookingDataForPayment?.paymentChargeId,
+                    bookingDataForPayment?.paymentId,
+                    bookingDataForPayment?.paymentReferenceRideId,
+                    paymentReferenceRideId
+                );
+
+                if (!paymentMockEnabled && shouldRequireProviderPaymentConfirmation()) {
+                    const providerConfirmation = await resolveAuthoritativePaymentConfirmation({
+                        paymentService,
+                        firestore,
+                        bookingId,
+                        references: paymentConfirmationReferences,
+                        expectedAmountInCents: amountInCents
+                    });
+
+                    if (!providerConfirmation.success) {
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || chargeReference || null, {
+                            error: providerConfirmation.message,
+                            code: providerConfirmation.code,
+                            references: paymentConfirmationReferences
+                        }, false, 'Pagamento sem confirmação autoritativa do provedor', metadata);
+
+                        socket.emit('paymentError', {
+                            error: 'Pagamento não confirmado',
+                            message: 'Ainda não recebemos a confirmação autoritativa do provedor para este PIX.',
+                            code: providerConfirmation.code || 'PAYMENT_NOT_PROVIDER_CONFIRMED',
+                            retryAfterSec: 2
+                        });
+
+                        if (outerIdempotencyOwner && outerIdempotencyKey) {
+                            outerIdempotencyOwner = false;
+                            await idempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                        }
+
+                        logStructured('warn', 'confirmPayment bloqueado sem confirmação provider-backed', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            code: providerConfirmation.code,
+                            references: paymentConfirmationReferences
+                        });
+                        return;
+                    }
+                }
+
                 // ✅ NOVO: Salvar payment holding como "in_holding" para permitir startTrip
                 try {
-                    const PaymentService = require('../services/payment-service');
-                    const paymentService = new PaymentService();
                     const paymentHoldingTimeoutMs = Number.parseInt(process.env.PAYMENT_HOLDING_TIMEOUT_MS || '2500', 10);
 
                     // Converter amount para centavos se necessário
-                    const amountInCents = typeof amount === 'number' && amount < 1000 ? Math.round(amount * 100) : Math.round(amount);
                     const fareLockValidationEnabled =
                         data?.enforceFareLock === true ||
                         String(
@@ -237,11 +573,11 @@ function registerSocketConfirmPaymentHandler({
                         Math.round(Number(process.env.PAYMENT_FARE_LOCK_TOLERANCE_REAIS || '0.01') * 100)
                     );
 
-                    if (
-                        fareLockValidationEnabled &&
-                        Number.isFinite(estimatedFareInCents) &&
-                        estimatedFareInCents > 0 &&
-                        Math.abs(amountInCents - estimatedFareInCents) > toleranceInCents
+	                    if (
+	                        fareLockValidationEnabled &&
+	                        Number.isFinite(estimatedFareInCents) &&
+	                        estimatedFareInCents > 0 &&
+	                        Math.abs(amountInCents - estimatedFareInCents) > toleranceInCents
                     ) {
                         await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || null, {
                             error: 'Valor do pagamento diverge da tarifa travada',
@@ -264,17 +600,99 @@ function registerSocketConfirmPaymentHandler({
                             estimatedFareInCents,
                             toleranceInCents
                         });
-                        return;
-                    }
+                        if (outerIdempotencyOwner && outerIdempotencyKey) {
+                            outerIdempotencyOwner = false;
+                            await idempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                        }
+	                        return;
+	                    }
 
-                    await Promise.race([
-                        paymentService.savePaymentHolding(bookingId, {
+	                    const ledgerValidationEnabled =
+	                        !paymentMockEnabled &&
+	                        (
+	                            data?.enforcePaymentLedger === true ||
+	                            String(
+	                                process.env.REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH ||
+	                                (process.env.NODE_ENV === 'test' ? 'false' : 'true')
+	                            ).toLowerCase() === 'true'
+	                        );
+
+	                    if (ledgerValidationEnabled) {
+	                        const paymentLedgerResult = await paymentService.storeConfirmedPayment({
+	                            rideId: bookingId,
+	                            chargeId: paymentId || chargeReference || '',
+	                            amount: amountInCents,
+	                            passengerId: bookingDataForPayment?.customerId || userId,
+	                            metadata: {
+	                                event: 'socket_confirmPayment',
+	                                correlationID: data?.correlationId || data?.correlationID || null,
+	                                source: 'socket_confirmPayment_provider_verified'
+	                            }
+	                        });
+
+	                        if (!paymentLedgerResult.success || paymentLedgerResult.ledgerPosted !== true) {
+	                            const ledgerError =
+	                                paymentLedgerResult.ledgerError ||
+	                                paymentLedgerResult.error ||
+	                                'PAYMENT_LEDGER_NOT_POSTED';
+
+	                            await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || chargeReference || null, {
+	                                error: 'Pagamento confirmado sem ledger postado',
+	                                ledgerStatus: paymentLedgerResult.ledgerStatus || 'pending_retry',
+	                                ledgerError
+	                            }, false, 'Pagamento sem ledger financeiro canônico', metadata);
+
+	                            try {
+	                                const paymentDispatchService = require('../services/payment-dispatch-service');
+	                                await paymentDispatchService.markBookingPaymentConfirmed({
+	                                    bookingId,
+	                                    chargeId: paymentId || chargeReference || '',
+	                                    temporaryRideId: data?.rideId || data?.temporaryRideId || '',
+	                                    amountInCents,
+	                                    paymentStatus: 'ledger_pending',
+	                                    source: 'socket_confirmPayment_ledger_pending'
+	                                });
+	                            } catch (markLedgerPendingError) {
+	                                logStructured('warn', 'confirmPayment: falha ao marcar ledger_pending', {
+	                                    bookingId,
+	                                    eventType: 'confirmPayment',
+	                                    error: markLedgerPendingError.message
+	                                });
+	                            }
+
+	                            socket.emit('paymentError', {
+	                                error: 'Ledger financeiro pendente',
+	                                message: 'Pagamento recebido, mas a trilha financeira ainda não foi registrada. A corrida não será despachada até a conciliação.',
+	                                code: 'PAYMENT_LEDGER_PENDING',
+	                                ledgerStatus: paymentLedgerResult.ledgerStatus || 'pending_retry',
+	                                retryAfterSec: 3
+	                            });
+
+	                            logStructured('error', 'confirmPayment bloqueado porque payment_received ledger não foi postado', {
+	                                bookingId,
+	                                eventType: 'confirmPayment',
+	                                ledgerStatus: paymentLedgerResult.ledgerStatus || 'pending_retry',
+	                                ledgerError
+	                            });
+
+	                            if (outerIdempotencyOwner && outerIdempotencyKey) {
+	                                outerIdempotencyOwner = false;
+	                                await idempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+	                            }
+	                            return;
+	                        }
+	                    }
+
+	                    await Promise.race([
+	                        paymentService.savePaymentHolding(bookingId, {
                             status: 'in_holding',
                             amount: amountInCents,
                             paymentMethod: paymentMethod,
                             paymentId: paymentId || `payment_${Date.now()}`,
+                            chargeId: chargeReference || paymentId || null,
                             paidAt: new Date().toISOString(),
-                            confirmedAt: new Date().toISOString()
+                            confirmedAt: new Date().toISOString(),
+                            source: paymentMockEnabled ? 'socket_mock_payment' : 'socket_confirmPayment_provider_verified'
                         }),
                         new Promise((_, reject) => setTimeout(() => reject(new Error('payment_holding_timeout')), paymentHoldingTimeoutMs))
                     ]);
@@ -303,15 +721,14 @@ function registerSocketConfirmPaymentHandler({
                 };
 
                 const paymentDispatchService = require('../services/payment-dispatch-service');
-                const amountInCents = typeof amount === 'number' && amount < 1000 ? Math.round(amount * 100) : Math.round(amount || 0);
                 try {
                     await paymentDispatchService.markBookingPaymentConfirmed({
                         bookingId,
-                        chargeId: paymentId || data?.chargeId || '',
+                        chargeId: paymentId || chargeReference || '',
                         temporaryRideId: data?.rideId || data?.temporaryRideId || '',
                         amountInCents,
                         paymentStatus: 'in_holding',
-                        source: 'socket_confirmPayment'
+                        source: paymentMockEnabled ? 'socket_mock_payment' : 'socket_confirmPayment_provider_verified'
                     });
                 } catch (markPaymentError) {
                     logStructured('warn', 'confirmPayment: falha ao marcar booking como pago', {
@@ -327,10 +744,10 @@ function registerSocketConfirmPaymentHandler({
                     await applyConfirmedRideExtension({
                         redis,
                         bookingId,
-                        chargeId: paymentId || data?.chargeId || '',
+                        chargeId: paymentId || chargeReference || '',
                         amountInCents,
                         io,
-                        source: 'socket_confirmPayment'
+                        source: paymentMockEnabled ? 'socket_mock_payment' : 'socket_confirmPayment_provider_verified'
                     });
                 } catch (extensionApplyError) {
                     logStructured('warn', 'confirmPayment: falha ao aplicar extensão confirmada', {
@@ -371,7 +788,7 @@ function registerSocketConfirmPaymentHandler({
                     bookingId,
                     io,
                     pickupLocation: pickupLocationToValidate,
-                    source: 'socket_confirmPayment',
+                    source: paymentMockEnabled ? 'socket_mock_payment' : 'socket_confirmPayment_provider_verified',
                     force: true
                 }).then((dispatchResult) => {
                     logStructured('info', 'confirmPayment: dispatch pós-pagamento processado', {
@@ -499,3 +916,15 @@ function registerSocketConfirmPaymentHandler({
 }
 
 module.exports = registerSocketConfirmPaymentHandler;
+module.exports.__private = {
+    AUTHORITATIVE_PAYMENT_RECORD_SOURCES,
+    NON_AUTHORITATIVE_PAYMENT_STATUS_SOURCES,
+    PAID_PAYMENT_STATUSES,
+    collectPaymentReferences,
+    isAuthoritativePaymentRecord,
+    isAuthoritativeProviderStatus,
+    isSocketMockPaymentAllowed,
+    normalizePaymentAmountCents,
+    resolveAuthoritativePaymentConfirmation,
+    shouldRequireProviderPaymentConfirmation
+};

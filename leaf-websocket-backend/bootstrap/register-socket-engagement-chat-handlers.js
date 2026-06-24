@@ -1,3 +1,24 @@
+const {
+    assertRideParticipant,
+    normalizeSocketTextMessage,
+    normalizeUserType: normalizeSocketUserType
+} = require('../services/socket-scope-guard');
+const crypto = require('crypto');
+
+function buildScopedMessageId({
+    clientMessageId = '',
+    conversationId = '',
+    senderId = ''
+} = {}) {
+    const requestedMessageId = String(clientMessageId || '').trim();
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestedMessageId)) {
+        return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    }
+
+    const scope = [conversationId, senderId, requestedMessageId].join('\u0000');
+    return `msg_${crypto.createHash('sha256').update(scope).digest('hex').slice(0, 40)}`;
+}
+
 function registerSocketEngagementChatHandlers({
     socket,
     io,
@@ -10,10 +31,7 @@ function registerSocketEngagementChatHandlers({
     const LOST_ITEM_CHAT_TTL_SECONDS = Number.parseInt(process.env.LOST_ITEM_CHAT_TTL_SECONDS || '86400', 10);
 
     const normalizeUserType = (userType) => {
-        const normalized = String(userType || '').toLowerCase();
-        if (normalized === 'customer') return 'passenger';
-        if (normalized === 'rider') return 'passenger';
-        return normalized;
+        return normalizeSocketUserType(userType);
     };
 
     const normalizeStatus = (status) => String(status || '').trim().toUpperCase();
@@ -108,9 +126,30 @@ function registerSocketEngagementChatHandlers({
     };
 
     const enforceChatPolicy = async ({ conversationId, senderId, senderType, data = {} }) => {
-        const state = await getConversationState(conversationId);
+        const participant = await assertRideParticipant({
+            socket,
+            io,
+            redisPool,
+            bookingId: conversationId,
+            allowedRoles: ['passenger', 'driver'],
+            allowSupport: true
+        });
+        if (!participant.allowed) {
+            return {
+                allowed: false,
+                code: participant.code,
+                error: participant.error
+            };
+        }
+
+        const state = participant.scope?.found
+            ? participant.scope
+            : await getConversationState(conversationId);
         const status = normalizeStatus(state.status);
         const hasAssignedDriver = Boolean(state.driverId);
+        const canonicalSenderType = participant.participantRole === 'support'
+            ? normalizeUserType(senderType || socket.userType)
+            : participant.participantRole;
 
         if (CANCELED_RIDE_STATUSES.has(status)) {
             return {
@@ -122,7 +161,12 @@ function registerSocketEngagementChatHandlers({
 
         if (COMPLETED_RIDE_STATUSES.has(status)) {
             try {
-                const isAllowed = await ensureLostItemWindow({ conversationId, senderId, senderType, data });
+                const isAllowed = await ensureLostItemWindow({
+                    conversationId,
+                    senderId,
+                    senderType: canonicalSenderType,
+                    data
+                });
                 if (!isAllowed) {
                     return {
                         allowed: false,
@@ -149,7 +193,9 @@ function registerSocketEngagementChatHandlers({
 
         return {
             allowed: true,
-            state
+            state,
+            participantRole: participant.participantRole,
+            senderType: canonicalSenderType
         };
     };
 
@@ -329,8 +375,8 @@ function registerSocketEngagementChatHandlers({
                 data.rideId ||
                 `chat_${Date.now()}`;
             const conversationId = data.bookingId || data.tripId || data.rideId || data.chatId || chatId;
-            const requesterId = socket.userId || socket.id;
-            const requesterType = normalizeUserType(data.userType || socket.userType);
+            const requesterId = socket.userId;
+            const requesterType = normalizeUserType(socket.userType);
 
             if (conversationId) {
                 const policy = await enforceChatPolicy({
@@ -387,7 +433,15 @@ function registerSocketEngagementChatHandlers({
     socket.on('sendMessage', async (data = {}) => {
         try {
             // ✅ NOVO: Rate Limiting
-            const senderId = data.senderId || socket.userId || socket.id;
+            const senderId = socket.userId;
+            if (!senderId) {
+                socket.emit('messageError', {
+                    error: 'Autenticação obrigatória',
+                    code: 'AUTH_REQUIRED'
+                });
+                return;
+            }
+
             const rateLimitCheck = await rateLimiterService.checkRateLimit(senderId, 'sendMessage');
 
             if (!rateLimitCheck.allowed) {
@@ -417,16 +471,31 @@ function registerSocketEngagementChatHandlers({
                 rideId: data.rideId
             });
 
-            const { bookingId, rideId, chatId, tripId, receiverId, senderType } = data;
-            const messageText = data.message || data.text;
-            const normalizedSenderType = normalizeUserType(senderType || socket.userType);
+            const { bookingId, rideId, chatId, tripId } = data;
+            const rawMessageText = data.message ?? data.text;
+            const normalizedSenderType = normalizeUserType(socket.userType);
 
-            if (!messageText || !senderId) {
-                socket.emit('messageError', { error: 'Mensagem e senderId são obrigatórios' });
+            const messageValidation = normalizeSocketTextMessage(rawMessageText, { maxLength: 2000 });
+            if (!messageValidation.valid) {
+                socket.emit('messageError', {
+                    error: messageValidation.error,
+                    code: messageValidation.code,
+                    bookingId: bookingId || rideId || tripId || chatId || null,
+                    chatId: bookingId || rideId || tripId || chatId || null
+                });
+                return;
+            }
+
+            if (!senderId) {
+                socket.emit('messageError', {
+                    error: 'Autenticação obrigatória',
+                    code: 'AUTH_REQUIRED'
+                });
                 return;
             }
 
             const conversationId = bookingId || rideId || tripId || chatId;
+            const messageText = messageValidation.text;
 
             if (!conversationId) {
                 socket.emit('messageError', { error: 'bookingId/rideId/tripId/chatId é obrigatório' });
@@ -448,29 +517,46 @@ function registerSocketEngagementChatHandlers({
                 });
                 return;
             }
+            const canonicalSenderType = policy.senderType || normalizedSenderType;
+            const messageId = buildScopedMessageId({
+                clientMessageId: data.clientMessageId || data.messageId,
+                conversationId,
+                senderId
+            });
 
             // ✅ NOVO: Salvar mensagem no Firestore com TTL de 90 dias
+            let persistedMessageId = messageId;
             try {
                 const chatPersistenceService = require('../services/chat-persistence-service');
                 const persistenceTimeoutMs = Math.max(
                     500,
                     Number.parseInt(process.env.CHAT_PERSISTENCE_TIMEOUT_MS || '1500', 10) || 1500
                 );
+                let persistenceTimeout = null;
                 const saveResult = await Promise.race([
                     chatPersistenceService.saveMessage({
+                        messageId,
                         bookingId: bookingId || conversationId,
                         rideId: rideId || conversationId,
                         senderId: senderId,
-                        receiverId: receiverId || null,
+                        receiverId: policy.participantRole === 'driver'
+                            ? policy.state.customerId || null
+                            : policy.state.driverId || null,
                         message: messageText,
-                        senderType: normalizedSenderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
+                        senderType: canonicalSenderType,
                         timestamp: new Date().toISOString()
                     }),
-                    new Promise((resolve) => setTimeout(() => resolve({
-                        success: false,
-                        error: `timeout_after_${persistenceTimeoutMs}ms`
-                    }), persistenceTimeoutMs))
-                ]);
+                    new Promise((resolve) => {
+                        persistenceTimeout = setTimeout(() => resolve({
+                            success: false,
+                            error: `timeout_after_${persistenceTimeoutMs}ms`
+                        }), persistenceTimeoutMs);
+                    })
+                ]).finally(() => {
+                    if (persistenceTimeout) {
+                        clearTimeout(persistenceTimeout);
+                    }
+                });
 
                 if (!saveResult.success) {
                     logStructured('error', 'Erro ao salvar mensagem no Firestore', {
@@ -480,8 +566,16 @@ function registerSocketEngagementChatHandlers({
                         conversationId: conversationId,
                         error: saveResult.error
                     });
-                    // Não bloquear envio se persistência falhar, mas logar erro
+                    socket.emit('messageError', {
+                        error: 'Mensagem não persistida. Tente novamente.',
+                        code: 'CHAT_PERSISTENCE_FAILED',
+                        bookingId: conversationId,
+                        chatId: conversationId
+                    });
+                    return;
                 }
+
+                persistedMessageId = saveResult.messageId || messageId;
             } catch (persistError) {
                 logStructured('error', 'Erro ao persistir mensagem', {
                     service: 'websocket',
@@ -490,36 +584,29 @@ function registerSocketEngagementChatHandlers({
                     conversationId: conversationId,
                     error: persistError.message
                 });
-                // Não bloquear envio se persistência falhar
+                socket.emit('messageError', {
+                    error: 'Mensagem não persistida. Tente novamente.',
+                    code: 'CHAT_PERSISTENCE_FAILED',
+                    bookingId: conversationId,
+                    chatId: conversationId
+                });
+                return;
             }
-
-            // Gerar ID da mensagem
-            const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
             // Buscar dados do booking para notificar o outro participante
-            const bookingData = io.activeBookings?.get(conversationId);
-            const customerId = bookingData?.customerId;
-            const driverId = bookingData?.driverId;
-
-            // Determinar receiverId se não fornecido
-            let finalReceiverId = receiverId;
-            if (!finalReceiverId) {
-                if (senderId === customerId) {
-                    finalReceiverId = driverId;
-                } else if (senderId === driverId) {
-                    finalReceiverId = customerId;
-                }
-            }
+            const finalReceiverId = policy.participantRole === 'driver'
+                ? policy.state.customerId
+                : policy.state.driverId;
 
             // Notificar o remetente
             socket.emit('messageSent', {
                 success: true,
-                messageId: messageId,
+                messageId: persistedMessageId,
                 chatId: conversationId,
                 bookingId: conversationId,
                 text: messageText,
                 senderId,
-                senderType: normalizedSenderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
+                senderType: canonicalSenderType,
                 message: 'Mensagem enviada com sucesso',
                 timestamp: new Date().toISOString()
             });
@@ -530,13 +617,13 @@ function registerSocketEngagementChatHandlers({
                 if (receiverSocket) {
                     receiverSocket.emit('newMessage', {
                         success: true,
-                        messageId: messageId,
+                        messageId: persistedMessageId,
                         chatId: conversationId,
                         bookingId: conversationId,
                         senderId: senderId,
                         text: messageText,
                         message: messageText,
-                        senderType: normalizedSenderType || (socket.userType === 'driver' ? 'driver' : 'passenger'),
+                        senderType: canonicalSenderType,
                         timestamp: new Date().toISOString()
                     });
                     logStructured('info', 'Mensagem enviada para receptor', {
@@ -553,10 +640,181 @@ function registerSocketEngagementChatHandlers({
             logStructured('error', 'Erro ao enviar mensagem', {
                 service: 'websocket',
                 operation: 'sendMessage',
-                senderId: data.senderId || socket.userId || socket.id,
+                senderId: socket.userId || socket.id,
                 error: error.message
             });
             socket.emit('messageError', { error: 'Erro interno do servidor' });
+        }
+    });
+
+    socket.on('load_messages', async (data = {}) => {
+        const conversationId = data.chatId || data.bookingId || data.tripId || data.rideId;
+        try {
+            if (!conversationId) {
+                socket.emit('messages_loaded', {
+                    success: false,
+                    error: 'chatId/bookingId ausente',
+                    code: 'CHAT_ID_REQUIRED',
+                    messages: []
+                });
+                return;
+            }
+
+            const policy = await enforceChatPolicy({
+                conversationId,
+                senderId: socket.userId,
+                senderType: normalizeUserType(socket.userType),
+                data
+            });
+            if (!policy.allowed) {
+                socket.emit('messages_loaded', {
+                    success: false,
+                    error: policy.error,
+                    code: policy.code,
+                    chatId: conversationId,
+                    bookingId: conversationId,
+                    messages: []
+                });
+                return;
+            }
+
+            const page = Math.max(0, Number.parseInt(data.page, 10) || 0);
+            const limit = Math.max(1, Math.min(50, Number.parseInt(data.limit, 10) || 20));
+            const chatPersistenceService = require('../services/chat-persistence-service');
+            const rawResult = await chatPersistenceService.getMessages(
+                conversationId,
+                (page + 1) * limit
+            );
+            if (!rawResult?.success) {
+                socket.emit('messages_loaded', {
+                    success: false,
+                    error: rawResult?.error || 'Não foi possível carregar mensagens',
+                    code: 'CHAT_HISTORY_UNAVAILABLE',
+                    chatId: conversationId,
+                    bookingId: conversationId,
+                    messages: []
+                });
+                return;
+            }
+
+            const messages = Array.isArray(rawResult.messages) ? rawResult.messages : [];
+            const start = page * limit;
+            socket.emit('messages_loaded', {
+                success: true,
+                chatId: conversationId,
+                bookingId: conversationId,
+                messages: messages.slice(start, start + limit),
+                page,
+                limit,
+                total: messages.length
+            });
+        } catch (error) {
+            socket.emit('messages_loaded', {
+                success: false,
+                error: error?.message || 'Não foi possível carregar mensagens',
+                code: 'CHAT_HISTORY_UNAVAILABLE',
+                chatId: conversationId || null,
+                bookingId: conversationId || null,
+                messages: []
+            });
+        }
+    });
+
+    socket.on('mark_messages_read', async (data = {}) => {
+        const conversationId = data.chatId || data.bookingId || data.tripId || data.rideId;
+        try {
+            if (!conversationId) {
+                socket.emit('messages_marked_read', {
+                    success: false,
+                    error: 'chatId/bookingId ausente',
+                    code: 'CHAT_ID_REQUIRED',
+                    messageIds: []
+                });
+                return;
+            }
+
+            const policy = await enforceChatPolicy({
+                conversationId,
+                senderId: socket.userId,
+                senderType: normalizeUserType(socket.userType),
+                data
+            });
+            if (!policy.allowed) {
+                socket.emit('messages_marked_read', {
+                    success: false,
+                    error: policy.error,
+                    code: policy.code,
+                    chatId: conversationId,
+                    bookingId: conversationId,
+                    messageIds: []
+                });
+                return;
+            }
+
+            const requestedIds = new Set(
+                (Array.isArray(data.messageIds) ? data.messageIds : [])
+                    .map((messageId) => String(messageId || '').trim())
+                    .filter(Boolean)
+            );
+            if (requestedIds.size === 0) {
+                socket.emit('messages_marked_read', {
+                    success: true,
+                    chatId: conversationId,
+                    bookingId: conversationId,
+                    messageIds: [],
+                    markedCount: 0
+                });
+                return;
+            }
+
+            const chatPersistenceService = require('../services/chat-persistence-service');
+            const history = await chatPersistenceService.getMessages(conversationId, 50);
+            if (!history?.success) {
+                socket.emit('messages_marked_read', {
+                    success: false,
+                    error: history?.error || 'Não foi possível validar mensagens',
+                    code: 'CHAT_HISTORY_UNAVAILABLE',
+                    chatId: conversationId,
+                    bookingId: conversationId,
+                    messageIds: []
+                });
+                return;
+            }
+
+            const readerId = String(socket.userId || '').trim();
+            const messagesToMark = (history.messages || []).filter((message) => {
+                const messageId = String(message?.messageId || message?.id || '').trim();
+                const receiverId = String(message?.receiverId || '').trim();
+                const senderId = String(message?.senderId || '').trim();
+                return requestedIds.has(messageId) &&
+                    senderId !== readerId &&
+                    (!receiverId || receiverId === readerId);
+            });
+            const results = await Promise.all(
+                messagesToMark.map((message) =>
+                    chatPersistenceService.markMessageAsRead(message.messageId || message.id)
+                )
+            );
+            const markedIds = messagesToMark
+                .filter((_message, index) => results[index]?.success)
+                .map((message) => message.messageId || message.id);
+
+            socket.emit('messages_marked_read', {
+                success: true,
+                chatId: conversationId,
+                bookingId: conversationId,
+                messageIds: markedIds,
+                markedCount: markedIds.length
+            });
+        } catch (error) {
+            socket.emit('messages_marked_read', {
+                success: false,
+                error: error?.message || 'Não foi possível marcar mensagens como lidas',
+                code: 'CHAT_READ_UPDATE_FAILED',
+                chatId: conversationId || null,
+                bookingId: conversationId || null,
+                messageIds: []
+            });
         }
     });
 }

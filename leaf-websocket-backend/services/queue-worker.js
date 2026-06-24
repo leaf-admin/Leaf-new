@@ -61,7 +61,7 @@ class QueueWorker {
         if (!bookingData) return false;
 
         const status = String(bookingData.status || '').toUpperCase();
-        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+        if (RideStateManager.isTerminalStateValue(status)) {
             return false;
         }
 

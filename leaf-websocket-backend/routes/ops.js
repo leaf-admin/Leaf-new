@@ -14,7 +14,7 @@ const { logError } = require('../utils/logger');
 
 const router = express.Router();
 const OPS_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development', 'viewer'];
-const MUTATION_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
+const MUTATION_ROLES = ['admin', 'manager', 'super-admin', 'development'];
 
 router.use(authenticateSupport, requireSupportRoles(OPS_ROLES));
 

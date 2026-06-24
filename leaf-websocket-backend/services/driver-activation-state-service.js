@@ -1,5 +1,6 @@
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
+const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
 
 const DRIVER_ACTIVATION_STATES = Object.freeze({
   PRE_REGISTERED: 'PRE_REGISTERED',
@@ -100,6 +101,36 @@ function hasBackgroundConsent(activationNode = {}, userData = {}) {
     boolish(userData?.backgroundCheckConsent);
 }
 
+function firstText(...values) {
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function resolveCrlvDocumentIdentity(activationNode = {}, userData = {}, crlvStatus = 'pending') {
+  const documentData =
+    activationNode?.documents?.crlv?.data ||
+    activationNode?.documents?.crlv?.extractedData ||
+    userData?.documents?.crlv?.extractedData ||
+    userData?.documents?.crlv?.analysisData ||
+    {};
+  const normalized = normalizeVehicleOcrPayload(documentData);
+  const hasIdentity = Boolean(normalized.plate || normalized.model || normalized.color);
+
+  return {
+    plate: normalized.plate || '',
+    model: normalized.model || '',
+    color: normalized.color || '',
+    year: normalized.year || '',
+    source: hasIdentity
+      ? (isApprovedStatus(crlvStatus) ? 'crlv_pdf_ocr' : 'crlv_document_analysis')
+      : 'unavailable',
+    verified: hasIdentity && isApprovedStatus(crlvStatus)
+  };
+}
+
 function resolveLivenessEvidence(userData = {}) {
   const candidates = [
     userData?.driverActivation?.firstLivenessPassedAt,
@@ -116,8 +147,6 @@ function resolveLivenessEvidence(userData = {}) {
     boolish(userData?.driverActivation?.firstLivenessPassed) ||
     boolish(userData?.kyc?.passed) ||
     boolish(userData?.liveness?.passed) ||
-    boolish(userData?.kycStatus) ||
-    boolish(userData?.kyc_status) ||
     candidates.length > 0;
 
   return {
@@ -144,7 +173,7 @@ async function readUserVehicles(db, driverId) {
   }
 }
 
-function resolveVehicleStatusFromEntries(userData = {}, entries = []) {
+function resolveVehicleStatusFromEntries(userData = {}, entries = [], crlvIdentity = {}) {
   const approvedEntries = entries.filter((vehicle) =>
     isApprovedStatus(vehicle?.status) ||
     boolish(vehicle?.approved) ||
@@ -163,13 +192,77 @@ function resolveVehicleStatusFromEntries(userData = {}, entries = []) {
   const approved = Boolean(activeApprovedEntry || approvedEntries.length > 0 || profileHasApprovedVehicle);
   const active = Boolean(activeApprovedEntry || (profileHasApprovedVehicle && userData?.activeVehicleId));
   const inReview = Boolean(inReviewEntry || userData?.vehicleStatus === 'pending' || userData?.vehicleStatus === 'in_review');
+  const selectedEntry = activeApprovedEntry || approvedEntries[0] || inReviewEntry || {};
+  const plate = firstText(
+    selectedEntry?.plate,
+    selectedEntry?.vehiclePlate,
+    selectedEntry?.vehicleNumber,
+    userData?.vehiclePlate,
+    userData?.vehicleNumber,
+    userData?.carPlate,
+    crlvIdentity?.plate
+  );
+  const model = firstText(
+    selectedEntry?.model,
+    selectedEntry?.vehicleModel,
+    selectedEntry?.carModel,
+    userData?.vehicleModel,
+    userData?.carModel,
+    crlvIdentity?.model
+  );
+  const color = firstText(
+    selectedEntry?.color,
+    selectedEntry?.vehicleColor,
+    selectedEntry?.carColor,
+    userData?.vehicleColor,
+    userData?.carColor,
+    crlvIdentity?.color
+  );
+  const year = firstText(
+    selectedEntry?.year,
+    selectedEntry?.anoModelo,
+    userData?.vehicleYear,
+    userData?.carYear,
+    crlvIdentity?.year
+  );
+  const selectedRecordHasIdentity = Boolean(
+    firstText(
+      selectedEntry?.plate,
+      selectedEntry?.vehiclePlate,
+      selectedEntry?.vehicleNumber,
+      selectedEntry?.model,
+      selectedEntry?.vehicleModel,
+      selectedEntry?.carModel,
+      selectedEntry?.color,
+      selectedEntry?.vehicleColor,
+      selectedEntry?.carColor,
+      userData?.vehiclePlate,
+      userData?.vehicleNumber,
+      userData?.carPlate,
+      userData?.vehicleModel,
+      userData?.carModel,
+      userData?.vehicleColor,
+      userData?.carColor
+    )
+  );
+  const usesDocumentIdentity = Boolean(
+    crlvIdentity?.verified && !selectedRecordHasIdentity
+  );
 
   return {
     approved,
     active,
     inReview,
     vehicleId: activeApprovedEntry?.vehicleId || activeApprovedEntry?.id || approvedEntries[0]?.vehicleId || approvedEntries[0]?.id || userData?.activeVehicleId || null,
-    count: entries.length
+    count: entries.length,
+    status: selectedEntry?.status || (approved ? 'approved' : inReview ? 'in_review' : 'pending'),
+    plate,
+    model,
+    color,
+    year,
+    documentStatus: crlvIdentity?.verified ? 'approved' : undefined,
+    identitySource: usesDocumentIdentity ? 'crlv_pdf_ocr' : (plate || model || color ? 'vehicle_record' : 'unavailable'),
+    identityComplete: Boolean(plate && model && color)
   };
 }
 
@@ -197,7 +290,13 @@ async function resolveDriverActivationState({
   const resolvedActivationNode = activationNode || resolvedActivationSnapshot?.val?.() || {};
   const resolvedUserData = userData || resolvedUserSnapshot?.val?.() || {};
   const vehicles = await readUserVehicles(realtimeDb, safeDriverId);
-  const vehicle = resolveVehicleStatusFromEntries(resolvedUserData, vehicles);
+  const crlvStatus = extractDocumentStatus(resolvedActivationNode, resolvedUserData, 'crlv');
+  const crlvIdentity = resolveCrlvDocumentIdentity(
+    resolvedActivationNode,
+    resolvedUserData,
+    crlvStatus
+  );
+  const vehicle = resolveVehicleStatusFromEntries(resolvedUserData, vehicles, crlvIdentity);
 
   const accountStatus = normalizeStatus(
     resolvedUserData?.accountStatus ||
@@ -223,7 +322,6 @@ async function resolveDriverActivationState({
   }
 
   const cnhStatus = extractDocumentStatus(resolvedActivationNode, resolvedUserData, 'cnh');
-  const crlvStatus = extractDocumentStatus(resolvedActivationNode, resolvedUserData, 'crlv');
   const meiStatus = extractDocumentStatus(resolvedActivationNode, resolvedUserData, 'mei');
   const backgroundCheckConsent = hasBackgroundConsent(resolvedActivationNode, resolvedUserData);
   const meiRequired = requiresMeiDocument();
@@ -231,18 +329,9 @@ async function resolveDriverActivationState({
   const meiApproved = !meiRequired || isApprovedStatus(meiStatus);
   const docsRejected = isRejectedStatus(cnhStatus) || (meiRequired && isRejectedStatus(meiStatus));
   const docsInReview = isReviewStatus(cnhStatus) || (meiRequired && isReviewStatus(meiStatus));
-  const explicitApprovedFlag = boolish(
-    resolvedUserData?.approved ??
-      resolvedUserData?.isApproved ??
-      resolvedUserData?.profileApproved ??
-      false
-  );
-  const approvedStatusFlag = ['approved', 'active'].includes(accountStatus);
-  const approvedByLegacyFlow = explicitApprovedFlag || approvedStatusFlag;
-  const allowLegacyDocsBypass = approvedByLegacyFlow && !docsRejected;
-  const effectiveBackgroundConsent = backgroundCheckConsent || allowLegacyDocsBypass;
-  const effectiveCnhApproved = cnhApproved || allowLegacyDocsBypass;
-  const effectiveMeiApproved = meiApproved || allowLegacyDocsBypass;
+  const effectiveBackgroundConsent = backgroundCheckConsent;
+  const effectiveCnhApproved = cnhApproved;
+  const effectiveMeiApproved = meiApproved;
   const driverDocsApproved =
     effectiveCnhApproved &&
     effectiveMeiApproved &&
@@ -281,8 +370,7 @@ async function resolveDriverActivationState({
   if (
     !resolvedActivationNode?.documents &&
     !cnhApproved &&
-    !backgroundCheckConsent &&
-    !allowLegacyDocsBypass
+    !backgroundCheckConsent
   ) {
     return buildStatePayload(DRIVER_ACTIVATION_STATES.PRE_REGISTERED, {
       ...meta,

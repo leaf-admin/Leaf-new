@@ -12,6 +12,7 @@ const mockDeletionAdd = jest.fn();
 const mockDeletionLogUpdate = jest.fn();
 const mockDatabaseOnce = jest.fn();
 const mockDatabaseRemove = jest.fn();
+const mockDatabaseUpdate = jest.fn();
 
 const firestoreFn = jest.fn(() => ({
   collection: jest.fn((collectionName) => {
@@ -50,6 +51,7 @@ jest.mock('firebase-admin', () => ({
     ref: jest.fn(() => ({
       once: mockDatabaseOnce,
       remove: mockDatabaseRemove,
+      update: mockDatabaseUpdate,
     })),
   })),
 }));
@@ -89,6 +91,60 @@ describe('account deletion route', () => {
       val: () => null,
     });
     mockDatabaseRemove.mockResolvedValue(undefined);
+    mockDatabaseUpdate.mockResolvedValue(undefined);
+  });
+
+  it('rejects client profile updates that try to write derived driver approval, document, KYC or vehicle fields', async () => {
+    const response = await request(createApp())
+      .put('/api/account/profile')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        name: 'Motorista Teste',
+        documents: { cnh: { status: 'approved' } },
+        driverActivation: { canGoOnline: true },
+        vehicleApproved: true,
+        kycStatus: 'approved',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual(expect.objectContaining({
+      success: false,
+      code: 'PROFILE_DERIVED_FIELD_FORBIDDEN',
+      forbiddenFields: expect.arrayContaining([
+        'documents',
+        'driverActivation',
+        'kycStatus',
+        'vehicleApproved',
+      ]),
+    }));
+    expect(mockUserDocSet).not.toHaveBeenCalled();
+    expect(mockDatabaseUpdate).not.toHaveBeenCalled();
+  });
+
+  it('allows normal account profile updates without derived driver lifecycle fields', async () => {
+    const response = await request(createApp())
+      .put('/api/account/profile')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        name: 'Leaf Passageiro Teste',
+        city: 'Rio de Janeiro',
+        onboardingCompleted: true,
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(expect.objectContaining({
+      success: true,
+      source: 'firestore',
+    }));
+    expect(mockUserDocSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uid: 'review-user',
+        name: 'Leaf Passageiro Teste',
+        city: 'Rio de Janeiro',
+        onboardingCompleted: true,
+      }),
+      { merge: true },
+    );
   });
 
   it('deletes an authenticated account even when no Firestore profile exists', async () => {

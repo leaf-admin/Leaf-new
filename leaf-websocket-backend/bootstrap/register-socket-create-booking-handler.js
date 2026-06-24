@@ -1,5 +1,247 @@
 const PaymentService = require('../services/payment-service');
 const paymentServiceSingleton = new PaymentService();
+const {
+    collectPaymentReferences,
+    normalizePaymentAmountCents,
+    resolveAuthoritativePaymentConfirmation
+} = require('../services/authoritative-payment-confirmation-service');
+const {
+    buildRouteSignature,
+    normalizeAmountCents: normalizeQuoteAmountCents
+} = require('../services/quote-lock-service');
+
+function normalizeText(value) {
+    return String(value || '').trim();
+}
+
+function normalizeComparableText(value) {
+    return normalizeText(value).toLowerCase();
+}
+
+function resolvePaymentIntentValue(intent = {}, snapshot = {}, ...keys) {
+    for (const key of keys) {
+        const value = intent?.[key] ?? snapshot?.[key];
+        if (value !== undefined && value !== null && normalizeText(value)) {
+            return normalizeText(value);
+        }
+    }
+    return '';
+}
+
+function resolveIncomingPaymentBinding(data = {}) {
+    const paymentData = data?.paymentData && typeof data.paymentData === 'object'
+        ? data.paymentData
+        : {};
+
+    return {
+        paymentSessionId: normalizeText(
+            paymentData.paymentSessionId ||
+            paymentData.sessionId ||
+            data.paymentSessionId
+        ),
+        paymentContextKey: normalizeText(
+            paymentData.paymentContextKey ||
+            paymentData.contextKey ||
+            data.paymentContextKey
+        ),
+        quoteSessionId: normalizeText(
+            paymentData.quoteSessionId ||
+            data.quoteSessionId
+        ),
+        quoteLockId: normalizeText(
+            paymentData.quoteLockId ||
+            data.quoteLockId
+        ),
+        payableAmountInCents: normalizeQuoteAmountCents(
+            paymentData.amountInCents ??
+            data.paymentAmountInCents ??
+            data.amountInCents,
+            0
+        ),
+        grossAmountInCents: normalizeQuoteAmountCents(
+            paymentData.grossAmountInCents ??
+            data.grossAmountInCents,
+            0
+        )
+    };
+}
+
+function validateAdvancePaymentIntentBinding({
+    advancePaymentIntent,
+    data,
+    customerId,
+    pickupLocation,
+    destinationLocation,
+    requestedCarType,
+    resolvedPaymentAmountInCents
+} = {}) {
+    if (!advancePaymentIntent?.found) {
+        return { success: true, binding: {} };
+    }
+
+    const quoteLockSnapshot = advancePaymentIntent.quoteLockSnapshot || {};
+    const incoming = resolveIncomingPaymentBinding(data);
+    const expectedPassengerId = normalizeText(advancePaymentIntent.passengerId);
+    const incomingPassengerId = normalizeText(customerId);
+    if (expectedPassengerId && expectedPassengerId !== incomingPassengerId) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_PASSENGER_MISMATCH',
+            message: 'Este pagamento pertence a outro passageiro.'
+        };
+    }
+
+    const expectedQuoteLockId = resolvePaymentIntentValue(
+        advancePaymentIntent,
+        quoteLockSnapshot,
+        'quoteLockId',
+        'quote_lock_id'
+    );
+    if (expectedQuoteLockId && incoming.quoteLockId !== expectedQuoteLockId) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_QUOTE_LOCK_MISMATCH',
+            message: 'O pagamento não pertence à cotação desta corrida.'
+        };
+    }
+
+    const expectedQuoteSessionId = resolvePaymentIntentValue(
+        advancePaymentIntent,
+        quoteLockSnapshot,
+        'quoteSessionId'
+    );
+    if (expectedQuoteSessionId && incoming.quoteSessionId !== expectedQuoteSessionId) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_QUOTE_SESSION_MISMATCH',
+            message: 'A sessão de cotação do pagamento não confere com a corrida.'
+        };
+    }
+
+    const expectedPaymentSessionId = normalizeText(advancePaymentIntent.paymentSessionId);
+    if (expectedPaymentSessionId && incoming.paymentSessionId !== expectedPaymentSessionId) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_SESSION_MISMATCH',
+            message: 'A sessão de pagamento não confere com a corrida.'
+        };
+    }
+
+    const expectedPaymentContextKey = normalizeText(advancePaymentIntent.paymentContextKey);
+    if (expectedPaymentContextKey && incoming.paymentContextKey !== expectedPaymentContextKey) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_CONTEXT_MISMATCH',
+            message: 'O contexto de pagamento não confere com a corrida.'
+        };
+    }
+
+    const expectedCarType = normalizeComparableText(
+        quoteLockSnapshot.carType ||
+        advancePaymentIntent.carType
+    );
+    if (expectedCarType && normalizeComparableText(requestedCarType) !== expectedCarType) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_CAR_TYPE_MISMATCH',
+            message: 'A categoria do pagamento não confere com a corrida.'
+        };
+    }
+
+    const expectedRouteSignature =
+        normalizeText(quoteLockSnapshot.routeSignature || advancePaymentIntent.routeSignature) ||
+        buildRouteSignature({
+            pickupLocation: quoteLockSnapshot.pickupLocation || advancePaymentIntent.pickupLocation,
+            destinationLocation: quoteLockSnapshot.destinationLocation || advancePaymentIntent.destinationLocation,
+            carType: expectedCarType || requestedCarType
+        });
+    const incomingRouteSignature = buildRouteSignature({
+        pickupLocation,
+        destinationLocation,
+        carType: requestedCarType
+    });
+    if (expectedRouteSignature && incomingRouteSignature && expectedRouteSignature !== incomingRouteSignature) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_ROUTE_MISMATCH',
+            message: 'A rota do pagamento não confere com a corrida solicitada.'
+        };
+    }
+
+    const expectedPayableAmountInCents = normalizeQuoteAmountCents(
+        quoteLockSnapshot.payableAmountInCents ||
+        quoteLockSnapshot.passengerPayableAmountInCents ||
+        advancePaymentIntent.payableAmountInCents ||
+        advancePaymentIntent.amountCents ||
+        advancePaymentIntent.amount,
+        0
+    );
+    const incomingPayableAmountInCents =
+        normalizeQuoteAmountCents(resolvedPaymentAmountInCents, 0) ||
+        incoming.payableAmountInCents;
+    if (
+        expectedPayableAmountInCents > 0 &&
+        incomingPayableAmountInCents > 0 &&
+        expectedPayableAmountInCents !== incomingPayableAmountInCents
+    ) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_AMOUNT_MISMATCH',
+            message: 'O valor pago não confere com a corrida solicitada.'
+        };
+    }
+
+    const expectedGrossAmountInCents = normalizeQuoteAmountCents(
+        quoteLockSnapshot.grossAmountInCents ||
+        advancePaymentIntent.grossAmountInCents,
+        0
+    );
+    if (
+        expectedGrossAmountInCents > 0 &&
+        incoming.grossAmountInCents > 0 &&
+        expectedGrossAmountInCents !== incoming.grossAmountInCents
+    ) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_GROSS_AMOUNT_MISMATCH',
+            message: 'O valor bruto da cotação não confere com o pagamento.'
+        };
+    }
+    if (
+        expectedGrossAmountInCents > 0 &&
+        expectedPayableAmountInCents > 0 &&
+        expectedGrossAmountInCents !== expectedPayableAmountInCents &&
+        incoming.grossAmountInCents <= 0
+    ) {
+        return {
+            success: false,
+            code: 'PAYMENT_INTENT_GROSS_AMOUNT_REQUIRED',
+            message: 'O valor bruto da cotação precisa acompanhar o pagamento.'
+        };
+    }
+
+    return {
+        success: true,
+        binding: {
+            paymentSessionId: expectedPaymentSessionId || incoming.paymentSessionId || null,
+            paymentContextKey: expectedPaymentContextKey || incoming.paymentContextKey || null,
+            quoteSessionId: expectedQuoteSessionId || incoming.quoteSessionId || null,
+            quoteLockId: expectedQuoteLockId || incoming.quoteLockId || null,
+            payableAmountInCents: expectedPayableAmountInCents || incomingPayableAmountInCents || null,
+            grossAmountInCents: expectedGrossAmountInCents || incoming.grossAmountInCents || null,
+            routeSignature: expectedRouteSignature || incomingRouteSignature || null
+        }
+    };
+}
+
+function getFirestoreSafely() {
+    try {
+        const firebaseConfig = require('../firebase-config');
+        return firebaseConfig.getFirestore?.() || null;
+    } catch (_error) {
+        return null;
+    }
+}
 
 function registerSocketCreateBookingHandler({
     socket,
@@ -29,7 +271,7 @@ function registerSocketCreateBookingHandler({
     findAvailableDriversForPickup,
     rideCostTelemetryService
 }) {
-    const { scheduleCreateBookingAvailabilityPrecheck } = require('../services/create-booking-availability-precheck');
+    const { performCreateBookingAvailabilityPrecheck } = require('../services/create-booking-availability-precheck');
     const { buildCanonicalCreateBookingIdempotencyKey } = require('../services/create-booking-idempotency-service');
     const { countNearbyEligibleDriversApprox } = require('../services/driver-availability-snapshot-service');
     const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
@@ -322,11 +564,18 @@ function registerSocketCreateBookingHandler({
                                 return;
                             }
                         } catch (trustGuardError) {
-                            logStructured('warn', 'Falha no guard de trust do passageiro (seguindo fluxo)', {
+                            logStructured('error', 'Falha no guard de trust do passageiro (fail-closed)', {
                                 customerId,
                                 eventType: 'createBooking',
                                 error: trustGuardError.message
                             });
+                            socket.emit('bookingError', {
+                                error: 'Solicitação temporariamente indisponível',
+                                message: 'Não foi possível validar a segurança da solicitação agora. Tente novamente em instantes.',
+                                code: 'PASSENGER_TRUST_GUARD_UNAVAILABLE'
+                            });
+                            recordFailure('active_guard', 'passenger_trust_guard_unavailable');
+                            return;
                         }
                     }
 
@@ -363,11 +612,18 @@ function registerSocketCreateBookingHandler({
                                 }
                             }
                         } catch (activeBookingGuardError) {
-                            logStructured('warn', 'Falha ao validar/superseder booking ativo do cliente (seguindo fluxo)', {
+                            logStructured('error', 'Falha ao validar/superseder booking ativo do cliente (fail-closed)', {
                                 customerId,
                                 eventType: 'createBooking',
                                 error: activeBookingGuardError.message
                             });
+                            socket.emit('bookingError', {
+                                error: 'Não foi possível validar sua corrida atual',
+                                message: 'Tente novamente em instantes para evitar corridas duplicadas.',
+                                code: 'ACTIVE_RIDE_GUARD_UNAVAILABLE'
+                            });
+                            recordFailure('active_guard', 'active_ride_guard_unavailable');
+                            return;
                         }
                     }
                     perfTrace.afterActiveGuard = Date.now();
@@ -375,6 +631,9 @@ function registerSocketCreateBookingHandler({
                     const clientRequestedConfirmedPayment = PAID_PAYMENT_STATUSES.has(normalizedPaymentStatus);
                     let hasConfirmedPayment = false;
                     let paymentServerValidated = false;
+                    let paymentProviderProofSource = null;
+                    let advancePaymentIntent = null;
+                    let paymentIntentBinding = {};
                     const paymentChargeId = String(data?.paymentData?.chargeId || data?.paymentId || '').trim();
                     const paymentReferenceRideId = String(data?.paymentData?.rideId || data?.rideId || '').trim();
                     const parsedPaymentAmountInCents = Number.parseInt(
@@ -388,7 +647,7 @@ function registerSocketCreateBookingHandler({
                     const requestedCarType = sanitizedCarType || data?.carType || null;
 
                     if (paymentReferenceRideId) {
-                        const advancePaymentIntent =
+                        advancePaymentIntent =
                             await paymentServiceSingleton.getAdvancePaymentIntent(paymentReferenceRideId);
                         if (advancePaymentIntent?.unavailable) {
                             socket.emit('bookingError', {
@@ -452,102 +711,98 @@ function registerSocketCreateBookingHandler({
 
                     if (clientRequestedConfirmedPayment && VERIFY_PAYMENT_BEFORE_BOOKING && paymentChargeId) {
                         try {
-                            const paymentStatusCheck = await paymentServiceSingleton.getPaymentStatus(paymentChargeId);
-                            if (!paymentStatusCheck?.success) {
-                                socket.emit('bookingError', {
-                                    error: 'Pagamento não confirmado',
-                                    message: 'Ainda não recebemos a confirmação do PIX. Aguarde alguns segundos e tente novamente.',
-                                    code: 'PAYMENT_NOT_CONFIRMED',
-                                    retryAfterSec: 2
-                                });
-                                recordFailure('active_guard', 'payment_not_confirmed');
-                                return;
-                            }
+                            const isAllowedReviewMockPayment =
+                                String(paymentChargeId).startsWith('mock_review_') &&
+                                ALLOW_REVIEW_MOCK_PAYMENT_ON_CREATE_BOOKING;
 
-                            let verifiedPaymentStatus = String(paymentStatusCheck.status || '').trim().toLowerCase();
+                            if (isAllowedReviewMockPayment) {
+                                const paymentStatusCheck = await paymentServiceSingleton.getPaymentStatus(paymentChargeId);
+                                const verifiedPaymentStatus = String(paymentStatusCheck?.status || '').trim().toLowerCase();
 
-                            if (
-                                !PAID_PAYMENT_STATUSES.has(verifiedPaymentStatus) &&
-                                paymentReferenceRideId
-                            ) {
-                                try {
-                                    const tempRidePaymentStatusCheck = await paymentServiceSingleton.getPaymentStatus(
-                                        paymentReferenceRideId
-                                    );
-                                    const tempRidePaymentStatus = String(
-                                        tempRidePaymentStatusCheck?.status || ''
-                                    ).trim().toLowerCase();
-
-                                    if (
-                                        tempRidePaymentStatusCheck?.success &&
-                                        PAID_PAYMENT_STATUSES.has(tempRidePaymentStatus)
-                                    ) {
-                                        verifiedPaymentStatus = tempRidePaymentStatus;
-                                        const amountFromTempRide = Number(tempRidePaymentStatusCheck.amount);
-                                        if (
-                                            (!Number.isFinite(resolvedPaymentAmountInCents) || resolvedPaymentAmountInCents <= 0) &&
-                                            Number.isFinite(amountFromTempRide) &&
-                                            amountFromTempRide > 0
-                                        ) {
-                                            resolvedPaymentAmountInCents = Math.round(amountFromTempRide);
-                                        }
-                                    } else {
-                                        const paymentHolding =
-                                            await paymentServiceSingleton.getPaymentHolding(paymentReferenceRideId);
-                                        const holdingStatus = String(paymentHolding?.status || '').trim().toLowerCase();
-                                        const holdingChargeId = String(
-                                            paymentHolding?.chargeId || paymentHolding?.paymentId || ''
-                                        ).trim();
-
-                                        if (
-                                            PAID_PAYMENT_STATUSES.has(holdingStatus) &&
-                                            (!holdingChargeId || holdingChargeId === paymentChargeId)
-                                        ) {
-                                            verifiedPaymentStatus = holdingStatus;
-                                            const holdingAmount = Number(paymentHolding?.amount);
-                                            if (
-                                                (!Number.isFinite(resolvedPaymentAmountInCents) || resolvedPaymentAmountInCents <= 0) &&
-                                                Number.isFinite(holdingAmount) &&
-                                                holdingAmount > 0
-                                            ) {
-                                                resolvedPaymentAmountInCents = Math.round(holdingAmount);
-                                            }
-                                        }
-                                    }
-                                } catch (paymentHoldingError) {
-                                    logStructured('warn', 'Falha ao validar payment holding pré-booking', {
-                                        userId,
-                                        eventType: 'createBooking',
-                                        paymentChargeId,
-                                        paymentReferenceRideId,
-                                        error: paymentHoldingError.message
+                                if (!paymentStatusCheck?.success || !PAID_PAYMENT_STATUSES.has(verifiedPaymentStatus)) {
+                                    socket.emit('bookingError', {
+                                        error: 'Pagamento não confirmado',
+                                        message: 'O pagamento desta corrida ainda não foi confirmado.',
+                                        code: 'PAYMENT_NOT_CONFIRMED',
+                                        paymentStatus: verifiedPaymentStatus || null,
+                                        retryAfterSec: 2
                                     });
+                                    recordFailure('active_guard', 'payment_not_confirmed');
+                                    return;
                                 }
-                            }
 
-                            if (!PAID_PAYMENT_STATUSES.has(verifiedPaymentStatus)) {
-                                socket.emit('bookingError', {
-                                    error: 'Pagamento não confirmado',
-                                    message: 'O pagamento desta corrida ainda não foi confirmado.',
-                                    code: 'PAYMENT_NOT_CONFIRMED',
-                                    paymentStatus: verifiedPaymentStatus,
-                                    retryAfterSec: 2
+                                normalizedPaymentStatus = verifiedPaymentStatus;
+                                hasConfirmedPayment = true;
+                                paymentServerValidated = true;
+                                paymentProviderProofSource = 'app_review_mock_payment';
+
+                                const amountFromPaymentStatus = Number(paymentStatusCheck.amount);
+                                if (
+                                    (!Number.isFinite(resolvedPaymentAmountInCents) || resolvedPaymentAmountInCents <= 0) &&
+                                    Number.isFinite(amountFromPaymentStatus) &&
+                                    amountFromPaymentStatus > 0
+                                ) {
+                                    resolvedPaymentAmountInCents = Math.round(amountFromPaymentStatus);
+                                }
+                            } else {
+                                const paymentReferences = collectPaymentReferences(
+                                    paymentChargeId,
+                                    paymentReferenceRideId,
+                                    data?.paymentData?.paymentId,
+                                    data?.paymentData?.paymentIntentId,
+                                    data?.paymentIntentId
+                                );
+                                const expectedAmountInCents =
+                                    Number.isFinite(resolvedPaymentAmountInCents) && resolvedPaymentAmountInCents > 0
+                                        ? normalizePaymentAmountCents(resolvedPaymentAmountInCents)
+                                        : 0;
+                                const providerConfirmation = await resolveAuthoritativePaymentConfirmation({
+                                    paymentService: paymentServiceSingleton,
+                                    firestore: getFirestoreSafely(),
+                                    bookingId: paymentReferenceRideId || paymentChargeId,
+                                    references: paymentReferences,
+                                    expectedAmountInCents
                                 });
-                                recordFailure('active_guard', 'payment_not_confirmed');
-                                return;
-                            }
 
-                            normalizedPaymentStatus = verifiedPaymentStatus;
-                            hasConfirmedPayment = true;
-                            paymentServerValidated = true;
+                                if (!providerConfirmation?.success) {
+                                    socket.emit('bookingError', {
+                                        error: 'Pagamento não confirmado',
+                                        message: providerConfirmation?.message || 'O pagamento desta corrida ainda não foi confirmado pelo provedor.',
+                                        code: 'PAYMENT_NOT_CONFIRMED',
+                                        providerCode: providerConfirmation?.code || 'PAYMENT_NOT_PROVIDER_CONFIRMED',
+                                        retryAfterSec: 2
+                                    });
+                                    recordFailure('active_guard', 'payment_not_provider_confirmed');
+                                    return;
+                                }
 
-                            const amountFromPaymentStatus = Number(paymentStatusCheck.amount);
-                            if (
-                                (!Number.isFinite(resolvedPaymentAmountInCents) || resolvedPaymentAmountInCents <= 0) &&
-                                Number.isFinite(amountFromPaymentStatus) &&
-                                amountFromPaymentStatus > 0
-                            ) {
-                                resolvedPaymentAmountInCents = Math.round(amountFromPaymentStatus);
+                                const paymentProofRecord = providerConfirmation.record || {};
+                                const verifiedPaymentStatus = String(
+                                    paymentProofRecord.status ||
+                                    paymentProofRecord.paymentStatus ||
+                                    normalizedPaymentStatus
+                                ).trim().toLowerCase();
+
+                                normalizedPaymentStatus = PAID_PAYMENT_STATUSES.has(verifiedPaymentStatus)
+                                    ? verifiedPaymentStatus
+                                    : 'in_holding';
+                                hasConfirmedPayment = true;
+                                paymentServerValidated = true;
+                                paymentProviderProofSource = providerConfirmation.source || paymentProofRecord.source || null;
+
+                                const amountFromPaymentProof = Number(
+                                    paymentProofRecord.amountInCents ??
+                                    paymentProofRecord.amount ??
+                                    paymentProofRecord.metadata?.amountInCents ??
+                                    paymentProofRecord.metadata?.amount
+                                );
+                                if (
+                                    (!Number.isFinite(resolvedPaymentAmountInCents) || resolvedPaymentAmountInCents <= 0) &&
+                                    Number.isFinite(amountFromPaymentProof) &&
+                                    amountFromPaymentProof > 0
+                                ) {
+                                    resolvedPaymentAmountInCents = normalizePaymentAmountCents(amountFromPaymentProof);
+                                }
                             }
                         } catch (paymentVerificationError) {
                             logStructured('warn', 'Falha ao validar status do pagamento antes do createBooking', {
@@ -576,6 +831,34 @@ function registerSocketCreateBookingHandler({
                         });
                         recordFailure('active_guard', 'payment_not_confirmed');
                         return;
+                    }
+
+                    const paymentIntentValidation = validateAdvancePaymentIntentBinding({
+                        advancePaymentIntent,
+                        data,
+                        customerId,
+                        pickupLocation,
+                        destinationLocation,
+                        requestedCarType,
+                        resolvedPaymentAmountInCents
+                    });
+                    if (!paymentIntentValidation.success) {
+                        socket.emit('bookingError', {
+                            error: 'Pagamento incompatível',
+                            message: paymentIntentValidation.message || 'O pagamento não confere com esta corrida.',
+                            code: paymentIntentValidation.code || 'PAYMENT_INTENT_BINDING_MISMATCH',
+                            retryAfterSec: 0
+                        });
+                        recordFailure('active_guard', paymentIntentValidation.code || 'payment_intent_binding_mismatch');
+                        return;
+                    }
+                    paymentIntentBinding = paymentIntentValidation.binding || {};
+                    if (
+                        (!Number.isFinite(resolvedPaymentAmountInCents) || resolvedPaymentAmountInCents <= 0) &&
+                        Number.isFinite(paymentIntentBinding.payableAmountInCents) &&
+                        paymentIntentBinding.payableAmountInCents > 0
+                    ) {
+                        resolvedPaymentAmountInCents = paymentIntentBinding.payableAmountInCents;
                     }
 
                     if (!hasConfirmedPayment) {
@@ -688,13 +971,21 @@ function registerSocketCreateBookingHandler({
                             return;
                         }
                     } catch (areaPolicyError) {
-                        logStructured('warn', 'Falha na política operacional de área (seguindo fluxo)', {
+                        logStructured('error', 'Falha na política operacional de área (fail-closed)', {
                             customerId,
                             city: areaPolicyCity,
                             regionHash: areaPolicyRegionHash,
                             eventType: 'createBooking',
                             error: areaPolicyError.message
                         });
+                        socket.emit('bookingError', {
+                            error: 'Não foi possível validar a área de atendimento',
+                            message: 'Tente novamente em instantes para confirmar a cobertura operacional.',
+                            code: 'AREA_POLICY_GUARD_UNAVAILABLE',
+                            regionHash: areaPolicyRegionHash
+                        });
+                        recordFailure('policy', 'area_policy_guard_unavailable');
+                        return;
                     }
                     perfTrace.afterPolicy = Date.now();
                     recordStage('policy', perfTrace.afterPolicy);
@@ -846,15 +1137,13 @@ function registerSocketCreateBookingHandler({
                         }
                     }
 
-                    // ✅ REFATORAÇÃO: Usar RequestRideCommand
-                    logStructured('info', 'Executando RequestRideCommand', {
-                        customerId,
-                        eventType: 'createBooking'
-                    });
-
-                    // Guarda de negócio: validar disponibilidade quando pagamento já confirmado.
-                    // Não bloquear a criação da corrida por falhas transitórias desta checagem.
-                    scheduleCreateBookingAvailabilityPrecheck({
+                    // Guarda de negócio: corrida paga só pode virar busca se ainda houver
+                    // motorista elegível no momento de materializar o booking canônico.
+                    const createBookingAvailabilityTimeoutMs = Number.parseInt(
+                        process.env.CREATE_BOOKING_AVAILABILITY_TIMEOUT_MS || '1200',
+                        10
+                    );
+                    const createBookingAvailability = await performCreateBookingAvailabilityPrecheck({
                         hasConfirmedPayment,
                         pickupLocation,
                         destinationLocation,
@@ -865,7 +1154,73 @@ function registerSocketCreateBookingHandler({
                         logContext: {
                             userId,
                             eventType: 'createBooking'
+                        },
+                        timeoutMs: createBookingAvailabilityTimeoutMs
+                    });
+
+                    if (!createBookingAvailability.skipped) {
+                        if (createBookingAvailability.code === 'NO_DRIVERS_AVAILABLE') {
+                            socket.emit('bookingError', {
+                                error: 'Não há motorista disponível',
+                                message: 'Não há motorista disponível para essa corrida agora. Nenhuma nova busca foi iniciada.',
+                                code: 'NO_DRIVERS_AVAILABLE',
+                                retryAfterSec: 15
+                            });
+                            logStructured('warn', 'createBooking bloqueado por ausência de motorista elegível', {
+                                userId,
+                                customerId,
+                                eventType: 'createBooking',
+                                code: 'NO_DRIVERS_AVAILABLE'
+                            });
+                            recordFailure('availability_guard', 'no_drivers_available');
+                            await releaseIdempotencyLock();
+                            return;
                         }
+
+                        if (!createBookingAvailability.success) {
+                            socket.emit('bookingError', {
+                                error: 'Não foi possível validar disponibilidade agora',
+                                message: 'Não foi possível validar disponibilidade agora. Tente novamente em instantes.',
+                                code: createBookingAvailability.code || 'AVAILABILITY_CHECK_FAILED',
+                                retryAfterSec: 5
+                            });
+                            logStructured('warn', 'createBooking bloqueado por falha no guard de disponibilidade', {
+                                userId,
+                                customerId,
+                                eventType: 'createBooking',
+                                code: createBookingAvailability.code || 'AVAILABILITY_CHECK_FAILED',
+                                error: createBookingAvailability.error || null
+                            });
+                            recordFailure('availability_guard', 'availability_check_failed');
+                            await releaseIdempotencyLock();
+                            return;
+                        }
+                    } else if (hasConfirmedPayment && createBookingAvailability.reason !== 'payment_not_confirmed') {
+                        socket.emit('bookingError', {
+                            error: 'Não foi possível validar disponibilidade agora',
+                            message: 'Não foi possível validar disponibilidade agora. Tente novamente em instantes.',
+                            code: 'AVAILABILITY_CHECK_SKIPPED',
+                            reason: createBookingAvailability.reason || null,
+                            retryAfterSec: 5
+                        });
+                        logStructured('warn', 'createBooking bloqueado por pre-check de disponibilidade ignorado', {
+                            userId,
+                            customerId,
+                            eventType: 'createBooking',
+                            reason: createBookingAvailability.reason || null
+                        });
+                        recordFailure('availability_guard', 'availability_check_skipped');
+                        await releaseIdempotencyLock();
+                        return;
+                    }
+
+                    perfTrace.afterAvailabilityGuard = Date.now();
+                    recordStage('availability_guard', perfTrace.afterAvailabilityGuard);
+
+                    // ✅ REFATORAÇÃO: Usar RequestRideCommand
+                    logStructured('info', 'Executando RequestRideCommand', {
+                        customerId,
+                        eventType: 'createBooking'
                     });
 
                     // ✅ FASE 1.3: Criar span para Command
@@ -900,10 +1255,26 @@ function registerSocketCreateBookingHandler({
                     if (paymentReferenceRideId) {
                         commandPaymentData.rideId = paymentReferenceRideId;
                     }
+                    ['paymentSessionId', 'paymentContextKey', 'quoteSessionId', 'quoteLockId'].forEach((key) => {
+                        if (!commandPaymentData[key] && paymentIntentBinding[key]) {
+                            commandPaymentData[key] = paymentIntentBinding[key];
+                        }
+                    });
                     commandPaymentData.paymentStatus = normalizedPaymentStatus;
                     commandPaymentData.serverValidated = paymentServerValidated;
+                    if (paymentProviderProofSource) {
+                        commandPaymentData.providerProofSource = paymentProviderProofSource;
+                    }
                     if (Number.isFinite(resolvedPaymentAmountInCents) && resolvedPaymentAmountInCents > 0) {
                         commandPaymentData.amountInCents = resolvedPaymentAmountInCents;
+                    }
+                    if (
+                        (!Number.isFinite(Number(commandPaymentData.grossAmountInCents)) ||
+                            Number(commandPaymentData.grossAmountInCents) <= 0) &&
+                        Number.isFinite(paymentIntentBinding.grossAmountInCents) &&
+                        paymentIntentBinding.grossAmountInCents > 0
+                    ) {
+                        commandPaymentData.grossAmountInCents = paymentIntentBinding.grossAmountInCents;
                     }
 
                     try {

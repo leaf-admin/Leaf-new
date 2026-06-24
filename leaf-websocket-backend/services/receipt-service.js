@@ -14,6 +14,16 @@ const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
 
+class ReceiptFinancialSnapshotIncompleteError extends Error {
+    constructor(message, details = {}) {
+        super(message);
+        this.name = 'ReceiptFinancialSnapshotIncompleteError';
+        this.code = 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE';
+        this.statusCode = 409;
+        this.details = details;
+    }
+}
+
 class ReceiptService {
     constructor() {
         this.GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.GEO_KEY;
@@ -92,6 +102,191 @@ class ReceiptService {
         return { date: dateFormatted, time: timeFormatted };
     }
 
+    parseMoneyValue(value, fallback = null) {
+        if (value === null || value === undefined || value === '') {
+            return fallback;
+        }
+
+        if (typeof value === 'string') {
+            const sanitized = value
+                .replace(/[^\d,.-]/g, '')
+                .trim();
+            if (!sanitized) {
+                return fallback;
+            }
+            const normalized = sanitized.includes(',')
+                ? sanitized.replace(/\./g, '').replace(',', '.')
+                : sanitized;
+            const parsed = Number(normalized);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        }
+
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    firstPresentMoney(...values) {
+        for (const value of values) {
+            const parsed = this.parseMoneyValue(value, null);
+            if (parsed !== null) {
+                return parsed;
+            }
+        }
+        return null;
+    }
+
+    isTruthyFlag(value) {
+        if (value === true) {
+            return true;
+        }
+        const normalized = String(value || '').trim().toLowerCase();
+        return ['1', 'true', 'yes', 'sim'].includes(normalized);
+    }
+
+    resolveFinalReceiptFinancialSnapshot(rideId, rideData = {}) {
+        const fareBreakdown = rideData.fareBreakdown || {};
+        const paymentBreakdown = rideData.paymentBreakdown || {};
+        const financialBreakdown = rideData.financialBreakdown || {};
+        const nestedFinancial = rideData.financial || {};
+        const calculationBreakdown =
+            rideData.calculation?.breakdown ||
+            fareBreakdown.calculation?.breakdown ||
+            paymentBreakdown.calculation?.breakdown ||
+            {};
+        const snapshotSource = String(
+            rideData.financialSnapshotSource ||
+            fareBreakdown.financialSnapshotSource ||
+            paymentBreakdown.financialSnapshotSource ||
+            financialBreakdown.financialSnapshotSource ||
+            ''
+        ).trim();
+        const authoritativeSnapshot =
+            this.isTruthyFlag(rideData.authoritativeSnapshot) ||
+            this.isTruthyFlag(fareBreakdown.authoritativeSnapshot) ||
+            this.isTruthyFlag(paymentBreakdown.authoritativeSnapshot) ||
+            this.isTruthyFlag(financialBreakdown.authoritativeSnapshot);
+
+        const grossAmount = this.firstPresentMoney(
+            rideData.finalPrice,
+            rideData.finalFare,
+            rideData.grossAmount,
+            rideData.grossFare,
+            rideData.totalPaid,
+            rideData.totalAmount,
+            rideData.customer_paid,
+            rideData.customerPaid,
+            rideData.paymentAmount,
+            nestedFinancial.totalPaid?.amount,
+            fareBreakdown.finalFare,
+            fareBreakdown.grossAmount,
+            paymentBreakdown.finalFare,
+            paymentBreakdown.grossAmount,
+            financialBreakdown.finalFare,
+            financialBreakdown.grossAmount
+        );
+        const operationalFee = this.firstPresentMoney(
+            rideData.operationalFee,
+            fareBreakdown.operationalFee,
+            paymentBreakdown.operationalFee,
+            financialBreakdown.operationalFee,
+            calculationBreakdown.operationalFee
+        );
+        const paymentIntermediationFee = this.firstPresentMoney(
+            rideData.paymentIntermediationFee,
+            rideData.wooviFee,
+            fareBreakdown.paymentIntermediationFee,
+            fareBreakdown.wooviFee,
+            paymentBreakdown.paymentIntermediationFee,
+            paymentBreakdown.wooviFee,
+            financialBreakdown.paymentIntermediationFee,
+            financialBreakdown.wooviFee,
+            calculationBreakdown.paymentIntermediationFee,
+            calculationBreakdown.wooviFee
+        );
+        const driverNetAmount = this.firstPresentMoney(
+            rideData.driverNetAmount,
+            rideData.netAmount,
+            fareBreakdown.driverNetAmount,
+            fareBreakdown.netAmount,
+            paymentBreakdown.driverNetAmount,
+            paymentBreakdown.netAmount,
+            financialBreakdown.driverNetAmount,
+            financialBreakdown.netAmount
+        );
+        const tollFee = this.firstPresentMoney(
+            rideData.tollFee,
+            rideData.toll_fee,
+            rideData.pedagio,
+            fareBreakdown.tollFee,
+            fareBreakdown.toll_fee,
+            fareBreakdown.driverTollPassThrough,
+            paymentBreakdown.tollFee,
+            paymentBreakdown.toll_fee,
+            paymentBreakdown.driverTollPassThrough,
+            financialBreakdown.tollFee,
+            financialBreakdown.toll_fee,
+            financialBreakdown.driverTollPassThrough
+        ) ?? 0;
+        const totalFees = this.firstPresentMoney(
+            rideData.totalFees,
+            rideData.retainedFees,
+            fareBreakdown.totalFees,
+            fareBreakdown.retainedFees,
+            paymentBreakdown.totalFees,
+            paymentBreakdown.retainedFees,
+            financialBreakdown.totalFees,
+            financialBreakdown.retainedFees
+        );
+        const missing = [];
+        if (!authoritativeSnapshot) missing.push('authoritativeSnapshot');
+        if (snapshotSource !== 'backend_final') missing.push('financialSnapshotSource=backend_final');
+        if (!(grossAmount > 0)) missing.push('finalGrossAmount');
+        if (!(operationalFee >= 0)) missing.push('operationalFee');
+        if (!(paymentIntermediationFee >= 0)) missing.push('paymentIntermediationFee');
+        if (!(driverNetAmount >= 0)) missing.push('driverNetAmount');
+        if (!(totalFees >= 0)) {
+            missing.push('totalFees');
+        }
+        if (grossAmount !== null && totalFees !== null && driverNetAmount !== null) {
+            const grossAmountCents = Math.round(grossAmount * 100);
+            const allocatedAmountCents = Math.round((driverNetAmount + totalFees) * 100);
+            if (allocatedAmountCents !== grossAmountCents) {
+                missing.push('driverNetAmount+totalFees=grossAmount');
+            }
+        }
+
+        if (missing.length > 0) {
+            throw new ReceiptFinancialSnapshotIncompleteError(
+                `Recibo ${rideId} sem snapshot financeiro final completo`,
+                {
+                    rideId,
+                    missing,
+                    financialSnapshotSource: snapshotSource || null,
+                    authoritativeSnapshot,
+                    grossAmount,
+                    operationalFee,
+                    paymentIntermediationFee,
+                    driverNetAmount,
+                    totalFees
+                }
+            );
+        }
+
+        return {
+            finalPrice: grossAmount,
+            finalFare: grossAmount,
+            grossAmount,
+            tollFee,
+            driverTollPassThrough: tollFee,
+            operationalFee,
+            paymentIntermediationFee,
+            driverNetAmount,
+            ...(totalFees !== null ? { totalFees } : {}),
+            authoritativeSnapshot: true,
+            financialSnapshotSource: 'backend_final'
+        };
+    }
+
     /**
      * Gera recibo completo da corrida
      * @param {string} rideId - ID da corrida
@@ -101,41 +296,50 @@ class ReceiptService {
     async generateReceipt(rideId, rideData) {
         try {
             logger.info(`📋 Gerando recibo para corrida: ${rideId}`);
+            const finalFinancialSnapshot = this.resolveFinalReceiptFinancialSnapshot(rideId, rideData);
+            const receiptRideData = {
+                ...rideData,
+                ...finalFinancialSnapshot,
+                fareBreakdown: {
+                    ...(rideData.fareBreakdown || {}),
+                    ...finalFinancialSnapshot
+                }
+            };
 
             // 1. Calcular valores financeiros
-            const financialBreakdown = this.calculateFinancialBreakdown(rideData);
+            const financialBreakdown = this.calculateFinancialBreakdown(receiptRideData);
 
             // 2. Calcular métricas da viagem
-            const tripMetrics = this.calculateTripMetrics(rideData);
+            const tripMetrics = this.calculateTripMetrics(receiptRideData);
 
             // 3. Gerar URL da imagem estática do mapa
-            const mapImageUrl = this.generateStaticMapImage(rideData);
+            const mapImageUrl = this.generateStaticMapImage(receiptRideData);
 
             // 4. Gerar hash único de identificação
-            const receiptHash = this.generateReceiptHash(rideId, rideData);
+            const receiptHash = this.generateReceiptHash(rideId, receiptRideData);
 
             // 5. Formatar data e horário
             const tripDate =
                 this.parseDateValue(
-                    rideData.endTime ||
-                    rideData.completedAt ||
-                    rideData.tripStartTime ||
-                    rideData.startedAt ||
-                    rideData.bookingDate ||
-                    rideData.createdAt,
+                    receiptRideData.endTime ||
+                    receiptRideData.completedAt ||
+                    receiptRideData.tripStartTime ||
+                    receiptRideData.startedAt ||
+                    receiptRideData.bookingDate ||
+                    receiptRideData.createdAt,
                     new Date()
                 )?.toISOString() || new Date().toISOString();
             const { date: tripDateFormatted, time: tripTimeFormatted } = this.formatDateTime(tripDate);
 
             // 6. Obter destino para título
-            const destination = rideData.drop?.add || 'destino';
+            const destination = receiptRideData.drop?.add || 'destino';
 
             // 7. Formatar dados do recibo conforme estrutura solicitada
             const receipt = {
                 // === IDENTIFICAÇÃO E HASH ===
                 receiptId: `LEAF-${rideId}`,
                 rideId: rideId,
-                reference: rideData.reference || rideId.substring(0, 6).toUpperCase(),
+                reference: receiptRideData.reference || rideId.substring(0, 6).toUpperCase(),
                 hash: receiptHash, // Hash único para validação
                 issueDate: new Date().toISOString(),
                 issueTimestamp: Date.now(),
@@ -152,32 +356,32 @@ class ReceiptService {
 
                     // Local de partida
                         pickup: {
-                            address: rideData.pickup?.add || 'Endereço de origem',
+                            address: receiptRideData.pickup?.add || 'Endereço de origem',
                             coordinates: {
-                                lat: rideData.pickup?.lat || 0,
-                                lng: rideData.pickup?.lng || 0
+                                lat: receiptRideData.pickup?.lat || 0,
+                                lng: receiptRideData.pickup?.lng || 0
                             },
-                            timestamp: this.parseDateValue(rideData.tripStartTime || rideData.startedAt || rideData.startTime)?.toISOString() || null
+                            timestamp: this.parseDateValue(receiptRideData.tripStartTime || receiptRideData.startedAt || receiptRideData.startTime)?.toISOString() || null
                         },
 
                     // Local de destino
                         dropoff: {
-                            address: rideData.drop?.add || 'Endereço de destino',
+                            address: receiptRideData.drop?.add || 'Endereço de destino',
                             coordinates: {
-                                lat: rideData.drop?.lat || 0,
-                                lng: rideData.drop?.lng || 0
+                                lat: receiptRideData.drop?.lat || 0,
+                                lng: receiptRideData.drop?.lng || 0
                             },
-                            timestamp: this.parseDateValue(rideData.endTime || rideData.completedAt || rideData.endDate)?.toISOString() || null
+                            timestamp: this.parseDateValue(receiptRideData.endTime || receiptRideData.completedAt || receiptRideData.endDate)?.toISOString() || null
                         },
 
                     // Tempo de viagem e distância
                     duration: tripMetrics.duration, // em minutos
                     durationFormatted: tripMetrics.durationFormatted,
                     distance: {
-                        estimated: parseFloat(rideData.estimateDistance || 0),
-                        actual: parseFloat(rideData.distance || rideData.estimateDistance || 0),
+                        estimated: parseFloat(receiptRideData.estimateDistance || 0),
+                        actual: parseFloat(receiptRideData.distance || receiptRideData.estimateDistance || 0),
                         unit: 'km',
-                        formatted: `${(parseFloat(rideData.distance || rideData.estimateDistance || 0) / 1000).toFixed(2)} km`
+                        formatted: `${(parseFloat(receiptRideData.distance || receiptRideData.estimateDistance || 0) / 1000).toFixed(2)} km`
                     },
 
                     // Mapa do trajeto
@@ -190,23 +394,23 @@ class ReceiptService {
 
                 // === DADOS DO PASSAGEIRO ===
                 customer: {
-                    name: rideData.customer_name || 'Passageiro',
-                    email: rideData.customer_email || '',
-                    phone: rideData.customer_contact || '',
-                    id: rideData.customer || ''
+                    name: receiptRideData.customer_name || 'Passageiro',
+                    email: receiptRideData.customer_email || '',
+                    phone: receiptRideData.customer_contact || '',
+                    id: receiptRideData.customer || ''
                 },
 
                 // === DADOS DO MOTORISTA ===
                 driver: {
-                    name: rideData.driver_name || 'Motorista Parceiro',
-                    fullName: rideData.driver_name || 'Motorista Parceiro', // Nome completo
-                    id: rideData.driver || '',
+                    name: receiptRideData.driver_name || 'Motorista Parceiro',
+                    fullName: receiptRideData.driver_name || 'Motorista Parceiro', // Nome completo
+                    id: receiptRideData.driver || '',
                     vehicle: {
-                        type: rideData.carType || 'Veículo',
-                        plate: rideData.vehicle_plate || 'N/A',
-                        brand: rideData.vehicleMake || '',
-                        model: rideData.vehicleModel || '',
-                        brandModel: `${rideData.vehicleMake || ''} ${rideData.vehicleModel || ''}`.trim() || 'Veículo'
+                        type: receiptRideData.carType || 'Veículo',
+                        plate: receiptRideData.vehicle_plate || 'N/A',
+                        brand: receiptRideData.vehicleMake || '',
+                        model: receiptRideData.vehicleModel || '',
+                        brandModel: `${receiptRideData.vehicleMake || ''} ${receiptRideData.vehicleModel || ''}`.trim() || 'Veículo'
                     }
                 },
 
@@ -215,10 +419,10 @@ class ReceiptService {
 
                 // === FORMA DE PAGAMENTO ===
                 payment: {
-                    method: this.getPaymentMethodName(rideData.payment_mode),
-                    status: rideData.payment_status || 'completed',
-                    transactionId: rideData.txnId || '',
-                    processedAt: rideData.paymentDate || rideData.completedAt
+                    method: this.getPaymentMethodName(receiptRideData.payment_mode),
+                    status: receiptRideData.payment_status || 'completed',
+                    transactionId: receiptRideData.txnId || '',
+                    processedAt: receiptRideData.paymentDate || receiptRideData.completedAt
                 },
 
                 // === INFORMAÇÕES LEGAIS ===
@@ -233,7 +437,9 @@ class ReceiptService {
                 metadata: {
                     version: '2.0',
                     generatedBy: 'Leaf Receipt Service',
-                    status: rideData.status || 'COMPLETED'
+                    status: receiptRideData.status || 'COMPLETED',
+                    authoritativeSnapshot: finalFinancialSnapshot.authoritativeSnapshot,
+                    financialSnapshotSource: finalFinancialSnapshot.financialSnapshotSource
                 }
             };
 
@@ -242,6 +448,9 @@ class ReceiptService {
 
         } catch (error) {
             logger.error(`❌ Erro ao gerar recibo para corrida ${rideId}:`, error);
+            if (error?.code === 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE') {
+                throw error;
+            }
             throw new Error(`Falha ao gerar recibo: ${error.message}`);
         }
     }
@@ -250,15 +459,45 @@ class ReceiptService {
      * Calcula breakdown financeiro detalhado
      */
     calculateFinancialBreakdown(rideData) {
-        const totalFare = parseFloat(rideData.finalPrice || rideData.customer_paid || rideData.estimate || 0);
-        const tollFee = parseFloat(rideData.tollFee || rideData.toll_fee || rideData.pedagio || 0);
+        const totalFare = this.firstPresentMoney(
+            rideData.finalPrice,
+            rideData.finalFare,
+            rideData.grossAmount,
+            rideData.grossFare,
+            rideData.totalPaid,
+            rideData.totalAmount,
+            rideData.customer_paid,
+            rideData.customerPaid,
+            rideData.paymentAmount,
+            rideData.financial?.totalPaid?.amount,
+            rideData.fareBreakdown?.finalFare,
+            rideData.fareBreakdown?.grossAmount,
+            rideData.paymentBreakdown?.finalFare,
+            rideData.paymentBreakdown?.grossAmount,
+            rideData.financialBreakdown?.finalFare,
+            rideData.financialBreakdown?.grossAmount
+        ) ?? 0;
+        const tollFee = this.firstPresentMoney(
+            rideData.tollFee,
+            rideData.toll_fee,
+            rideData.pedagio,
+            rideData.driverTollPassThrough,
+            rideData.fareBreakdown?.tollFee,
+            rideData.fareBreakdown?.toll_fee,
+            rideData.fareBreakdown?.driverTollPassThrough,
+            rideData.paymentBreakdown?.tollFee,
+            rideData.paymentBreakdown?.toll_fee,
+            rideData.paymentBreakdown?.driverTollPassThrough,
+            rideData.financialBreakdown?.tollFee,
+            rideData.financialBreakdown?.toll_fee,
+            rideData.financialBreakdown?.driverTollPassThrough
+        ) ?? 0;
         const breakdown = this.paymentService.calculateFareBreakdownFromReais(totalFare, tollFee);
         const explicitBreakdown = rideData.fareBreakdown || rideData.paymentBreakdown || {};
         const firstFinite = (...values) => {
             for (const value of values) {
-                if (value === null || value === undefined || value === '') continue;
-                const numeric = Number(value);
-                if (Number.isFinite(numeric)) return numeric;
+                const numeric = this.parseMoneyValue(value, null);
+                if (numeric !== null) return numeric;
             }
             return null;
         };
@@ -311,6 +550,18 @@ class ReceiptService {
                     formatted: `R$ ${wooviFee.toFixed(2).replace('.', ',')}`
                 },
 
+                tollPassThrough: {
+                    amount: tollFee,
+                    formatted: `R$ ${tollFee.toFixed(2).replace('.', ',')}`,
+                    passThrough: true
+                },
+
+                driverTollPassThrough: {
+                    amount: tollFee,
+                    formatted: `R$ ${tollFee.toFixed(2).replace('.', ',')}`,
+                    passThrough: true
+                },
+
                 driverAmount: {
                     amount: driverAmount,
                     formatted: `R$ ${driverAmount.toFixed(2).replace('.', ',')}`
@@ -323,6 +574,8 @@ class ReceiptService {
                 driverReceived: driverAmount,
                 leafOperational: operationalFee,
                 wooviFee: wooviFee,
+                tollPassThrough: tollFee,
+                driverTollPassThrough: tollFee,
                 retainedFees: totalFees
             }
         };

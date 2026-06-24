@@ -8,6 +8,18 @@ const { getBypassOtpCode, isOtpBypassPhone, isReviewOtpBypassEnabled } = require
 const router = express.Router();
 const OTP_TTL_SECONDS = 300;
 
+function isProductionRuntime() {
+    return String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+}
+
+function respondOtpProviderNotConfigured(res) {
+    return res.status(503).json({
+        success: false,
+        code: 'OTP_PROVIDER_NOT_CONFIGURED',
+        error: 'OTP provider not configured for production'
+    });
+}
+
 function normalizePhoneDigits(phone) {
     return String(phone || '').replace(/\D/g, '');
 }
@@ -120,6 +132,11 @@ router.post('/request-otp', async (req, res) => {
         }
 
         const otpBypassEnabled = isOtpBypassPhone(normalizedPhone);
+        if (isProductionRuntime() && !otpBypassEnabled) {
+            logger.error('[CUSTOM OTP] Production request blocked: no real OTP delivery provider is configured');
+            return respondOtpProviderNotConfigured(res);
+        }
+
         const otp = otpBypassEnabled
             ? getBypassOtpCode(normalizedPhone)
             : Math.floor(100000 + Math.random() * 900000).toString();
@@ -209,6 +226,11 @@ router.post('/verify-otp', async (req, res) => {
 
         if (!verificationId && !bypassAllowedForRequest) {
             return res.status(400).json({ error: 'Missing parameters' });
+        }
+
+        if (isProductionRuntime() && !bypassAllowedForRequest) {
+            logger.error('[CUSTOM OTP] Production verification blocked: no real OTP delivery provider is configured');
+            return respondOtpProviderNotConfigured(res);
         }
 
         if (bypassAttempt && testOtpBypassEnabled) {

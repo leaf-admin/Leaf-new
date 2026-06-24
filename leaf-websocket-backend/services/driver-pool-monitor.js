@@ -198,8 +198,8 @@ class DriverPoolMonitor {
                     return false; // Motorista bloqueado por KYC
                 }
             } catch (kycError) {
-                // Se falhar verificação KYC, continuar com outras verificações (fail-open)
-                logger.debug(`⚠️ [DriverPoolMonitor] Erro ao verificar KYC de ${driverId}:`, kycError.message);
+                logger.debug(`⚠️ [DriverPoolMonitor] Erro ao verificar KYC de ${driverId} (bloqueando disponibilidade):`, kycError.message);
+                return false;
             }
 
             // 1. Verificar se motorista tem lock (corrida em andamento)
@@ -316,4 +316,3 @@ class DriverPoolMonitor {
 }
 
 module.exports = DriverPoolMonitor;
-

@@ -256,8 +256,24 @@ describe('FinancialLedgerService', () => {
     });
     firestore.docs.set('payment_distributions/ride_reconcile_1', {
       rideId: 'ride_reconcile_1',
+      status: 'distributed',
+      netAmount: 2500,
+      retainedFees: {
+        operationalFee: 300,
+        wooviFee: 200
+      },
       calculation: {
-        totalAmount: 3000
+        totalAmount: 3000,
+        financialContract: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 3000,
+          tollFeeCents: 0,
+          operationalFeeCents: 300,
+          paymentIntermediationFeeCents: 200,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 2500
+        }
       }
     });
 
@@ -288,6 +304,10 @@ describe('FinancialLedgerService', () => {
       totals: {
         paymentAmountCents: 3000,
         distributionTotalCents: 3000,
+        passengerGrossCents: 3000,
+        driverNetAmountCents: 2500,
+        operationalFeeCents: 300,
+        wooviFeeCents: 200,
         ledgerEventCount: 2
       }
     });
@@ -319,8 +339,24 @@ describe('FinancialLedgerService', () => {
     });
     firestore.docs.set('payment_distributions/booking_alias_1', {
       rideId: 'booking_alias_1',
+      status: 'distributed',
+      netAmount: 9420,
+      retainedFees: {
+        operationalFee: 294,
+        wooviFee: 78
+      },
       calculation: {
-        totalAmount: 9792
+        totalAmount: 9792,
+        financialContract: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 9792,
+          tollFeeCents: 0,
+          operationalFeeCents: 294,
+          paymentIntermediationFeeCents: 78,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 9420
+        }
       }
     });
 
@@ -392,6 +428,68 @@ describe('FinancialLedgerService', () => {
           code: 'PAYMENT_LEDGER_AMOUNT_MISMATCH',
           ledgerAmountCents: 9500,
           paymentAmountCents: 9792
+        })
+      ])
+    });
+  });
+
+  it('flags a distributed driver net that diverges from the immutable financial snapshot', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    firestore.docs.set('ride_payments/ride_snapshot_mismatch', {
+      rideId: 'ride_snapshot_mismatch',
+      chargeId: 'charge_snapshot_mismatch',
+      amount: 3000,
+      status: 'CONFIRMED'
+    });
+    firestore.docs.set('payment_distributions/ride_snapshot_mismatch', {
+      rideId: 'ride_snapshot_mismatch',
+      status: 'distributed',
+      netAmount: 2400,
+      retainedFees: {
+        operationalFee: 300,
+        wooviFee: 200
+      },
+      calculation: {
+        totalAmount: 3000,
+        financialContract: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 3000,
+          tollFeeCents: 0,
+          operationalFeeCents: 300,
+          paymentIntermediationFeeCents: 200,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 2500
+        }
+      }
+    });
+    await service.recordPaymentReceived({
+      rideId: 'ride_snapshot_mismatch',
+      chargeId: 'charge_snapshot_mismatch',
+      amountCents: 3000,
+      passengerId: 'passenger_1'
+    });
+    await service.recordRideSettlement({
+      rideId: 'ride_snapshot_mismatch',
+      driverId: 'driver_1',
+      totalAmountCents: 3000,
+      netAmountCents: 2500,
+      operationalFeeCents: 300,
+      wooviFeeCents: 200
+    });
+
+    const result = await service.reconcileRideFinancials({ rideId: 'ride_snapshot_mismatch' });
+
+    expect(result.report).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'DISTRIBUTION_DRIVER_NET_MISMATCH',
+          distributionNetAmountCents: 2400,
+          snapshotDriverNetAmountCents: 2500
         })
       ])
     });

@@ -536,6 +536,11 @@ function buildExtensionRequest({
   newFare,
   routeDistanceKm = null,
   routeDurationSecs = null,
+  requestedClientFare = null,
+  serverEstimatedFare = null,
+  fareAuthority = null,
+  pricingPayload = null,
+  pricingAudit = null,
   traceId = null,
   correlationId = null
 }) {
@@ -554,6 +559,11 @@ function buildExtensionRequest({
     newEndLocation,
     routeDistanceKm: routeDistanceKm !== null ? roundMoney(routeDistanceKm) : null,
     routeDurationSecs: routeDurationSecs !== null ? Math.round(routeDurationSecs) : null,
+    requestedClientFare: requestedClientFare !== null ? roundMoney(requestedClientFare) : null,
+    serverEstimatedFare: serverEstimatedFare !== null ? roundMoney(serverEstimatedFare) : null,
+    fareAuthority: fareAuthority ? String(fareAuthority).trim() : null,
+    pricingPayload: pricingPayload || null,
+    pricingAudit: pricingAudit || null,
     traceId,
     correlationId
   };

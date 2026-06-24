@@ -5,6 +5,12 @@ const RideStateManager = require('../services/ride-state-manager');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { writeVisibleBookingSnapshot } = require('../services/booking-visibility-service');
 const {
+    hasRideOfflineIntentPayload,
+    markRideOfflineIntentProcessed,
+    markRideOfflineIntentRejected,
+    validateAndReserveRideOfflineIntent
+} = require('../services/ride-offline-intent-validator');
+const {
     resolveDriverActivationState
 } = require('../services/driver-activation-state-service');
 const {
@@ -151,6 +157,59 @@ function registerSocketDriverControlHandlers({
             }
 
             const redis = redisPool.getConnection();
+            let offlineIntentValidation = null;
+            if (hasRideOfflineIntentPayload(data)) {
+                offlineIntentValidation = await validateAndReserveRideOfflineIntent({
+                    redis,
+                    bookingId: rideId,
+                    actorId: socket.userId || data.driverId,
+                    role: 'driver',
+                    eventType: 'arrived_at_pickup',
+                    idempotencyKey: outerIdempotencyKey || data.idempotencyKey,
+                    clientSequence: data.clientSequence,
+                    clientCreatedAt: data.clientCreatedAt,
+                    payload: {
+                        location
+                    },
+                    data
+                });
+
+                if (!offlineIntentValidation.accepted) {
+                    const errorPayload = {
+                        success: false,
+                        error: offlineIntentValidation.message || 'Intencao offline rejeitada',
+                        code: offlineIntentValidation.code || 'OFFLINE_INTENT_REJECTED',
+                        bookingId: rideId
+                    };
+                    socket.emit('arrivedAtPickup', errorPayload);
+                    if (transport === 'notificationAction') {
+                        socket.emit('notificationActionError', {
+                            ...errorPayload,
+                            action: 'arrived_at_pickup'
+                        });
+                    }
+                    if (outerIdempotencyOwner && outerIdempotencyKey && rideIdempotencyService) {
+                        outerIdempotencyOwner = false;
+                        await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                    }
+                    return;
+                }
+
+                if (offlineIntentValidation.replay && offlineIntentValidation.cachedResult) {
+                    if (rideIdempotencyService && outerIdempotencyKey) {
+                        await rideIdempotencyService.cacheResult(outerIdempotencyKey, offlineIntentValidation.cachedResult);
+                        outerIdempotencyOwner = false;
+                    }
+                    socket.emit('arrivedAtPickup', offlineIntentValidation.cachedResult);
+                    if (transport === 'notificationAction') {
+                        socket.emit('notificationActionSuccess', {
+                            ...offlineIntentValidation.cachedResult,
+                            action: 'arrived_at_pickup'
+                        });
+                    }
+                    return;
+                }
+            }
             const bookingData = await redis.hgetall(`booking:${rideId}`);
             const arrivalAssessment = await assessDriverArrivalAtPickup({
                 redis,
@@ -179,6 +238,15 @@ function registerSocketDriverControlHandlers({
                 }
                 if (outerIdempotencyOwner && outerIdempotencyKey && rideIdempotencyService) {
                     outerIdempotencyOwner = false;
+                    if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                        await markRideOfflineIntentRejected({
+                            redis,
+                            bookingId: rideId,
+                            idempotencyKey: outerIdempotencyKey,
+                            error: arrivalAssessment.message || 'Chegada rejeitada',
+                            code: arrivalAssessment.code || 'ARRIVAL_VALIDATION_FAILED'
+                        }).catch(() => null);
+                    }
                     await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
                 }
                 return;
@@ -302,6 +370,14 @@ function registerSocketDriverControlHandlers({
             };
             if (outerIdempotencyKey && rideIdempotencyService) {
                 await rideIdempotencyService.cacheResult(outerIdempotencyKey, successPayload);
+                if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                    await markRideOfflineIntentProcessed({
+                        redis,
+                        bookingId: rideId,
+                        idempotencyKey: outerIdempotencyKey,
+                        result: successPayload
+                    }).catch(() => null);
+                }
                 outerIdempotencyOwner = false;
             }
             socket.emit('arrivedAtPickup', successPayload);

@@ -34,7 +34,7 @@ const supportQueueService = require('../services/support-queue-service');
 const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const supportDriverIdentityReverificationService = require('../services/support-driver-identity-reverification-service');
 
-const AGENT_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
+const AGENT_ROLES = ['admin', 'manager', 'super-admin', 'support', 'support_n1', 'support_n2', 'support_n3', 'development'];
 
 const supportRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -192,6 +192,7 @@ router.post(
         userType: req.user?.userType || 'passenger',
         userInfo: userInfo || {},
         metadata: metadata || {},
+        requesterIsAgent: isSupportAgent(req.user),
         ipAddress: req.ip,
         userAgent: req.get('User-Agent')
       });

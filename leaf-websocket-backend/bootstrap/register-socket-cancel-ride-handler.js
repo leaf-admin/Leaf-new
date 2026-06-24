@@ -1,3 +1,11 @@
+const { assertRideParticipant } = require('../services/socket-scope-guard');
+const {
+    hasRideOfflineIntentPayload,
+    markRideOfflineIntentProcessed,
+    markRideOfflineIntentRejected,
+    validateAndReserveRideOfflineIntent
+} = require('../services/ride-offline-intent-validator');
+
 function registerSocketCancelRideHandler({
     socket,
     io,
@@ -21,7 +29,8 @@ function registerSocketCancelRideHandler({
     logEvent,
     PaymentService,
     idempotencyService,
-    fcmService
+    fcmService,
+    assertRideParticipant: assertRideParticipantForSocket = assertRideParticipant
 }) {
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
     const rideIdempotencyService = idempotencyService || require('../services/idempotency-service');
@@ -33,7 +42,8 @@ function registerSocketCancelRideHandler({
         await traceContext.runWithTraceId(traceId, async () => {
             try {
                 const { bookingId, reason, cancellationFee } = data;
-                const userId = socket.userId || socket.id;
+                let userId = socket.userId || socket.id;
+                let canonicalUserType = socket.userType;
 
                 logStructured('info', 'cancelRide iniciado', {
                     userId,
@@ -76,6 +86,26 @@ function registerSocketCancelRideHandler({
                     return;
                 }
 
+                const participant = await assertRideParticipantForSocket({
+                    socket,
+                    io,
+                    redisPool,
+                    bookingId,
+                    allowedRoles: ['passenger', 'driver'],
+                    allowSupport: false
+                });
+                if (!participant?.allowed) {
+                    socket.emit('rideCancellationError', {
+                        error: participant?.error || 'Usuário não autorizado para cancelar esta corrida',
+                        code: participant?.code || 'RIDE_SCOPE_DENIED'
+                    });
+                    return;
+                }
+                userId = participant.identity?.userId || userId;
+                canonicalUserType = participant.participantRole === 'passenger'
+                    ? 'customer'
+                    : 'driver';
+
                 const idempotencyKey = data.idempotencyKey || rideIdempotencyService.generateKey(
                     userId,
                     'cancelRide',
@@ -107,19 +137,42 @@ function registerSocketCancelRideHandler({
                     return;
                 }
                 outerIdempotencyOwner = true;
+                let offlineIntentValidation = null;
 
-                // ✅ NOVO: Marcar corrida como cancelada no Firestore
-                try {
-                    const ridePersistenceService = require('../services/ride-persistence-service');
-                    const cancelReason = reason || 'Cancelado pelo usuário';
-                    await ridePersistenceService.markRideCancelled(bookingId, cancelReason);
-                } catch (persistError) {
-                    logStructured('error', 'Erro ao marcar corrida como cancelada no Firestore', {
+                if (hasRideOfflineIntentPayload(data)) {
+                    offlineIntentValidation = await validateAndReserveRideOfflineIntent({
+                        redis,
                         bookingId,
-                        eventType: 'cancelRide',
-                        error: persistError.message
+                        actorId: userId,
+                        role: participant.participantRole,
+                        eventType: 'cancel_ride',
+                        idempotencyKey,
+                        clientSequence: data.clientSequence,
+                        clientCreatedAt: data.clientCreatedAt,
+                        payload: {
+                            reason,
+                            cancellationFee
+                        },
+                        data
                     });
-                    // Não bloquear cancelamento se persistência falhar
+
+                    if (!offlineIntentValidation.accepted) {
+                        socket.emit('rideCancellationError', {
+                            error: offlineIntentValidation.message || 'Intencao offline rejeitada',
+                            message: offlineIntentValidation.message || 'O backend rejeitou esta acao offline.',
+                            code: offlineIntentValidation.code || 'OFFLINE_INTENT_REJECTED'
+                        });
+                        outerIdempotencyOwner = false;
+                        await rideIdempotencyService.releaseInflight(idempotencyKey);
+                        return;
+                    }
+
+                    if (offlineIntentValidation.replay && offlineIntentValidation.cachedResult) {
+                        await rideIdempotencyService.cacheResult(idempotencyKey, offlineIntentValidation.cachedResult);
+                        outerIdempotencyOwner = false;
+                        socket.emit('rideCancelled', offlineIntentValidation.cachedResult);
+                        return;
+                    }
                 }
 
                 // 1. Buscar dados da corrida
@@ -228,7 +281,7 @@ function registerSocketCancelRideHandler({
                         cancellationFee: cancellationFee || 0,
                         traceId, // ✅ Passar traceId para o command
                         correlationId, // ✅ Passar correlationId para o command
-                        userType: socket.userType // Tipo de usuário (customer/driver)
+                        userType: canonicalUserType // Papel canônico do participante
                     });
 
                     result = await runInSpan(commandSpan, async () => {
@@ -261,11 +314,34 @@ function registerSocketCancelRideHandler({
                     socket.emit('rideCancellationError', {
                         error: result.error || 'Erro ao cancelar corrida'
                     });
+                    if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                        await markRideOfflineIntentRejected({
+                            redis,
+                            bookingId,
+                            idempotencyKey,
+                            error: result.error || 'Erro ao cancelar corrida',
+                            code: 'CANCEL_RIDE_COMMAND_FAILED'
+                        }).catch(() => null);
+                    }
                     if (outerIdempotencyOwner && outerIdempotencyKey) {
                         outerIdempotencyOwner = false;
                         await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
                     }
                     return;
+                }
+
+                // A persistência espelha apenas uma transição canônica já confirmada.
+                try {
+                    const ridePersistenceService = require('../services/ride-persistence-service');
+                    const cancelReason = reason || 'Cancelado pelo usuário';
+                    await ridePersistenceService.markRideCancelled(bookingId, cancelReason);
+                } catch (persistError) {
+                    logStructured('error', 'Erro ao marcar corrida como cancelada no Firestore', {
+                        bookingId,
+                        eventType: 'cancelRide',
+                        error: persistError.message
+                    });
+                    // A transição Redis/evento já foi confirmada; o espelho será reconciliado.
                 }
 
                 // Command executado com sucesso (já processou reembolso e atualizou estado)
@@ -350,7 +426,14 @@ function registerSocketCancelRideHandler({
                         return;
                     }
 
-                    if (paymentRecord.refunded || paymentRecord.status === 'REFUNDED') {
+                    const alreadyRefunded =
+                        paymentRecord.refunded ||
+                        (typeof PaymentService.isRefundedPaymentStatus === 'function'
+                            ? PaymentService.isRefundedPaymentStatus(paymentRecord.status)
+                            : ['REFUNDED', 'REFUNDED_FULL', 'REFUNDED_PARTIAL'].includes(
+                                String(paymentRecord.status || '').trim().toUpperCase()
+                            ));
+                    if (alreadyRefunded) {
                         refundSummary.status = 'ALREADY_REFUNDED';
                     } else {
                         const totalPaidCents = Number(paymentRecord.amount) || Math.round(estimatedFare * 100);
@@ -359,7 +442,19 @@ function registerSocketCancelRideHandler({
                         const refundReason = reason || 'Cancelado pelo passageiro';
 
                         if (refundAmountCents > 0 && chargeId) {
-                            const refundResult = await paymentService.processRefund(chargeId, refundAmountCents, refundReason);
+                            const refundResult = await paymentService.processRideRefund({
+                                rideId: bookingId,
+                                chargeId,
+                                amount: refundAmountCents,
+                                cancellationFee: feeCents,
+                                reason: refundReason,
+                                status: feeCents > 0 ? 'REFUNDED_PARTIAL' : 'REFUNDED_FULL',
+                                passengerId,
+                                metadata: {
+                                    source: 'socket_cancel_ride',
+                                    cancelledBy: socket.userType || 'unknown'
+                                }
+                            });
                             if (!refundResult.success) {
                                 socket.emit('rideCancellationError', { error: 'Falha ao processar reembolso PIX' });
                                 if (outerIdempotencyOwner && outerIdempotencyKey) {
@@ -369,16 +464,12 @@ function registerSocketCancelRideHandler({
                                 return;
                             }
 
-                            await paymentService.markPaymentRefunded(bookingId, {
-                                refundId: refundResult.refundId,
-                                refundAmount: refundAmountCents,
-                                cancellationFee: feeCents,
-                                reason: refundReason,
-                                status: 'REFUNDED'
-                            });
-
                             refundSummary = {
-                                status: 'REFUNDED',
+                                status: refundResult.alreadyRefunded
+                                    ? 'ALREADY_REFUNDED'
+                                    : feeCents > 0
+                                        ? 'REFUNDED_PARTIAL'
+                                        : 'REFUNDED_FULL',
                                 refundId: refundResult.refundId,
                                 refundAmountInCents: refundAmountCents,
                                 refundAmountInReais: (refundAmountCents / 100).toFixed(2),
@@ -406,13 +497,20 @@ function registerSocketCancelRideHandler({
                     }
                 }
 
+                const refundWasProcessed = [
+                    'REFUNDED',
+                    'REFUNDED_FULL',
+                    'REFUNDED_PARTIAL',
+                    'ALREADY_REFUNDED'
+                ].includes(String(refundSummary.status || '').toUpperCase());
+
                 const cancellationData = {
                     bookingId,
                     reason: reason || 'Cancelado pelo usuário',
                     cancellationFee: parseFloat(refundSummary.cancellationFeeInReais),
                     refundAmount: parseFloat(refundSummary.refundAmountInReais),
                     refundStatus: refundSummary.status,
-                    refundMethod: refundSummary.status === 'REFUNDED' ? 'PIX' : null,
+                    refundMethod: refundWasProcessed ? 'PIX' : null,
                     refundId: refundSummary.refundId,
                     chargeId: refundSummary.chargeId,
                     timestamp: new Date().toISOString()
@@ -421,7 +519,7 @@ function registerSocketCancelRideHandler({
                 const cancellationResponse = {
                     success: true,
                     bookingId,
-                    message: refundSummary.status === 'REFUNDED'
+                    message: refundWasProcessed
                         ? 'Corrida cancelada e reembolso processado'
                         : 'Corrida cancelada',
                     initiatedBy: socket.userType || 'unknown',
@@ -429,6 +527,14 @@ function registerSocketCancelRideHandler({
                     data: cancellationData
                 };
                 await rideIdempotencyService.cacheResult(idempotencyKey, cancellationResponse);
+                if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                    await markRideOfflineIntentProcessed({
+                        redis,
+                        bookingId,
+                        idempotencyKey,
+                        result: cancellationResponse
+                    }).catch(() => null);
+                }
                 outerIdempotencyOwner = false;
 
                 // 8. Emitir confirmação

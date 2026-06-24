@@ -86,11 +86,45 @@ function parseTimestampMs(rawValue) {
     return null;
 }
 
+function isAuthorizedCancellationActor({ canceledBy, userType, customerId, driverId }) {
+    const normalizedActorId = String(canceledBy || '').trim();
+    const normalizedUserType = String(userType || '').trim().toLowerCase();
+    const normalizedCustomerId = String(customerId || '').trim();
+    const normalizedDriverId = String(driverId || '').trim();
+
+    if (
+        normalizedUserType === 'system' &&
+        normalizedActorId === 'system_trip_integrity'
+    ) {
+        return true;
+    }
+
+    if (
+        ['customer', 'passenger'].includes(normalizedUserType) &&
+        normalizedActorId &&
+        normalizedActorId === normalizedCustomerId
+    ) {
+        return true;
+    }
+
+    return (
+        normalizedUserType === 'driver' &&
+        normalizedActorId &&
+        normalizedActorId === normalizedDriverId
+    );
+}
+
 function normalizeMoneyToCents(rawValue) {
     const parsed = Number.parseFloat(rawValue || 0);
     if (!Number.isFinite(parsed) || parsed <= 0) return 0;
     if (parsed >= 1000) return Math.round(parsed); // já está em centavos
     return Math.round(parsed * 100); // valor em reais
+}
+
+function isRefundablePaymentStatus(status) {
+    return ['PAID', 'CONFIRMED', 'LEDGER_PENDING', 'IN_HOLDING'].includes(
+        String(status || '').trim().toUpperCase()
+    );
 }
 
 function haversineDistanceKm(lat1, lng1, lat2, lng2) {
@@ -197,6 +231,21 @@ class CancelRideCommand extends Command {
                 // Verificar estado atual
                 const currentState = await RideStateManager.getBookingState(redis, this.bookingId);
 
+                const customerId = bookingData.customerId || bookingData.passengerId;
+                const driverId = bookingData.driverId;
+                const isSystemTripIntegrityCancellation =
+                    String(this.userType || '').trim().toLowerCase() === 'system' &&
+                    this.canceledBy === 'system_trip_integrity';
+                if (!isAuthorizedCancellationActor({
+                    canceledBy: this.canceledBy,
+                    userType: this.userType,
+                    customerId,
+                    driverId
+                })) {
+                    metrics.recordCommand('CancelRide', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure('Usuário não autorizado para cancelar esta corrida');
+                }
+
                 const blockedStatesAfterTripStart = new Set([
                     RideStateManager.STATES.IN_PROGRESS,
                     RideStateManager.STATES.REASSIGNED_IN_PROGRESS,
@@ -206,14 +255,23 @@ class CancelRideCommand extends Command {
                 ]);
 
                 // Depois que a corrida começou, o fluxo correto é complete/endEarly/review.
-                if (blockedStatesAfterTripStart.has(currentState)) {
+                if (
+                    blockedStatesAfterTripStart.has(currentState) &&
+                    !isSystemTripIntegrityCancellation
+                ) {
                     metrics.recordCommand('CancelRide', (Date.now() - startTime) / 1000, false);
                     return CommandResult.failure('Após o início da corrida, use o encerramento adequado em vez de cancelamento')
                 }
 
+                if (
+                    currentState === RideStateManager.STATES.CANCELED ||
+                    String(bookingData.status || '').trim().toUpperCase() === RideStateManager.STATES.CANCELED
+                ) {
+                    metrics.recordCommand('CancelRide', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure('Corrida já está cancelada');
+                }
+
                 // Parsear dados da corrida
-                const customerId = bookingData.customerId;
-                const driverId = bookingData.driverId;
 
                 // Liberar lock de motorista se houver
                 if (driverId) {
@@ -328,38 +386,55 @@ class CancelRideCommand extends Command {
                 // Processar reembolso se houver pagamento
                 let refundResult = null;
                 const paymentRecord = await paymentService.getStoredPayment(this.bookingId);
+                const paymentAmount = Number(paymentRecord?.amount || 0);
+                const chargeIdToRefund = paymentRecord?.chargeId || paymentRecord?.paymentId;
 
-                if (paymentRecord && paymentRecord.status === 'PAID' && paymentRecord.paymentId) {
+                if (
+                    paymentRecord &&
+                    isRefundablePaymentStatus(paymentRecord.status) &&
+                    chargeIdToRefund &&
+                    Number.isFinite(paymentAmount) &&
+                    paymentAmount > 0
+                ) {
                     if (this.cancellationFee && this.cancellationFee > 0) {
                         // Reembolso parcial
-                        const refundAmount = paymentRecord.amount - this.cancellationFee;
+                        const refundAmount = paymentAmount - this.cancellationFee;
                         if (refundAmount > 0) {
-                            refundResult = await paymentService.processRefund(
-                                paymentRecord.paymentId,
-                                refundAmount
-                            );
-                            if (refundResult.success) {
-                                await paymentService.markPaymentRefunded(this.bookingId, {
-                                    refundAmount,
-                                    refundId: refundResult.refundId,
-                                    refundedAt: new Date().toISOString(),
-                                    status: 'REFUNDED_PARTIAL'
-                                });
+                            refundResult = await paymentService.processRideRefund({
+                                rideId: this.bookingId,
+                                chargeId: chargeIdToRefund,
+                                amount: refundAmount,
+                                cancellationFee: this.cancellationFee,
+                                reason: this.reason || 'Cancelado pelo usuário',
+                                status: 'REFUNDED_PARTIAL',
+                                passengerId: customerId,
+                                metadata: {
+                                    source: 'CancelRideCommand',
+                                    cancelledBy: this.canceledBy,
+                                    userType: this.userType
+                                }
+                            });
+                            if (!refundResult.success) {
+                                throw new Error(refundResult.error || 'Falha ao processar reembolso PIX');
                             }
                         }
                     } else {
                         // Reembolso total
-                        refundResult = await paymentService.processRefund(
-                            paymentRecord.paymentId,
-                            paymentRecord.amount
-                        );
-                        if (refundResult.success) {
-                            await paymentService.markPaymentRefunded(this.bookingId, {
-                                refundAmount: paymentRecord.amount,
-                                refundId: refundResult.refundId,
-                                refundedAt: new Date().toISOString(),
-                                status: 'REFUNDED_FULL'
-                            });
+                        refundResult = await paymentService.processRideRefund({
+                            rideId: this.bookingId,
+                            chargeId: chargeIdToRefund,
+                            amount: paymentAmount,
+                            reason: this.reason || 'Cancelado pelo usuário',
+                            status: 'REFUNDED_FULL',
+                            passengerId: customerId,
+                            metadata: {
+                                source: 'CancelRideCommand',
+                                cancelledBy: this.canceledBy,
+                                userType: this.userType
+                            }
+                        });
+                        if (!refundResult.success) {
+                            throw new Error(refundResult.error || 'Falha ao processar reembolso PIX');
                         }
                     }
                 }
@@ -488,3 +563,4 @@ class CancelRideCommand extends Command {
 }
 
 module.exports = CancelRideCommand;
+module.exports.isAuthorizedCancellationActor = isAuthorizedCancellationActor;

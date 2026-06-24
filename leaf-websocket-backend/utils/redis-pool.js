@@ -344,11 +344,28 @@ class RedisPool {
         const timeoutMs = Number.parseInt(options.timeoutMs || '5000', 10);
 
         try {
-            if (this.pool.status === 'ready' || this.pool.status === 'connect' || this.pool.status === 'connecting') {
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('redis_shutdown_timeout')), timeoutMs)
-                );
-                await Promise.race([this.pool.quit(), timeoutPromise]);
+            const canQuit =
+                typeof this.pool.quit === 'function' &&
+                (this.pool.status === 'ready' ||
+                    this.pool.status === 'connect' ||
+                    this.pool.status === 'connecting');
+
+            if (canQuit) {
+                let shutdownTimeout = null;
+                const timeoutPromise = new Promise((_, reject) => {
+                    shutdownTimeout = setTimeout(
+                        () => reject(new Error('redis_shutdown_timeout')),
+                        timeoutMs
+                    );
+                });
+
+                try {
+                    await Promise.race([this.pool.quit(), timeoutPromise]);
+                } finally {
+                    if (shutdownTimeout) {
+                        clearTimeout(shutdownTimeout);
+                    }
+                }
             }
         } catch (error) {
             logger.warn(`⚠️ Erro ao encerrar Redis com quit(): ${error.message}`);

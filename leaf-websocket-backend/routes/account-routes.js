@@ -123,23 +123,54 @@ const PROFILE_MUTABLE_FIELDS = new Set([
   'gender',
   'genero',
   'genderLabel',
-  'driverActivation',
-  'driverProfileStatus',
-  'vehicleProfileStatus',
-  'activationCurrentStage',
-  'onboardingDocuments',
-  'documents',
-  'vehicles',
   'profileImage',
   'profile_image',
   'fcmToken',
   'pushToken',
   'platform',
   'lastSeen',
-  'cnhUploaded',
   'driverContactData',
   'customerData',
   'emergencyContact'
+]);
+
+const PROFILE_DERIVED_FORBIDDEN_FIELDS = new Set([
+  'approved',
+  'isApproved',
+  'canGoOnline',
+  'approvalStatus',
+  'driverProfileStatus',
+  'driverActivation',
+  'driverActivationConsent',
+  'activationCurrentStage',
+  'activationStatus',
+  'vehicleProfileStatus',
+  'vehicleStatus',
+  'vehicleApproved',
+  'vehicleCategory',
+  'vehicleNumber',
+  'vehiclePlate',
+  'vehicleMake',
+  'vehicleModel',
+  'vehicleColor',
+  'vehicleIdentitySource',
+  'vehicleIdentityCanonical',
+  'vehicleIdentityComplete',
+  'activeVehicleId',
+  'onboardingDocuments',
+  'documents',
+  'vehicles',
+  'vehicle',
+  'cnhUploaded',
+  'cnhExtraction',
+  'vehicleExtraction',
+  'kycStatus',
+  'kyc_status',
+  'kycBlocked',
+  'kycBlockedReason',
+  'livenessStatus',
+  'faceCompareStatus',
+  'faceCompareResult'
 ]);
 
 const FIRESTORE_PROTECTED_FIELDS = new Set([
@@ -191,6 +222,16 @@ function sanitizeProfilePatch(input = {}) {
   });
 
   return patch;
+}
+
+function findForbiddenProfileFields(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return [];
+  }
+
+  return Object.keys(input)
+    .filter((key) => PROFILE_DERIVED_FORBIDDEN_FIELDS.has(key))
+    .sort();
 }
 
 function stripProtectedFields(input = {}) {
@@ -461,6 +502,16 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Payload de perfil inválido'
+      });
+    }
+
+    const forbiddenFields = findForbiddenProfileFields(incomingProfile);
+    if (forbiddenFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'PROFILE_DERIVED_FIELD_FORBIDDEN',
+        message: 'Campos derivados de aprovação, documentos, KYC ou veículo não podem ser atualizados pelo app.',
+        forbiddenFields
       });
     }
 

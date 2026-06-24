@@ -56,6 +56,7 @@ describe('driver-eligibility-service', () => {
       createRealtimeDB({
         'users/driver_1': {
           approved: true,
+          kycStatus: 'approved',
           carType: 'Model 3',
           carPlate: 'TES8888'
         },
@@ -108,6 +109,7 @@ describe('driver-eligibility-service', () => {
       createRealtimeDB({
         'users/driver_3': {
           approved: true,
+          kycStatus: 'approved',
           carType: 'Model 3'
         },
         'user_vehicles/driver_3': {
@@ -144,8 +146,19 @@ describe('driver-eligibility-service', () => {
   it('blocks the driver when the active vehicle is assigned to another driver', async () => {
     firebaseConfig.getRealtimeDB.mockReturnValue(
       createRealtimeDB({
+        'driver_activation/driver_2': {
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: { status: 'approved' }
+          },
+          consent: {
+            backgroundCheck: { acceptedAt: '2026-06-24T12:00:00.000Z' }
+          }
+        },
         'users/driver_2': {
           approved: true,
+          kycStatus: 'approved',
+          kycFirstAccessVerifiedAt: '2026-06-24T12:00:00.000Z',
           carType: 'Leaf Plus'
         },
         'user_vehicles/driver_2': {
@@ -185,6 +198,7 @@ describe('driver-eligibility-service', () => {
       createRealtimeDB({
         'users/driver_4': {
           approved: true,
+          kycStatus: 'approved',
           carType: 'Leaf Plus'
         },
         'user_vehicles/driver_4': {
@@ -217,5 +231,162 @@ describe('driver-eligibility-service', () => {
     expect(profile.assignmentConflict).toBe(false);
     expect(profile.activeVehicleId).toBe('vehicle_4');
     expect(profile.vehiclePlate).toBe('TES4444');
+  });
+
+  it('does not infer driver or vehicle approval from a missing canonical profile', async () => {
+    firebaseConfig.getRealtimeDB.mockReturnValue(createRealtimeDB({}));
+
+    const profile = await driverEligibilityService.resolveDriverProfile('driver_missing_profile', {
+      carType: 'Leaf Plus',
+      vehiclePlate: 'MISS1234'
+    });
+
+    expect(profile.driverApproved).toBe(false);
+    expect(profile.vehicleApproved).toBe(false);
+    expect(profile.vehicleIdentitySource).toBe('runtime_fallback');
+    expect(profile.vehiclePlate).toBe('MISS1234');
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver_eligibility_profile:driver_missing_profile',
+      expect.objectContaining({
+        driverApproved: 'false',
+        vehicleApproved: 'false',
+        vehicleIdentitySource: 'runtime_fallback'
+      })
+    );
+  });
+
+  it('treats legacy cache entries without explicit approval flags as blocked', async () => {
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_legacy_cache',
+      vehicleCategory: 'plus',
+      carType: 'Leaf Plus',
+      vehiclePlate: 'CACHE123'
+    });
+
+    const profile = await driverEligibilityService.resolveDriverProfile('driver_legacy_cache');
+
+    expect(profile.driverApproved).toBe(false);
+    expect(profile.vehicleApproved).toBe(false);
+    expect(profile.vehicleCategory).toBe('plus');
+    expect(profile.vehiclePlate).toBe('CACHE123');
+  });
+
+  it('blocks ride eligibility when canonical KYC is still in manual review', async () => {
+    firebaseConfig.getRealtimeDB.mockReturnValue(
+      createRealtimeDB({
+        'users/driver_kyc_review': {
+          approved: true,
+          kycStatus: 'pending_review',
+          carType: 'Leaf Plus'
+        },
+        'user_vehicles/driver_kyc_review': {
+          uv_1: {
+            vehicleId: 'vehicle_review',
+            isActive: true,
+            status: 'approved',
+            approved: true
+          }
+        },
+        'vehicles/vehicle_review': {
+          approved: true,
+          carType: 'Leaf Plus',
+          plate: 'REV1234'
+        },
+        'vehicle_active_assignment/vehicle_review': {
+          driverId: 'driver_kyc_review',
+          userId: 'driver_kyc_review',
+          status: 'active'
+        }
+      })
+    );
+
+    const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+      'driver_kyc_review',
+      'Leaf Plus',
+      { carType: 'Leaf Plus' }
+    );
+
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.code).toBe('DRIVER_ACTIVATION_REJECTED');
+    expect(eligibility.activationState).toEqual(
+      expect.objectContaining({
+        canGoOnline: false,
+        kyc: expect.objectContaining({
+          blocked: true,
+          status: 'pending_review'
+        })
+      })
+    );
+  });
+
+  it('blocks ride eligibility when an activation document is rejected', async () => {
+    firebaseConfig.getRealtimeDB.mockReturnValue(
+      createRealtimeDB({
+        'driver_activation/driver_doc_failed': {
+          documents: {
+            cnh: { status: 'failed' }
+          }
+        },
+        'users/driver_doc_failed': {
+          approved: true,
+          kycStatus: 'approved',
+          carType: 'Leaf Plus'
+        },
+        'user_vehicles/driver_doc_failed': {
+          uv_1: {
+            vehicleId: 'vehicle_doc_failed',
+            isActive: true,
+            status: 'approved',
+            approved: true
+          }
+        },
+        'vehicles/vehicle_doc_failed': {
+          approved: true,
+          carType: 'Leaf Plus',
+          plate: 'DOC1234'
+        },
+        'vehicle_active_assignment/vehicle_doc_failed': {
+          driverId: 'driver_doc_failed',
+          userId: 'driver_doc_failed',
+          status: 'active'
+        }
+      })
+    );
+
+    const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+      'driver_doc_failed',
+      'Leaf Plus',
+      { carType: 'Leaf Plus' }
+    );
+
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.code).toBe('DRIVER_ACTIVATION_DRIVER_DOCS_PENDING');
+    expect(eligibility.activationState).toEqual(
+      expect.objectContaining({
+        canGoOnline: false,
+        documents: expect.objectContaining({
+          cnh: 'failed'
+        })
+      })
+    );
+  });
+
+  it('fails closed when the canonical activation state cannot be resolved', async () => {
+    firebaseConfig.getRealtimeDB.mockReturnValue(null);
+
+    const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+      'driver_unavailable_state',
+      'Leaf Plus',
+      { carType: 'Leaf Plus' }
+    );
+
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.code).toBe('DRIVER_ACTIVATION_STATE_UNAVAILABLE');
+    expect(eligibility.activationState).toEqual(
+      expect.objectContaining({
+        canGoOnline: false,
+        blockingReason: 'Nao foi possivel validar cadastro, documentos e KYC agora.'
+      })
+    );
   });
 });

@@ -26,11 +26,20 @@ const financialReconciliationDashboardService = require('../services/financial-r
 const FinancialLedgerService = require('../services/financial-ledger-service');
 const auditService = require('../services/audit-service');
 const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
-const { resolveDriverReactivationState } = require('../services/dashboard-user-management-service');
+const {
+  DashboardUserManagementError,
+  updateUserOperationalStatus
+} = require('../services/dashboard-user-management-service');
 const {
   recomputeDriverActivationStatus
 } = require('../services/driver-document-analysis-queue');
-const { buildRecentRideActivities } = require('../services/dashboard-ride-monitoring-service');
+const {
+  buildRecentRideActivities,
+  isRideRevenuePendingFinalSnapshot,
+  resolveRideDriverNetAmount,
+  resolveRideOperationalFee,
+  resolveRideRevenue
+} = require('../services/dashboard-ride-monitoring-service');
 const { getPeakHours: getReportPeakHours } = require('../services/dashboard/reportMetrics');
 const os = require('os');
 
@@ -52,9 +61,15 @@ const legacyPromotionsRoutesEnabled =
 const legacyDashboardUsersMirrorEnabled =
   String(process.env.ENABLE_LEGACY_DASHBOARD_USERS_RTDB_MIRROR || 'false').toLowerCase() === 'true';
 const DASHBOARD_OPERATION_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
+const DASHBOARD_OPERATION_MUTATION_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const DASHBOARD_SUPPORT_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
 const DASHBOARD_FINANCIAL_ROLES = ['admin', 'super-admin', 'manager'];
 const DASHBOARD_MONITORING_ROLES = ['admin', 'super-admin', 'manager', 'development'];
+const DRIVER_DOCUMENT_SIGNED_URL_TTL_MS = Math.max(
+  5 * 60 * 1000,
+  Number.parseInt(process.env.DRIVER_DOCUMENT_SIGNED_URL_TTL_MS || `${24 * 60 * 60 * 1000}`, 10) || 24 * 60 * 60 * 1000
+);
+const LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED = false;
 const DASHBOARD_JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
   context: 'dashboard-routes'
 });
@@ -62,12 +77,13 @@ const DASHBOARD_JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET']
 function emitDriverActivationUnlockedEvent(req, driverId, payload = {}) {
   const io = req?.app?.get?.('io') || req?.app?.locals?.io || null;
   if (!io || !driverId) return;
+  const canGoOnline = payload?.canGoOnline === true;
   io.to(`driver_${driverId}`).emit('driverDocumentStatusUpdated', {
     driverId,
     documentType: 'activation_status',
-    status: 'approved',
+    status: canGoOnline ? 'approved' : 'pending',
     updatedAt: new Date().toISOString(),
-    canGoOnline: true,
+    canGoOnline,
     ...payload
   });
 }
@@ -116,6 +132,7 @@ function resolveDashboardHardeningRoles(methods, routePath) {
     normalizedPath.includes('/promotions') ||
     normalizedPath.includes('/revenue') ||
     normalizedPath.includes('/financial') ||
+    normalizedPath.includes('/reports') ||
     normalizedPath.includes('/costs')
   ) {
     return DASHBOARD_FINANCIAL_ROLES;
@@ -247,12 +264,12 @@ async function authenticateLegacyDashboardSupportJWTOrSkip(req, res, next) {
     }
 
     const userData = adminUser.data || {};
-    req.user = {
-      id: decoded.userId,
-      email: decoded.email || userData.email,
-      role: decoded.role || userData.role || 'viewer',
-      permissions: decoded.permissions || userData.permissions || []
-    };
+	    req.user = {
+	      id: decoded.userId,
+	      email: decoded.email || userData.email,
+	      role: userData.role || 'viewer',
+	      permissions: Array.isArray(userData.permissions) ? userData.permissions : []
+	    };
 
     return next();
   } catch (error) {
@@ -292,9 +309,9 @@ async function authenticateMapH3Access(req, res, next) {
         maxAgeMs: 15 * 1000
       });
 
-      if (adminUser.exists && adminUser.data?.active !== false) {
-        const userData = adminUser.data || {};
-        const role = decoded.role || userData.role || 'viewer';
+	    if (adminUser.exists && adminUser.data?.active !== false) {
+	      const userData = adminUser.data || {};
+	      const role = userData.role || 'viewer';
 
         if (!DASHBOARD_OPERATION_ROLES.includes(role)) {
           return res.status(403).json({
@@ -304,11 +321,11 @@ async function authenticateMapH3Access(req, res, next) {
         }
 
         req.user = {
-          id: decoded.userId,
-          email: decoded.email || userData.email,
-          role,
-          permissions: decoded.permissions || userData.permissions || []
-        };
+	        id: decoded.userId,
+	        email: decoded.email || userData.email,
+	        role,
+	        permissions: Array.isArray(userData.permissions) ? userData.permissions : []
+	      };
         req.mapH3AuthSource = 'dashboard';
         return next();
       }
@@ -610,7 +627,7 @@ router.get('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERATIO
 });
 
 // 👤 Atualizar dados cadastrais de usuário via dashboard (admin)
-router.patch('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.patch('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), async (req, res) => {
   try {
     const { userId } = req.params;
     const safeUserId = normalizeId(userId);
@@ -670,7 +687,7 @@ router.get('/api/drivers/applications', authenticateJWT, requireRole(DASHBOARD_O
 
 // 📋 Aprovar/Rejeitar Documento Específico - NOVO SISTEMA
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/:driverId/documents/:documentType/review', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.post('/api/drivers/:driverId/documents/:documentType/review', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), async (req, res) => {
   try {
     const { driverId, documentType } = req.params;
     const { action, rejectionReason } = req.body; // action: 'approve' | 'reject'
@@ -753,19 +770,36 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
           nextStatus
         );
 
-        // ✅ Atualizar também o status geral do motorista se todos os documentos estiverem aprovados
-        if (action === 'approve') {
-          const allDocsSnapshot = await db.ref(`users/${driverId}/documents`).once('value');
-          const allDocs = allDocsSnapshot.val() || {};
-          const allApproved = Object.values(allDocs).every(doc => doc.status === 'approved');
+        await auditService.logEvent({
+          userId: reviewedBy,
+          action: 'driver.document_review',
+          resource: 'driver_document',
+          severity: action === 'reject' ? 'WARNING' : 'INFO',
+          details: {
+            driverId,
+            documentType: normalizedDocumentType,
+            action,
+            previousStatus: existingDocument.status || null,
+            nextStatus,
+            rejectionReason: action === 'reject' ? rejectionReason : null,
+            reviewedByEmail: req.user.email || null
+          },
+          ip: req.ip,
+          userAgent: req.headers['user-agent'] || 'unknown',
+          success: true
+        });
 
-          if (allApproved) {
-            await db.ref(`users/${driverId}`).update({
-              approved: true,
-              approvedAt: new Date().toISOString(),
-              approvedBy: reviewedBy
-            });
-          }
+        // Document review never grants operational access by itself. The canonical
+        // activation service also evaluates vehicle, KYC and liveness evidence.
+        try {
+          await recomputeDriverActivationStatus(driverId);
+        } catch (recomputeError) {
+          logStructured('warn', 'Falha ao recomputar ativação após revisão de documento', {
+            service: 'dashboard-routes',
+            driverId,
+            documentType: normalizedDocumentType,
+            error: recomputeError?.message || String(recomputeError)
+          });
         }
 
         try {
@@ -871,6 +905,28 @@ function sanitizeFilename(value) {
     .replace(/_+/g, '_');
 }
 
+function normalizeManualApprovalEvidence(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === 'string') return { ref: item };
+        if (item && typeof item === 'object') return item;
+        return null;
+      })
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return [{ ref: value.trim() }];
+  }
+
+  if (value && typeof value === 'object') {
+    return [value];
+  }
+
+  return [];
+}
+
 const MEI_DOCUMENTS_ENABLED =
   String(process.env.ENABLE_DRIVER_MEI_DOCUMENTS || 'false').toLowerCase() === 'true';
 const REVIEWABLE_DOCUMENT_TYPES = [
@@ -970,7 +1026,7 @@ router.get(
 router.post(
   '/api/drivers/:driverId/documents/:documentType/upload',
   authenticateJWT,
-  requireRole(DASHBOARD_OPERATION_ROLES),
+  requireRole(DASHBOARD_OPERATION_MUTATION_ROLES),
   (req, res, next) => {
     adminDocumentUpload.single('file')(req, res, (err) => {
       if (err) {
@@ -1032,6 +1088,7 @@ router.post(
       const extension = path.extname(fileName) || (requestedMime === 'application/pdf' ? '.pdf' : '');
       const objectPath = `documents/${driverId}/${documentType}/${Date.now()}_${fileName.replace(extension, '')}${extension}`;
       const storageFile = bucket.file(objectPath);
+      const signedUrlExpiresAt = new Date(Date.now() + DRIVER_DOCUMENT_SIGNED_URL_TTL_MS);
 
       await storageFile.save(req.file.buffer, {
         resumable: false,
@@ -1048,13 +1105,14 @@ router.post(
 
       const [signedUrl] = await storageFile.getSignedUrl({
         action: 'read',
-        expires: '2035-01-01'
+        expires: signedUrlExpiresAt
       });
 
       const documentPayload = {
         type: documentType,
         status: 'pending',
         fileUrl: signedUrl,
+        fileUrlExpiresAt: signedUrlExpiresAt.toISOString(),
         filePath: objectPath,
         fileType: req.file.mimetype,
         fileName,
@@ -1118,6 +1176,7 @@ router.post(
           driverId,
           documentType,
           fileUrl: signedUrl,
+          fileUrlExpiresAt: signedUrlExpiresAt.toISOString(),
           status: 'pending'
         }
       });
@@ -1133,7 +1192,7 @@ router.post(
 
 // 🚗 Atualizar configuração manual de veículo/categoria do motorista
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
     const {
@@ -1342,6 +1401,27 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
 
     await db.ref().update(updates);
 
+    await auditService.logEvent({
+      userId: req.user?.id || req.user?.userId || req.user?.email || 'dashboard',
+      action: 'driver.vehicle_config_update',
+      resource: 'driver_vehicle',
+      severity: vehicleStatus ? 'WARNING' : 'INFO',
+      details: {
+        driverId,
+        userVehicleId,
+        vehicleId: selectedVehicleId || null,
+        category: normalizedCategory || null,
+        setActive: setActive !== false,
+        vehicleStatus: vehicleStatus || null,
+        acceptPlusWithElite: typeof acceptPlusWithElite === 'boolean' ? acceptPlusWithElite : null,
+        actorEmail: req.user?.email || null,
+        actorRole: req.user?.role || null
+      },
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] || 'unknown',
+      success: true
+    });
+
     // Melhor esforço: atualizar cache Redis de elegibilidade para refletir mudança imediatamente.
     try {
       const redis = redisPool.getConnection();
@@ -1403,7 +1483,15 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
 
 // 🚗 Aprovar Aplicação de Motorista
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), async (req, res) => {
+  if (!LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED) {
+    return res.status(410).json({
+      success: false,
+      code: 'LEGACY_DRIVER_APPLICATION_MUTATION_DISABLED',
+      error: 'Aprovação em massa legada está desativada. Revise documentos individualmente e use o fluxo canônico de ativação.'
+    });
+  }
+
   try {
     const { id } = req.params;
     const { notes } = req.body;
@@ -1424,6 +1512,35 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
           return res.status(400).json({ error: 'Usuário não é um motorista' });
         }
 
+        const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
+        const documents = documentsSnapshot.val() || {};
+        const manualApprovalEvidence = Object.entries(documents).map(([docType, doc]) => ({
+          type: sanitizeDocumentType(docType) || docType,
+          status: doc?.status || null,
+          fileName: doc?.fileName || null,
+          fileType: doc?.fileType || null,
+          uploadedAt: doc?.uploadedAt || null
+        }));
+        const manualApprovalAudit = {
+          actorId: adminId,
+          actorRole: req.user.role || 'admin',
+          reason: notes || 'Aprovacao manual de aplicacao de motorista pelo dashboard',
+          provenance: 'dashboard_driver_application_approval',
+          evidence: manualApprovalEvidence.length > 0
+            ? manualApprovalEvidence
+            : [{ type: 'dashboard_application', ref: id }]
+        };
+
+        await kycDriverStatusService.unblockDriver(id, {
+          confidence: 1,
+          similarityScore: 1,
+          manualOverride: true,
+          audit: {
+            ...manualApprovalAudit,
+            reason: `${manualApprovalAudit.reason}; liberacao KYC vinculada a aprovacao manual`
+          }
+        });
+
         // ✅ Atualizar status de aprovação no Firebase Realtime Database
         const updates = {
           approved: true,
@@ -1431,6 +1548,7 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
           approvedBy: adminId,
           approvedByEmail: req.user.email, // ✅ Email do admin para auditoria
           adminNotes: notes || '',
+          manualApprovalAudit,
           status: 'approved',
           kycStatus: 'approved',
           kycBlocked: false,
@@ -1442,8 +1560,6 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
         await db.ref(`users/${id}`).update(updates);
 
         // ✅ Atualizar também todos os documentos para aprovados
-        const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-        const documents = documentsSnapshot.val() || {};
         const documentUpdates = {};
         const counterTransitions = [];
         const reviewedAtIso = new Date().toISOString();
@@ -1509,20 +1625,6 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
           activationState: 'ACTIVE'
         });
 
-        // Melhor esforço: liberar bloqueio KYC para refletir aprovação manual.
-        try {
-          await kycDriverStatusService.unblockDriver(id, {
-            confidence: 1,
-            similarityScore: 1
-          });
-        } catch (kycUnblockError) {
-          logStructured('warn', 'Falha ao liberar bloqueio KYC após aprovação manual', {
-            service: 'dashboard-routes',
-            driverId: id,
-            error: kycUnblockError.message
-          });
-        }
-
         try {
           await driverApplicationService.syncDriverApplication(id, {
             db,
@@ -1558,7 +1660,15 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
 
 // 🚗 Rejeitar Aplicação de Motorista
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), async (req, res) => {
+  if (!LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED) {
+    return res.status(410).json({
+      success: false,
+      code: 'LEGACY_DRIVER_APPLICATION_MUTATION_DISABLED',
+      error: 'Rejeição em massa legada está desativada. Use a revisão individual de documentos com motivo auditável.'
+    });
+  }
+
   try {
     const { id } = req.params;
     const { notes, rejectionReasons } = req.body;
@@ -1896,15 +2006,15 @@ router.get('/api/metrics/financial', authenticateJWT, requireRole(DASHBOARD_FINA
         const cancelledBookings = filteredBookings.filter(b => b.status === 'CANCELLED');
 
         const totalRevenue = completedBookings.reduce((sum, booking) => {
-          return sum + parseFloat(booking.customer_paid || booking.total_fare || 0);
+          return sum + resolveRideRevenue(booking);
         }, 0);
 
         const convenienceFees = completedBookings.reduce((sum, booking) => {
-          return sum + parseFloat(booking.convenience_fees || 0);
+          return sum + resolveRideOperationalFee(booking);
         }, 0);
 
         const totalFares = completedBookings.reduce((sum, booking) => {
-          return sum + parseFloat(booking.driver_share || 0);
+          return sum + resolveRideDriverNetAmount(booking);
         }, 0);
 
         metrics = {
@@ -2024,15 +2134,15 @@ router.get('/api/metrics/financial/advanced', authenticateJWT, requireRole(DASHB
         if (completedBookings.length > 0) {
           // Calcular receitas reais
           const grossRevenue = completedBookings.reduce((sum, booking) => {
-            return sum + parseFloat(booking.customer_paid || booking.total_fare || 0);
+            return sum + resolveRideRevenue(booking);
           }, 0);
 
           const commissionRevenue = completedBookings.reduce((sum, booking) => {
-            return sum + parseFloat(booking.convenience_fees || 0);
+            return sum + resolveRideOperationalFee(booking);
           }, 0);
 
           const driverPayouts = completedBookings.reduce((sum, booking) => {
-            return sum + parseFloat(booking.driver_share || 0);
+            return sum + resolveRideDriverNetAmount(booking);
           }, 0);
 
           // Calcular custos operacionais reais por corrida
@@ -2581,7 +2691,7 @@ router.get('/api/rides/stats', async (req, res) => {
         );
 
         const totalValue = completedRides.reduce((sum, b) =>
-          sum + parseFloat(b.customer_paid || b.fare || 0), 0
+          sum + resolveRideRevenue(b), 0
         );
 
         stats = {
@@ -2638,11 +2748,11 @@ router.get('/api/revenue/stats', async (req, res) => {
         });
 
         const todayRevenue = completedToday.reduce((sum, b) =>
-          sum + parseFloat(b.customer_paid || b.fare || 0), 0
+          sum + resolveRideRevenue(b), 0
         );
 
         const monthlyRevenue = completedThisMonth.reduce((sum, b) =>
-          sum + parseFloat(b.customer_paid || b.fare || 0), 0
+          sum + resolveRideRevenue(b), 0
         );
 
         stats = {
@@ -3629,7 +3739,7 @@ router.get('/api/map/trip/:bookingId/route', async (req, res) => {
 });
 
 // 📊 Advanced Reports - SISTEMA DE RELATÓRIOS AVANÇADOS
-router.get('/api/reports/comprehensive', async (req, res) => {
+router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   try {
     const {
       reportType = 'financial', // 'financial', 'operational', 'users', 'trips'
@@ -3686,17 +3796,20 @@ router.get('/api/reports/comprehensive', async (req, res) => {
           const completedBookings = periodBookings.filter(b =>
             b.status === 'COMPLETE' || b.status === 'PAID'
           );
+          const reconciledCompletedBookings = completedBookings.filter(
+            (booking) => !isRideRevenuePendingFinalSnapshot(booking)
+          );
 
           const totalFares = completedBookings.reduce((sum, b) =>
-            sum + parseFloat(b.estimate || 0), 0
+            sum + resolveRideRevenue(b), 0
           );
 
           const convenienceFees = completedBookings.reduce((sum, b) =>
-            sum + (parseFloat(b.estimate || 0) * 0.15), 0 // 15% de taxa
+            sum + resolveRideOperationalFee(b), 0
           );
 
           const driverEarnings = completedBookings.reduce((sum, b) =>
-            sum + parseFloat(b.driver_share || b.estimate * 0.85 || 0), 0
+            sum + resolveRideDriverNetAmount(b), 0
           );
 
           // Agrupar por dia
@@ -3710,9 +3823,11 @@ router.get('/api/reports/comprehensive', async (req, res) => {
                 trips: 0
               };
             }
-            dailyRevenue[date].totalFares += parseFloat(booking.estimate || 0);
-            dailyRevenue[date].convenienceFees += parseFloat(booking.estimate || 0) * 0.15;
+            dailyRevenue[date].totalFares += resolveRideRevenue(booking);
+            dailyRevenue[date].convenienceFees += resolveRideOperationalFee(booking);
             dailyRevenue[date].trips += 1;
+            dailyRevenue[date].reconciledTrips = (dailyRevenue[date].reconciledTrips || 0)
+              + (isRideRevenuePendingFinalSnapshot(booking) ? 0 : 1);
           });
 
           reportData = {
@@ -3723,8 +3838,10 @@ router.get('/api/reports/comprehensive', async (req, res) => {
               totalRevenue: totalFares.toFixed(2),
               convenienceFees: convenienceFees.toFixed(2),
               driverEarnings: driverEarnings.toFixed(2),
+              reconciledCompletedBookings: reconciledCompletedBookings.length,
+              pendingReconciliationBookings: completedBookings.length - reconciledCompletedBookings.length,
               averageOrderValue: completedBookings.length > 0 ?
-                (totalFares / completedBookings.length).toFixed(2) : '0.00'
+                (totalFares / Math.max(reconciledCompletedBookings.length, 1)).toFixed(2) : '0.00'
             },
             dailyBreakdown: Object.keys(dailyRevenue).map(date => ({
               date,
@@ -3848,7 +3965,7 @@ router.get('/api/reports/comprehensive', async (req, res) => {
 });
 
 // 📊 Export Report Data
-router.get('/api/reports/export/:reportId', async (req, res) => {
+router.get('/api/reports/export/:reportId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   try {
     const { reportId } = req.params;
     const { format = 'pdf' } = req.query; // 'pdf', 'excel', 'csv'
@@ -3885,7 +4002,7 @@ function getTopDriversByEarnings(bookings, users, limit = 10) {
       };
     }
 
-    driverEarnings[driverId].totalEarnings += parseFloat(booking.driver_share || booking.estimate * 0.85 || 0);
+    driverEarnings[driverId].totalEarnings += resolveRideDriverNetAmount(booking);
     driverEarnings[driverId].totalTrips += 1;
   });
 
@@ -4087,7 +4204,7 @@ function getCityAnalysis(bookings, users) {
     }
 
     cities[city].trips += 1;
-    cities[city].revenue += parseFloat(booking.estimate || 0);
+    cities[city].revenue += resolveRideRevenue(booking);
   });
 
   return Object.keys(cities).map(city => ({
@@ -5364,7 +5481,7 @@ router.get('/api/costs/per-trip', async (req, res) => {
           const booking = bookings[id];
           const distance = parseFloat(booking.distance || 0);
           const duration = parseFloat(booking.duration || 0);
-          const fare = parseFloat(booking.estimate || 0);
+          const fare = resolveRideRevenue(booking);
 
           // Custos por corrida (estimativas baseadas em dados reais do mercado)
           const costs = calculateTripCosts(booking, distance, duration);
@@ -5555,7 +5672,7 @@ router.get('/api/costs/insights', async (req, res) => {
           }
           dailyCosts[date].trips += 1;
           dailyCosts[date].totalCosts += trip.costs.totalOperationalCosts;
-          dailyCosts[date].totalRevenue += parseFloat(trip.estimate || 0);
+          dailyCosts[date].totalRevenue += resolveRideRevenue(trip);
         });
 
         // Identificar otimizações
@@ -5677,7 +5794,7 @@ function calculateTripCosts(booking, distance, duration) {
   // Processamento de pagamento (% da transação)
   const paymentProcessingRate = 0.039; // 3.9% + R$ 0.39
   const paymentFixedFee = 0.39;
-  const fare = parseFloat(booking.estimate || 0);
+  const fare = resolveRideRevenue(booking);
   const paymentCost = (fare * paymentProcessingRate) + paymentFixedFee;
 
   // Comunicação
@@ -6385,7 +6502,7 @@ router.get('/api/analytics/growth', async (req, res) => {
             totalTrips: Object.keys(bookings).length,
             totalRevenue: Object.values(bookings)
               .filter(b => b.status === 'COMPLETE' || b.status === 'PAID')
-              .reduce((sum, b) => sum + parseFloat(b.estimate || 0), 0).toFixed(2),
+              .reduce((sum, b) => sum + resolveRideRevenue(b), 0).toFixed(2),
             generatedAt: new Date().toISOString()
           },
           growth: {
@@ -6570,10 +6687,10 @@ function analyzeRevenueGrowth(bookings, startDate, endDate, compareStartDate) {
   });
 
   const currentRevenue = currentPeriodBookings.reduce((sum, b) =>
-    sum + parseFloat(b.estimate || 0), 0
+    sum + resolveRideRevenue(b), 0
   );
   const previousRevenue = previousPeriodBookings.reduce((sum, b) =>
-    sum + parseFloat(b.estimate || 0), 0
+    sum + resolveRideRevenue(b), 0
   );
 
   const growthRate = previousRevenue > 0 ?
@@ -6695,7 +6812,7 @@ function generateDailyRevenueGrowth(bookings, startDate, endDate) {
     if (booking.tripdate) {
       const dateStr = new Date(booking.tripdate).toISOString().split('T')[0];
       if (daily.hasOwnProperty(dateStr)) {
-        daily[dateStr] += parseFloat(booking.estimate || 0);
+        daily[dateStr] += resolveRideRevenue(booking);
       }
     }
   });
@@ -7126,7 +7243,7 @@ router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERA
       // Calcular estatísticas de corridas
       const driverBookings = Object.values(bookings).filter(b => b.driver === driverId);
       const completedBookings = driverBookings.filter(b => b.status === 'COMPLETED');
-      const totalEarnings = completedBookings.reduce((sum, b) => sum + parseFloat(b.fare || 0), 0);
+      const totalEarnings = completedBookings.reduce((sum, b) => sum + resolveRideDriverNetAmount(b), 0);
 
       // Determinar plano
       let driverPlanType = 'none';
@@ -7451,7 +7568,7 @@ router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHB
     // Calcular estatísticas
     const driverBookings = Object.values(bookings);
     const completedBookings = driverBookings.filter(b => b.status === 'COMPLETED');
-    const totalEarnings = completedBookings.reduce((sum, b) => sum + parseFloat(b.fare || 0), 0);
+    const totalEarnings = completedBookings.reduce((sum, b) => sum + resolveRideDriverNetAmount(b), 0);
 
     // Histórico de pagamentos
     const subscriptionPayments = Object.values(payments)
@@ -7789,9 +7906,30 @@ router.post('/api/drivers/:driverId/extend-free', authenticateJWT, requireRole(D
  * Aprovar motorista
  * POST /api/drivers/:driverId/approve
  */
-router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
+    const approvalReason = String(
+      req.body?.reason ||
+        req.body?.approvalReason ||
+        req.body?.reviewReason ||
+        req.body?.notes ||
+        ''
+    ).trim();
+    const approvalEvidence = normalizeManualApprovalEvidence(
+      req.body?.evidence ||
+        req.body?.evidenceRefs ||
+        req.body?.documents ||
+        req.body?.documentRefs
+    );
+
+    if (!approvalReason || approvalEvidence.length === 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'QUICK_APPROVAL_AUDIT_REQUIRED',
+        error: 'Aprovação rápida exige reason e evidence para auditoria.'
+      });
+    }
 
     if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
       return res.status(500).json({ error: 'Firebase não disponível' });
@@ -7799,41 +7937,98 @@ router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHB
 
     const db = firebaseConfig.getRealtimeDB();
     const nowIso = new Date().toISOString();
+	    const userSnapshot = await db.ref(`users/${driverId}`).once('value');
+	    const currentUser = userSnapshot.val() || {};
+	    let activationStatus = null;
+	    try {
+	      activationStatus = await recomputeDriverActivationStatus(driverId);
+	    } catch (recomputeError) {
+	      logStructured('warn', 'Falha ao recomputar ativação antes da revisão rápida', {
+	        service: 'dashboard-routes',
+	        driverId,
+	        error: recomputeError?.message || String(recomputeError)
+	      });
+	    }
+	    const canApproveFromCanonicalEvidence = activationStatus?.canGoOnline === true;
+	    const manualApprovalAudit = {
+	      action: 'driver.quick_manual_approval',
+	      driverId,
+      actorId: req.user.id,
+      actorRole: req.user.role || 'admin',
+      reason: approvalReason,
+      provenance: 'dashboard_quick_driver_approval',
+      evidence: approvalEvidence,
+	      previousState: {
+	        approved: currentUser.approved ?? currentUser.isApproved ?? null,
+	        status: currentUser.status || null,
+	        kycStatus: currentUser.kycStatus || currentUser.kyc_status || null
+	      },
+	      nextState: {
+	        approved: canApproveFromCanonicalEvidence ? true : currentUser.approved ?? null,
+	        status: canApproveFromCanonicalEvidence ? 'approved' : currentUser.status || null,
+	        kycStatus: currentUser.kycStatus || currentUser.kyc_status || null,
+	        manualReviewStatus: canApproveFromCanonicalEvidence
+	          ? 'canonical_evidence_confirmed'
+	          : 'pending_canonical_evidence'
+	      },
+	      activationStatus: activationStatus || null,
+	      createdAt: nowIso
+	    };
 
-    await db.ref(`users/${driverId}`).update({
-      approved: true,
-      approvedAt: nowIso,
-      kyc_status: 'approved',
-      kycStatus: 'approved',
-      status: 'approved',
-      updatedAt: nowIso
-    });
+	    const approvalUpdate = {
+	      manualApprovalAudit,
+	      approvalAuditTrail: manualApprovalAudit,
+	      approvalAuditUpdatedAt: nowIso,
+	      manualReviewStatus: manualApprovalAudit.nextState.manualReviewStatus,
+	      manualReviewedAt: nowIso,
+	      manualReviewedBy: req.user.id,
+	      manualReviewedByEmail: req.user.email || null,
+	      updatedAt: nowIso
+	    };
+	    if (canApproveFromCanonicalEvidence) {
+	      approvalUpdate.approved = true;
+	      approvalUpdate.approvedAt = nowIso;
+	      approvalUpdate.approvedBy = req.user.id;
+	      approvalUpdate.approvedByEmail = req.user.email || null;
+	      approvalUpdate.status = 'approved';
+	    }
 
-    await Promise.all([
-      db.ref(`users/${driverId}/driverActivationConsent`).update({
-        backgroundCheck: true,
-        updatedAt: nowIso
-      }),
-      db.ref(`driver_activation/${driverId}/consent/backgroundCheck`).update({
-        accepted: true,
-        acceptedAt: nowIso,
-        updatedAt: nowIso
-      })
-    ]);
+	    await db.ref(`users/${driverId}`).update(approvalUpdate);
 
-    try {
-      await recomputeDriverActivationStatus(driverId);
-    } catch (recomputeError) {
-      logStructured('warn', 'Falha ao recomputar ativação após aprovação rápida', {
-        service: 'dashboard-routes',
-        driverId,
-        error: recomputeError?.message || String(recomputeError)
-      });
+    await auditService.logEvent({
+      userId: req.user?.id || req.user?.userId || req.user?.email || 'dashboard',
+      action: 'driver.quick_manual_approval',
+      resource: 'driver',
+	      severity: 'WARNING',
+	      details: {
+	        driverId,
+	        reason: approvalReason,
+	        evidence: approvalEvidence,
+	        previousState: manualApprovalAudit.previousState,
+	        nextState: manualApprovalAudit.nextState,
+	        activationStatus,
+	        canonicalEvidenceConfirmed: canApproveFromCanonicalEvidence,
+	        actorEmail: req.user?.email || null,
+	        actorRole: req.user?.role || null
+	      },
+	      ip: req.ip,
+	      userAgent: req.headers['user-agent'] || 'unknown',
+	      success: canApproveFromCanonicalEvidence
+	    });
+
+	    if (!canApproveFromCanonicalEvidence) {
+	      return res.status(409).json({
+	        success: false,
+	        code: 'CANONICAL_DRIVER_EVIDENCE_REQUIRED',
+	        error: 'Aprovação rápida não substitui CNH, CRLV/veículo ativo, KYC, liveness e consentimentos canônicos.',
+	        driverId,
+	        activationStatus
+	      });
+	    }
+
+	    if (activationStatus?.canGoOnline === true) {
+	      emitDriverActivationUnlockedEvent(req, driverId, activationStatus);
     }
-
-    emitDriverActivationUnlockedEvent(req, driverId, {
-      activationState: 'ACTIVE'
-    });
 
     // Verificar e aplicar promoções elegíveis
     const promotionService = require('../services/promotion-service');
@@ -7861,49 +8056,40 @@ router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHB
  * POST /api/drivers/:driverId/suspend
  * Body: { reason: string, duration?: number }
  */
-router.post('/api/drivers/:driverId/suspend', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.post('/api/drivers/:driverId/suspend', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
     const { reason, duration } = req.body;
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Firebase não disponível' });
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-
-    const suspendData = {
-      suspended: true,
-      accountSuspended: true,
-      operationalBlocked: true,
-      status: 'suspended',
-      accountStatus: 'suspended',
-      suspendedAt: new Date().toISOString(),
-      suspendReason: reason || 'Suspensão manual via dashboard',
-      updatedAt: new Date().toISOString()
-    };
-
-    if (duration) {
-      const suspendUntil = new Date(Date.now() + duration * 24 * 60 * 60 * 1000);
-      suspendData.suspendedUntil = suspendUntil.toISOString();
-    }
-
-    await db.ref(`users/${driverId}`).update(suspendData);
+    const result = await updateUserOperationalStatus(
+      driverId,
+      {
+        status: 'suspended',
+        reason,
+        durationDays: duration
+      },
+      {
+        operator: {
+          id: req.user?.id || req.user?.userId || null,
+          email: req.user?.email || null,
+          role: req.user?.role || null
+        }
+      }
+    );
 
     logger.info(`✅ Motorista ${driverId} suspenso: ${reason}`);
 
-    res.json({
-      success: true,
+    return res.json({
+      ...result,
       message: 'Motorista suspenso com sucesso',
-      driverId,
-      ...suspendData
+      driverId: result.userId || driverId
     });
 
   } catch (error) {
     logger.error(`❌ Erro ao suspender motorista ${req.params.driverId}:`, error);
-    res.status(500).json({
-      error: 'Erro interno do servidor',
-      message: error.message
+    return res.status(error instanceof DashboardUserManagementError ? error.statusCode || 400 : 500).json({
+      success: false,
+      code: error instanceof DashboardUserManagementError ? error.code : undefined,
+      error: error instanceof DashboardUserManagementError ? error.message : 'Erro interno do servidor'
     });
   }
 });
@@ -7912,45 +8098,38 @@ router.post('/api/drivers/:driverId/suspend', authenticateJWT, requireRole(DASHB
  * Reativar motorista suspenso
  * POST /api/drivers/:driverId/unsuspend
  */
-router.post('/api/drivers/:driverId/unsuspend', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.post('/api/drivers/:driverId/unsuspend', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Firebase não disponível' });
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-
-    const driverSnapshot = await db.ref(`users/${driverId}`).once('value');
-    const driverData = driverSnapshot.val() || {};
-    const reactivationState = resolveDriverReactivationState(driverData);
-
-    await db.ref(`users/${driverId}`).update({
-      suspended: false,
-      accountSuspended: false,
-      operationalBlocked: false,
-      status: reactivationState.status,
-      accountStatus: reactivationState.accountStatus,
-      suspendReason: null,
-      suspendedUntil: null,
-      unsuspendedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
+    const result = await updateUserOperationalStatus(
+      driverId,
+      {
+        status: 'active',
+        reason: req.body?.reason
+      },
+      {
+        operator: {
+          id: req.user?.id || req.user?.userId || null,
+          email: req.user?.email || null,
+          role: req.user?.role || null
+        }
+      }
+    );
 
     logger.info(`✅ Motorista ${driverId} reativado`);
 
-    res.json({
-      success: true,
+    return res.json({
+      ...result,
       message: 'Motorista reativado com sucesso',
-      driverId
+      driverId: result.userId || driverId
     });
 
   } catch (error) {
     logger.error(`❌ Erro ao reativar motorista ${req.params.driverId}:`, error);
-    res.status(500).json({
-      error: 'Erro interno do servidor',
-      message: error.message
+    return res.status(error instanceof DashboardUserManagementError ? error.statusCode || 400 : 500).json({
+      success: false,
+      code: error instanceof DashboardUserManagementError ? error.code : undefined,
+      error: error instanceof DashboardUserManagementError ? error.message : 'Erro interno do servidor'
     });
   }
 });

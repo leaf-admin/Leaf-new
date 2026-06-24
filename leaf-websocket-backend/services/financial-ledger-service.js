@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const admin = require('firebase-admin');
 const firebaseConfig = require('../firebase-config');
+const { validateAuthoritativeFinancialSnapshot } = require('./ride-financial-contract');
 const { logStructured, logError } = require('../utils/logger');
 
 class FinancialLedgerService {
@@ -21,6 +22,12 @@ class FinancialLedgerService {
 
   normalizeBoolean(value) {
     return ['true', '1', 'yes', 'sim'].includes(String(value || '').toLowerCase());
+  }
+
+  sumLedgerLineAmounts(event = {}, account) {
+    return (Array.isArray(event?.lines) ? event.lines : [])
+      .filter((line) => line?.account === account && line?.direction === 'credit')
+      .reduce((sum, line) => sum + this.toCents(line.amountCents), 0);
   }
 
   normalizeLine(line = {}, index = 0) {
@@ -765,6 +772,103 @@ class FinancialLedgerService {
         });
       }
 
+      const isManualOrMultiLegDistribution = ['manual_settlement_required', 'multi_leg']
+        .includes(String(distribution?.mode || '').toLowerCase());
+      const shouldRequireFinancialSnapshot = Boolean(distribution && distributionTotal > 0 && !isManualOrMultiLegDistribution);
+      let financialSnapshot = null;
+      if (shouldRequireFinancialSnapshot) {
+        const snapshotValidation = validateAuthoritativeFinancialSnapshot(
+          distribution?.calculation?.financialContract || distribution?.financialSnapshot || {},
+          { passengerPaidCents: distributionTotal }
+        );
+        if (!snapshotValidation.valid) {
+          issues.push({
+            code: 'DISTRIBUTION_FINANCIAL_SNAPSHOT_INVALID',
+            severity: 'high',
+            message: 'Distribuição concluída sem snapshot financeiro backend_final válido',
+            snapshotCode: snapshotValidation.code
+          });
+        } else {
+          financialSnapshot = snapshotValidation.snapshot;
+          const distributionNetAmount = this.toCents(distribution?.netAmount);
+          const distributionOperationalFee = this.toCents(distribution?.retainedFees?.operationalFee);
+          const distributionWooviFee = this.toCents(distribution?.retainedFees?.wooviFee);
+          const distributionSubscriptionFee = this.toCents(distribution?.subscriptionRetainedFee);
+
+          if (distributionNetAmount !== financialSnapshot.driverNetAmountCents) {
+            issues.push({
+              code: 'DISTRIBUTION_DRIVER_NET_MISMATCH',
+              severity: 'high',
+              message: 'Valor líquido da distribuição diverge do snapshot final',
+              distributionNetAmountCents: distributionNetAmount,
+              snapshotDriverNetAmountCents: financialSnapshot.driverNetAmountCents
+            });
+          }
+          if (
+            distributionOperationalFee !== financialSnapshot.operationalFeeCents ||
+            distributionWooviFee !== financialSnapshot.paymentIntermediationFeeCents ||
+            distributionSubscriptionFee !== financialSnapshot.subscriptionRetainedFeeCents
+          ) {
+            issues.push({
+              code: 'DISTRIBUTION_RETAINED_FEES_MISMATCH',
+              severity: 'high',
+              message: 'Taxas retidas na distribuição divergem do snapshot final',
+              distributionOperationalFeeCents: distributionOperationalFee,
+              distributionWooviFeeCents: distributionWooviFee,
+              distributionSubscriptionFeeCents: distributionSubscriptionFee,
+              snapshotOperationalFeeCents: financialSnapshot.operationalFeeCents,
+              snapshotWooviFeeCents: financialSnapshot.paymentIntermediationFeeCents,
+              snapshotSubscriptionFeeCents: financialSnapshot.subscriptionRetainedFeeCents
+            });
+          }
+          if (settlementEvent) {
+            const ledgerDriverNetAmount = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'liability:driver_balance_payable'
+            );
+            const ledgerOperationalFee = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'revenue:leaf_operational_fee'
+            );
+            const ledgerWooviFee = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'contra_revenue:payment_intermediation_fee'
+            );
+            const ledgerSubscriptionFee = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'revenue:driver_subscription_settlement'
+            );
+
+            if (ledgerDriverNetAmount !== financialSnapshot.driverNetAmountCents) {
+              issues.push({
+                code: 'SETTLEMENT_DRIVER_NET_MISMATCH',
+                severity: 'high',
+                message: 'Valor líquido do ledger diverge do snapshot final',
+                ledgerDriverNetAmountCents: ledgerDriverNetAmount,
+                snapshotDriverNetAmountCents: financialSnapshot.driverNetAmountCents
+              });
+            }
+            if (
+              ledgerOperationalFee !== financialSnapshot.operationalFeeCents ||
+              ledgerWooviFee !== financialSnapshot.paymentIntermediationFeeCents ||
+              ledgerSubscriptionFee !== financialSnapshot.subscriptionRetainedFeeCents
+            ) {
+              issues.push({
+                code: 'SETTLEMENT_RETAINED_FEES_MISMATCH',
+                severity: 'high',
+                message: 'Taxas do ledger divergem do snapshot final',
+                ledgerOperationalFeeCents: ledgerOperationalFee,
+                ledgerWooviFeeCents: ledgerWooviFee,
+                ledgerSubscriptionFeeCents: ledgerSubscriptionFee,
+                snapshotOperationalFeeCents: financialSnapshot.operationalFeeCents,
+                snapshotWooviFeeCents: financialSnapshot.paymentIntermediationFeeCents,
+                snapshotSubscriptionFeeCents: financialSnapshot.subscriptionRetainedFeeCents
+              });
+            }
+          }
+        }
+      }
+
       const report = {
         rideId,
         ok: issues.length === 0,
@@ -773,7 +877,12 @@ class FinancialLedgerService {
         totals: {
           paymentAmountCents: paymentAmount,
           distributionTotalCents: distributionTotal,
-          ledgerEventCount: ledgerEvents.length
+          ledgerEventCount: ledgerEvents.length,
+          passengerGrossCents: financialSnapshot?.passengerPaidCents || null,
+          driverNetAmountCents: financialSnapshot?.driverNetAmountCents || null,
+          operationalFeeCents: financialSnapshot?.operationalFeeCents || null,
+          wooviFeeCents: financialSnapshot?.paymentIntermediationFeeCents || null,
+          subscriptionRetainedFeeCents: financialSnapshot?.subscriptionRetainedFeeCents || null
         },
         references: {
           ledgerRideIds,

@@ -68,7 +68,11 @@ describe('ride-queue-manager', () => {
           conversation: 'quiet'
         },
         femaleDriverOnly: true,
-        paymentStatus: 'confirmed'
+        paymentStatus: 'confirmed',
+        paymentAmountInCents: 1840,
+        paymentGrossAmountInCents: 1960,
+        paymentQuoteSessionId: 'quote_session_123',
+        paymentQuoteLockId: 'ql_123'
       },
       { deferEventSourcing: false }
     );
@@ -81,7 +85,11 @@ describe('ride-queue-manager', () => {
           temperature: 'cool',
           conversation: 'quiet'
         }),
-        femaleDriverOnly: 'true'
+        femaleDriverOnly: 'true',
+        paymentAmountInCents: '1840',
+        paymentGrossAmountInCents: '1960',
+        paymentQuoteSessionId: 'quote_session_123',
+        paymentQuoteLockId: 'ql_123'
       })
     );
     expect(pipeline.hset).toHaveBeenCalledWith(
@@ -92,7 +100,11 @@ describe('ride-queue-manager', () => {
           temperature: 'cool',
           conversation: 'quiet'
         }),
-        femaleDriverOnly: 'true'
+        femaleDriverOnly: 'true',
+        paymentAmountInCents: '1840',
+        paymentGrossAmountInCents: '1960',
+        paymentQuoteSessionId: 'quote_session_123',
+        paymentQuoteLockId: 'ql_123'
       })
     );
   });

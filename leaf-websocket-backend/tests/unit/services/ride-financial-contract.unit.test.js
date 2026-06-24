@@ -1,11 +1,32 @@
 const {
+  buildAuthoritativeFinancialSnapshot,
   buildRideFinancialContract,
+  describeFinancialPolicy,
   resolveOperationalFee,
   resolvePaymentIntermediationFee,
-  toCents
+  toCents,
+  validateAuthoritativeFinancialSnapshot
 } = require('../../../services/ride-financial-contract');
 
 describe('ride-financial-contract', () => {
+  it('describes the active financial policy with an explicit approval id', () => {
+    expect(describeFinancialPolicy()).toMatchObject({
+      policyId: 'runtime_tiered_percent_above_50_v1',
+      currency: 'BRL',
+      operationalFee: {
+        upTo10Cents: 79,
+        from10To25Cents: 99,
+        from25To50Cents: 149,
+        above50Model: 'percentage',
+        above50Percentage: 0.03
+      },
+      paymentIntermediation: {
+        percentage: 0.008,
+        minimumCents: 50
+      }
+    });
+  });
+
   it.each([
     [850, 79, 'up_to_10'],
     [1000, 79, 'up_to_10'],
@@ -130,5 +151,42 @@ describe('ride-financial-contract', () => {
     );
     expect(contract.driverNetAmountCents + contract.retainedTotalCents).toBe(3000);
     expect(contract.balanced).toBe(true);
+  });
+
+  it('builds an immutable backend-final snapshot that balances exactly in cents', () => {
+    const snapshot = buildAuthoritativeFinancialSnapshot({
+      passengerPaidCents: 3250,
+      tollFeeCents: 750,
+      operationalFeeCents: 99,
+      paymentIntermediationFeeCents: 50,
+      driverNetAmountCents: 3101
+    });
+
+    expect(snapshot).toMatchObject({
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+      passengerPaidCents: 3250,
+      grossFareCents: 2500,
+      retainedTotalCents: 149,
+      allocatedTotalCents: 3250,
+      balanced: true
+    });
+  });
+
+  it('rejects a backend-final snapshot that does not allocate the full passenger payment', () => {
+    const result = validateAuthoritativeFinancialSnapshot({
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+      passengerPaidCents: 3250,
+      tollFeeCents: 750,
+      operationalFeeCents: 99,
+      paymentIntermediationFeeCents: 50,
+      driverNetAmountCents: 3000
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      code: 'FINANCIAL_SNAPSHOT_UNBALANCED'
+    });
   });
 });

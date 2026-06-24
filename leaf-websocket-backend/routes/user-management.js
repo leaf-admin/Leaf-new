@@ -9,6 +9,7 @@ const { logError } = require('../utils/logger');
 
 const router = express.Router();
 const DASHBOARD_OPERATION_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
+const DASHBOARD_OPERATION_MUTATION_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 
 function handleDashboardUserManagementError(error, res, context = {}) {
   if (error instanceof DashboardUserManagementError) {
@@ -32,7 +33,7 @@ function handleDashboardUserManagementError(error, res, context = {}) {
 router.post(
   '/api/users/:userId/status',
   authenticateJWT,
-  requireRole(DASHBOARD_OPERATION_ROLES),
+  requireRole(DASHBOARD_OPERATION_MUTATION_ROLES),
   async (req, res) => {
     try {
       const result = await updateUserOperationalStatus(req.params.userId, req.body || {}, {
@@ -55,7 +56,7 @@ router.post(
 router.post(
   '/api/drivers/:driverId/documents/:documentType/request',
   authenticateJWT,
-  requireRole(DASHBOARD_OPERATION_ROLES),
+  requireRole(DASHBOARD_OPERATION_MUTATION_ROLES),
   async (req, res) => {
     try {
       const result = await requestDriverDocument(

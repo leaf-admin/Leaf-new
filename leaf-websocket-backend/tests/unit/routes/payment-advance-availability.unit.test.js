@@ -8,6 +8,8 @@ const request = require('supertest');
 const mockVerifyIdToken = jest.fn();
 const mockProcessAdvancePayment = jest.fn();
 const mockHasPaymentEligibleDriver = jest.fn();
+const mockValidateQuoteLock = jest.fn();
+const mockRedis = {};
 const mockBuildPaymentAvailabilityInput = jest.fn((payload) => ({
   pickupLocation: payload.pickupLocation || payload.rideDetails?.pickupLocation || null,
   destinationLocation: payload.destinationLocation || payload.rideDetails?.destinationLocation || null,
@@ -29,6 +31,10 @@ jest.mock('firebase-admin', () => ({
 
 jest.mock('../../../firebase-config', () => ({
   getFirestore: jest.fn(() => null)
+}));
+
+jest.mock('../../../utils/redis-pool', () => ({
+  getConnection: jest.fn(() => mockRedis)
 }));
 
 jest.mock('../../../services/payment-service', () => jest.fn().mockImplementation(() => ({
@@ -54,6 +60,10 @@ jest.mock('../../../services/passenger-discount-benefit-service', () => ({
 jest.mock('../../../services/payment-driver-availability-guard', () => ({
   buildPaymentAvailabilityInput: (...args) => mockBuildPaymentAvailabilityInput(...args),
   hasPaymentEligibleDriver: (...args) => mockHasPaymentEligibleDriver(...args)
+}));
+
+jest.mock('../../../services/quote-lock-service', () => ({
+  validateQuoteLock: (...args) => mockValidateQuoteLock(...args)
 }));
 
 jest.mock('../../../utils/jwt-secret-resolver', () => ({
@@ -97,7 +107,19 @@ describe('payment advance availability guard', () => {
     mockVerifyIdToken.mockReset();
     mockProcessAdvancePayment.mockReset();
     mockHasPaymentEligibleDriver.mockReset();
+    mockValidateQuoteLock.mockReset();
     mockBuildPaymentAvailabilityInput.mockClear();
+    mockValidateQuoteLock.mockResolvedValue({
+      success: true,
+      quoteLock: {
+        quoteLockId: 'ql_valid_1',
+        estimatedFare: 27.5,
+        payableAmountInCents: 2750,
+        grossAmountInCents: 2750
+      },
+      payableAmountInCents: 2750,
+      grossAmountInCents: 2750
+    });
 
     mockVerifyIdToken.mockResolvedValue({
       uid: 'passenger-1',
@@ -184,5 +206,79 @@ describe('payment advance availability guard', () => {
         preferences: validPaymentPayload.preferences
       })
     );
+  });
+
+  it('blocks Pix creation when an enforced quote lock diverges from the payment amount', async () => {
+    const app = createApp();
+    mockValidateQuoteLock.mockResolvedValue({
+      success: false,
+      code: 'QUOTE_LOCK_AMOUNT_MISMATCH',
+      expectedAmountInCents: 2750,
+      incomingAmountInCents: 8050
+    });
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .set('Authorization', 'Bearer passenger-token')
+      .send({
+        ...validPaymentPayload,
+        amount: 8050,
+        quoteLockId: 'ql_valid_1',
+        enforceQuoteLock: true
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'QUOTE_LOCK_AMOUNT_MISMATCH',
+      expectedAmountInCents: 2750,
+      incomingAmountInCents: 8050
+    });
+    expect(mockProcessAdvancePayment).not.toHaveBeenCalled();
+  });
+
+  it('passes the locked amount and quote lock metadata into Pix creation', async () => {
+    const app = createApp();
+    mockHasPaymentEligibleDriver.mockResolvedValue({
+      success: true,
+      hasDrivers: true,
+      code: 'DRIVERS_AVAILABLE',
+      driverId: 'driver-1'
+    });
+    mockProcessAdvancePayment.mockResolvedValue({
+      success: true,
+      chargeId: 'charge-1',
+      qrCode: 'qr',
+      paymentLink: 'https://pay.local/charge-1'
+    });
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .set('Authorization', 'Bearer passenger-token')
+      .send({
+        ...validPaymentPayload,
+        amount: 2750,
+        grossAmountInCents: 2750,
+        quoteSessionId: 'quote_session_1',
+        quoteLockId: 'ql_valid_1',
+        enforceQuoteLock: true
+      });
+
+    expect(response.status).toBe(200);
+    expect(mockValidateQuoteLock).toHaveBeenCalledWith(expect.objectContaining({
+      quoteLockId: 'ql_valid_1',
+      quoteSessionId: 'quote_session_1',
+      passengerId: 'passenger-1',
+      amountInCents: 2750
+    }));
+    expect(mockProcessAdvancePayment).toHaveBeenCalledWith(expect.objectContaining({
+      amount: 2750,
+      grossAmountInCents: 2750,
+      payableAmountInCents: 2750,
+      quoteLockId: 'ql_valid_1',
+      quoteLockSnapshot: expect.objectContaining({
+        quoteLockId: 'ql_valid_1'
+      })
+    }));
   });
 });

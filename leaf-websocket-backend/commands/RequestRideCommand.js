@@ -221,6 +221,23 @@ class RequestRideCommand extends Command {
                     this.paymentData?.rideId ||
                     ''
                 ).trim();
+                const paymentSessionId = String(
+                    this.paymentData?.paymentSessionId ||
+                    ''
+                ).trim();
+                const paymentContextKey = String(
+                    this.paymentData?.paymentContextKey ||
+                    this.paymentData?.contextKey ||
+                    ''
+                ).trim();
+                const paymentQuoteSessionId = String(
+                    this.paymentData?.quoteSessionId ||
+                    ''
+                ).trim();
+                const paymentQuoteLockId = String(
+                    this.paymentData?.quoteLockId ||
+                    ''
+                ).trim();
                 const parsedPaymentAmountInCents = Number.parseInt(
                     String(this.paymentData?.amountInCents ?? ''),
                     10
@@ -324,7 +341,12 @@ class RequestRideCommand extends Command {
                     paymentStatus: normalizedPaymentStatus,
                     paymentChargeId,
                     paymentReferenceRideId,
+                    paymentSessionId,
+                    paymentContextKey,
                     paymentAmountInCents: paymentAmountInCents || '',
+                    paymentGrossAmountInCents: paymentGrossAmountInCents || '',
+                    paymentQuoteSessionId,
+                    paymentQuoteLockId,
                     paymentConfirmedAt,
                     preferences: { ...(this.preferences || {}) },
                     femaleDriverOnly: this.preferences?.femaleDriverOnly === true ||

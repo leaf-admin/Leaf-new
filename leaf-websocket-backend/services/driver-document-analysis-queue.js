@@ -6,6 +6,7 @@ const { validateCnhDocumentIdentity } = require('./cnh-document-identity-validat
 const { logStructured, logError } = require('../utils/logger');
 const { metrics: runtimeMetrics } = require('../utils/prometheus-metrics');
 const driverActivationStateService = require('./driver-activation-state-service');
+const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
 
 const MEI_DOCUMENTS_ENABLED =
   String(process.env.ENABLE_DRIVER_MEI_DOCUMENTS || 'false').toLowerCase() === 'true';
@@ -70,6 +71,13 @@ function hasUsefulVehicleText(text) {
   const markers = ['PLACA', 'RENAVAM', 'CHASSI', 'MUNICIPIO', 'MARCA', 'MODELO'];
   const hitCount = markers.reduce((acc, marker) => (upper.includes(marker) ? acc + 1 : acc), 0);
   return hitCount >= 2;
+}
+
+function hasRequiredCrlvVehicleIdentity(data = {}) {
+  return Boolean(String(data?.plate || data?.placa || '').trim()) &&
+    Boolean(String(data?.renavam || '').trim()) &&
+    Boolean(String(data?.model || data?.modelo || data?.vehicleModel || '').trim()) &&
+    Boolean(String(data?.color || data?.cor || data?.vehicleColor || data?.carColor || '').trim());
 }
 
 function getDbOrThrow() {
@@ -462,6 +470,23 @@ async function recomputeDriverActivationStatus(driverId) {
   };
 }
 
+async function syncDriverApplicationMirror(driverId, db) {
+  try {
+    // Resolve lazily so document analysis never creates an initialization cycle.
+    const driverApplicationService = require('./driver-application-service');
+    await driverApplicationService.syncDriverApplication(driverId, {
+      db,
+      includeRatings: false
+    });
+  } catch (error) {
+    logStructured('warn', 'Falha ao sincronizar espelho do dashboard apos analise documental', {
+      service: 'driver-activation-queue',
+      driverId,
+      error: error?.message || String(error)
+    });
+  }
+}
+
 async function updateDocumentState({
   driverId,
   documentType,
@@ -482,7 +507,7 @@ async function updateDocumentState({
     throw new Error('INVALID_DOCUMENT_STATE_UPDATE');
   }
 
-  const normalizedStatus = String(status || 'pending').trim().toLowerCase();
+  let normalizedStatus = String(status || 'pending').trim().toLowerCase();
   const statusUpdatedAt = nowIso();
   const db = getDbOrThrow();
 
@@ -494,17 +519,26 @@ async function updateDocumentState({
   const previousUserDocument = previousUserDocumentSnapshot.val() || {};
   const previousReviewStatus = String(previousUserDocument?.status || '').toLowerCase();
 
+  const normalizedDocumentData = safeType === 'crlv' && data
+    ? normalizeVehicleOcrPayload(data)
+    : data || null;
+  let effectiveReason = reason || '';
+
+  if (safeType === 'crlv' && normalizedStatus === 'approved' && !hasRequiredCrlvVehicleIdentity(normalizedDocumentData)) {
+    normalizedStatus = 'failed';
+    effectiveReason = 'CRLV sem dados obrigatórios de veículo (placa, RENAVAM, modelo e cor).';
+  }
   const reviewStatus = toReviewQueueStatus(normalizedStatus);
 
   const basePayload = {
     documentType: safeType,
     status: normalizedStatus,
-    reason: reason || '',
+    reason: effectiveReason,
     updatedAt: statusUpdatedAt,
     reviewedAt: normalizedStatus === 'approved' || normalizedStatus === 'failed' ? statusUpdatedAt : null,
     model: model || null,
     extractionSource: extractionSource || null,
-    data: data || null,
+    data: normalizedDocumentData,
     ...metadata
   };
 
@@ -519,10 +553,13 @@ async function updateDocumentState({
     type: safeType,
     status: reviewStatus,
     analysisStatus: normalizedStatus,
-    analysisReason: reason || '',
-    analysisData: data || null,
+    analysisReason: effectiveReason,
+    analysisData: normalizedDocumentData,
+    // The dashboard review projection reads extractedData. Keep it aligned with
+    // analysisData so the CRLV identity cannot diverge between operational views.
+    extractedData: normalizedDocumentData,
     reviewedAt: normalizedStatus === 'approved' || normalizedStatus === 'failed' ? statusUpdatedAt : null,
-    rejectionReason: normalizedStatus === 'failed' ? reason || 'Documento reprovado na análise.' : null,
+    rejectionReason: normalizedStatus === 'failed' ? effectiveReason || 'Documento reprovado na análise.' : null,
     updatedAt: statusUpdatedAt,
     lastSubmissionId: safeSubmissionId,
     model: model || null,
@@ -565,13 +602,14 @@ async function updateDocumentState({
   }
 
   const aggregatedStatus = await recomputeDriverActivationStatus(safeDriverId);
+  await syncDriverApplicationMirror(safeDriverId, db);
 
   const eventPayload = {
     driverId: safeDriverId,
     documentType: safeType,
     submissionId: safeSubmissionId,
     status: normalizedStatus,
-    reason: reason || '',
+    reason: effectiveReason,
     updatedAt: statusUpdatedAt,
     canGoOnline: Boolean(aggregatedStatus?.canGoOnline)
   };
@@ -697,11 +735,12 @@ async function analyzeCrlvDocument(fileBuffer) {
     extractionSource = 'pdf_image';
   }
 
-  const hasVehicleIdentity = Boolean(String(data?.placa || '').trim()) && Boolean(String(data?.renavam || '').trim());
-  if (!hasVehicleIdentity) {
+  data = normalizeVehicleOcrPayload(data || {});
+
+  if (!hasRequiredCrlvVehicleIdentity(data)) {
     return {
       success: false,
-      reason: 'CRLV sem dados mínimos válidos (placa/renavam).',
+      reason: 'CRLV sem dados obrigatórios de veículo (placa, RENAVAM, modelo e cor).',
       data,
       extractionSource
     };

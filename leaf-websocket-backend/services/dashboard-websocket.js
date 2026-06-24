@@ -272,8 +272,8 @@ class DashboardWebSocketService {
             // Autenticação bem-sucedida
             socket.authenticated = true;
             socket.userId = decoded.userId;
-            socket.userRole = decoded.role || adminData.role;
-            socket.userPermissions = decoded.permissions || adminData.permissions || [];
+            socket.userRole = adminData.role || 'viewer';
+            socket.userPermissions = Array.isArray(adminData.permissions) ? adminData.permissions : [];
             this.markSocketAuthenticated(socket);
 
             socket.emit('authenticated', {

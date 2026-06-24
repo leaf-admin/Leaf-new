@@ -30,6 +30,87 @@ function toFiniteNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function parseMoneyValue(value, fallback = null) {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+
+  if (typeof value === 'string') {
+    const sanitized = value.replace(/[^\d,.-]/g, '').trim();
+    if (!sanitized) return fallback;
+    const normalized = sanitized.includes(',')
+      ? sanitized.replace(/\./g, '').replace(',', '.')
+      : sanitized;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function firstPositiveMoney(...values) {
+  for (const value of values) {
+    const parsed = parseMoneyValue(value, null);
+    if (parsed !== null && parsed > 0) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function firstFiniteMoney(...values) {
+  for (const value of values) {
+    const parsed = parseMoneyValue(value, null);
+    if (parsed !== null && parsed >= 0) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function isTruthyFlag(value) {
+  if (value === true) return true;
+  return ['1', 'true', 'yes', 'sim'].includes(String(value || '').trim().toLowerCase());
+}
+
+function isCompletedRideStatus(status) {
+  return COMPLETED_RIDE_STATES.has(normalizeRideStatus(status));
+}
+
+function isRideRevenuePendingFinalSnapshot(ride = {}) {
+  const status = normalizeRideStatus(
+    ride.status,
+    ride.state,
+    ride.bookingStatus,
+    ride.tripStatus
+  );
+  return isCompletedRideStatus(status) && !hasAuthoritativeBackendFinalSnapshot(ride);
+}
+
+function hasAuthoritativeBackendFinalSnapshot(ride = {}) {
+  const fareBreakdown = ride.fareBreakdown || {};
+  const paymentBreakdown = ride.paymentBreakdown || {};
+  const financialBreakdown = ride.financialBreakdown || {};
+  const financialSnapshot = resolveFinancialSnapshot(ride);
+  const snapshotSource = String(
+    ride.financialSnapshotSource ||
+    financialSnapshot.financialSnapshotSource ||
+    fareBreakdown.financialSnapshotSource ||
+    paymentBreakdown.financialSnapshotSource ||
+    financialBreakdown.financialSnapshotSource ||
+    ''
+  ).trim();
+
+  return snapshotSource === 'backend_final' && (
+    isTruthyFlag(ride.authoritativeSnapshot) ||
+    isTruthyFlag(financialSnapshot.authoritativeSnapshot) ||
+    isTruthyFlag(fareBreakdown.authoritativeSnapshot) ||
+    isTruthyFlag(paymentBreakdown.authoritativeSnapshot) ||
+    isTruthyFlag(financialBreakdown.authoritativeSnapshot)
+  );
+}
+
 function parseTimestampValue(value) {
   if (!value) return null;
 
@@ -80,6 +161,23 @@ function parseJsonMaybe(value) {
   }
 }
 
+function resolveFinancialSnapshot(ride = {}) {
+  const snapshot = parseJsonMaybe(ride.financialSnapshot);
+  if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+    return snapshot;
+  }
+
+  return {};
+}
+
+function centsToMoney(value, { requirePositive = false } = {}) {
+  const cents = parseMoneyValue(value, null);
+  if (cents === null) return null;
+  if (requirePositive && cents <= 0) return null;
+  if (!requirePositive && cents < 0) return null;
+  return Number((cents / 100).toFixed(2));
+}
+
 function normalizeRideStatus(...values) {
   for (const value of values) {
     const normalized = String(value || '').trim().toUpperCase();
@@ -115,14 +213,57 @@ function resolveRideTimestamp(ride = {}) {
 }
 
 function resolveRideRevenue(ride = {}) {
-  const financialBreakdownTotal = toFiniteNumber(ride?.financialBreakdown?.totalAmount, 0);
+  const status = normalizeRideStatus(
+    ride.status,
+    ride.state,
+    ride.bookingStatus,
+    ride.tripStatus
+  );
+  const fareBreakdown = ride.fareBreakdown || {};
+  const paymentBreakdown = ride.paymentBreakdown || {};
+  const financialBreakdown = ride.financialBreakdown || {};
+  const financialSnapshot = resolveFinancialSnapshot(ride);
+  const snapshotGross = centsToMoney(financialSnapshot.passengerPaidCents, {
+    requirePositive: true
+  });
+  const finalGross = firstPositiveMoney(
+    ride.finalPrice,
+    ride.finalFare,
+    ride.grossAmount,
+    ride.grossFare,
+    ride.totalPaid,
+    ride.customer_paid,
+    ride.customerPaid,
+    ride.paymentAmount,
+    ride.financial?.totalPaid?.amount,
+    fareBreakdown.finalFare,
+    fareBreakdown.grossAmount,
+    paymentBreakdown.finalFare,
+    paymentBreakdown.grossAmount,
+    financialBreakdown.finalFare,
+    financialBreakdown.grossAmount
+  );
+
+  if (isCompletedRideStatus(status)) {
+    if (hasAuthoritativeBackendFinalSnapshot(ride)) {
+      if (snapshotGross !== null) {
+        return snapshotGross;
+      }
+      if (finalGross !== null) {
+        return Number(finalGross.toFixed(2));
+      }
+    }
+
+    return 0;
+  }
+
+  const financialBreakdownTotal = toFiniteNumber(financialBreakdown.totalAmount, 0);
   if (financialBreakdownTotal > 0) {
     return Number((financialBreakdownTotal / 100).toFixed(2));
   }
 
   const candidates = [
-    ride.finalPrice,
-    ride.customer_paid,
+    finalGross,
     ride.total_fare,
     ride.fare,
     ride.estimatedFare,
@@ -134,6 +275,118 @@ function resolveRideRevenue(ride = {}) {
     if (Number.isFinite(parsed) && parsed > 0) {
       return Number(parsed.toFixed(2));
     }
+  }
+
+  return 0;
+}
+
+function resolveRideOperationalFee(ride = {}) {
+  const status = normalizeRideStatus(
+    ride.status,
+    ride.state,
+    ride.bookingStatus,
+    ride.tripStatus
+  );
+
+  if (isCompletedRideStatus(status) && !hasAuthoritativeBackendFinalSnapshot(ride)) {
+    return 0;
+  }
+
+  const fareBreakdown = ride.fareBreakdown || {};
+  const paymentBreakdown = ride.paymentBreakdown || {};
+  const financialBreakdown = ride.financialBreakdown || {};
+  const calculationBreakdown = ride.calculationBreakdown || {};
+  const financialSnapshot = resolveFinancialSnapshot(ride);
+  const financialContract = parseJsonMaybe(ride.financialContract) || {};
+  const authoritativeSnapshotFee = hasAuthoritativeBackendFinalSnapshot(ride)
+    ? centsToMoney(financialSnapshot.operationalFeeCents)
+    : null;
+
+  if (authoritativeSnapshotFee !== null) {
+    return authoritativeSnapshotFee;
+  }
+
+  const value = firstFiniteMoney(
+    ride.operationalFee,
+    ride.leafOperationalFee,
+    ride.leafOperational,
+    fareBreakdown.operationalFee,
+    paymentBreakdown.operationalFee,
+    calculationBreakdown.operationalFee,
+    financialBreakdown.leafOperationalFee,
+    financialBreakdown.leafOperational
+  );
+
+  if (value !== null) {
+    return Number(value.toFixed(2));
+  }
+
+  const centsValue = firstFiniteMoney(
+    ride.operationalFeeCents,
+    financialSnapshot.operationalFeeCents,
+    financialContract.operationalFeeCents
+  );
+
+  if (centsValue !== null) {
+    return Number((centsValue / 100).toFixed(2));
+  }
+
+  return 0;
+}
+
+function resolveRideDriverNetAmount(ride = {}) {
+  const status = normalizeRideStatus(
+    ride.status,
+    ride.state,
+    ride.bookingStatus,
+    ride.tripStatus
+  );
+
+  if (isCompletedRideStatus(status) && !hasAuthoritativeBackendFinalSnapshot(ride)) {
+    return 0;
+  }
+
+  const fareBreakdown = ride.fareBreakdown || {};
+  const paymentBreakdown = ride.paymentBreakdown || {};
+  const financialBreakdown = ride.financialBreakdown || {};
+  const calculationBreakdown = ride.calculationBreakdown || {};
+  const financialSnapshot = resolveFinancialSnapshot(ride);
+  const financialContract = parseJsonMaybe(ride.financialContract) || {};
+  const authoritativeSnapshotDriverNet = hasAuthoritativeBackendFinalSnapshot(ride)
+    ? centsToMoney(financialSnapshot.driverNetAmountCents)
+    : null;
+
+  if (authoritativeSnapshotDriverNet !== null) {
+    return authoritativeSnapshotDriverNet;
+  }
+
+  const value = firstFiniteMoney(
+    ride.driverNetAmount,
+    ride.driverNet,
+    ride.driverEarnings,
+    ride.netFare,
+    fareBreakdown.driverNetAmount,
+    fareBreakdown.driverNet,
+    paymentBreakdown.driverNetAmount,
+    paymentBreakdown.driverNet,
+    calculationBreakdown.driverNetAmount,
+    calculationBreakdown.net,
+    financialBreakdown.driverNetAmount,
+    financialBreakdown.driverNet
+  );
+
+  if (value !== null) {
+    return Number(value.toFixed(2));
+  }
+
+  const centsValue = firstFiniteMoney(
+    ride.driverNetAmountCents,
+    financialSnapshot.driverNetAmountCents,
+    financialContract.driverNetAmountCents
+  );
+
+  if (centsValue !== null) {
+    return Number((centsValue / 100).toFixed(2));
   }
 
   return 0;
@@ -210,7 +463,8 @@ function buildRecentRideActivity(ride = {}) {
     user: resolveRideActor(ride),
     metadata: {
       status,
-      fare: resolveRideRevenue(ride)
+      fare: resolveRideRevenue(ride),
+      farePendingReconciliation: isRideRevenuePendingFinalSnapshot(ride)
     }
   };
 }
@@ -313,9 +567,12 @@ module.exports = {
   resolveRideStatusLabel,
   resolveRideTimestamp,
   resolveRideRevenue,
+  resolveRideOperationalFee,
+  resolveRideDriverNetAmount,
   buildRecentRideActivity,
   buildRecentRideActivities,
   isRideLikeRecord,
+  isRideRevenuePendingFinalSnapshot,
   countActiveRidesFromActiveHash,
   getActiveRideMaxAgeMs
 };

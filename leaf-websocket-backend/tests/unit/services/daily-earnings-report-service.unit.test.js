@@ -45,6 +45,20 @@ function hgetNumber(key, field) {
   return Number(redisHashes.get(key)?.[field] || 0);
 }
 
+function buildBackendFinalSnapshot(overrides = {}) {
+  return {
+    authoritativeSnapshot: true,
+    financialSnapshotSource: 'backend_final',
+    passengerPaidCents: 2200,
+    tollFeeCents: 0,
+    operationalFeeCents: 99,
+    paymentIntermediationFeeCents: 50,
+    subscriptionRetainedFeeCents: 0,
+    driverNetAmountCents: 2051,
+    ...overrides,
+  };
+}
+
 describe('daily-earnings-report-service', () => {
   const originalEnv = process.env;
 
@@ -132,6 +146,7 @@ describe('daily-earnings-report-service', () => {
       completedAt: '2026-05-13T12:00:00-03:00',
       finalFare: '22.00',
       operationalFee: '0.99',
+      financialSnapshot: JSON.stringify(buildBackendFinalSnapshot()),
     });
 
     expect(snapshot).toEqual(expect.objectContaining({
@@ -145,12 +160,31 @@ describe('daily-earnings-report-service', () => {
     }));
   });
 
+  it('nao cria snapshot final a partir de tarifa estimada sem backend_final', () => {
+    const snapshot = _private.snapshotFromReportAndBooking({
+      bookingId: 'booking-pending-reconciliation',
+      totals: {
+        cost: { totalBrl: 0.14, googleUsd: 0.027, exchangeRateUsdBrl: 5.2 },
+        google: { directions: { requestCount: 2 } },
+      },
+    }, {
+      status: 'COMPLETED',
+      completedAt: '2026-05-13T12:00:00-03:00',
+      finalFare: '22.00',
+      estimatedFare: '22.00',
+      operationalFee: '0.99',
+    });
+
+    expect(snapshot).toBeNull();
+  });
+
   it('atualiza rollup de forma idempotente quando a mesma corrida muda de custo', async () => {
     redisHashes.set('booking:booking-1', {
       status: 'COMPLETED',
       completedAt: '2026-05-13T12:00:00-03:00',
       finalFare: '22',
       operationalFee: '0.99',
+      financialSnapshot: JSON.stringify(buildBackendFinalSnapshot()),
     });
 
     await service.recordCompletedRideFromReport({

@@ -248,6 +248,20 @@ async function recoverAcceptedBooking({
     const previousDriverId = latestDriverId || String(expectedDriverId || '');
     const passengerId = latestBookingData.customerId || null;
     const nowIso = new Date().toISOString();
+    const recoveryMode = 'accepted_driver_reassignment';
+    const recoveryMessage = 'Motorista indisponível. Procurando outro motorista...';
+    const operationalContinuation = {
+        bookingId: normalizedBookingId,
+        status: 'SEARCHING_REPLACEMENT_DRIVER',
+        previousDriverId: previousDriverId || null,
+        reason,
+        message: recoveryMessage,
+        reassignmentRequestedAt: nowIso
+    };
+    const pickupLocation =
+        parsePickupLocation(latestBookingData.pickupLocation) ||
+        parsePickupLocation(pickupFallback);
+    const destinationLocation = parsePickupLocation(latestBookingData.destinationLocation);
 
     if (previousDriverId) {
         try {
@@ -287,6 +301,9 @@ async function recoverAcceptedBooking({
                 recoveryPreviousDriverId: previousDriverId,
                 recoveryTriggeredAt: nowIso,
                 recoverySource: source,
+                recoveryMode,
+                status: 'REASSIGNMENT_PENDING',
+                operationalContinuation: JSON.stringify(operationalContinuation),
                 ...recoveryMetadata
             }
         );
@@ -298,7 +315,10 @@ async function recoverAcceptedBooking({
     }
 
     await redis.hset(bookingKey, {
-        status: 'SEARCHING',
+        // The queue remains SEARCHING so the existing dispatcher can reuse its
+        // durable search machinery. The public status preserves the accepted
+        // ride's continuation semantics for passenger state restoration.
+        status: 'REASSIGNMENT_PENDING',
         driverId: '',
         notifiedDriverId: '',
         updatedAt: nowIso,
@@ -306,20 +326,31 @@ async function recoverAcceptedBooking({
         recoveryPreviousDriverId: previousDriverId,
         recoveryTriggeredAt: nowIso,
         recoverySource: source,
+        recoveryMode,
+        operationalContinuation: JSON.stringify(operationalContinuation),
         ...recoveryMetadata
     });
 
     if (emitPassengerEvent && passengerId && io) {
-        io.to(`customer_${passengerId}`).emit('driverSearchResumed', {
+        const passengerRecoveryPayload = {
+            success: true,
+            hasActiveRide: true,
             bookingId: normalizedBookingId,
             reason,
-            message: 'Motorista indisponível. Procurando outro motorista...'
-        });
+            message: recoveryMessage,
+            status: 'REASSIGNMENT_PENDING',
+            recoveryMode,
+            operationalContinuation,
+            pickupLocation,
+            destinationLocation,
+            estimatedFare: Number(latestBookingData.estimatedFare || latestBookingData.estimate || 0) || null,
+            paymentStatus: latestBookingData.paymentStatus || latestBookingData.payment_status || null
+        };
+        const passengerRoom = io.to(`customer_${passengerId}`);
+        passengerRoom.emit('driverSearchResumed', passengerRecoveryPayload);
+        passengerRoom.emit('rideOperationalContinuationSearching', passengerRecoveryPayload);
+        passengerRoom.emit('activeRideSync', passengerRecoveryPayload);
     }
-
-    const pickupLocation =
-        parsePickupLocation(latestBookingData.pickupLocation) ||
-        parsePickupLocation(pickupFallback);
 
     const dispatchResult = await paymentDispatchService.triggerDispatchAfterPayment({
         bookingId: normalizedBookingId,

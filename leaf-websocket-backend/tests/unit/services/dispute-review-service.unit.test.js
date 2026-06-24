@@ -38,7 +38,7 @@ describe('dispute-review-service', () => {
   it('creates dispute and processes refund on approval', async () => {
     const firestore = createFirestoreMock();
     const paymentService = {
-      processRefund: jest.fn(async () => ({
+      processRideRefund: jest.fn(async () => ({
         success: true,
         refundId: 'refund-1'
       }))
@@ -63,7 +63,14 @@ describe('dispute-review-service', () => {
       refundAmount: 1299
     });
 
-    expect(paymentService.processRefund).toHaveBeenCalledWith('charge-1', 1299, 'Falha operacional');
+    expect(paymentService.processRideRefund).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'booking-1',
+      chargeId: 'charge-1',
+      amount: 1299,
+      reason: 'Falha operacional',
+      status: 'REFUNDED_FULL',
+      passengerId: 'passenger-1'
+    }));
     expect(decided.status).toBe('APPROVED_REFUND');
     expect(decided.refundResult).toEqual(expect.objectContaining({ refundId: 'refund-1' }));
   });

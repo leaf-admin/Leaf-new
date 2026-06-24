@@ -138,7 +138,7 @@ class ResponseHandler {
         }
 
         const status = String(bookingData.status || '').toUpperCase();
-        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+        if (RideStateManager.isTerminalStateValue(status)) {
             logger.debug(`⏭️ [ResponseHandler] Booking ${bookingId} ignorado por status ${status}`);
             return false;
         }

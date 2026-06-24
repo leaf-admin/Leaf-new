@@ -30,7 +30,9 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     WOOVI_BASE_URL: 'https://api.woovi.com/api/v1',
     WOOVI_API_TOKEN: 'woovi-token',
     LEAF_PIX_KEY: 'pix-key',
-    CORS_ORIGIN: 'https://api.leaf.example'
+    CORS_ORIGIN: 'https://api.leaf.example',
+    LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
+    LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval'
   };
 
   it('allows production deploy with the bundled Woovi webhook public-key verifier', () => {
@@ -56,8 +58,81 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
         expected: false
       }
     });
+    expect(result.report.diagnostics.authOtp).toMatchObject({
+      customOtpRouteMounted: true,
+      productionNonBypassMode: 'fail_closed_without_real_provider',
+      debugOtp: { value: false, source: 'default' },
+      testBypass: { value: false, source: 'default' },
+      reviewBypass: { value: false, source: 'default' }
+    });
+    expect(result.report.diagnostics.financialPolicy).toMatchObject({
+      approvedPolicyId: 'runtime_tiered_percent_above_50_v1',
+      approvalReferenceConfigured: 'present',
+      approved: true,
+      activePolicy: {
+        policyId: 'runtime_tiered_percent_above_50_v1',
+        operationalFee: {
+          above50Model: 'percentage',
+          above50Percentage: 0.03
+        }
+      }
+    });
+    expect(result.report.diagnostics.coreRidePaymentGuards).toMatchObject({
+      REQUIRE_PAYMENT_QUOTE_LOCK: { value: true, source: 'default', expected: true },
+      REQUIRE_PAYMENT_BEFORE_BOOKING: { value: true, source: 'default', expected: true },
+      VERIFY_PAYMENT_BEFORE_BOOKING: { value: true, source: 'default', expected: true },
+      REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING: { value: true, source: 'default', expected: true },
+      CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK: { value: false, source: 'default', expected: false },
+      ENFORCE_PAYMENT_FARE_LOCK: { value: true, source: 'default', expected: true },
+      REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH: { value: true, source: 'default', expected: true }
+    });
     expect(result.report.sensitivePresence).toMatchObject({
       WOOVI_WEBHOOK_PUBLIC_KEY: 'default-public'
+    });
+  });
+
+  it('blocks production deploy without explicit approval for the active financial policy', () => {
+    const {
+      LEAF_APPROVED_FINANCIAL_POLICY_ID,
+      LEAF_FINANCIAL_POLICY_APPROVAL_REF,
+      ...envWithoutPolicyApproval
+    } = baseProdEnv;
+    const result = runValidator(envWithoutPolicyApproval);
+
+    expect(result.status).toBe(1);
+    expect(result.report.ok).toBe(false);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'Política financeira ativa sem aprovação explícita: defina LEAF_APPROVED_FINANCIAL_POLICY_ID=runtime_tiered_percent_above_50_v1 e LEAF_FINANCIAL_POLICY_APPROVAL_REF antes de produção'
+    ]));
+    expect(result.report.diagnostics.financialPolicy).toMatchObject({
+      approvedPolicyId: '(empty)',
+      approvalReferenceConfigured: '(empty)',
+      approved: false,
+      activePolicy: {
+        policyId: 'runtime_tiered_percent_above_50_v1'
+      }
+    });
+  });
+
+  it('blocks production deploy when the approved financial policy id does not match the active code policy', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_APPROVED_FINANCIAL_POLICY_ID: 'fixed_149_above_20_v1',
+      LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.ok).toBe(false);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'Política financeira ativa sem aprovação explícita: defina LEAF_APPROVED_FINANCIAL_POLICY_ID=runtime_tiered_percent_above_50_v1 e LEAF_FINANCIAL_POLICY_APPROVAL_REF antes de produção'
+    ]));
+    expect(result.report.diagnostics.financialPolicy).toMatchObject({
+      approvedPolicyId: 'fixed_149_above_20_v1',
+      approvalReferenceConfigured: 'present',
+      approved: false,
+      activePolicy: {
+        policyId: 'runtime_tiered_percent_above_50_v1'
+      }
     });
   });
 
@@ -116,6 +191,8 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       WOOVI_API_TOKEN: 'woovi-token',
       LEAF_PIX_KEY: 'pix-key',
       CORS_ORIGIN: 'https://api.leaf.example',
+      LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
+      LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval',
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'false',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'true',
       WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: 'true'
@@ -156,6 +233,8 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       WOOVI_API_TOKEN: 'woovi-token',
       LEAF_PIX_KEY: 'pix-key',
       CORS_ORIGIN: 'https://api.leaf.example',
+      LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
+      LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval',
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
       WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: 'false'
@@ -205,6 +284,43 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     expect(result.report.summary.blockers).toContain(
       'ENABLE_LEGACY_MANUAL_PAYMENT_DISTRIBUTION=true bloqueado em produção'
     );
+  });
+
+  it('blocks production deploy when core ride payment guards are weakened', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      REQUIRE_PAYMENT_QUOTE_LOCK: 'false',
+      REQUIRE_PAYMENT_BEFORE_BOOKING: 'false',
+      VERIFY_PAYMENT_BEFORE_BOOKING: 'false',
+      REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING: 'false',
+      CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK: 'true',
+      ENFORCE_PAYMENT_FARE_LOCK: 'false',
+      REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH: 'false'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.ok).toBe(false);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'REQUIRE_PAYMENT_QUOTE_LOCK=false bloqueado em produção',
+      'REQUIRE_PAYMENT_BEFORE_BOOKING=false bloqueado em produção',
+      'VERIFY_PAYMENT_BEFORE_BOOKING=false bloqueado em produção',
+      'REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING=false bloqueado em produção',
+      'CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK=true bloqueado em produção',
+      'ENFORCE_PAYMENT_FARE_LOCK=false bloqueado em produção',
+      'REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH=false bloqueado em produção'
+    ]));
+    expect(result.report.diagnostics.coreRidePaymentGuards).toMatchObject({
+      REQUIRE_PAYMENT_QUOTE_LOCK: { value: false, source: 'env', expected: true },
+      REQUIRE_PAYMENT_BEFORE_BOOKING: { value: false, source: 'env', expected: true },
+      VERIFY_PAYMENT_BEFORE_BOOKING: { value: false, source: 'env', expected: true },
+      REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING: { value: false, source: 'env', expected: true },
+      CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK: { value: true, source: 'env', expected: false },
+      ENFORCE_PAYMENT_FARE_LOCK: { value: false, source: 'env', expected: true },
+      REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH: { value: false, source: 'env', expected: true }
+    });
   });
 
   it('blocks legacy runtime flags explicitly in production', () => {
@@ -429,6 +545,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       value: true,
       source: 'default'
     });
+    expect(enabledByDefault.report.diagnostics.maps.receiptMapImagesConfigured).toBe(true);
 
     const disabledExplicitly = runValidator({
       ...baseProdEnv,
@@ -462,6 +579,24 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     );
     expect(result.report.diagnostics.maps.clientDirectGoogleFallbackAllowed).toBe(true);
     expect(result.stdout).not.toContain('maps-key');
+  });
+
+  it('blocks custom OTP debug mode in production', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      DEBUG_OTP: 'true'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.ok).toBe(false);
+    expect(result.report.summary.blockers).toContain('DEBUG_OTP=true bloqueado em produção');
+    expect(result.report.diagnostics.authOtp.debugOtp).toEqual({
+      value: true,
+      source: 'env'
+    });
   });
 
   it('reports push diagnostics with FCM configured', () => {

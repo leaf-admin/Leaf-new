@@ -148,6 +148,118 @@ function main() {
   });
 
   check(() => {
+    const file = 'routes/receipts.js';
+    const source = read(file);
+    const sensitiveRoutes = [
+      {
+        routePath: '/api/receipts/:rideId',
+        tokens: ['authenticateSupport']
+      },
+      {
+        routePath: '/api/receipts/:rideId/map',
+        tokens: ['authenticateSupport']
+      },
+      {
+        routePath: '/api/receipts/user/:userId',
+        tokens: ['authenticateSupport', 'requireReceiptUserScope']
+      },
+      {
+        routePath: '/api/receipts/generate',
+        tokens: ['authenticateSupport', 'requireSupportRoles']
+      }
+    ];
+
+    const blocks = routeBlocks(source);
+    for (const { routePath, tokens } of sensitiveRoutes) {
+      const routeBlock = blocks.find(({ block }) => extractPath(block) === routePath);
+      assert(routeBlock, `${file} sem rota sensivel ${routePath}`);
+      for (const token of tokens) {
+        assert(
+          routeBlock.block.includes(token),
+          `${file}:${routeBlock.lineNumber} rota ${routePath} sem ${token}`
+        );
+      }
+    }
+  });
+
+  check(() => {
+    const file = 'routes/metrics.js';
+    const source = read(file);
+    const sensitiveRoutes = [
+      '/api/reports/predefined',
+      '/api/reports/generate',
+      '/api/reports/generate/:reportId'
+    ];
+    const blocks = routeBlocks(source);
+    for (const routePath of sensitiveRoutes) {
+      const routeBlock = blocks.find(({ block }) => extractPath(block) === routePath);
+      assert(routeBlock, `${file} sem rota sensivel ${routePath}`);
+      assert(
+        routeBlock.block.includes('authenticateSupport'),
+        `${file}:${routeBlock.lineNumber} rota ${routePath} sem authenticateSupport`
+      );
+      assert(
+        routeBlock.block.includes('requireSupportRoles(REPORT_READ_ROLES)'),
+        `${file}:${routeBlock.lineNumber} rota ${routePath} sem REPORT_READ_ROLES`
+      );
+    }
+    assert(
+      !/summary:\s*\{\},\s*data:\s*\[\]/.test(source),
+      `${file} ainda contem dataset placeholder vazio para reports`
+    );
+    assert(
+      source.includes('REPORT_DATASET_NOT_IMPLEMENTED'),
+      `${file} deve falhar explicitamente quando dataset de reports nao esta implementado`
+    );
+  });
+
+  check(() => {
+    const file = 'routes/dashboard.js';
+    const source = read(file);
+    const sensitiveRoutes = [
+      '/api/reports/comprehensive',
+      '/api/reports/export/:reportId'
+    ];
+    const blocks = routeBlocks(source);
+    for (const routePath of sensitiveRoutes) {
+      const routeBlock = blocks.find(({ block }) => extractPath(block) === routePath);
+      assert(routeBlock, `${file} sem rota sensivel ${routePath}`);
+      assert(
+        routeBlock.block.includes('authenticateJWT'),
+        `${file}:${routeBlock.lineNumber} rota ${routePath} sem authenticateJWT`
+      );
+      assert(
+        routeBlock.block.includes('DASHBOARD_FINANCIAL_ROLES'),
+        `${file}:${routeBlock.lineNumber} rota ${routePath} sem DASHBOARD_FINANCIAL_ROLES`
+      );
+    }
+    assert(!source.includes("expires: '2035-01-01'"), `${file} ainda gera signed URL ate 2035`);
+  });
+
+  check(() => {
+    const file = 'routes/worker-health.js';
+    const source = read(file);
+    assert(source.includes('const requireWorkerReadAccess = ['), `${file} sem requireWorkerReadAccess`);
+    const sensitiveRoutes = [
+      '/api/workers/health',
+      '/api/workers/consumers',
+      '/api/workers/lag',
+      '/api/workers/pending',
+      '/api/workers/dlq/events',
+      '/api/workers/dlq'
+    ];
+    const blocks = routeBlocks(source);
+    for (const routePath of sensitiveRoutes) {
+      const routeBlock = blocks.find(({ block }) => extractPath(block) === routePath);
+      assert(routeBlock, `${file} sem rota sensivel ${routePath}`);
+      assert(
+        routeBlock.block.includes('requireWorkerReadAccess'),
+        `${file}:${routeBlock.lineNumber} rota ${routePath} sem requireWorkerReadAccess`
+      );
+    }
+  });
+
+  check(() => {
     const file = 'server.vps.js';
     const source = read(file);
     const userManagementRequireIndex = source.indexOf("require('./routes/user-management')");
@@ -159,6 +271,17 @@ function main() {
       dashboardUseIndex < 0 || userManagementUseIndex < dashboardUseIndex,
       `${file} deve registrar userManagementRoutes antes de dashboardRoutes`
     );
+  });
+
+  check(() => {
+    const supportAuthFile = 'middleware/support-auth.js';
+    const supportRoutesFile = 'routes/support.js';
+    const supportAuthSource = read(supportAuthFile);
+    const supportRoutesSource = read(supportRoutesFile);
+    for (const role of ['support_n1', 'support_n2', 'support_n3']) {
+      assert(supportAuthSource.includes(role), `${supportAuthFile} nao reconhece ${role}`);
+      assert(supportRoutesSource.includes(role), `${supportRoutesFile} nao autoriza ${role}`);
+    }
   });
 
   check(() => {

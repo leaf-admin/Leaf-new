@@ -125,6 +125,11 @@ describe('socket lifecycle idempotency guards', () => {
       eventBus: { publish: jest.fn() },
       PaymentService: jest.fn(),
       fcmService: { sendRideStatusUpdate: jest.fn() },
+      assertRideParticipant: jest.fn().mockResolvedValue({
+        allowed: true,
+        participantRole: 'passenger',
+        identity: { userId: 'customer_1' },
+      }),
       idempotencyService,
       ...createSpanDeps(),
     });
@@ -138,5 +143,57 @@ describe('socket lifecycle idempotency guards', () => {
     expect(CancelRideCommand).not.toHaveBeenCalled();
     expect(redis.hgetall).not.toHaveBeenCalled();
     expect(idempotencyService.cacheResult).not.toHaveBeenCalled();
+  });
+
+  it('rejects cancellation before idempotency or persistence when the socket is not a ride participant', async () => {
+    const socket = createSocket({ userId: 'unrelated_user', userType: 'customer' });
+    const redis = { hgetall: jest.fn() };
+    const idempotencyService = createIdempotencyService(null);
+    const CancelRideCommand = jest.fn();
+    const assertRideParticipant = jest.fn().mockResolvedValue({
+      allowed: false,
+      code: 'RIDE_SCOPE_DENIED',
+      error: 'Usuário não participa desta corrida',
+    });
+
+    registerSocketCancelRideHandler({
+      socket,
+      io: { to: jest.fn() },
+      extractTraceIdFromEvent: jest.fn(() => 'trace_3'),
+      traceContext: createTraceContext(),
+      logStructured: jest.fn(),
+      rateLimiterService: {
+        checkRateLimit: jest.fn().mockResolvedValue({ allowed: true }),
+      },
+      redisPool: {
+        ensureConnection: jest.fn().mockResolvedValue(undefined),
+        getConnection: jest.fn(() => redis),
+      },
+      RideStateManager: { STATES: {} },
+      gradualExpander: { stopSearch: jest.fn() },
+      GeoHashUtils: { getRegionHash: jest.fn() },
+      rideQueueManager: { dequeueRide: jest.fn() },
+      CancelRideCommand,
+      eventBus: { publish: jest.fn() },
+      PaymentService: jest.fn(),
+      fcmService: { sendRideStatusUpdate: jest.fn() },
+      assertRideParticipant,
+      idempotencyService,
+      ...createSpanDeps(),
+    });
+
+    await socket.trigger('cancelRide', { bookingId: 'booking_3' });
+
+    expect(assertRideParticipant).toHaveBeenCalledWith(expect.objectContaining({
+      bookingId: 'booking_3',
+      allowedRoles: ['passenger', 'driver'],
+      allowSupport: false,
+    }));
+    expect(socket.emit).toHaveBeenCalledWith('rideCancellationError', expect.objectContaining({
+      code: 'RIDE_SCOPE_DENIED',
+    }));
+    expect(idempotencyService.beginRequest).not.toHaveBeenCalled();
+    expect(CancelRideCommand).not.toHaveBeenCalled();
+    expect(redis.hgetall).not.toHaveBeenCalled();
   });
 });

@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const driverApprovalService = require('../services/driver-approval-service');
+const DriverApprovalService = require('../services/driver-approval-service');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logStructured, logError } = require('../utils/logger');
+const driverApprovalService = new DriverApprovalService();
 
 const DRIVER_APPROVAL_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const ADMIN_ROUTE_MIDDLEWARE = [authenticateJWT, requireRole(DRIVER_APPROVAL_ADMIN_ROLES)];
@@ -10,7 +11,26 @@ const ADMIN_ROUTE_MIDDLEWARE = [authenticateJWT, requireRole(DRIVER_APPROVAL_ADM
 // Aprovar motorista e criar conta Woovi
 router.post('/approve', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
-    const { driverId, name, email, phone, cpf, pixKey, driverPixKey, subaccountPixKey, wooviSubaccountPixKey } = req.body;
+    const {
+      driverId,
+      name,
+      email,
+      phone,
+      cpf,
+      pixKey,
+      driverPixKey,
+      subaccountPixKey,
+      wooviSubaccountPixKey,
+      approvalReason,
+      reviewReason,
+      reason,
+      provenance,
+      source,
+      evidence,
+      evidenceRefs,
+      documents,
+      documentRefs
+    } = req.body;
     
     if (!driverId || !name || !email || !phone || !cpf) {
       return res.status(400).json({
@@ -28,7 +48,14 @@ router.post('/approve', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
       pixKey: pixKey || driverPixKey || subaccountPixKey || wooviSubaccountPixKey,
       driverPixKey,
       subaccountPixKey,
-      wooviSubaccountPixKey
+      wooviSubaccountPixKey,
+      approvalAudit: {
+        actorId: req.user?.id || req.user?.uid || req.user?.email || 'unknown_admin',
+        actorRole: req.user?.role || 'admin',
+        reason: approvalReason || reviewReason || reason,
+        provenance: provenance || source || 'driver_approval_dashboard',
+        evidence: evidence || evidenceRefs || documents || documentRefs
+      }
     });
 
     if (result.success) {
@@ -168,8 +195,6 @@ router.post('/create-woovi-account', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res)
 });
 
 module.exports = router;
-
-
 
 
 

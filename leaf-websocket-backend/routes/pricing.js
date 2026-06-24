@@ -7,6 +7,10 @@ const { getPublicRateCards, RATE_CARD_VERSION } = require('../services/pricing/c
 const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured } = require('../utils/logger');
 const geofenceService = require('../services/geofence-service');
+const {
+  createQuoteLock,
+  getQuoteLockTtlSeconds
+} = require('../services/quote-lock-service');
 
 const router = express.Router();
 const MAX_OPERATIONAL_ROUTE_DISTANCE_KM = Math.max(
@@ -17,6 +21,14 @@ const QUOTE_SESSION_COUNTER_TTL_SECONDS = Math.max(
   60,
   Number.parseInt(process.env.PRICING_QUOTE_SESSION_COUNTER_TTL_SECONDS || '900', 10) || 900
 );
+
+function shouldRequireQuoteLockForPayment() {
+  const configured = process.env.REQUIRE_PAYMENT_QUOTE_LOCK;
+  if (configured !== undefined) {
+    return String(configured).toLowerCase() === 'true';
+  }
+  return process.env.NODE_ENV !== 'test';
+}
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(
@@ -196,6 +208,42 @@ router.post('/pricing/quote', async (req, res) => {
       ? discountPreview.payableFare
       : result.estimatedFare;
 
+    const quoteLockResult = await createQuoteLock({
+      redis,
+      quoteSessionId,
+      passengerId,
+      pickupLocation: normalizedPickupLocation,
+      destinationLocation: normalizedDestinationLocation,
+      carType: result.normalizedCarType,
+      estimatedFare,
+      grossEstimatedFare: result.estimatedFare,
+      passengerPayableFare: estimatedFare,
+      discountBenefit: discountPreview.applied ? discountPreview : null,
+      routeDistanceKm: result.routeMetrics?.distanceKm || 0,
+      routeDurationSecs: result.routeMetrics?.durationSecs || 0,
+      tollFee: result.tollFee || 0,
+      rateCardVersion: result.rateCardVersion,
+      pricingPayload: result.pricingPayload || null,
+      pricingAudit: result.pricingAudit || null,
+      ttlSeconds: getQuoteLockTtlSeconds()
+    });
+
+    if (!quoteLockResult.success && shouldRequireQuoteLockForPayment()) {
+      metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
+      logStructured('error', 'Falha ao criar quote lock obrigatório', {
+        service: 'pricing-routes',
+        operation: 'pricing_quote_lock',
+        quoteSessionId: quoteSessionId || null,
+        code: quoteLockResult.code,
+        error: quoteLockResult.error
+      });
+      return res.status(503).json({
+        error: 'quote_lock_unavailable',
+        message: 'Não foi possível travar a cotação agora. Tente novamente em instantes.',
+        code: quoteLockResult.code || 'QUOTE_LOCK_UNAVAILABLE'
+      });
+    }
+
     metrics.recordPricingQuoteRequest?.({ success: true, source: quoteSessionId ? 'session' : 'anonymous' });
 
     if (quoteSessionId) {
@@ -216,6 +264,9 @@ router.post('/pricing/quote', async (req, res) => {
 
     return res.json({
       quoteSessionId: quoteSessionId || null,
+      quoteLockId: quoteLockResult.success ? quoteLockResult.quoteLockId : null,
+      quoteLockExpiresAt: quoteLockResult.success ? quoteLockResult.expiresAtIso : null,
+      quoteLockTtlSeconds: quoteLockResult.success ? quoteLockResult.ttlSeconds : null,
       quoteRequestCount: quoteRequestCount || null,
       estimatedFare,
       grossEstimatedFare: result.estimatedFare,

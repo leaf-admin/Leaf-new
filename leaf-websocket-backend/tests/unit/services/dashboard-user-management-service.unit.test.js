@@ -158,6 +158,59 @@ describe('dashboard-user-management-service', () => {
     }));
   });
 
+  it('suspends drivers with an expiry and removes dispatch eligibility immediately', async () => {
+    mockMakeFirestoreUserRef('driver_suspended').get.mockResolvedValue({
+      exists: true,
+      data: () => ({ usertype: 'driver', approved: true, status: 'approved' })
+    });
+    mockRealtimeSnapshots.set('users/driver_suspended', {
+      usertype: 'driver',
+      approved: true,
+      status: 'approved'
+    });
+
+    const result = await service.updateUserOperationalStatus(
+      'driver_suspended',
+      { status: 'suspended', reason: 'Revisao de seguranca', durationDays: 7 },
+      { operator: { id: 'admin_1', email: 'admin@leaf.test' } }
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      userId: 'driver_suspended',
+      userType: 'driver',
+      status: 'suspended',
+      reason: 'Revisao de seguranca'
+    });
+    expect(result.expiresAt).toEqual(expect.any(String));
+    expect(mockMakeFirestoreUserRef('driver_suspended').set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'suspended',
+        accountStatus: 'suspended',
+        operationalBlocked: true,
+        suspended: true,
+        suspendedUntil: result.expiresAt
+      }),
+      { merge: true }
+    );
+    expect(mockRedisMulti.hset).toHaveBeenCalledWith('driver:driver_suspended', expect.objectContaining({
+      status: 'OFFLINE',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'USER_STATUS_SUSPENDED'
+    }));
+    expect(mockAuditLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'admin_1',
+      action: 'dashboard.user.operational_status.update',
+      details: expect.objectContaining({
+        targetUserId: 'driver_suspended',
+        status: 'suspended',
+        reason: 'Revisao de seguranca',
+        durationDays: 7,
+        reasonCode: 'USER_STATUS_SUSPENDED'
+      })
+    }));
+  });
+
   it('reactivates customers and clears passenger trust block', async () => {
     mockMakeFirestoreUserRef('customer_1').get.mockResolvedValue({
       exists: true,

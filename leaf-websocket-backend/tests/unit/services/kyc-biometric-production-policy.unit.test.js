@@ -5,9 +5,9 @@ const {
 } = require('../../../services/kyc-biometric-production-policy');
 
 describe('kyc biometric production policy', () => {
-  test('keeps legacy device signature allowed outside strict biometric production', () => {
+  test('keeps legacy device signature allowed only outside production', () => {
     const policy = resolveBiometricPolicy({
-      NODE_ENV: 'production',
+      NODE_ENV: 'test',
       KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false'
     });
 
@@ -18,6 +18,23 @@ describe('kyc biometric production policy', () => {
 
     expect(result.allowed).toBe(true);
     expect(policy.allowLegacyDeviceSignature).toBe(true);
+  });
+
+  test('never allows legacy device signature in production, even with a stale override', () => {
+    const policy = resolveBiometricPolicy({
+      NODE_ENV: 'production',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false',
+      KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'true'
+    });
+
+    const result = evaluateDeviceVerificationTrust({
+      mode: 'device_signature_v1',
+      isMatch: true
+    }, { policy });
+
+    expect(result.allowed).toBe(false);
+    expect(result.code).toBe('KYC_LEGACY_DEVICE_SIGNATURE_DISABLED');
+    expect(policy.requireTrustedBiometricMatch).toBe(true);
   });
 
   test('blocks legacy device signature in strict biometric production', () => {

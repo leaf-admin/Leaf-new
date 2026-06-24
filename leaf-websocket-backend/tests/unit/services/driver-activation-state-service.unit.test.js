@@ -16,7 +16,7 @@ function createMockDb(dataByPath = {}) {
 }
 
 describe('driver-activation-state-service', () => {
-  it('libera motorista aprovado no fluxo legado para ficar online', async () => {
+  it('nao libera motorista aprovado no fluxo legado sem documentos canonicos', async () => {
     const driverId = 'driver_legacy_approved';
     const db = createMockDb({
       [`user_vehicles/${driverId}`]: {
@@ -42,10 +42,11 @@ describe('driver-activation-state-service', () => {
       }
     });
 
-    expect(result.state).toBe(DRIVER_ACTIVATION_STATES.ACTIVE);
-    expect(result.canGoOnline).toBe(true);
-    expect(result.canAttemptOnline).toBe(true);
-    expect(result.checklist.backgroundCheckConsent).toBe(true);
+    expect(result.state).toBe(DRIVER_ACTIVATION_STATES.PRE_REGISTERED);
+    expect(result.canGoOnline).toBe(false);
+    expect(result.canAttemptOnline).toBe(false);
+    expect(result.checklist.backgroundCheckConsent).toBe(false);
+    expect(result.checklist.cnhEar).toBe(false);
   });
 
   it('mantem bloqueio quando existe documento rejeitado mesmo com approved=true', async () => {
@@ -117,5 +118,52 @@ describe('driver-activation-state-service', () => {
         status: 'rejected'
       })
     );
+  });
+
+  it('expõe a identidade normalizada do CRLV sem liberar operação sem veículo aprovado', async () => {
+    const driverId = 'driver_crlv_identity';
+    const db = createMockDb({
+      [`user_vehicles/${driverId}`]: {}
+    });
+
+    const result = await resolveDriverActivationState({
+      driverId,
+      db,
+      activationNode: {
+        documents: {
+          cnh: { status: 'approved' },
+          crlv: {
+            status: 'approved',
+            data: {
+              placa: 'rja-2d41',
+              modelo: 'Honda City',
+              cor: 'branca',
+              anoModelo: '2024',
+              renavam: '12345678900'
+            }
+          }
+        },
+        consent: {
+          backgroundCheck: { accepted: true }
+        }
+      },
+      userData: {
+        kycStatus: 'approved',
+        kycFirstAccessVerifiedAt: '2026-06-21T10:00:00.000Z'
+      }
+    });
+
+    expect(result.state).toBe(DRIVER_ACTIVATION_STATES.VEHICLE_PENDING);
+    expect(result.canGoOnline).toBe(false);
+    expect(result.vehicle).toEqual(expect.objectContaining({
+      approved: false,
+      plate: 'RJA2D41',
+      model: 'Honda City',
+      color: 'BRANCO',
+      year: '2024',
+      documentStatus: 'approved',
+      identitySource: 'crlv_pdf_ocr',
+      identityComplete: true
+    }));
   });
 });

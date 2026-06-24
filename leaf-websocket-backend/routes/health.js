@@ -89,7 +89,7 @@ function buildMapsSection() {
     clientDirectGoogleFallbackAllowed,
     backendOnly: keyConfigured && !clientDirectGoogleFallbackAllowed,
     placesCacheEnabled: envBool('ENABLE_PLACES_CACHE', true),
-    receiptMapImagesConfigured: presence('GEO_KEY')
+    receiptMapImagesConfigured: keyConfigured || presence('GEO_KEY')
   };
 }
 

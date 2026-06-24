@@ -47,7 +47,11 @@ const TERMINAL_LOCK_BOOKING_STATES = new Set([
     'CANCELLED',
     'REJECTED',
     'EXPIRED',
-    'NO_DRIVERS_FOUND'
+    'NO_DRIVERS_AVAILABLE',
+    'NO_DRIVERS_FOUND',
+    'EARLY_ENDED_BY_RIDER',
+    'INTERRUPTED_OPERATIONAL_ENDED',
+    'EARLY_ENDED_REVIEW'
 ]);
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 const ALL_DRIVER_GEO_KEY = process.env.ALL_DRIVER_GEO_KEY || 'driver_locations';
@@ -346,7 +350,7 @@ class DriverNotificationDispatcher {
             return { ok: false, reason: 'STATE_NOT_DISPATCHABLE', state, status };
         }
 
-        if (status === 'SUPERSEDED' || status === 'NO_DRIVERS_AVAILABLE' || status === 'CANCELED' || status === 'COMPLETED') {
+        if (RideStateManager.isTerminalStateValue(status)) {
             return { ok: false, reason: 'BOOKING_STATUS_BLOCKED', state, status };
         }
 

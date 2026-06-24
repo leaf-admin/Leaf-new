@@ -249,6 +249,9 @@ describe('RequestRideCommand', () => {
         chargeId: 'charge_123',
         rideId: 'ride_123',
         amountInCents: 1840,
+        grossAmountInCents: 1960,
+        quoteSessionId: 'quote_session_123',
+        quoteLockId: 'ql_123',
         paymentStatus: 'confirmed',
         serverValidated: true,
         confirmedAt: '2026-04-07T23:59:00.000Z'
@@ -264,6 +267,9 @@ describe('RequestRideCommand', () => {
         paymentChargeId: 'charge_123',
         paymentReferenceRideId: 'ride_123',
         paymentAmountInCents: 1840,
+        paymentGrossAmountInCents: 1960,
+        paymentQuoteSessionId: 'quote_session_123',
+        paymentQuoteLockId: 'ql_123',
         paymentConfirmedAt: '2026-04-07T23:59:00.000Z'
       }),
       expect.objectContaining({
@@ -275,6 +281,9 @@ describe('RequestRideCommand', () => {
       paymentChargeId: 'charge_123',
       paymentReferenceRideId: 'ride_123',
       paymentAmountInCents: 1840,
+      paymentGrossAmountInCents: 1960,
+      paymentQuoteSessionId: 'quote_session_123',
+      paymentQuoteLockId: 'ql_123',
       paymentConfirmedAt: '2026-04-07T23:59:00.000Z'
     }));
     expect(result.data.event).toEqual(expect.objectContaining({

@@ -44,6 +44,21 @@ jest.mock('../../../services/ride-state-manager', () => ({
   },
   getBookingState: jest.fn(),
   updateBookingState: jest.fn().mockResolvedValue(true)
+  ,
+  isTerminalStateValue: jest.fn((value) => [
+    'COMPLETE',
+    'COMPLETED',
+    'CANCELED',
+    'CANCELLED',
+    'REJECTED',
+    'EXPIRED',
+    'SUPERSEDED',
+    'NO_DRIVERS_AVAILABLE',
+    'NO_DRIVERS_FOUND',
+    'EARLY_ENDED_BY_RIDER',
+    'INTERRUPTED_OPERATIONAL_ENDED',
+    'EARLY_ENDED_REVIEW'
+  ].includes(String(value || '').trim().toUpperCase()))
 }));
 
 const driverLockManager = require('../../../services/driver-lock-manager');
@@ -298,5 +313,23 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
       'booking:booking_shared',
       expect.objectContaining({ timeoutDriverId: 'driver_1' })
     );
+  });
+
+  it('blocks dispatch when booking status is an alternate terminal state', async () => {
+    redis.hgetall = jest.fn().mockResolvedValue({
+      bookingId: 'booking_review',
+      customerId: 'customer_1',
+      status: 'EARLY_ENDED_REVIEW',
+    });
+    RideStateManager.getBookingState.mockResolvedValue(RideStateManager.STATES.SEARCHING);
+
+    const result = await dispatcher.getDispatchability('booking_review');
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      reason: 'BOOKING_STATUS_BLOCKED',
+      state: RideStateManager.STATES.SEARCHING,
+      status: 'EARLY_ENDED_REVIEW',
+    }));
   });
 });

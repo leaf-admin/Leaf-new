@@ -31,6 +31,11 @@ const upload = multer({
   }
 });
 
+const DRIVER_DOCUMENT_SIGNED_URL_TTL_MS = Math.max(
+  5 * 60 * 1000,
+  Number.parseInt(process.env.DRIVER_DOCUMENT_SIGNED_URL_TTL_MS || `${24 * 60 * 60 * 1000}`, 10) || 24 * 60 * 60 * 1000
+);
+
 function ensureFirebaseInitialized() {
   if (Array.isArray(admin.apps) && admin.apps.length > 0) {
     return;
@@ -55,6 +60,15 @@ function parseBoolean(value, fallback = false) {
     return fallback;
   }
   return normalized === '1' || normalized === 'true' || normalized === 'sim' || normalized === 'yes';
+}
+
+function createActivationStorageError(message, cause = null) {
+  const error = new Error(message);
+  error.code = 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED';
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
 }
 
 async function requireDriverAuth(req, res, next) {
@@ -137,10 +151,7 @@ async function requireDriverAuth(req, res, next) {
 
 async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
   if (!file?.buffer || !driverId || !documentType) {
-    return {
-      fileUrl: null,
-      filePath: null
-    };
+    throw createActivationStorageError('Arquivo de ativação inválido para armazenamento.');
   }
 
   try {
@@ -153,6 +164,7 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
     const objectPath = `driver-activation/${driverId}/${documentType}/${Date.now()}_${originalName.replace(extension, '')}${extension}`;
 
     const storageFile = bucket.file(objectPath);
+    const signedUrlExpiresAt = new Date(Date.now() + DRIVER_DOCUMENT_SIGNED_URL_TTL_MS);
     await storageFile.save(file.buffer, {
       resumable: false,
       metadata: {
@@ -167,12 +179,17 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
 
     const [signedUrl] = await storageFile.getSignedUrl({
       action: 'read',
-      expires: '2035-01-01'
+      expires: signedUrlExpiresAt
     });
+
+    if (!String(signedUrl || '').trim()) {
+      throw createActivationStorageError('Firebase Storage não retornou URL assinada para o documento.');
+    }
 
     return {
       fileUrl: signedUrl,
-      filePath: objectPath
+      filePath: objectPath,
+      fileUrlExpiresAt: signedUrlExpiresAt.toISOString()
     };
   } catch (error) {
     logStructured('warn', 'Falha ao enviar PDF de ativação para o Firebase Storage', {
@@ -182,10 +199,10 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
       error: error?.message || String(error)
     });
 
-    return {
-      fileUrl: null,
-      filePath: null
-    };
+    throw createActivationStorageError(
+      'Não foi possível armazenar o documento de ativação. Tente novamente.',
+      error
+    );
   }
 }
 
@@ -234,11 +251,15 @@ router.post(
       const nowIso = new Date().toISOString();
       const submissionId = `${nowIso.replace(/[^0-9]/g, '')}_${Math.random().toString(16).slice(2, 8)}`;
 
-      const { fileUrl, filePath } = await uploadActivationPdfToStorage({
+      const { fileUrl, filePath, fileUrlExpiresAt } = await uploadActivationPdfToStorage({
         driverId,
         documentType,
         file: req.file
       });
+
+      if (!fileUrl || !filePath) {
+        throw createActivationStorageError('Documento de ativação não foi armazenado corretamente.');
+      }
 
       const metadata = {
         fileName: sanitizeFilename(req.file.originalname || `${documentType}.pdf`),
@@ -246,6 +267,7 @@ router.post(
         fileSize: Number(req.file.size || 0),
         fileUrl,
         filePath,
+        fileUrlExpiresAt,
         uploadedAt: nowIso,
         createdAt: nowIso
       };
@@ -277,6 +299,7 @@ router.post(
           fileSize: metadata.fileSize,
           fileUrl,
           filePath,
+          fileUrlExpiresAt,
           lastSubmissionId: submissionId
         }
       });
@@ -341,6 +364,22 @@ router.post(
         }
       });
     } catch (error) {
+      if (error?.code === 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED') {
+        logStructured('warn', 'Upload de documento de ativação rejeitado antes de persistência', {
+          service: 'driver-activation-routes',
+          driverId: req.user?.uid || null,
+          documentType: req.params?.type || null,
+          error: error.message
+        });
+
+        return res.status(503).json({
+          success: false,
+          code: 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED',
+          message: error.message,
+          retryable: true
+        });
+      }
+
       logError(error, 'Erro ao enviar documento de ativação', {
         service: 'driver-activation-routes',
         driverId: req.user?.uid || null,

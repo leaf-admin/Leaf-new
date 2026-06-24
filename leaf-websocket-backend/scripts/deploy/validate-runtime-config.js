@@ -15,6 +15,10 @@ const {
 const {
   getDefaultWooviWebhookPublicKey
 } = require('../../config/woovi-webhook-public-key');
+const {
+  DEFAULT_POLICY: DEFAULT_RIDE_FINANCIAL_POLICY,
+  describeFinancialPolicy
+} = require('../../services/ride-financial-contract');
 
 const REQUIRED_BASE = [
   'NODE_ENV'
@@ -69,6 +73,51 @@ const LEGACY_RUNTIME_FLAGS = [
   'ENABLE_LEGACY_NO_DRIVERS_FOUND_EVENT',
   'ENABLE_LEGACY_UPDATE_DRIVER_LOCATION_EVENT',
   'ENABLE_LEGACY_DRIVER_BAAS_FALLBACK'
+];
+
+const CORE_RIDE_PAYMENT_GUARD_FLAGS = [
+  {
+    key: 'REQUIRE_PAYMENT_QUOTE_LOCK',
+    expected: true,
+    fallback: true,
+    blocker: 'REQUIRE_PAYMENT_QUOTE_LOCK=false bloqueado em produção'
+  },
+  {
+    key: 'REQUIRE_PAYMENT_BEFORE_BOOKING',
+    expected: true,
+    fallback: true,
+    blocker: 'REQUIRE_PAYMENT_BEFORE_BOOKING=false bloqueado em produção'
+  },
+  {
+    key: 'VERIFY_PAYMENT_BEFORE_BOOKING',
+    expected: true,
+    fallback: true,
+    blocker: 'VERIFY_PAYMENT_BEFORE_BOOKING=false bloqueado em produção'
+  },
+  {
+    key: 'REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING',
+    expected: true,
+    fallback: true,
+    blocker: 'REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING=false bloqueado em produção'
+  },
+  {
+    key: 'CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK',
+    expected: false,
+    fallback: false,
+    blocker: 'CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK=true bloqueado em produção'
+  },
+  {
+    key: 'ENFORCE_PAYMENT_FARE_LOCK',
+    expected: true,
+    fallback: true,
+    blocker: 'ENFORCE_PAYMENT_FARE_LOCK=false bloqueado em produção'
+  },
+  {
+    key: 'REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH',
+    expected: true,
+    fallback: true,
+    blocker: 'REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH=false bloqueado em produção'
+  }
 ];
 
 const PAYMENT_PROVIDER_ROLES = new Set([
@@ -126,6 +175,23 @@ function requiresPaymentProviderConfig(runtimeRole) {
     return true;
   }
   return PAYMENT_PROVIDER_ROLES.has(String(runtimeRole || '').trim().toLowerCase());
+}
+
+function resolveFinancialPolicyApproval() {
+  const activePolicy = describeFinancialPolicy(DEFAULT_RIDE_FINANCIAL_POLICY);
+  const approvedPolicyId = String(process.env.LEAF_APPROVED_FINANCIAL_POLICY_ID || '').trim();
+  const approvalReference = String(process.env.LEAF_FINANCIAL_POLICY_APPROVAL_REF || '').trim();
+  const approvalActor = String(process.env.LEAF_FINANCIAL_POLICY_APPROVAL_ACTOR || '').trim();
+
+  return {
+    activePolicy,
+    approvedPolicyId: approvedPolicyId || '(empty)',
+    approvalReferenceConfigured: presence(approvalReference),
+    approvalActorConfigured: presence(approvalActor),
+    approved:
+      approvedPolicyId === activePolicy.policyId &&
+      Boolean(approvalReference)
+  };
 }
 
 function resolveEnvPath(filePath) {
@@ -207,6 +273,7 @@ function main() {
   const paymentProviderConfigRequired = requiresPaymentProviderConfig(runtimeRole);
   const paymentProviderSandboxRuntime =
     paymentProviderConfigRequired && (wooviEnv === 'sandbox' || wooviBaseUrlIsSandbox);
+  const financialPolicyApproval = resolveFinancialPolicyApproval();
 
   const missingCommon = checkRequired([
     ...REQUIRED_BASE,
@@ -250,11 +317,28 @@ function main() {
     acc[key] = booleanDiagnostic(key, false);
     return acc;
   }, {});
+  const coreRidePaymentGuardDiagnostics = CORE_RIDE_PAYMENT_GUARD_FLAGS.reduce((acc, guard) => {
+    acc[guard.key] = {
+      ...booleanDiagnostic(guard.key, guard.fallback),
+      expected: guard.expected
+    };
+    return acc;
+  }, {});
   const socketRedisAdapterDiagnostic = booleanDiagnostic('ENABLE_SOCKETIO_REDIS_ADAPTER', true);
   const socketRedisAdapterRequiredDiagnostic = booleanDiagnostic(
     'REQUIRE_SOCKETIO_REDIS_ADAPTER',
     nodeEnv === 'production' && runtimeRole === 'gateway'
   );
+  const authOtpDiagnostics = {
+    customOtpRouteMounted: true,
+    productionNonBypassMode:
+      nodeEnv === 'production'
+        ? 'fail_closed_without_real_provider'
+        : 'redis_simulated_delivery',
+    debugOtp: booleanDiagnostic('DEBUG_OTP', false),
+    testBypass: booleanDiagnostic('AUTH_TEST_OTP_BYPASS_ENABLED', false),
+    reviewBypass: booleanDiagnostic('AUTH_REVIEW_OTP_BYPASS_ENABLED', false)
+  };
   const webhookProviderVerificationFallback =
     !hasWebhookVerifier &&
     (hasWebhookAuthorization || paymentProviderSandboxRuntime) &&
@@ -369,8 +453,24 @@ function main() {
         blockers.push(`${key}=true bloqueado em produção`);
       }
     }
+    for (const guard of CORE_RIDE_PAYMENT_GUARD_FLAGS) {
+      if (coreRidePaymentGuardDiagnostics[guard.key].value !== guard.expected) {
+        blockers.push(guard.blocker);
+      }
+    }
     if (boolEnv('MOCK_PAYMENT_FOR_TESTS')) {
       blockers.push('MOCK_PAYMENT_FOR_TESTS=true bloqueado em produção');
+    }
+    if (
+      paymentProviderConfigRequired &&
+      !financialPolicyApproval.approved
+    ) {
+      blockers.push(
+        `Política financeira ativa sem aprovação explícita: defina LEAF_APPROVED_FINANCIAL_POLICY_ID=${financialPolicyApproval.activePolicy.policyId} e LEAF_FINANCIAL_POLICY_APPROVAL_REF antes de produção`
+      );
+    }
+    if (authOtpDiagnostics.debugOtp.value) {
+      blockers.push('DEBUG_OTP=true bloqueado em produção');
     }
     if (boolEnv('AUTH_TEST_OTP_BYPASS_ENABLED')) {
       blockers.push('AUTH_TEST_OTP_BYPASS_ENABLED=true bloqueado em produção');
@@ -467,6 +567,7 @@ function main() {
         }
       },
       paymentBypass: paymentBypassDiagnostics,
+      coreRidePaymentGuards: coreRidePaymentGuardDiagnostics,
       legacyRuntime: legacyRuntimeDiagnostics,
       firebase: {
         databaseUrlConfigured: presence(firebaseDatabaseUrl),
@@ -479,7 +580,9 @@ function main() {
           boolEnv('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false) ||
           boolEnv('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false),
         placesCacheEnabled: booleanDiagnostic('ENABLE_PLACES_CACHE', true),
-        receiptMapImagesConfigured: Boolean(String(process.env.GEO_KEY || '').trim())
+        receiptMapImagesConfigured: Boolean(
+          String(process.env.GOOGLE_MAPS_API_KEY || process.env.GEO_KEY || '').trim()
+        )
       },
       push: {
         fcmConfigured: Boolean(String(process.env.FCM_SERVER_KEY || '').trim()),
@@ -497,6 +600,10 @@ function main() {
           ...socketRedisAdapterRequiredDiagnostic,
           expected: nodeEnv === 'production' && runtimeRole === 'gateway'
         }
+      },
+      financialPolicy: financialPolicyApproval,
+      authOtp: {
+        ...authOtpDiagnostics
       }
     },
     optionalRecommended: OPTIONAL_RECOMMENDED.filter((k) => !String(process.env[k] || '').trim())

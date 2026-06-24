@@ -34,18 +34,17 @@ function resolveBiometricPolicy(env = process.env) {
   return {
     productionRuntime,
     productionBiometricsEnabled,
-    requireTrustedBiometricMatch: readBooleanLike(
-      env.KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH,
-      strictDefault
-    ),
-    allowLegacyDeviceSignature: readBooleanLike(
-      env.KYC_ALLOW_LEGACY_DEVICE_SIGNATURE,
-      !strictDefault
-    ),
-    allowAwsLivenessOnlyMatch: readBooleanLike(
-      env.KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH,
-      !strictDefault
-    ),
+    // A production runtime must never trust a client-declared identity match.
+    // The rollout flag controls readiness diagnostics, not this authorization boundary.
+    requireTrustedBiometricMatch: productionRuntime
+      ? true
+      : readBooleanLike(env.KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH, strictDefault),
+    allowLegacyDeviceSignature: productionRuntime
+      ? false
+      : readBooleanLike(env.KYC_ALLOW_LEGACY_DEVICE_SIGNATURE, !strictDefault),
+    allowAwsLivenessOnlyMatch: productionRuntime
+      ? false
+      : readBooleanLike(env.KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH, !strictDefault),
     trustedMatchProviders: readList(
       env.KYC_TRUSTED_BIOMETRIC_MATCH_PROVIDERS,
       DEFAULT_TRUSTED_MATCH_PROVIDERS

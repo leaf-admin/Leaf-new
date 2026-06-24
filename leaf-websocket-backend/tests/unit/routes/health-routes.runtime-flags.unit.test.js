@@ -201,6 +201,7 @@ describe('health runtime flags route', () => {
     const resNoFallback = await request(appWithoutFallback).get('/health/runtime-flags');
     expect(resNoFallback.body.maps.clientDirectGoogleFallbackAllowed).toBe(false);
     expect(resNoFallback.body.maps.backendOnly).toBe(true);
+    expect(resNoFallback.body.maps.receiptMapImagesConfigured).toBe(true);
 
     process.env.EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK = 'true';
     const appWithFallback = createApp();

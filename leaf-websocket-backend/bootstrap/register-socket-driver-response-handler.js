@@ -1,3 +1,5 @@
+const RideStateManager = require('../services/ride-state-manager');
+
 function registerSocketDriverResponseHandler({ socket, io, logStructured }) {
     // Resposta do motorista
     socket.on('driverResponse', async (data) => {
@@ -26,7 +28,7 @@ function registerSocketDriverResponseHandler({ socket, io, logStructured }) {
                     activeBooking?.passenger ||
                     null;
                 const normalizedStatus = String(activeBooking?.status || '').trim().toUpperCase();
-                const isTerminalBooking = ['COMPLETED', 'CANCELLED', 'CANCELED'].includes(normalizedStatus);
+                const isTerminalBooking = RideStateManager.isTerminalStateValue(normalizedStatus);
 
                 if (isTerminalBooking) {
                     socket.emit('driverResponseError', {

@@ -123,10 +123,20 @@ describe('user-management routes', () => {
     });
   });
 
-  it('requests driver documents behind dashboard auth', async () => {
+  it('rejects generic support when requesting driver document mutations', async () => {
     const response = await request(createApp())
       .post('/api/drivers/driver_1/documents/cnh/request')
       .set('Authorization', 'Bearer support')
+      .send({ reason: 'Atualize sua CNH', sendPush: true });
+
+    expect(response.status).toBe(403);
+    expect(mockRequestDriverDocument).not.toHaveBeenCalled();
+  });
+
+  it('requests driver documents behind dashboard mutation auth', async () => {
+    const response = await request(createApp())
+      .post('/api/drivers/driver_1/documents/cnh/request')
+      .set('Authorization', 'Bearer manager')
       .send({ reason: 'Atualize sua CNH', sendPush: true });
 
     expect(response.status).toBe(200);
@@ -136,7 +146,7 @@ describe('user-management routes', () => {
       'cnh',
       expect.objectContaining({ reason: 'Atualize sua CNH', sendPush: true }),
       expect.objectContaining({
-        operator: expect.objectContaining({ id: 'admin_1', role: 'support' })
+        operator: expect.objectContaining({ id: 'admin_1', role: 'manager' })
       })
     );
   });

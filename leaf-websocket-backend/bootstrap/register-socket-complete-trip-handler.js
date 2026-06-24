@@ -23,6 +23,12 @@ function registerSocketCompleteTripHandler({
 }) {
     const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+    const {
+        hasRideOfflineIntentPayload,
+        markRideOfflineIntentProcessed,
+        markRideOfflineIntentRejected,
+        validateAndReserveRideOfflineIntent
+    } = require('../services/ride-offline-intent-validator');
     const rideIdempotencyService = idempotencyService || require('../services/idempotency-service');
     const {
         recordDriverDestinationDailyRideCompletion
@@ -123,6 +129,45 @@ function registerSocketCompleteTripHandler({
                     return;
                 }
                 outerIdempotencyOwner = true;
+                const redis = redisPool.getConnection();
+                let offlineIntentValidation = null;
+
+                if (hasRideOfflineIntentPayload(data)) {
+                    offlineIntentValidation = await validateAndReserveRideOfflineIntent({
+                        redis,
+                        bookingId,
+                        actorId: driverId,
+                        role: 'driver',
+                        eventType: 'complete_trip',
+                        idempotencyKey,
+                        clientSequence: data.clientSequence,
+                        clientCreatedAt: data.clientCreatedAt,
+                        payload: {
+                            endLocation,
+                            distance,
+                            fare
+                        },
+                        data
+                    });
+
+                    if (!offlineIntentValidation.accepted) {
+                        socket.emit('tripCompleteError', {
+                            error: offlineIntentValidation.message || 'Intencao offline rejeitada',
+                            message: offlineIntentValidation.message || 'O backend rejeitou esta acao offline.',
+                            code: offlineIntentValidation.code || 'OFFLINE_INTENT_REJECTED'
+                        });
+                        outerIdempotencyOwner = false;
+                        await rideIdempotencyService.releaseInflight(idempotencyKey);
+                        return;
+                    }
+
+                    if (offlineIntentValidation.replay && offlineIntentValidation.cachedResult) {
+                        await rideIdempotencyService.cacheResult(idempotencyKey, offlineIntentValidation.cachedResult);
+                        outerIdempotencyOwner = false;
+                        socket.emit('tripCompleted', offlineIntentValidation.cachedResult);
+                        return;
+                    }
+                }
 
                 const paymentMockEnabled =
                     data?.mockPayment === true ||
@@ -137,7 +182,6 @@ function registerSocketCompleteTripHandler({
                 });
 
                 // Calcular duração se necessário (pode ser obtido do timer iniciado pelo listener)
-                const redis = redisPool.getConnection();
                 const timerKey = `trip_timer:${bookingId}`;
                 const timerData = await redis.hgetall(timerKey);
                 const duration = timerData.startTimestamp ?
@@ -203,6 +247,15 @@ function registerSocketCompleteTripHandler({
                         outerIdempotencyOwner = false;
                         await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
                     }
+                    if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                        await markRideOfflineIntentRejected({
+                            redis,
+                            bookingId,
+                            idempotencyKey,
+                            error: result.error || 'Erro ao finalizar viagem',
+                            code: 'COMPLETE_TRIP_COMMAND_FAILED'
+                        }).catch(() => null);
+                    }
                     socket.emit('tripCompleteError', {
                         error: result.error || 'Erro ao finalizar viagem'
                     });
@@ -229,7 +282,25 @@ function registerSocketCompleteTripHandler({
                 const paymentService = new PaymentService();
                 const fareReais = Number(finalFare || fare || 0);
                 const tollFeeReais = Number(resultTollFee || 0);
-                const fareBreakdown = paymentService.calculateFareBreakdownFromReais(fareReais, tollFeeReais);
+                const calculatedFareBreakdown = paymentService.calculateFareBreakdownFromReais(fareReais, tollFeeReais);
+                const fareBreakdown = {
+                    ...calculatedFareBreakdown,
+                    ...(Number.isFinite(Number(result.data?.operationalFee))
+                        ? { operationalFee: Number(result.data.operationalFee) }
+                        : {}),
+                    ...(Number.isFinite(Number(result.data?.paymentIntermediationFee))
+                        ? { paymentIntermediationFee: Number(result.data.paymentIntermediationFee) }
+                        : {}),
+                    ...(Number.isFinite(Number(result.data?.totalFees))
+                        ? { totalFees: Number(result.data.totalFees) }
+                        : {}),
+                    ...(Number.isFinite(Number(result.data?.driverNetAmount))
+                        ? { driverNetAmount: Number(result.data.driverNetAmount) }
+                        : {}),
+                    authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
+                    financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
+                    financialSnapshot: result.data?.financialSnapshot || null
+                };
 
                 metrics.recordRideCompleted(city, serviceType || 'standard');
                 if (Number.isFinite(Number(resultDuration)) && Number(resultDuration) >= 0) {
@@ -304,6 +375,14 @@ function registerSocketCompleteTripHandler({
                     persistence: 'accepted_background'
                 });
                 await rideIdempotencyService.cacheResult(idempotencyKey, tripCompletedData);
+                if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                    await markRideOfflineIntentProcessed({
+                        redis,
+                        bookingId,
+                        idempotencyKey,
+                        result: tripCompletedData
+                    }).catch(() => null);
+                }
                 outerIdempotencyOwner = false;
 
                 io.to(`driver_${driverId}`).emit('tripCompleted', tripCompletedData);
@@ -343,7 +422,10 @@ function registerSocketCompleteTripHandler({
                             endLocation: resultEndLocation || endLocation,
                             driverEarnings: null,
                             fareBreakdown,
-                            financialBreakdown: paymentDistribution || null
+                            financialBreakdown: paymentDistribution || null,
+                            authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
+                            financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
+                            financialSnapshot: result.data?.financialSnapshot || null
                         };
 
                         if (paymentMockEnabled) {
@@ -399,29 +481,41 @@ function registerSocketCompleteTripHandler({
 
                         try {
                             const ReceiptService = require('../services/receipt-service');
+                            const firebaseConfig = require('../firebase-config');
                             const receiptService = new ReceiptService();
-                            const bookingDataForReceipt = io.activeBookings?.get(bookingId);
-                            if (bookingDataForReceipt) {
-                                const receiptData = {
-                                    ...bookingDataForReceipt,
-                                    finalPrice: finalFare || fare,
-                                    grossAmount: fareBreakdown.grossAmount,
-                                    operationalFee: fareBreakdown.operationalFee,
-                                    paymentIntermediationFee: fareBreakdown.paymentIntermediationFee,
-                                    totalFees: fareBreakdown.totalFees,
-                                    driverNetAmount: fareBreakdown.driverNetAmount,
-                                    tollFee: fareBreakdown.tollFee,
-                                    fareBreakdown,
-                                    financialSnapshotSource: 'backend_final',
-                                    authoritativeSnapshot: true,
-                                    distance: resultDistance || distance,
-                                    endTime: new Date().toISOString(),
-                                    completedAt: new Date().toISOString(),
-                                    status: 'COMPLETED'
-                                };
-                                const firebaseDb = firebaseConfig?.getRealtimeDB?.();
-                                await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
-                            }
+                            const bookingDataForReceipt = {
+                                ...(io.activeBookings?.get(bookingId) || {}),
+                                ...(bookingSnapshot || {})
+                            };
+                            const completionTimestamp = new Date().toISOString();
+                            const receiptData = {
+                                ...bookingDataForReceipt,
+                                bookingId,
+                                driverId: resultDriverId || driverId || bookingDataForReceipt.driverId,
+                                customerId: customerIdToNotify || customerId || bookingDataForReceipt.customerId,
+                                finalPrice: finalFare || fare,
+                                finalFare: finalFare || fare,
+                                grossAmount: fareBreakdown.grossAmount,
+                                operationalFee: fareBreakdown.operationalFee,
+                                paymentIntermediationFee: fareBreakdown.paymentIntermediationFee,
+                                totalFees: fareBreakdown.totalFees,
+                                driverNetAmount: fareBreakdown.driverNetAmount,
+                                tollFee: fareBreakdown.tollFee,
+                                fareBreakdown,
+                                financialBreakdown: paymentDistribution || bookingDataForReceipt.financialBreakdown || null,
+                                paymentDistribution,
+                                financialSnapshot: result.data?.financialSnapshot || bookingDataForReceipt.financialSnapshot || null,
+                                financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
+                                authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
+                                distance: resultDistance || distance,
+                                duration: resultDuration || duration || null,
+                                endLocation: resultEndLocation || endLocation,
+                                endTime: completionTimestamp,
+                                completedAt: completionTimestamp,
+                                status: 'COMPLETED'
+                            };
+                            const firebaseDb = firebaseConfig?.getRealtimeDB?.();
+                            await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
                         } catch (receiptError) {
                             logStructured('warn', 'Erro ao gerar recibo', {
                                 bookingId,

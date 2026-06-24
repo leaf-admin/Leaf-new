@@ -4,11 +4,14 @@ const { logStructured, logError } = require('../utils/logger');
 
 const REASSIGNMENT_PENDING_KEY = process.env.RIDE_HEALTH_REASSIGNMENT_PENDING_KEY || 'ride_health:reassignment_pending';
 const EARLY_ENDED_REVIEW_KEY = process.env.RIDE_HEALTH_EARLY_REVIEW_KEY || 'ride_health:early_ended_review';
+const DRIVER_SIGNAL_ACTIVE_KEY = process.env.RIDE_HEALTH_DRIVER_SIGNAL_ACTIVE_KEY || 'ride_health:driver_signal_active';
 const DEFAULT_STUCK_THRESHOLD_MS = Number.parseInt(process.env.RIDE_HEALTH_REASSIGNMENT_STUCK_THRESHOLD_MS || '300000', 10);
 const DEFAULT_STUCK_CRITICAL_COUNT = Number.parseInt(process.env.RIDE_HEALTH_REASSIGNMENT_STUCK_CRITICAL_COUNT || '3', 10);
 const DEFAULT_REVIEW_WARNING_COUNT = Number.parseInt(process.env.RIDE_HEALTH_EARLY_REVIEW_WARNING_COUNT || '3', 10);
 const DEFAULT_REVIEW_CRITICAL_COUNT = Number.parseInt(process.env.RIDE_HEALTH_EARLY_REVIEW_CRITICAL_COUNT || '6', 10);
 const DEFAULT_REVIEW_WINDOW_MS = Number.parseInt(process.env.RIDE_HEALTH_EARLY_REVIEW_WINDOW_MS || '3600000', 10);
+const DEFAULT_DRIVER_SIGNAL_STALE_MS = Number.parseInt(process.env.RIDE_HEALTH_DRIVER_SIGNAL_STALE_MS || '90000', 10);
+const DEFAULT_DRIVER_SIGNAL_STALE_CRITICAL_COUNT = Number.parseInt(process.env.RIDE_HEALTH_DRIVER_SIGNAL_STALE_CRITICAL_COUNT || '3', 10);
 const DEFAULT_TOP_BOOKINGS_LIMIT = Number.parseInt(process.env.RIDE_HEALTH_TOP_BOOKINGS_LIMIT || '5', 10);
 
 const TRACKED_STATES = {
@@ -17,6 +20,20 @@ const TRACKED_STATES = {
 };
 
 const TRACKED_STATE_VALUES = new Set(Object.keys(TRACKED_STATES));
+const DRIVER_SIGNAL_TERMINAL_STATES = new Set([
+  'COMPLETE',
+  'COMPLETED',
+  'CANCELED',
+  'CANCELLED',
+  'REJECTED',
+  'EXPIRED',
+  'SUPERSEDED',
+  'NO_DRIVERS_AVAILABLE',
+  'NO_DRIVERS_FOUND',
+  'EARLY_ENDED_BY_RIDER',
+  'INTERRUPTED_OPERATIONAL_ENDED',
+  'EARLY_ENDED_REVIEW'
+]);
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -49,6 +66,14 @@ function isRedisRideHealthBackfillUsable(redis) {
   );
 }
 
+function isRedisDriverSignalIndexUsable(redis) {
+  return Boolean(
+    redis
+      && typeof redis.zadd === 'function'
+      && typeof redis.zrem === 'function'
+  );
+}
+
 function parseSortedSetRows(rows = []) {
   const parsed = [];
   for (let index = 0; index < rows.length; index += 2) {
@@ -65,6 +90,7 @@ function parseSortedSetRows(rows = []) {
 function buildEmptySnapshot(nowIso, options = {}) {
   const stuckThresholdMs = Math.max(60000, toNumber(options.stuckThresholdMs, DEFAULT_STUCK_THRESHOLD_MS));
   const reviewWindowMs = Math.max(60000, toNumber(options.reviewWindowMs, DEFAULT_REVIEW_WINDOW_MS));
+  const driverSignalStaleMs = Math.max(30000, toNumber(options.driverSignalStaleMs, DEFAULT_DRIVER_SIGNAL_STALE_MS));
 
   return {
     timestamp: nowIso,
@@ -83,6 +109,14 @@ function buildEmptySnapshot(nowIso, options = {}) {
       oldestBookingId: null,
       bookingIds: [],
       recentWindowMs: reviewWindowMs
+    },
+    driverSignal: {
+      total: 0,
+      stale: 0,
+      oldestAgeMs: 0,
+      oldestBookingId: null,
+      bookingIds: [],
+      staleThresholdMs: driverSignalStaleMs
     }
   };
 }
@@ -92,6 +126,8 @@ function applySnapshotMetrics(snapshot) {
   metrics.setRideHealthStuckCount('reassignment_pending', snapshot.reassignmentPending.stuck);
   metrics.setRideHealthStateCount('early_ended_review', snapshot.earlyEndedReview.total);
   metrics.setRideHealthRecentCount('early_ended_review', snapshot.earlyEndedReview.recent);
+  metrics.setRideHealthStateCount('driver_signal_active', snapshot.driverSignal.total);
+  metrics.setRideHealthStuckCount('driver_signal_stale', snapshot.driverSignal.stale);
 }
 
 function formatDurationMs(durationMs) {
@@ -229,7 +265,8 @@ async function syncTrackedRideState(redis, { bookingId, previousState = null, ne
     return false;
   }
 
-  if (!TRACKED_STATES[previousState] && !TRACKED_STATES[newState]) {
+  const newStateIsTerminal = DRIVER_SIGNAL_TERMINAL_STATES.has(String(newState || '').trim().toUpperCase());
+  if (!TRACKED_STATES[previousState] && !TRACKED_STATES[newState] && !newStateIsTerminal) {
     return false;
   }
 
@@ -239,6 +276,9 @@ async function syncTrackedRideState(redis, { bookingId, previousState = null, ne
   Object.values(TRACKED_STATES).forEach((key) => {
     pipeline.zrem(key, bookingId);
   });
+  if (newStateIsTerminal) {
+    pipeline.zrem(DRIVER_SIGNAL_ACTIVE_KEY, bookingId);
+  }
 
   if (TRACKED_STATES[newState]) {
     pipeline.zadd(TRACKED_STATES[newState], scoreMs, bookingId);
@@ -248,11 +288,26 @@ async function syncTrackedRideState(redis, { bookingId, previousState = null, ne
   return true;
 }
 
+async function syncDriverSignalForRide(redis, { bookingId, lastLocationAt = null } = {}) {
+  if (!isRedisDriverSignalIndexUsable(redis) || !bookingId) {
+    return false;
+  }
+
+  const scoreMs = toNumber(lastLocationAt, Date.now());
+  if (!Number.isFinite(scoreMs) || scoreMs <= 0) {
+    return false;
+  }
+
+  await redis.zadd(DRIVER_SIGNAL_ACTIVE_KEY, scoreMs, String(bookingId));
+  return true;
+}
+
 async function getRideOperationsSnapshot(redis, options = {}) {
   const nowIso = options.nowIso || new Date().toISOString();
   const nowMs = normalizeNowMs(nowIso);
   const stuckThresholdMs = Math.max(60000, toNumber(options.stuckThresholdMs, DEFAULT_STUCK_THRESHOLD_MS));
   const reviewWindowMs = Math.max(60000, toNumber(options.reviewWindowMs, DEFAULT_REVIEW_WINDOW_MS));
+  const driverSignalStaleMs = Math.max(30000, toNumber(options.driverSignalStaleMs, DEFAULT_DRIVER_SIGNAL_STALE_MS));
   const topLimit = Math.max(1, toNumber(options.topLimit, DEFAULT_TOP_BOOKINGS_LIMIT));
 
   if (!isRedisRideHealthUsable(redis)) {
@@ -263,6 +318,7 @@ async function getRideOperationsSnapshot(redis, options = {}) {
 
   const reassignmentMaxScore = nowMs - stuckThresholdMs;
   const reviewMinScore = nowMs - reviewWindowMs;
+  const driverSignalStaleMaxScore = nowMs - driverSignalStaleMs;
 
   const [
     reassignmentTotal,
@@ -272,7 +328,11 @@ async function getRideOperationsSnapshot(redis, options = {}) {
     reviewTotal,
     reviewOldestRows,
     reviewRecentCount,
-    reviewRecentRows
+    reviewRecentRows,
+    driverSignalTotal,
+    driverSignalOldestRows,
+    driverSignalStaleCount,
+    driverSignalStaleRows
   ] = await Promise.all([
     redis.zcard(REASSIGNMENT_PENDING_KEY).catch(() => 0),
     redis.zrange(REASSIGNMENT_PENDING_KEY, 0, 0, 'WITHSCORES').catch(() => []),
@@ -297,6 +357,18 @@ async function getRideOperationsSnapshot(redis, options = {}) {
       'LIMIT',
       0,
       topLimit
+    ).catch(() => []),
+    redis.zcard(DRIVER_SIGNAL_ACTIVE_KEY).catch(() => 0),
+    redis.zrange(DRIVER_SIGNAL_ACTIVE_KEY, 0, 0, 'WITHSCORES').catch(() => []),
+    redis.zcount(DRIVER_SIGNAL_ACTIVE_KEY, 0, driverSignalStaleMaxScore).catch(() => 0),
+    redis.zrangebyscore(
+      DRIVER_SIGNAL_ACTIVE_KEY,
+      0,
+      driverSignalStaleMaxScore,
+      'WITHSCORES',
+      'LIMIT',
+      0,
+      topLimit
     ).catch(() => [])
   ]);
 
@@ -304,6 +376,8 @@ async function getRideOperationsSnapshot(redis, options = {}) {
   const reassignmentStuckBookings = parseSortedSetRows(reassignmentStuckRows);
   const reviewOldest = parseSortedSetRows(reviewOldestRows)[0] || null;
   const recentReviewBookings = parseSortedSetRows(reviewRecentRows);
+  const driverSignalOldest = parseSortedSetRows(driverSignalOldestRows)[0] || null;
+  const staleDriverSignalBookings = parseSortedSetRows(driverSignalStaleRows);
 
   const snapshot = {
     timestamp: nowIso,
@@ -322,11 +396,43 @@ async function getRideOperationsSnapshot(redis, options = {}) {
       oldestBookingId: reviewOldest ? reviewOldest.bookingId : null,
       bookingIds: recentReviewBookings.map((item) => item.bookingId),
       recentWindowMs: reviewWindowMs
+    },
+    driverSignal: {
+      total: toNumber(driverSignalTotal, 0),
+      stale: toNumber(driverSignalStaleCount, 0),
+      oldestAgeMs: driverSignalOldest ? Math.max(0, nowMs - driverSignalOldest.scoreMs) : 0,
+      oldestBookingId: driverSignalOldest ? driverSignalOldest.bookingId : null,
+      bookingIds: staleDriverSignalBookings.map((item) => item.bookingId),
+      staleThresholdMs: driverSignalStaleMs
     }
   };
 
   applySnapshotMetrics(snapshot);
   return snapshot;
+}
+
+function buildDriverSignalAlert(snapshot, options = {}) {
+  const staleCount = snapshot.driverSignal.stale;
+  if (!staleCount) {
+    return null;
+  }
+
+  const criticalThreshold = Math.max(1, toNumber(options.driverSignalCriticalCount, DEFAULT_DRIVER_SIGNAL_STALE_CRITICAL_COUNT));
+  const severity = staleCount >= criticalThreshold ? 'critical' : 'warning';
+  const oldestDuration = formatDurationMs(snapshot.driverSignal.oldestAgeMs);
+
+  return {
+    severity,
+    metric: 'driver_signal_stale',
+    value: staleCount,
+    threshold: severity === 'critical' ? criticalThreshold : 1,
+    service: 'ride-health-monitor',
+    message: `${staleCount} corrida(s) ativa(s) sem sinal recente do motorista acima de ${formatDurationMs(snapshot.driverSignal.staleThresholdMs)}. Mais antiga: ${oldestDuration}.`,
+    details: {
+      bookingIds: snapshot.driverSignal.bookingIds,
+      oldestBookingId: snapshot.driverSignal.oldestBookingId
+    }
+  };
 }
 
 function buildReassignmentAlert(snapshot, options = {}) {
@@ -386,8 +492,9 @@ async function evaluateRideOperationsAlerts(redis, options = {}) {
 
   const reassignmentAlert = buildReassignmentAlert(snapshot, options);
   const reviewAlert = buildReviewAlert(snapshot, options);
+  const driverSignalAlert = buildDriverSignalAlert(snapshot, options);
 
-  for (const alert of [reassignmentAlert, reviewAlert].filter(Boolean)) {
+  for (const alert of [reassignmentAlert, reviewAlert, driverSignalAlert].filter(Boolean)) {
     try {
       await alertClient.sendAlert(alert);
       metrics.recordRideHealthAlert(alert.metric, alert.severity);
@@ -407,6 +514,8 @@ async function evaluateRideOperationsAlerts(redis, options = {}) {
     reassignmentPendingStuck: snapshot.reassignmentPending.stuck,
     earlyEndedReviewTotal: snapshot.earlyEndedReview.total,
     earlyEndedReviewRecent: snapshot.earlyEndedReview.recent,
+    driverSignalActive: snapshot.driverSignal.total,
+    driverSignalStale: snapshot.driverSignal.stale,
     alerts: alerts.length
   });
 
@@ -420,11 +529,15 @@ module.exports = {
   DEFAULT_REVIEW_WINDOW_MS,
   DEFAULT_REVIEW_WARNING_COUNT,
   DEFAULT_REVIEW_CRITICAL_COUNT,
+  DEFAULT_DRIVER_SIGNAL_STALE_MS,
+  DEFAULT_DRIVER_SIGNAL_STALE_CRITICAL_COUNT,
   DEFAULT_STUCK_CRITICAL_COUNT,
   DEFAULT_STUCK_THRESHOLD_MS,
+  DRIVER_SIGNAL_ACTIVE_KEY,
   EARLY_ENDED_REVIEW_KEY,
   REASSIGNMENT_PENDING_KEY,
   TRACKED_STATES,
+  buildDriverSignalAlert,
   buildReviewAlert,
   buildReassignmentAlert,
   backfillRideHealthIndex,
@@ -436,5 +549,6 @@ module.exports = {
   parseSortedSetRows,
   resolveTrackedRideState,
   resolveTrackedRideTimestampMs,
+  syncDriverSignalForRide,
   syncTrackedRideState
 };

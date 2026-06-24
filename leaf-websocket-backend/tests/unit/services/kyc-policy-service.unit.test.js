@@ -4,6 +4,7 @@ jest.mock('../../../utils/logger', () => ({
 }));
 
 const mockHasValidVerification = jest.fn();
+const mockResolveActiveTripForDriver = jest.fn();
 const KYC_WINDOW_ENV_KEYS = [
   'KYC_WITHDRAW_VERIFICATION_MAX_AGE_HOURS',
   'KYC_WITHDRAW_LOW_RISK_VERIFICATION_MAX_AGE_HOURS',
@@ -35,6 +36,10 @@ const mockRedis = {
 
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: jest.fn(() => mockRedis)
+}));
+
+jest.mock('../../../utils/active-trip-index', () => ({
+  resolveActiveTripForDriver: (...args) => mockResolveActiveTripForDriver(...args)
 }));
 
 jest.mock('../../../firebase-config', () => ({
@@ -79,6 +84,7 @@ describe('kyc-policy-service', () => {
     service = require('../../../services/kyc-policy-service');
     jest.clearAllMocks();
     mockHasValidVerification.mockResolvedValue({ hasValid: true });
+    mockResolveActiveTripForDriver.mockResolvedValue({ tripId: null, customerId: null });
   });
 
   test('isPhotoMismatchReport should return true for mismatch keywords', () => {
@@ -286,6 +292,43 @@ describe('kyc-policy-service', () => {
       'driver_locations_eligible',
       'driver-kyc-blocked',
     );
+  });
+
+  test('defers photo-mismatch revalidation while the driver has an active trip', async () => {
+    const firebaseConfig = require('../../../firebase-config');
+    mockResolveActiveTripForDriver.mockResolvedValueOnce({
+      tripId: 'trip-active-1',
+      customerId: 'passenger-1'
+    });
+
+    const result = await service.markDriverForPhotoMismatch({
+      driverId: 'driver-active-1',
+      tripId: 'trip-active-1',
+      reporterId: 'passenger-1',
+      payload: {
+        selectedOptions: ['Motorista diferente da foto']
+      }
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      success: true,
+      deferred: true,
+      reverifyRequired: false,
+      activeTripId: 'trip-active-1'
+    }));
+    expect(firebaseConfig.updateRealtimeDB).toHaveBeenCalledWith(
+      'users/driver-active-1',
+      expect.objectContaining({
+        kycReverifyPendingAfterTrip: true
+      })
+    );
+    expect(mockRedis.hset).toHaveBeenCalledWith(
+      'driver:driver-active-1',
+      expect.objectContaining({
+        identity_reverification_pending_after_trip: 'true'
+      })
+    );
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
   });
 
   test('markDriverForLivenessAttemptsExhausted opens support ticket and soft-blocks dispatch', async () => {

@@ -41,6 +41,9 @@ function createRedis() {
       mockRedisState.strings.set(key, value);
       return 'OK';
     }),
+    get: jest.fn(async (key) => mockRedisState.strings.get(key) || null),
+    hlen: jest.fn(async (key) => Object.keys(mockRedisState.hashes.get(key) || {}).length),
+    hgetall: jest.fn(async (key) => mockRedisState.hashes.get(key) || {}),
     multi: jest.fn(() => {
       const ops = [];
       return {
@@ -97,7 +100,8 @@ jest.mock('../../../utils/logger', () => ({
 jest.mock('../../../services/gradual-radius-expander', () => jest.fn());
 
 const {
-  materializePaymentForBooking
+  materializePaymentForBooking,
+  triggerDispatchAfterPayment
 } = require('../../../services/payment-dispatch-service');
 
 describe('payment-dispatch-service', () => {
@@ -174,5 +178,32 @@ describe('payment-dispatch-service', () => {
     expect(mockRedisState.strings.get('payment_charge_booking:charge_1')).toBe('booking_1');
     expect(mockRedisState.strings.get('payment_temp_ride_booking:temp_ride_1')).toBe('booking_1');
     expect(mockRedisState.strings.has('payment_status_cache:booking_1')).toBe(true);
+  });
+
+  it('does not dispatch a booking whose payment ledger is pending', async () => {
+    mockRedisState.hashes.set('booking:booking_ledger_pending', {
+      bookingId: 'booking_ledger_pending',
+      customerId: 'passenger_1',
+      paymentStatus: 'ledger_pending',
+      paymentLedgerStatus: 'pending_retry',
+      pickupLocation: JSON.stringify({ lat: -22.853586, lng: -43.318168 })
+    });
+
+    const result = await triggerDispatchAfterPayment({
+      bookingId: 'booking_ledger_pending',
+      io: {},
+      pickupLocation: { lat: -22.853586, lng: -43.318168 },
+      source: 'unit_test',
+      force: true,
+      maxAttempts: 1
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      skipped: true,
+      reason: 'PAYMENT_LEDGER_PENDING',
+      paymentStatus: 'ledger_pending',
+      paymentLedgerStatus: 'pending_retry'
+    });
   });
 });

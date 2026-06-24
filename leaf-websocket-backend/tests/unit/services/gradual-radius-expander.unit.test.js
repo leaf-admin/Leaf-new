@@ -13,7 +13,21 @@ jest.mock('../../../services/ride-state-manager', () => ({
     CANCELED: 'CANCELED'
   },
   getBookingState: jest.fn(),
-  updateBookingState: jest.fn().mockResolvedValue(undefined)
+  updateBookingState: jest.fn().mockResolvedValue(undefined),
+  isTerminalStateValue: jest.fn((value) => [
+    'COMPLETE',
+    'COMPLETED',
+    'CANCELED',
+    'CANCELLED',
+    'REJECTED',
+    'EXPIRED',
+    'SUPERSEDED',
+    'NO_DRIVERS_AVAILABLE',
+    'NO_DRIVERS_FOUND',
+    'EARLY_ENDED_BY_RIDER',
+    'INTERRUPTED_OPERATIONAL_ENDED',
+    'EARLY_ENDED_REVIEW'
+  ].includes(String(value || '').trim().toUpperCase()))
 }));
 
 jest.mock('../../../services/event-sourcing', () => ({
@@ -37,6 +51,12 @@ jest.mock('../../../services/driver-lock-manager', () => ({}));
 const mockNotifyMultipleDrivers = jest.fn().mockResolvedValue({ notified: 1 });
 const mockClearAllTimeouts = jest.fn();
 const mockFindAndScoreDrivers = jest.fn().mockResolvedValue([]);
+const mockGetStoredPayment = jest.fn();
+const mockProcessRideRefund = jest.fn();
+const mockNormalizePaymentAmountCents = jest.fn((value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+});
 
 jest.mock('../../../services/driver-notification-dispatcher', () => {
   return jest.fn().mockImplementation(() => ({
@@ -44,6 +64,28 @@ jest.mock('../../../services/driver-notification-dispatcher', () => {
     clearAllTimeouts: mockClearAllTimeouts,
     findAndScoreDrivers: mockFindAndScoreDrivers
   }));
+});
+
+jest.mock('../../../services/payment-service', () => {
+  return class MockPaymentService {
+    static isRefundedPaymentStatus(value) {
+      return ['REFUNDED', 'REFUNDED_FULL', 'REFUNDED_PARTIAL'].includes(
+        String(value || '').trim().toUpperCase()
+      );
+    }
+
+    getStoredPayment(...args) {
+      return mockGetStoredPayment(...args);
+    }
+
+    processRideRefund(...args) {
+      return mockProcessRideRefund(...args);
+    }
+
+    normalizePaymentAmountCents(...args) {
+      return mockNormalizePaymentAmountCents(...args);
+    }
+  };
 });
 
 jest.mock('../../../utils/logger', () => ({
@@ -74,6 +116,16 @@ describe('gradual-radius-expander', () => {
     delete process.env.MATCH_MINIMUM_SEARCH_DURATION_MS;
     delete process.env.MATCH_MAX_RADIUS_RETRY_INTERVAL_MS;
     delete process.env.MATCH_RESPONSE_PAUSE_MIN_UNIQUE_DRIVERS;
+    mockGetStoredPayment.mockResolvedValue(null);
+    mockProcessRideRefund.mockResolvedValue({
+      success: true,
+      refundId: 'refund_default',
+      ledgerRecorded: true
+    });
+    mockNormalizePaymentAmountCents.mockImplementation((value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+    });
 
     redis = {
       hgetall: jest.fn(async (key) => {
@@ -361,6 +413,61 @@ describe('gradual-radius-expander', () => {
     );
   });
 
+  it('processes a canonical refund before terminalizing a paid no-driver search', async () => {
+    mockGetStoredPayment.mockResolvedValue({
+      rideId: 'booking_paid_no_driver',
+      chargeId: 'charge_paid_no_driver',
+      amount: 8785,
+      passengerId: 'customer_1',
+      status: 'PAID'
+    });
+    mockProcessRideRefund.mockResolvedValue({
+      success: true,
+      refundId: 'refund_no_driver_1',
+      ledgerRecorded: true
+    });
+
+    await expander.handleMaxRadiusReached('booking_paid_no_driver', {
+      searchedRadius: 30,
+      pickupLocation: { lat: -23.55, lng: -46.63 },
+      limit: 1
+    });
+
+    expect(mockProcessRideRefund).toHaveBeenCalledTimes(1);
+    expect(mockProcessRideRefund).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'booking_paid_no_driver',
+      chargeId: 'charge_paid_no_driver',
+      amount: 8785,
+      reason: 'NO_DRIVERS_AVAILABLE',
+      status: 'REFUNDED_FULL',
+      passengerId: 'customer_1',
+      metadata: expect.objectContaining({
+        source: 'gradual_radius_expander'
+      })
+    }));
+    expect(roomEmitter.emit).toHaveBeenCalledWith(
+      'noDriversFound',
+      expect.objectContaining({
+        bookingId: 'booking_paid_no_driver',
+        refundStatus: 'REFUNDED',
+        refundId: 'refund_no_driver_1',
+        refundAmountInCents: 8785,
+        refundAmountInReais: '87.85'
+      })
+    );
+    expect(redis.hset).toHaveBeenCalledWith(
+      'booking:booking_paid_no_driver',
+      expect.objectContaining({
+        status: 'NO_DRIVERS_AVAILABLE',
+        refundStatus: 'REFUNDED',
+        refundId: 'refund_no_driver_1',
+        refundAmountInCents: '8785',
+        refundAmountInReais: '87.85',
+        refundLedgerRecorded: 'true'
+      })
+    );
+  });
+
   it('does not emit noDriversFound while a driver offer is still awaiting response', async () => {
     jest.useFakeTimers();
     RideStateManager.getBookingState.mockResolvedValue(RideStateManager.STATES.AWAITING_RESPONSE);
@@ -508,5 +615,27 @@ describe('gradual-radius-expander', () => {
       bookingId: 'booking_terminal'
     }));
     expect(redis.del).toHaveBeenCalledWith('customer_active_booking:customer_1');
+  });
+
+  it('clears a stale customer active index that points to a completed booking without restarting search', async () => {
+    redis.get.mockResolvedValue('booking_completed');
+    redis.hgetall.mockResolvedValue({
+      customerId: 'customer_1',
+      driverId: 'driver_1',
+      status: 'COMPLETED',
+      completedAt: '2026-06-23T12:00:00.000Z'
+    });
+    const finalizeSpy = jest.spyOn(expander, 'handleMaxRadiusReached');
+
+    const result = await expander.reconcileExpiredSearchForCustomer('customer_1');
+
+    expect(result).toEqual(expect.objectContaining({
+      reconciled: true,
+      reason: 'TERMINAL_ACTIVE_INDEX_CLEARED',
+      bookingId: 'booking_completed',
+      status: 'COMPLETED'
+    }));
+    expect(redis.del).toHaveBeenCalledWith('customer_active_booking:customer_1');
+    expect(finalizeSpy).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,7 @@ const mockCacheStore = new Map();
 const mockCreateCharge = jest.fn();
 const mockCreateChargeWithSplit = jest.fn();
 const mockTransferDirectToDriver = jest.fn();
+const mockProcessRefund = jest.fn();
 
 jest.mock('../../../services/woovi-driver-service', () =>
   jest.fn().mockImplementation(() => ({
@@ -11,7 +12,8 @@ jest.mock('../../../services/woovi-driver-service', () =>
     }),
     createCharge: mockCreateCharge,
     createChargeWithSplit: mockCreateChargeWithSplit,
-    transferDirectToDriver: mockTransferDirectToDriver
+    transferDirectToDriver: mockTransferDirectToDriver,
+    processRefund: mockProcessRefund
   }))
 );
 
@@ -84,7 +86,8 @@ const createInMemoryFirestore = () => {
       exists: docs.has(path),
       data: () => docs.get(path)
     }),
-    set: async (data, options) => writeDoc({ path }, data, options)
+    set: async (data, options) => writeDoc({ path }, data, options),
+    update: async (data) => writeDoc({ path }, data, { merge: true })
   });
 
   return {
@@ -120,6 +123,7 @@ describe('PaymentService payment status cache', () => {
     mockCreateCharge.mockReset();
     mockCreateChargeWithSplit.mockReset();
     mockTransferDirectToDriver.mockReset();
+    mockProcessRefund.mockReset();
     mockCreateCharge.mockResolvedValue({
       success: true,
       charge: {
@@ -212,6 +216,42 @@ describe('PaymentService payment status cache', () => {
     expect(result.success).toBe(false);
     expect(mockCacheStore.has('payment_status_cache:temp_ride_123')).toBe(true);
     expect(mockCacheStore.has('payment_status_cache:charge_abc')).toBe(true);
+  });
+
+  it('marks confirmed payment as ledger_pending when payment_received ledger fails', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    service.financialLedgerService.recordPaymentReceived = jest.fn().mockResolvedValue({
+      success: false,
+      code: 'LEDGER_WRITE_FAILED',
+      error: 'ledger unavailable'
+    });
+
+    const result = await service.storeConfirmedPayment({
+      rideId: 'booking_payment_ledger_pending',
+      chargeId: 'charge_ledger_pending',
+      amount: 2750,
+      passengerId: 'passenger_ledger'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      ledgerPosted: false,
+      ledgerStatus: 'pending_retry',
+      ledgerError: 'ledger unavailable'
+    });
+    expect(firestore.docs.get('ride_payments/booking_payment_ledger_pending')).toMatchObject({
+      status: 'LEDGER_PENDING',
+      ledgerStatus: 'pending_retry',
+      ledgerRetryable: true,
+      ledgerError: 'ledger unavailable'
+    });
+    expect(firestore.docs.get('bookings/booking_payment_ledger_pending')).toMatchObject({
+      paymentStatus: 'ledger_pending',
+      paymentLedgerStatus: 'pending_retry',
+      paymentDispatchBlockedReason: 'PAYMENT_LEDGER_PENDING'
+    });
   });
 
   it('creates a regular Woovi charge when driver split target is not known yet', async () => {
@@ -948,6 +988,128 @@ describe('PaymentService financial rules', () => {
       }
     });
   });
+
+  it('settles the backend-final snapshot without recalculating the driver amount', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    service.calculateNetAmount = jest.fn(() => {
+      throw new Error('não deve recalcular snapshot final');
+    });
+
+    const result = await service.processNetDistribution({
+      rideId: 'booking_snapshot_locked',
+      driverId: 'driver_snapshot',
+      totalAmount: 1506,
+      tollFee: 0,
+      financialSnapshot: {
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        passengerPaidCents: 1506,
+        tollFeeCents: 0,
+        operationalFeeCents: 99,
+        paymentIntermediationFeeCents: 50,
+        subscriptionRetainedFeeCents: 0,
+        driverNetAmountCents: 1357
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      netAmount: 1357,
+      retainedFees: {
+        operationalFee: 99,
+        wooviFee: 50,
+        totalRetained: 149
+      }
+    });
+    expect(service.calculateNetAmount).not.toHaveBeenCalled();
+    expect(firestore.docs.get('payment_distributions/booking_snapshot_locked')).toMatchObject({
+      netAmount: 1357,
+      calculation: expect.objectContaining({
+        totalAmount: 1506,
+        netAmount: 1357
+      })
+    });
+  });
+
+  it('settles subscription retention from the backend-final snapshot without recalculating', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    service.calculateNetAmount = jest.fn(() => {
+      throw new Error('não deve recalcular snapshot final');
+    });
+    service.buildRideFinancialContract = jest.fn(() => {
+      throw new Error('não deve reconstruir contrato backend_final');
+    });
+
+    const result = await service.processNetDistribution({
+      rideId: 'booking_snapshot_subscription',
+      driverId: 'driver_snapshot',
+      totalAmount: 3000,
+      tollFee: 0,
+      financialSnapshot: {
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        passengerPaidCents: 3000,
+        tollFeeCents: 0,
+        operationalFeeCents: 149,
+        paymentIntermediationFeeCents: 50,
+        subscriptionRetainedFeeCents: 300,
+        driverNetAmountCents: 2501
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      netAmount: 2501,
+      retainedFees: {
+        operationalFee: 149,
+        wooviFee: 50,
+        subscriptionRetainedFee: 300,
+        totalRetained: 499
+      }
+    });
+    expect(service.calculateNetAmount).not.toHaveBeenCalled();
+    expect(service.buildRideFinancialContract).not.toHaveBeenCalled();
+    expect(firestore.docs.get('payment_distributions/booking_snapshot_subscription')).toMatchObject({
+      netAmount: 2501,
+      subscriptionRetainedFee: 300,
+      retainedFees: {
+        operationalFee: 149,
+        wooviFee: 50,
+        subscriptionRetainedFee: 300,
+        totalRetained: 499
+      },
+      calculation: expect.objectContaining({
+        totalAmount: 3000,
+        netAmount: 2501,
+        financialContract: expect.objectContaining({
+          subscriptionRetainedFeeCents: 300
+        })
+      })
+    });
+    const settlementEvent = Array.from(firestore.docs.values()).find(
+      (doc) => doc.eventType === 'ride_settlement' && doc.rideId === 'booking_snapshot_subscription'
+    );
+    expect(settlementEvent).toMatchObject({
+      totalDebitCents: 3000,
+      totalCreditCents: 3000,
+      lines: expect.arrayContaining([
+        expect.objectContaining({
+          account: 'liability:driver_balance_payable',
+          direction: 'credit',
+          amountCents: 2501
+        }),
+        expect.objectContaining({
+          account: 'revenue:driver_subscription_settlement',
+          direction: 'credit',
+          amountCents: 300
+        })
+      ])
+    });
+  });
 });
 
 describe('PaymentService driver balance credit idempotency', () => {
@@ -994,5 +1156,293 @@ describe('PaymentService driver balance credit idempotency', () => {
       newBalance: 12.43,
       idempotencyKey: transactionId
     });
+  });
+});
+
+describe('PaymentService refund terminal status handling', () => {
+  beforeEach(() => {
+    firebaseConfig.getFirestore.mockReturnValue(null);
+  });
+
+  it('marks partial and full refund statuses as refunded to block replay', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    await firestore.collection('ride_payments').doc('booking_refund_1').set({
+      rideId: 'booking_refund_1',
+      chargeId: 'charge_refund_1',
+      amount: 8785,
+      passengerId: 'customer_1',
+      status: 'PAID'
+    });
+    await firestore.collection('payment_holdings').doc('booking_refund_1').set({
+      rideId: 'booking_refund_1',
+      chargeId: 'charge_refund_1',
+      amount: 8785,
+      status: 'refunded'
+    });
+    const service = new PaymentService();
+
+    const result = await service.markPaymentRefunded('booking_refund_1', {
+      refundAmount: 0,
+      cancellationFee: 200,
+      status: 'REFUNDED_PARTIAL',
+      reason: 'unit replay guard'
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(firestore.docs.get('ride_payments/booking_refund_1')).toMatchObject({
+      status: 'REFUNDED_PARTIAL',
+      refunded: true,
+      refundAmount: 0,
+      cancellationFee: 200
+    });
+    expect(PaymentService.isRefundedPaymentStatus('REFUNDED_FULL')).toBe(true);
+    expect(PaymentService.isRefundedPaymentStatus('REFUNDED_PARTIAL')).toBe(true);
+  });
+
+  it('closes fee-only cancellations without marking payment holding as refunded', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    await firestore.collection('ride_payments').doc('booking_fee_only_1').set({
+      rideId: 'booking_fee_only_1',
+      chargeId: 'charge_fee_only_1',
+      amount: 1000,
+      passengerId: 'customer_fee_only',
+      status: 'PAID'
+    });
+    await firestore.collection('payment_holdings').doc('booking_fee_only_1').set({
+      rideId: 'booking_fee_only_1',
+      chargeId: 'charge_fee_only_1',
+      amount: 1000,
+      status: 'in_holding'
+    });
+    const service = new PaymentService();
+
+    const result = await service.markPaymentRefunded('booking_fee_only_1', {
+      refundAmount: 0,
+      cancellationFee: 1000,
+      status: 'FEE_ONLY',
+      reason: 'unit fee retained'
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(firestore.docs.get('ride_payments/booking_fee_only_1')).toMatchObject({
+      status: 'FEE_ONLY',
+      refunded: false,
+      refundStatus: 'FEE_ONLY',
+      refundAmount: 0,
+      cancellationFee: 1000,
+      noRefundRequiredAt: '__SERVER_TIMESTAMP__'
+    });
+    expect(firestore.docs.get('payment_holdings/booking_fee_only_1')).toMatchObject({
+      status: 'cancelled',
+      refunded: false,
+      refundStatus: 'FEE_ONLY',
+      refundAmount: 0,
+      cancellationFee: 1000,
+      noRefundRequiredAt: '__SERVER_TIMESTAMP__'
+    });
+  });
+
+  it('treats canonical confirmed payment records as captured for refunds', () => {
+    expect(PaymentService.isCapturedPaymentStatus('PAID')).toBe(true);
+    expect(PaymentService.isCapturedPaymentStatus('CONFIRMED')).toBe(true);
+    expect(PaymentService.isCapturedPaymentStatus('LEDGER_PENDING')).toBe(true);
+    expect(PaymentService.isCapturedPaymentStatus('IN_HOLDING')).toBe(true);
+    expect(PaymentService.isCapturedPaymentStatus('PENDING')).toBe(false);
+    expect(PaymentService.isCapturedPaymentStatus('REFUNDED_FULL')).toBe(false);
+  });
+
+  it('processes ride refunds through provider and canonical ledger-backed records', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockProcessRefund.mockResolvedValue({
+      success: true,
+      refundId: 'refund_provider_1'
+    });
+    await firestore.collection('ride_payments').doc('booking_refund_2').set({
+      rideId: 'booking_refund_2',
+      chargeId: 'charge_refund_2',
+      amount: 8785,
+      passengerId: 'customer_2',
+      status: 'PAID'
+    });
+    await firestore.collection('payment_holdings').doc('booking_refund_2').set({
+      rideId: 'booking_refund_2',
+      chargeId: 'charge_refund_2',
+      amount: 8785,
+      status: 'in_holding'
+    });
+    const service = new PaymentService();
+
+    const result = await service.processRideRefund({
+      rideId: 'booking_refund_2',
+      chargeId: 'charge_refund_2',
+      amount: 1200,
+      reason: 'unit canonical refund',
+      status: 'REFUNDED_PARTIAL'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      rideId: 'booking_refund_2',
+      chargeId: 'charge_refund_2',
+      refundId: 'refund_provider_1',
+      ledgerRecorded: true
+    });
+    expect(mockProcessRefund).toHaveBeenCalledTimes(1);
+    expect(mockProcessRefund).toHaveBeenCalledWith(
+      'charge_refund_2',
+      1200,
+      'Reembolso Leaf - unit canonical refund'
+    );
+    expect(firestore.docs.get('ride_payments/booking_refund_2')).toMatchObject({
+      status: 'REFUNDED_PARTIAL',
+      refunded: true,
+      refundInProgress: false,
+      refundStatus: 'REFUNDED_PARTIAL',
+      refundAmount: 1200,
+      refundId: 'refund_provider_1'
+    });
+    expect(firestore.docs.get('payment_holdings/booking_refund_2')).toMatchObject({
+      status: 'refunded',
+      refunded: true,
+      refundAmount: 1200,
+      refundId: 'refund_provider_1'
+    });
+  });
+
+  it('does not report refund ledger evidence when ledger recording fails', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockProcessRefund.mockResolvedValue({
+      success: true,
+      refundId: 'refund_provider_ledger_fail'
+    });
+    await firestore.collection('ride_payments').doc('booking_refund_ledger_fail').set({
+      rideId: 'booking_refund_ledger_fail',
+      chargeId: 'charge_refund_ledger_fail',
+      amount: 8785,
+      passengerId: 'customer_ledger_fail',
+      status: 'PAID'
+    });
+    await firestore.collection('payment_holdings').doc('booking_refund_ledger_fail').set({
+      rideId: 'booking_refund_ledger_fail',
+      chargeId: 'charge_refund_ledger_fail',
+      amount: 8785,
+      status: 'in_holding'
+    });
+    const service = new PaymentService();
+    service.financialLedgerService.recordRefund = jest.fn().mockResolvedValue({
+      success: false,
+      error: 'ledger unavailable'
+    });
+
+    const result = await service.processRideRefund({
+      rideId: 'booking_refund_ledger_fail',
+      chargeId: 'charge_refund_ledger_fail',
+      amount: 1200,
+      reason: 'unit ledger failure',
+      status: 'REFUNDED_PARTIAL'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      rideId: 'booking_refund_ledger_fail',
+      refundId: 'refund_provider_ledger_fail',
+      ledgerRecorded: false,
+      ledgerError: 'ledger unavailable'
+    });
+    expect(firestore.docs.get('ride_payments/booking_refund_ledger_fail')).toMatchObject({
+      status: 'REFUNDED_PARTIAL',
+      refunded: true,
+      refundLedgerStatus: 'pending',
+      refundLedgerError: 'ledger unavailable'
+    });
+  });
+
+  it('marks an advance payment intent as consumed inside a Firestore transaction', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const paymentIntentId = service.buildAdvancePaymentIntentId('temp_ride_1');
+    await firestore.collection('payment_intents').doc(paymentIntentId).set({
+      status: 'charge_created',
+      chargeId: 'charge_1',
+      passengerId: 'customer_1'
+    });
+
+    const result = await service.markAdvancePaymentIntentConsumed({
+      rideId: 'temp_ride_1',
+      bookingId: 'booking_1',
+      chargeId: 'charge_1'
+    });
+
+    expect(result).toBe(true);
+    expect(firestore.docs.get(`payment_intents/${paymentIntentId}`)).toMatchObject({
+      status: 'consumed',
+      bookingId: 'booking_1',
+      canonicalRideId: 'booking_1',
+      consumedChargeId: 'charge_1'
+    });
+  });
+
+  it('does not overwrite an advance payment intent consumed by another booking', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const paymentIntentId = service.buildAdvancePaymentIntentId('temp_ride_2');
+    await firestore.collection('payment_intents').doc(paymentIntentId).set({
+      status: 'consumed',
+      bookingId: 'booking_existing',
+      canonicalRideId: 'booking_existing',
+      chargeId: 'charge_2',
+      consumedChargeId: 'charge_2'
+    });
+
+    const result = await service.markAdvancePaymentIntentConsumed({
+      rideId: 'temp_ride_2',
+      bookingId: 'booking_new',
+      chargeId: 'charge_2'
+    });
+
+    expect(result).toBe(false);
+    expect(firestore.docs.get(`payment_intents/${paymentIntentId}`)).toMatchObject({
+      status: 'consumed',
+      bookingId: 'booking_existing',
+      canonicalRideId: 'booking_existing',
+      consumedChargeId: 'charge_2'
+    });
+  });
+
+  it('does not call the provider again when a ride refund is already terminal', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    await firestore.collection('ride_payments').doc('booking_refund_3').set({
+      rideId: 'booking_refund_3',
+      chargeId: 'charge_refund_3',
+      amount: 8785,
+      refundAmount: 1200,
+      refundId: 'refund_existing',
+      refunded: true,
+      status: 'REFUNDED_PARTIAL'
+    });
+    const service = new PaymentService();
+
+    const result = await service.processRideRefund({
+      rideId: 'booking_refund_3',
+      chargeId: 'charge_refund_3',
+      amount: 1200,
+      reason: 'unit replay',
+      status: 'REFUNDED_PARTIAL'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      alreadyRefunded: true,
+      code: 'ALREADY_REFUNDED',
+      refundId: 'refund_existing'
+    });
+    expect(mockProcessRefund).not.toHaveBeenCalled();
   });
 });

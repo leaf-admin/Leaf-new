@@ -167,11 +167,20 @@ class DisputeReviewService {
     const nextRefundAmount = Number.isFinite(Number(refundAmount)) ? Number(refundAmount) : current.refundAmount;
 
     if (['APPROVED_REFUND', 'PARTIAL_REFUND'].includes(normalizedDecision) && current.chargeId && nextRefundAmount) {
-      refundResult = await this.paymentService.processRefund(
-        current.chargeId,
-        nextRefundAmount,
-        resolutionNote || `Operação manual ${normalizedDecision}`
-      );
+      refundResult = await this.paymentService.processRideRefund({
+        rideId: current.bookingId,
+        chargeId: current.chargeId,
+        amount: nextRefundAmount,
+        reason: resolutionNote || `Operação manual ${normalizedDecision}`,
+        status: normalizedDecision === 'PARTIAL_REFUND' ? 'REFUNDED_PARTIAL' : 'REFUNDED_FULL',
+        passengerId: current.userType === 'passenger' ? current.userId : null,
+        metadata: {
+          source: 'dispute_review_service',
+          disputeId,
+          decision: normalizedDecision,
+          actorId: actorId || 'ops'
+        }
+      });
     }
 
     const next = normalizeDispute(disputeId, {

@@ -14,6 +14,169 @@ class DriverApprovalService {
     return String(value || '').trim();
   }
 
+  normalizeApprovalEvidence(value) {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => {
+          if (typeof item === 'string') return { ref: item };
+          if (item && typeof item === 'object') return item;
+          return null;
+        })
+        .filter(Boolean);
+    }
+
+    if (value && typeof value === 'object') {
+      return [value];
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      return [{ ref: value.trim() }];
+    }
+
+    return [];
+  }
+
+  normalizeManualApprovalAudit(driverData = {}) {
+    const audit = driverData.approvalAudit || driverData.audit || driverData.auditTrail || {};
+    const actorId = String(
+      audit.actorId ||
+        audit.adminId ||
+        audit.userId ||
+        audit.actor?.id ||
+        ''
+    ).trim();
+    const actorRole = String(
+      audit.actorRole ||
+        audit.role ||
+        audit.actor?.role ||
+        'admin'
+    ).trim();
+    const reason = String(
+      audit.reason ||
+        audit.approvalReason ||
+        audit.reviewReason ||
+        audit.justification ||
+        ''
+    ).trim();
+    const provenance = String(
+      audit.provenance ||
+        audit.source ||
+        audit.reviewSource ||
+        ''
+    ).trim();
+    const evidence = this.normalizeApprovalEvidence(
+      audit.evidence ||
+        audit.evidenceRefs ||
+        audit.documents ||
+        audit.documentRefs ||
+        audit.reviewEvidence
+    );
+
+    if (!actorId || !actorRole || !reason || !provenance || evidence.length === 0) {
+      return {
+        valid: false,
+        error: 'APPROVAL_AUDIT_REQUIRED',
+        details: 'Aprovação manual exige actorId, actorRole, reason, provenance e evidence.'
+      };
+    }
+
+    return {
+      valid: true,
+      audit: {
+        action: 'driver.manual_approval',
+        actorId,
+        actorRole,
+        reason,
+        provenance,
+        evidence,
+        source: provenance,
+        createdAt: new Date().toISOString()
+      }
+    };
+  }
+
+  async getDriverPreviousApprovalState(driverId) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) {
+      return {
+        ok: false,
+        error: 'APPROVAL_AUDIT_STORE_UNAVAILABLE',
+        details: 'Firestore indisponível para capturar estado anterior.'
+      };
+    }
+
+    const driverRef = firestore.collection('users').doc(driverId);
+    const snapshot = await driverRef.get();
+    const data = snapshot.exists ? (snapshot.data() || {}) : {};
+
+    return {
+      ok: true,
+      firestore,
+      previousState: {
+        exists: Boolean(snapshot.exists),
+        approved: data.approved ?? null,
+        isApproved: data.isApproved ?? null,
+        driverStatus: data.driverStatus || data.status || null,
+        kycStatus: data.kycStatus || data.kyc_status || null,
+        vehicleStatus: data.vehicleStatus || data.vehicle_status || null,
+        wooviAccountCreated: data.wooviAccountCreated ?? null,
+        wooviSubaccountCreated: data.wooviSubaccountCreated ?? null
+      }
+    };
+  }
+
+  buildApprovalAuditFields(driverData = {}, nextState = {}) {
+    const auditTrail = driverData.approvalAuditTrail;
+    if (!auditTrail) {
+      return {};
+    }
+
+    return {
+      approvalAuditTrail: {
+        ...auditTrail,
+        nextState
+      },
+      approvalAuditUpdatedAt: auditTrail.createdAt,
+      approvalAuditActorId: auditTrail.actorId,
+      approvalAuditReason: auditTrail.reason,
+      approvalAuditProvenance: auditTrail.provenance
+    };
+  }
+
+  async prepareManualApprovalAudit(driverData = {}) {
+    const normalizedAudit = this.normalizeManualApprovalAudit(driverData);
+    if (!normalizedAudit.valid) {
+      return normalizedAudit;
+    }
+
+    const previous = await this.getDriverPreviousApprovalState(driverData.id);
+    if (!previous.ok) {
+      return {
+        valid: false,
+        error: previous.error,
+        details: previous.details
+      };
+    }
+
+    const nextState = {
+      approved: true,
+      isApproved: true,
+      driverStatus: 'approved'
+    };
+
+    return {
+      valid: true,
+      firestore: previous.firestore,
+      auditTrail: {
+        ...normalizedAudit.audit,
+        driverId: driverData.id,
+        previousState: previous.previousState,
+        nextState
+      },
+      nextState
+    };
+  }
+
   buildDriverSubaccountPayload(driverData = {}) {
     const pixKey = this.normalizePixKey(
       driverData.wooviSubaccountPixKey ||
@@ -97,7 +260,14 @@ class DriverApprovalService {
       baasUpgradePending: false,
       wooviAccountCreatedAt: nowIso,
       isApproved: true,
-      approvedAt: nowIso
+      approvedAt: nowIso,
+      ...this.buildApprovalAuditFields(driverData, {
+        approved: true,
+        isApproved: true,
+        driverStatus: 'approved',
+        wooviSubaccountCreated: true,
+        fallbackToCustomer: false
+      })
     };
 
     await this.persistDriverWooviAccount(driverData.id, dataToSave);
@@ -126,14 +296,26 @@ class DriverApprovalService {
   async approveDriver(driverData) {
     try {
       logStructured('info', 'Processando aprovação do motorista', { service: 'driver-approval-service', driverId: driverData.id, driverName: driverData.name });
+      const audit = await this.prepareManualApprovalAudit(driverData);
+      if (!audit.valid) {
+        return {
+          success: false,
+          error: audit.error,
+          details: audit.details
+        };
+      }
+      const driverDataWithAudit = {
+        ...driverData,
+        approvalAuditTrail: audit.auditTrail
+      };
 
-      const subaccountResult = await this.tryCreateDriverSubaccount(driverData);
+      const subaccountResult = await this.tryCreateDriverSubaccount(driverDataWithAudit);
       if (subaccountResult.success) {
         return {
           success: true,
           message: 'Motorista aprovado com subconta Woovi para split',
           driverData: {
-            ...driverData,
+            ...driverDataWithAudit,
             ...subaccountResult.dataToSave
           },
           wooviAccountId: subaccountResult.wooviAccountId,
@@ -145,7 +327,7 @@ class DriverApprovalService {
       if (subaccountResult.reason !== 'pix_key_missing') {
         logStructured('warn', 'Falha ao criar subconta Woovi; tentando fallback BaaS/customer', {
           service: 'driver-approval-service',
-          driverId: driverData.id,
+          driverId: driverDataWithAudit.id,
           reason: subaccountResult.reason,
           error: subaccountResult.error
         });
@@ -206,7 +388,7 @@ class DriverApprovalService {
 
         // Usar customer como fallback (temporário até API MASTER estar disponível)
         const updatedDriverData = {
-          ...driverData,
+          ...driverDataWithAudit,
           wooviAccountId: customerResult.wooviClientId,
           wooviClientId: customerResult.wooviClientId, // Compatibilidade
           isApproved: true,
@@ -232,7 +414,14 @@ class DriverApprovalService {
               baasUpgradePending: false,
               wooviAccountCreatedAt: new Date().toISOString(),
               isApproved: true,
-              approvedAt: new Date().toISOString()
+              approvedAt: new Date().toISOString(),
+              ...this.buildApprovalAuditFields(driverDataWithAudit, {
+                approved: true,
+                isApproved: true,
+                driverStatus: 'approved',
+                wooviAccountCreated: true,
+                fallbackToCustomer: true
+              })
             };
             // Remover valores undefined
             Object.keys(dataToSave).forEach(key => {
@@ -280,7 +469,7 @@ class DriverApprovalService {
 
       // 3. Atualizar dados do motorista no sistema (Firebase/Firestore)
       const updatedDriverData = {
-        ...driverData,
+        ...driverDataWithAudit,
         wooviAccountId: baasResult.wooviAccountId, // ID da conta BaaS (principal)
         wooviClientId: baasResult.wooviClientId, // Para compatibilidade
         customerId: customerResult.success ? customerResult.wooviClientId : null,
@@ -304,7 +493,14 @@ class DriverApprovalService {
             baasAccountCreated: true,
             wooviAccountCreatedAt: new Date().toISOString(),
             isApproved: true,
-            approvedAt: new Date().toISOString()
+            approvedAt: new Date().toISOString(),
+            ...this.buildApprovalAuditFields(driverDataWithAudit, {
+              approved: true,
+              isApproved: true,
+              driverStatus: 'approved',
+              wooviAccountCreated: true,
+              baasAccountCreated: true
+            })
           };
           
           // Adicionar customerId apenas se existir

@@ -41,6 +41,7 @@ jest.mock('../../../utils/logger', () => ({
 }));
 
 const otpRoutes = require('../../../routes/auth-otp');
+const originalNodeEnv = process.env.NODE_ENV;
 
 function createApp() {
   const app = express();
@@ -59,6 +60,11 @@ describe('auth-otp routes', () => {
     mockCreateCustomToken.mockReset();
     mockCreateCustomToken.mockResolvedValue('custom-token');
     mockGetUserByPhoneNumber.mockResolvedValue({ uid: 'test_uid' });
+    process.env.NODE_ENV = 'test';
+  });
+
+  afterAll(() => {
+    process.env.NODE_ENV = originalNodeEnv;
   });
 
   it('returns bypass indicator and skips Redis storage for test phone on request-otp', async () => {
@@ -90,6 +96,22 @@ describe('auth-otp routes', () => {
     expect(mockRedisSet.mock.calls.length).toBeGreaterThanOrEqual(1);
     const storedOtpValues = mockRedisSet.mock.calls.map((call) => call[1]);
     expect(storedOtpValues.every((value) => /^\d{6}$/.test(String(value)))).toBe(true);
+  });
+
+  it('blocks simulated OTP request for non-test phones in production', async () => {
+    process.env.NODE_ENV = 'production';
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/api/custom-otp/request-otp')
+      .send({ phone: '+5521999999999' });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'OTP_PROVIDER_NOT_CONFIGURED'
+    });
+    expect(mockRedisSet).not.toHaveBeenCalled();
   });
 
   it('accepts static bypass OTP for configured test phones in verify-otp', async () => {
@@ -144,5 +166,26 @@ describe('auth-otp routes', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('Invalid or expired OTP');
+  });
+
+  it('blocks simulated OTP verification for non-test phones in production', async () => {
+    process.env.NODE_ENV = 'production';
+    const app = createApp();
+    mockRedisGet.mockResolvedValue('123456');
+
+    const response = await request(app)
+      .post('/api/custom-otp/verify-otp')
+      .send({
+        phone: '+5521999999999',
+        verificationId: 'vid_prod',
+        otp: '123456'
+      });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'OTP_PROVIDER_NOT_CONFIGURED'
+    });
+    expect(mockRedisGet).not.toHaveBeenCalled();
   });
 });

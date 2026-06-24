@@ -15,6 +15,8 @@ const {
   buildRideExtensionExpiresAt
 } = require('../services/ride-lifecycle-service');
 
+const EXTENSION_FARE_AUTHORITY = 'backend_extension_estimate';
+
 class RespondRideExtensionCommand extends Command {
   constructor(data) {
     super(data);
@@ -100,6 +102,10 @@ class RespondRideExtensionCommand extends Command {
             status: declinedRequest.status,
             extensionRequest: declinedRequest
           });
+        }
+
+        if (activeExtensionRequest.fareAuthority !== EXTENSION_FARE_AUTHORITY) {
+          return CommandResult.failure('Extensão sem cotação financeira backend. Passageiro deve refazer a solicitação.');
         }
 
         const extendRideCommand = new ExtendRideCommand({

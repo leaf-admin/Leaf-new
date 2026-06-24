@@ -90,7 +90,7 @@ class RadiusExpansionManager {
         }
 
         const status = String(snapshot.status || '').toUpperCase();
-        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+        if (RideStateManager.isTerminalStateValue(status)) {
             return { ok: false, reason: 'STATUS_BLOCKED', state, status };
         }
 

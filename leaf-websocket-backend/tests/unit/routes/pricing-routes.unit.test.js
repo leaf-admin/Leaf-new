@@ -5,7 +5,8 @@ const request = require('supertest');
 
 const mockRedis = {
   incr: jest.fn(),
-  expire: jest.fn()
+  expire: jest.fn(),
+  set: jest.fn()
 };
 const mockGetConnection = jest.fn(() => mockRedis);
 const mockEstimateRideFare = jest.fn();
@@ -60,6 +61,7 @@ describe('pricing routes', () => {
     jest.clearAllMocks();
     mockRedis.incr.mockResolvedValue(1);
     mockRedis.expire.mockResolvedValue(1);
+    mockRedis.set.mockResolvedValue('OK');
     mockGetConnection.mockReturnValue(mockRedis);
     mockIsActive.mockReturnValue(false);
     mockValidateRideLocations.mockReturnValue({ valid: true });
@@ -145,6 +147,14 @@ describe('pricing routes', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.estimatedFare).toBe(22.15);
+    expect(response.body.quoteLockId).toMatch(/^ql_/);
+    expect(response.body.quoteLockExpiresAt).toEqual(expect.any(String));
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      expect.stringMatching(/^pricing:quote-lock:ql_/),
+      expect.stringContaining('"payableAmountInCents":2215'),
+      'EX',
+      expect.any(Number)
+    );
     expect(mockEstimateRideFare).toHaveBeenCalledWith(
       expect.objectContaining({
         pickupLocation: expect.objectContaining({ lat: -22.966, lng: -43.182 }),

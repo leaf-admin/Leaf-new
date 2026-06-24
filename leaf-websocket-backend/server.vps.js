@@ -1746,7 +1746,10 @@ logStructured('info', 'Rotas de Autenticação Admin (JWT) registradas', { servi
 app.use('/api/kyc', kycRoutes.getRouter());
 
 // Rotas KYC Proxy (para microserviço)
-app.use('/api/kyc-proxy', kycProxyRoutes.getRouter());
+if (String(process.env.ENABLE_LEGACY_KYC_PROXY || 'false').toLowerCase() === 'true') {
+    app.use('/api/kyc-proxy', kycProxyRoutes.getRouter());
+    logStructured('warn', 'Proxy KYC legado habilitado por flag explicita no runtime VPS', { service: 'server' });
+}
 
 // Rotas KYC Analytics
 app.use('/api/kyc-analytics', kycAnalyticsRoutes.getRouter());
@@ -6209,12 +6212,8 @@ io.on('connection', async (socket) => {
 
                 // Usar dados sanitizados
                 const { bookingId, paymentMethod, paymentId, amount } = validation.sanitized;
-                const paymentMockEnabled =
-                    data?.mockPayment === true ||
-                    data?.__mockPayment === true ||
-                    String(process.env.MOCK_PAYMENT_FOR_TESTS || '').toLowerCase() === 'true';
                 const skipAvailabilityCheck =
-                    String(process.env.CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK || 'true').toLowerCase() === 'true';
+                    String(process.env.CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK || 'false').toLowerCase() === 'true';
 
                 // ✅ NOVO: Idempotency - Verificar se requisição já foi processada
                 const idempotencyKey = data.idempotencyKey || idempotencyService.generateKey(
@@ -6252,8 +6251,8 @@ io.on('connection', async (socket) => {
                     }
                 }
 
-                // Guarda de negócio:
-                // A elegibilidade já é garantida no pool ativo de dispatch; aqui só validamos em modo best-effort.
+                // Guarda de negócio: confirmação de pagamento só avança se ainda houver
+                // motorista elegível no momento da confirmação.
                 let bookingPickupLocation = null;
                 let bookingDestinationLocation = null;
                 let bookingPreferences = {};
@@ -6290,40 +6289,78 @@ io.on('connection', async (socket) => {
 
                 const pickupLocationToValidate = payloadPickupLocation || bookingPickupLocation;
 
-                if (!paymentMockEnabled && !skipAvailabilityCheck && pickupLocationToValidate?.lat && pickupLocationToValidate?.lng) {
-                    try {
-                        const availabilityTimeoutMs = Number.parseInt(
-                            process.env.CONFIRM_PAYMENT_AVAILABILITY_TIMEOUT_MS || '800',
-                            10
-                        );
-                        const availability = await Promise.race([
-                            findAvailableDriversForPickup(pickupLocationToValidate, {
-                                carType: bookingCarType,
-                                destinationLocation: bookingDestinationLocation,
-                                preferences: bookingPreferences
-                            }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('availability_check_timeout')), availabilityTimeoutMs))
-                        ]);
+                if (skipAvailabilityCheck) {
+                    logStructured('warn', 'confirmPayment: pre-check de disponibilidade ignorado por flag explícita', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        code: 'AVAILABILITY_CHECK_SKIPPED'
+                    });
+                } else {
+                    const availabilityTimeoutMs = Number.parseInt(
+                        process.env.CONFIRM_PAYMENT_AVAILABILITY_TIMEOUT_MS || '800',
+                        10
+                    );
+                    const availability = await performCreateBookingAvailabilityPrecheck({
+                        hasConfirmedPayment: true,
+                        pickupLocation: pickupLocationToValidate,
+                        destinationLocation: bookingDestinationLocation,
+                        preferences: bookingPreferences,
+                        requestedCarType: bookingCarType,
+                        checkAvailability: findAvailableDriversForPickup,
+                        logStructured,
+                        logContext: {
+                            userId,
+                            bookingId,
+                            eventType: 'confirmPayment'
+                        },
+                        timeoutMs: availabilityTimeoutMs,
+                        operationLabel: 'confirmPayment'
+                    });
 
-                        if (!availability?.success) {
-                            logStructured('warn', 'confirmPayment: pre-check de disponibilidade indisponível (seguindo fluxo)', {
-                                bookingId,
-                                eventType: 'confirmPayment',
-                                code: 'AVAILABILITY_CHECK_FAILED'
-                            });
-                        } else if ((availability.drivers || []).length === 0) {
-                            logStructured('warn', 'confirmPayment: sem motoristas no pre-check (seguindo fluxo)', {
-                                bookingId,
-                                eventType: 'confirmPayment',
-                                code: 'NO_DRIVERS_AVAILABLE'
-                            });
-                        }
-                    } catch (availabilityError) {
-                        logStructured('warn', 'confirmPayment: erro no pre-check de disponibilidade (seguindo fluxo)', {
+                    if (availability.code === 'NO_DRIVERS_AVAILABLE') {
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || null, {
+                            error: 'Sem motorista elegível antes de confirmar pagamento',
+                            code: 'NO_DRIVERS_AVAILABLE',
+                            radiusKm: availability.radiusKm || null
+                        }, false, 'Sem motorista elegível para confirmar pagamento', metadata);
+
+                        socket.emit('paymentError', {
+                            error: 'Não há motorista disponível',
+                            message: 'Não há motorista disponível para essa corrida agora. O pagamento não será confirmado.',
+                            code: 'NO_DRIVERS_AVAILABLE',
+                            retryAfterSec: 15
+                        });
+                        logStructured('warn', 'confirmPayment bloqueado por ausência de motorista elegível', {
                             bookingId,
                             eventType: 'confirmPayment',
-                            error: availabilityError.message
+                            code: 'NO_DRIVERS_AVAILABLE'
                         });
+                        await idempotencyService.releaseInflight(idempotencyKey).catch(() => null);
+                        return;
+                    }
+
+                    if (!availability.success || availability.skipped) {
+                        const availabilityCode = availability.code || 'AVAILABILITY_CHECK_FAILED';
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || null, {
+                            error: 'Falha ao validar motorista elegível antes de confirmar pagamento',
+                            code: availabilityCode,
+                            reason: availability.reason || null
+                        }, false, 'Falha no guard de disponibilidade antes do pagamento', metadata);
+
+                        socket.emit('paymentError', {
+                            error: 'Não foi possível validar disponibilidade agora',
+                            message: 'Não foi possível validar motorista disponível agora. Tente novamente em instantes.',
+                            code: availabilityCode,
+                            retryAfterSec: 5
+                        });
+                        logStructured('warn', 'confirmPayment bloqueado por falha no guard de disponibilidade', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            code: availabilityCode,
+                            error: availability.error || null
+                        });
+                        await idempotencyService.releaseInflight(idempotencyKey).catch(() => null);
+                        return;
                     }
                 }
 
@@ -11756,22 +11793,28 @@ io.on('connection', async (socket) => {
                         const refundReason = reason || 'Cancelado pelo passageiro';
 
                         if (refundAmountCents > 0 && chargeId) {
-                            const refundResult = await paymentService.processRefund(chargeId, refundAmountCents, refundReason);
+                            const refundStatus = feeCents > 0 ? 'REFUNDED_PARTIAL' : 'REFUNDED_FULL';
+                            const refundResult = await paymentService.processRideRefund({
+                                rideId: bookingId,
+                                chargeId,
+                                amount: refundAmountCents,
+                                cancellationFee: feeCents,
+                                reason: refundReason,
+                                status: refundStatus,
+                                passengerId,
+                                metadata: {
+                                    source: 'server.vps.cancelRide',
+                                    cancelledBy: userId || passengerId || null,
+                                    userType: 'customer'
+                                }
+                            });
                             if (!refundResult.success) {
                                 socket.emit('rideCancellationError', { error: 'Falha ao processar reembolso PIX' });
                                 return;
                             }
 
-                            await paymentService.markPaymentRefunded(bookingId, {
-                                refundId: refundResult.refundId,
-                                refundAmount: refundAmountCents,
-                                cancellationFee: feeCents,
-                                reason: refundReason,
-                                status: 'REFUNDED'
-                            });
-
                             refundSummary = {
-                                status: 'REFUNDED',
+                                status: refundStatus,
                                 refundId: refundResult.refundId,
                                 refundAmountInCents: refundAmountCents,
                                 refundAmountInReais: (refundAmountCents / 100).toFixed(2),

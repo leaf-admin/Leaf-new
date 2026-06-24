@@ -83,6 +83,35 @@ class RideStateManager {
         EXPANDED: 'EXPANDED' // Estado intermediário quando raio é expandido
     };
 
+    static TERMINAL_STATE_ALIASES = new Set([
+        'COMPLETE',
+        'COMPLETED',
+        'TRIP_COMPLETED',
+        'CANCELED',
+        'CANCELLED',
+        'TRIP_CANCELED',
+        'TRIP_CANCELLED',
+        'REJECTED',
+        'EXPIRED',
+        'SUPERSEDED',
+        'NO_DRIVERS',
+        'NO_DRIVERS_AVAILABLE',
+        'NO_DRIVERS_FOUND',
+        'EARLY_ENDED_BY_RIDER',
+        'INTERRUPTED_OPERATIONAL_ENDED',
+        'EARLY_ENDED_REVIEW'
+    ]);
+
+    static normalizeStateValue(value) {
+        return String(value || '').trim().toUpperCase();
+    }
+
+    static isTerminalStateValue(value) {
+        return RideStateManager.TERMINAL_STATE_ALIASES.has(
+            RideStateManager.normalizeStateValue(value)
+        );
+    }
+
     /**
      * Transições válidas de estado
      * Define quais estados podem transitar para quais outros
@@ -148,7 +177,8 @@ class RideStateManager {
             RideStateManager.STATES.COMPLETED,
             RideStateManager.STATES.EARLY_ENDED_BY_RIDER,
             RideStateManager.STATES.INTERRUPTED_OPERATIONAL,
-            RideStateManager.STATES.EARLY_ENDED_REVIEW
+            RideStateManager.STATES.EARLY_ENDED_REVIEW,
+            RideStateManager.STATES.CANCELED
         ],
         [RideStateManager.STATES.INTERRUPTED_OPERATIONAL]: [
             RideStateManager.STATES.REASSIGNMENT_PENDING,
@@ -283,11 +313,7 @@ class RideStateManager {
      */
     static async isFinalState(redis, bookingId) {
         const currentState = await RideStateManager.getBookingState(redis, bookingId);
-        return currentState === RideStateManager.STATES.COMPLETED ||
-               currentState === RideStateManager.STATES.EARLY_ENDED_BY_RIDER ||
-               currentState === RideStateManager.STATES.INTERRUPTED_OPERATIONAL_ENDED ||
-               currentState === RideStateManager.STATES.EARLY_ENDED_REVIEW ||
-               currentState === RideStateManager.STATES.CANCELED;
+        return RideStateManager.isTerminalStateValue(currentState);
     }
 
     /**

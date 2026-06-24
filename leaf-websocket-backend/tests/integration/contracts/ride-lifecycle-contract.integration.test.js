@@ -36,8 +36,9 @@ describe('Ride lifecycle source contract audit', () => {
     expect(completeTripHandler).toContain('paymentIntermediationFee: fareBreakdown.paymentIntermediationFee');
     expect(completeTripHandler).toContain('totalFees: fareBreakdown.totalFees');
     expect(completeTripHandler).toContain('driverNetAmount: fareBreakdown.driverNetAmount');
-    expect(completeTripHandler).toContain("financialSnapshotSource: 'backend_final'");
-    expect(completeTripHandler).toContain('authoritativeSnapshot: true');
+    expect(completeTripHandler).toContain("financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final'");
+    expect(completeTripHandler).toContain('authoritativeSnapshot: result.data?.authoritativeSnapshot === true');
+    expect(completeTripHandler).toContain("const firebaseConfig = require('../firebase-config');");
     expect(confirmPaymentHandler).toContain("socket.on('confirmPayment'");
     expect(confirmPaymentHandler).toContain("socket.emit('paymentConfirmed'");
     expect(updateTripLocationHandler).toContain("socket.on('updateTripLocation'");
@@ -83,11 +84,14 @@ describe('Ride lifecycle source contract audit', () => {
   it('keeps passenger auto-routing aligned with the active lifecycle surfaces', () => {
     const homeScreen = read('mobile-app/src/screens/prototype/RobotaxiHomeScreen.js');
     const passengerRouting = read('mobile-app/src/screens/prototype/passengerFlowRouting.js');
+    const lifecycleSurfaceMatrix = read('mobile-app/src/screens/prototype/rideLifecycleSurfaceMatrix.js');
 
     expect(homeScreen).toContain('resolvePassengerAutoRoute');
     expect(homeScreen).toContain('shouldAutoSyncPassengerRoute');
-    expect(passengerRouting).toContain("return 'RobotaxiPrototypeDriverSearch'");
-    expect(passengerRouting).toContain("return 'RobotaxiPrototypeTrip'");
-    expect(passengerRouting).toContain("return 'RobotaxiPrototypeReceipt'");
+    expect(passengerRouting).toContain('getRideLifecycleSurface(RIDE_LIFECYCLE_ROLES.PASSENGER, rawStatus)?.routeName');
+    expect(passengerRouting).toContain('getPassengerLifecycleSyncRoutes');
+    expect(lifecycleSurfaceMatrix).toContain("routeName: 'RobotaxiPrototypeDriverSearch'");
+    expect(lifecycleSurfaceMatrix).toContain("routeName: 'RobotaxiPrototypeTrip'");
+    expect(lifecycleSurfaceMatrix).toContain("routeName: 'RobotaxiPrototypeReceipt'");
   });
 });

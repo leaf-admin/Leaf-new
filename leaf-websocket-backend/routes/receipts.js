@@ -7,16 +7,126 @@
 const express = require('express');
 const router = express.Router();
 const ReceiptService = require('../services/receipt-service');
+const {
+    authenticateSupport,
+    requireSupportRoles,
+    isSupportAgent,
+    canAccessUserScope
+} = require('../middleware/support-auth');
 const { logger } = require('../utils/logger');
 
 // Instanciar serviço de recibos
 const receiptService = new ReceiptService();
 
+const RECEIPT_ADMIN_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
+
+function normalizeId(value) {
+    return String(value || '').trim();
+}
+
+function collectRideOwnerIds(rideData = {}) {
+    return [
+        rideData.customer,
+        rideData.customerId,
+        rideData.customer_id,
+        rideData.customerUid,
+        rideData.customer_uid,
+        rideData.passengerId,
+        rideData.passenger_id,
+        rideData.passengerUid,
+        rideData.passenger_uid,
+        rideData.userId,
+        rideData.riderId,
+        rideData.driver,
+        rideData.driverId,
+        rideData.driver_id,
+        rideData.driverUid,
+        rideData.driver_uid,
+        rideData.customer?.id,
+        rideData.driver?.id
+    ]
+        .map(normalizeId)
+        .filter(Boolean);
+}
+
+function collectReceiptOwnerIds(receipt = {}) {
+    return [
+        receipt.customer?.id,
+        receipt.driver?.id,
+        receipt.passengerId,
+        receipt.passenger_id,
+        receipt.driverId,
+        receipt.driver_id,
+        receipt.userId
+    ]
+        .map(normalizeId)
+        .filter(Boolean);
+}
+
+function canAccessOwnerScopedData(user, ownerIds = []) {
+    const requesterId = normalizeId(user?.uid || user?.id);
+    if (requesterId && ownerIds.includes(requesterId)) {
+        return true;
+    }
+
+    return isSupportAgent(user);
+}
+
+function requireReceiptUserScope(req, res, next) {
+    const { userId } = req.params;
+    if (!canAccessUserScope(req.user, userId)) {
+        return res.status(403).json({
+            success: false,
+            error: 'Acesso negado para este usuário'
+        });
+    }
+
+    return next();
+}
+
+function isReceiptFinancialSnapshotIncomplete(error) {
+    return error?.code === 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE' || error?.statusCode === 409;
+}
+
+function sendReceiptRouteError(res, error) {
+    if (isReceiptFinancialSnapshotIncomplete(error)) {
+        return res.status(409).json({
+            success: false,
+            code: 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE',
+            error: 'Recibo ainda não reconciliado',
+            details: error.details || null
+        });
+    }
+
+    return res.status(500).json({
+        success: false,
+        error: 'Erro interno do servidor'
+    });
+}
+
+/**
+ * 📋 GET /api/receipts/health
+ * Health check do serviço de recibos
+ */
+router.get('/api/receipts/health', (req, res) => {
+    res.json({
+        success: true,
+        service: 'Receipt Service',
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        features: {
+            receiptGeneration: true,
+            mapImages: !!receiptService.GOOGLE_MAPS_API_KEY,
+            pdfGeneration: true
+        }
+    });
+});
+
 /**
  * 📋 GET /api/receipts/:rideId
  * Busca e gera recibo para uma corrida específica
  */
-router.get('/api/receipts/:rideId', async (req, res) => {
+router.get('/api/receipts/:rideId', authenticateSupport, async (req, res) => {
     try {
         const { rideId } = req.params;
         const { format = 'json' } = req.query;
@@ -34,6 +144,13 @@ router.get('/api/receipts/:rideId', async (req, res) => {
             return res.status(404).json({
                 success: false,
                 error: 'Recibo não encontrado'
+            });
+        }
+
+        if (!canAccessOwnerScopedData(req.user, collectReceiptOwnerIds(receipt))) {
+            return res.status(403).json({
+                success: false,
+                error: 'Acesso negado para este recibo'
             });
         }
 
@@ -61,10 +178,7 @@ router.get('/api/receipts/:rideId', async (req, res) => {
 
     } catch (error) {
         logger.error(`❌ Erro ao buscar recibo:`, error);
-        res.status(500).json({
-            success: false,
-            error: 'Erro interno do servidor'
-        });
+        sendReceiptRouteError(res, error);
     }
 });
 
@@ -72,40 +186,42 @@ router.get('/api/receipts/:rideId', async (req, res) => {
  * 📋 POST /api/receipts/generate
  * Gera recibo a partir de dados fornecidos
  */
-router.post('/api/receipts/generate', async (req, res) => {
-    try {
-        const { rideId, rideData } = req.body;
+router.post(
+    '/api/receipts/generate',
+    authenticateSupport,
+    requireSupportRoles(RECEIPT_ADMIN_ROLES),
+    async (req, res) => {
+        try {
+            const { rideId, rideData } = req.body;
 
-        if (!rideId || !rideData) {
-            return res.status(400).json({
-                success: false,
-                error: 'rideId e rideData são obrigatórios'
+            if (!rideId || !rideData) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'rideId e rideData são obrigatórios'
+                });
+            }
+
+            logger.info(`📋 Gerando recibo personalizado para corrida: ${rideId}`);
+
+            const receipt = await receiptService.generateReceipt(rideId, rideData);
+
+            res.json({
+                success: true,
+                receipt: receipt
             });
+
+        } catch (error) {
+            logger.error(`❌ Erro ao gerar recibo:`, error);
+            sendReceiptRouteError(res, error);
         }
-
-        logger.info(`📋 Gerando recibo personalizado para corrida: ${rideId}`);
-
-        const receipt = await receiptService.generateReceipt(rideId, rideData);
-
-        res.json({
-            success: true,
-            receipt: receipt
-        });
-
-    } catch (error) {
-        logger.error(`❌ Erro ao gerar recibo:`, error);
-        res.status(500).json({
-            success: false,
-            error: 'Erro interno do servidor'
-        });
     }
-});
+);
 
 /**
  * 📋 GET /api/receipts/user/:userId
  * Lista recibos de um usuário específico
  */
-router.get('/api/receipts/user/:userId', async (req, res) => {
+router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUserScope, async (req, res) => {
     try {
         const { userId } = req.params;
         const { limit = 10, offset = 0, role = 'customer' } = req.query;
@@ -192,7 +308,7 @@ router.get('/api/receipts/user/:userId', async (req, res) => {
  * 📋 GET /api/receipts/:rideId/map
  * Retorna apenas a URL da imagem do mapa para uma corrida
  */
-router.get('/api/receipts/:rideId/map', async (req, res) => {
+router.get('/api/receipts/:rideId/map', authenticateSupport, async (req, res) => {
     try {
         const { rideId } = req.params;
 
@@ -225,6 +341,13 @@ router.get('/api/receipts/:rideId/map', async (req, res) => {
             });
         }
 
+        if (!canAccessOwnerScopedData(req.user, collectRideOwnerIds(rideData))) {
+            return res.status(403).json({
+                success: false,
+                error: 'Acesso negado para este mapa'
+            });
+        }
+
         // Gerar URL da imagem do mapa
         const mapImageUrl = receiptService.generateStaticMapImage(rideData);
 
@@ -251,25 +374,4 @@ router.get('/api/receipts/:rideId/map', async (req, res) => {
     }
 });
 
-/**
- * 📋 GET /api/receipts/health
- * Health check do serviço de recibos
- */
-router.get('/api/receipts/health', (req, res) => {
-    res.json({
-        success: true,
-        service: 'Receipt Service',
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        features: {
-            receiptGeneration: true,
-            mapImages: !!receiptService.GOOGLE_MAPS_API_KEY,
-            pdfGeneration: true
-        }
-    });
-});
-
 module.exports = router;
-
-
-

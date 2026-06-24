@@ -64,6 +64,38 @@ describe('driver-lock-manager', () => {
     });
   });
 
+  it('auto-releases stale locks that point to alternate terminal bookings', async () => {
+    redis.get.mockResolvedValue('booking_review');
+    redis.hmget.mockResolvedValue(['EARLY_ENDED_REVIEW', 'EARLY_ENDED_REVIEW']);
+    redis.del.mockResolvedValue(1);
+
+    const result = await driverLockManager.isDriverLocked('driver_review');
+
+    expect(redis.del).toHaveBeenCalledWith('driver_lock:driver_review');
+    expect(result).toEqual({
+      isLocked: false,
+      bookingId: null,
+      recovered: true,
+      staleBookingId: 'booking_review'
+    });
+  });
+
+  it('auto-releases stale locks that point to no-driver bookings', async () => {
+    redis.get.mockResolvedValue('booking_no_driver');
+    redis.hmget.mockResolvedValue(['NO_DRIVERS_AVAILABLE', 'NO_DRIVERS_AVAILABLE']);
+    redis.del.mockResolvedValue(1);
+
+    const result = await driverLockManager.isDriverLocked('driver_no_driver');
+
+    expect(redis.del).toHaveBeenCalledWith('driver_lock:driver_no_driver');
+    expect(result).toEqual({
+      isLocked: false,
+      bookingId: null,
+      recovered: true,
+      staleBookingId: 'booking_no_driver'
+    });
+  });
+
   it('auto-releases stale locks when the booking no longer exists', async () => {
     redis.get.mockResolvedValue('booking_missing');
     redis.hmget.mockResolvedValue([null, null]);

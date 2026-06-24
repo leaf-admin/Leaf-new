@@ -7,11 +7,13 @@ const PaymentService = require('../services/payment-service');
 const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
 const kycPolicyService = require('../services/kyc-policy-service');
 const firebaseConfig = require('../firebase-config');
+const redisPool = require('../utils/redis-pool');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
 const {
   buildPaymentAvailabilityInput,
   hasPaymentEligibleDriver
 } = require('../services/payment-driver-availability-guard');
+const { validateQuoteLock } = require('../services/quote-lock-service');
 const { logStructured, logError } = require('../utils/logger');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
@@ -38,6 +40,22 @@ const WITHDRAWAL_PASSWORD_LOCKOUT_SECONDS = Number.parseInt(
 
 function isLegacyManualPaymentDistributionEnabled() {
   return String(process.env.ENABLE_LEGACY_MANUAL_PAYMENT_DISTRIBUTION || 'false').toLowerCase() === 'true';
+}
+
+function shouldRequireQuoteLockForPayment() {
+  const configured = process.env.REQUIRE_PAYMENT_QUOTE_LOCK;
+  if (configured !== undefined) {
+    return String(configured).toLowerCase() === 'true';
+  }
+  return process.env.NODE_ENV !== 'test';
+}
+
+function resolveQuoteLockFailureStatus(code) {
+  if (code === 'QUOTE_LOCK_REQUIRED') return 400;
+  if (code === 'QUOTE_LOCK_STORE_UNAVAILABLE') return 503;
+  if (code === 'QUOTE_LOCK_NOT_FOUND_OR_EXPIRED' || code === 'QUOTE_LOCK_EXPIRED') return 409;
+  if (String(code || '').includes('MISMATCH')) return 409;
+  return 400;
 }
 
 function extractBearerToken(req) {
@@ -574,6 +592,7 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       paymentSessionId,
       paymentContextKey,
       quoteSessionId,
+      quoteLockId,
       pickupLocation,
       destinationLocation,
       preferences,
@@ -607,6 +626,68 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       vehicleCategory,
       rideDetails
     });
+
+    let quoteLockValidation = null;
+    let authoritativeAmountInCents = normalizePaymentAmountCents(amount);
+    let authoritativeGrossAmountInCents =
+      grossAmountInCents !== undefined && grossAmountInCents !== null
+        ? normalizePaymentAmountCents(grossAmountInCents)
+        : normalizePaymentAmountCents(Number(grossAmount || 0) * 100);
+    const enforceQuoteLock =
+      req.body?.enforceQuoteLock === true ||
+      req.body?.requireQuoteLock === true ||
+      shouldRequireQuoteLockForPayment();
+
+    if (enforceQuoteLock || quoteLockId) {
+      try {
+        const redis = redisPool.getConnection();
+        quoteLockValidation = await validateQuoteLock({
+          redis,
+          quoteLockId,
+          quoteSessionId,
+          passengerId,
+          amountInCents: authoritativeAmountInCents,
+          grossAmountInCents: authoritativeGrossAmountInCents,
+          pickupLocation: availabilityInput.pickupLocation,
+          destinationLocation: availabilityInput.destinationLocation,
+          carType: availabilityInput.carType,
+          toleranceInCents: Number.parseInt(process.env.PAYMENT_QUOTE_LOCK_TOLERANCE_CENTS || '1', 10) || 1
+        });
+      } catch (quoteLockError) {
+        quoteLockValidation = {
+          success: false,
+          code: 'QUOTE_LOCK_STORE_UNAVAILABLE',
+          error: quoteLockError.message
+        };
+      }
+
+      if (!quoteLockValidation?.success) {
+        const statusCode = resolveQuoteLockFailureStatus(quoteLockValidation?.code);
+        logStructured(statusCode >= 500 ? 'error' : 'warn', 'payment/advance bloqueado por quote lock inválido', {
+          service: 'payment-routes',
+          passengerId,
+          rideId: rideId || paymentSessionId || null,
+          quoteSessionId: quoteSessionId || null,
+          quoteLockId: quoteLockId || null,
+          code: quoteLockValidation?.code || 'QUOTE_LOCK_INVALID',
+          incomingAmountInCents: authoritativeAmountInCents,
+          expectedAmountInCents: quoteLockValidation?.expectedAmountInCents || null
+        });
+
+        return res.status(statusCode).json({
+          success: false,
+          error: 'Cotação expirada ou divergente',
+          message: 'Atualize a cotação antes de gerar o Pix desta corrida.',
+          code: quoteLockValidation?.code || 'QUOTE_LOCK_INVALID',
+          expectedAmountInCents: quoteLockValidation?.expectedAmountInCents || null,
+          incomingAmountInCents: quoteLockValidation?.incomingAmountInCents || authoritativeAmountInCents
+        });
+      }
+
+      authoritativeAmountInCents = quoteLockValidation.payableAmountInCents || authoritativeAmountInCents;
+      authoritativeGrossAmountInCents = quoteLockValidation.grossAmountInCents || authoritativeGrossAmountInCents;
+    }
+
     const availability = await hasPaymentEligibleDriver({
       ...availabilityInput,
       logStructured,
@@ -640,9 +721,9 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
 
     const discountValidation = await validatePassengerDiscountPayload({
       passengerId,
-      amount,
+      amount: authoritativeAmountInCents,
       discountBenefit,
-      grossAmountInCents,
+      grossAmountInCents: authoritativeGrossAmountInCents,
       grossAmount,
     });
 
@@ -652,11 +733,13 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
 
     const paymentData = {
       passengerId,
-      amount,
+      amount: authoritativeAmountInCents,
       rideId,
       paymentSessionId,
       paymentContextKey,
       quoteSessionId,
+      quoteLockId: quoteLockValidation?.quoteLock?.quoteLockId || quoteLockId || null,
+      quoteLockSnapshot: quoteLockValidation?.quoteLock || null,
       rideDetails,
       pickupLocation: availabilityInput.pickupLocation,
       destinationLocation: availabilityInput.destinationLocation,
@@ -766,16 +849,28 @@ router.post(
  */
 router.post('/payment/refund', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
   try {
-    const { chargeId, amount, reason } = req.body;
+    const { rideId, bookingId, chargeId, amount, reason } = req.body;
 
-    if (!chargeId || !amount) {
+    if ((!rideId && !bookingId && !chargeId) || !amount) {
       return res.status(400).json({
         success: false,
-        error: 'chargeId e amount são obrigatórios'
+        error: 'rideId/bookingId ou chargeId e amount são obrigatórios'
       });
     }
 
-    const result = await paymentService.processRefund(chargeId, amount, reason || 'No driver found');
+    const result = await paymentService.processRideRefund({
+      rideId,
+      bookingId,
+      chargeId,
+      amount,
+      reason: reason || 'No driver found',
+      status: 'REFUNDED',
+      metadata: {
+        source: 'admin_payment_refund_route',
+        actorId: req.user?.uid || req.user?.id || req.user?.email || null,
+        actorRole: req.user?.role || null
+      }
+    });
 
     if (result.success) {
       res.status(200).json(result);

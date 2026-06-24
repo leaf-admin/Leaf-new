@@ -53,6 +53,7 @@ function getPilotLaunchFlags() {
     smartPushEnabled: resolvePilotFeature('ENABLE_SMART_PUSH', false),
     softBanEnforcementEnabled: resolvePilotFeature('ENABLE_SOFT_BAN_ENFORCEMENT', true),
     adminMutationsEnabled: resolvePilotFeature('ENABLE_ADMIN_MUTATIONS', true),
+    financialSimulatorEnabled: resolvePilotFeature('ENABLE_FINANCIAL_SIMULATOR', false),
   };
 }
 
