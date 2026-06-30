@@ -1907,11 +1907,9 @@ async function captureStep(name) {
     if (fs.existsSync(dump)) fs.unlinkSync(dump);
     const dumpResult = adbRun(["shell", "uiautomator", "dump", phoneDumpPath], { allowFailure: true });
     lastDumpStatus = dumpResult.status;
-    if (dumpResult.status === 0) {
-      adbRun(["pull", phoneDumpPath, dump], { allowFailure: true });
-      xml = fs.existsSync(dump) ? fs.readFileSync(dump, "utf8") : "";
-      if (xml.trim()) break;
-    }
+    adbRun(["pull", phoneDumpPath, dump], { allowFailure: true });
+    xml = fs.existsSync(dump) ? fs.readFileSync(dump, "utf8") : "";
+    if (xml.trim()) break;
     if (attempt < 3) {
       await sleep(CAPTURE_XML_RETRY_MS);
     }

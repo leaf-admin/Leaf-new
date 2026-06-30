@@ -4,6 +4,18 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
+const { getIdTokenForUid } = require(path.join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'leaf-websocket-backend',
+  'tests',
+  'e2e',
+  'backend',
+  '__helpers__',
+  'firebase-id-token.js',
+));
 
 const APP_ID = 'br.com.leaf.ride';
 const ROOT_DIR = path.resolve(__dirname, '../../..');
@@ -23,7 +35,9 @@ const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
 const TEST_MODE_STORAGE_KEY = '@test_mode';
+const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const DEFAULT_QA_FREEZE_MS = 600000;
+const REALTIME_DRIVER_SCENARIOS = new Set(['driver-home']);
 
 function readJsonIfExists(filePath, fallbackValue = {}) {
   try {
@@ -138,6 +152,12 @@ function arg(name, fallback = '') {
 
 function hasFlag(name) {
   return process.argv.includes(name);
+}
+
+function defaultFreezeMsForScenario(scenario) {
+  return REALTIME_DRIVER_SCENARIOS.has(String(scenario || '').trim())
+    ? 0
+    : DEFAULT_QA_FREEZE_MS;
 }
 
 function parseCoordinateOverride(latitudeArg, longitudeArg) {
@@ -1001,9 +1021,13 @@ function buildPassengerTripBase(status = 'started') {
   const isAccepted = normalizedStatus === 'accepted';
   const isArrived = normalizedStatus === 'arrived';
   const isPickupPhase = isAccepted || isArrived;
+  const routePlan = buildDriverRoutePlan();
+  const activeRouteCoordinates = isPickupPhase
+    ? routePlan.pickupCoordinates
+    : routePlan.destinationCoordinates;
   const driverCoordinate = isPickupPhase
     ? { latitude: -22.9746, longitude: -43.1903 }
-    : BASE_COORDS.inTransit;
+    : BASE_COORDS.pickup;
   const tripDistanceKm = isArrived ? 0.1 : isAccepted ? 1.2 : 5.1;
   const tripDurationMin = isArrived ? 2 : isAccepted ? 4 : 16;
 
@@ -1015,8 +1039,11 @@ function buildPassengerTripBase(status = 'started') {
       id: 'booking-proof-passenger-1',
       driverId: DRIVER_UID,
       driverName: 'Carlos Motorista Teste',
+      status: normalizedStatus,
       pickupLocation: { ...BASE_COORDS.pickup, add: LABELS.pickupAddress },
       destinationLocation: { ...BASE_COORDS.destination, add: LABELS.destinationAddress },
+      routePlan,
+      routeCoordinates: activeRouteCoordinates,
       estimatedFare: 27.5,
       paymentMethod: 'pix',
       boardingPin: '4821'
@@ -1033,7 +1060,11 @@ function buildPassengerTripBase(status = 'started') {
     tripArrivalText: `Chegada estimada em ${tripDurationMin} min`,
     paymentMethod: 'pix',
     driverCoordinate,
-    driverActiveRide: buildDriverActiveRide(normalizedStatus),
+    driverActiveRide: {
+      ...buildDriverActiveRide(normalizedStatus),
+      routePlan,
+      routeCoordinates: activeRouteCoordinates,
+    },
     driverInfo: {
       id: DRIVER_UID,
       name: 'Carlos Motorista Teste',
@@ -1050,6 +1081,7 @@ function buildPassengerQuoteBase() {
     bookingStatus: 'idle',
     activeBookingId: null,
     activeBooking: null,
+    quoteLock: null,
     selectedDestination: {
       name: 'Leblon',
       address: LABELS.destinationAddress,
@@ -1079,6 +1111,7 @@ function scenarioPatch(name) {
         bookingStatus: 'idle',
         activeBookingId: null,
         activeBooking: null,
+        quoteLock: null,
         selectedDestination: null,
         tripDistanceKm: null,
         tripDurationMin: null,
@@ -1433,7 +1466,7 @@ function scenarioRoute(name) {
   return null;
 }
 
-function main() {
+async function main() {
   const deviceKey = String(arg('--device', '17pro')).toLowerCase();
   const scenario = String(arg('--scenario', 'passenger-home')).trim();
   const screenshotPath = arg('--screenshot', '');
@@ -1455,16 +1488,18 @@ function main() {
       screenshotPath ? path.dirname(path.resolve(screenshotPath)) : process.cwd()
     )
   );
-  const rawFreezeMs = arg('--freeze-ms', String(DEFAULT_QA_FREEZE_MS));
+  const defaultFreezeMs = defaultFreezeMsForScenario(scenario);
+  const rawFreezeMs = arg('--freeze-ms', String(defaultFreezeMs));
   const parsedFreezeMs = Number(rawFreezeMs);
   const freezeMs = Math.max(
     0,
-    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : DEFAULT_QA_FREEZE_MS
+    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : defaultFreezeMs
   );
   const postLaunchWaitMs = Math.max(
     0,
     Number(arg('--post-launch-wait-ms', '0')) || 0
   );
+  const skipSocketToken = hasFlag('--skip-socket-token');
   const deviceId = DEVICE_MAP[deviceKey] || deviceKey;
   const isDriverScenario = scenario.startsWith('driver-');
   const defaultUid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
@@ -1528,6 +1563,14 @@ function main() {
     buildSeedUserData(uid, isDriverScenario)
   );
   saveAsyncStorageValue(dataContainer, TEST_MODE_STORAGE_KEY, 'true');
+  if (!skipSocketToken) {
+    const qaSocketIdToken = await getIdTokenForUid(uid);
+    saveAsyncStorageValue(
+      dataContainer,
+      QA_SOCKET_ID_TOKEN_STORAGE_KEY,
+      qaSocketIdToken
+    );
+  }
   fs.mkdirSync(artifactDir, { recursive: true });
 
   let launchPid = null;
@@ -1623,4 +1666,7 @@ function main() {
   );
 }
 
-main();
+main().catch((error) => {
+  console.error(error?.stack || error?.message || String(error));
+  process.exit(1);
+});

@@ -2,6 +2,9 @@ const express = require('express');
 const { logStructured, logError } = require('../utils/logger');
 const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
 const { readPolicyFromEnv } = require('../services/driver-destination-mode-service');
+const {
+    getDriverOnlineDailyPolicy
+} = require('../services/driver-online-time-policy-service');
 const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
 const h3VisualPolicyService = require('../services/h3-visual-policy-service');
 const { resolvePricingModelMode } = require('../services/pricing');
@@ -142,12 +145,19 @@ function buildDriverOnlinePolicy() {
     const geofenceBypass =
         envBool('BYPASS_GEOFENCE', false) ||
         String(process.env.GEOFENCE_RADIUS_KM || '') === '9999';
+    const dailyTimePolicy = getDriverOnlineDailyPolicy();
     return {
         backendGoverned: true,
         geofenceEnforced: envBool('ENABLE_DRIVER_ONLINE_GEOFENCE', false) && !geofenceBypass,
         geofenceBypass,
         requireApprovedDocuments: envBool('DRIVER_ONLINE_REQUIRE_APPROVED_DOCUMENTS', true),
         requireFreshLiveness: envBool('DRIVER_ONLINE_REQUIRE_FRESH_LIVENESS', false),
+        dailyTimeLimit: {
+            backendGoverned: true,
+            timezone: dailyTimePolicy.timezone,
+            warningMs: dailyTimePolicy.warningMs,
+            limitMs: dailyTimePolicy.limitMs
+        },
         minAppVersion: String(process.env.DRIVER_ONLINE_MIN_APP_VERSION || '').trim() || null
     };
 }

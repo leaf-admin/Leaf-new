@@ -14,6 +14,7 @@ PASSENGER_PHONE="${PASSENGER_PHONE:-21102938475}"
 DRIVER_PHONE="${DRIVER_PHONE:-21123456789}"
 PASSENGER_UID="${PASSENGER_UID:-OjML1wSzdNRaynjqMRlSW1Y0LVy2}"
 DRIVER_UID="${DRIVER_UID:-8vg2kxxqi3TYKlpD6eBlWgYseIq2}"
+APP_ID="${APP_ID:-br.com.leaf.ride}"
 
 REMOTE_HOST="${REMOTE_HOST:-${VPS_HOST:-}}"
 REMOTE_KEY="${REMOTE_SSH_KEY:-${VPS_KEY:-${SSH_KEY_PATH:-${REMOTE_KEY:-}}}}"
@@ -25,6 +26,9 @@ SHARED_METRO_PORT="${SHARED_METRO_PORT:-8081}"
 PASSENGER_PORT="${PASSENGER_PORT:-${SHARED_METRO_PORT}}"
 DRIVER_PORT="${DRIVER_PORT:-${SHARED_METRO_PORT}}"
 METRO_STABILITY_WAIT_SEC="${METRO_STABILITY_WAIT_SEC:-25}"
+SIMCTL_BIN="${SIMCTL_BIN:-/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl}"
+QA_SIM_LOCATION_LAT="${QA_SIM_LOCATION_LAT:--22.857}"
+QA_SIM_LOCATION_LNG="${QA_SIM_LOCATION_LNG:--43.309}"
 
 REPORT_DIR="${ROOT_DIR}/test-results/qa-preflight"
 mkdir -p "${REPORT_DIR}"
@@ -34,6 +38,7 @@ PASS_COUNT=0
 FAIL_COUNT=0
 WARN_COUNT=0
 STRICT_PREFLIGHT="${STRICT_PREFLIGHT:-false}"
+RUN_PAYMENT_ADVANCE_PREFLIGHT="${RUN_PAYMENT_ADVANCE_PREFLIGHT:-false}"
 
 log() {
   printf "[preflight] %s\n" "$1" | tee -a "${REPORT_FILE}"
@@ -116,6 +121,33 @@ wait_http_ready() {
 
   fail "${label} not ready via http"
   return 1
+}
+
+reset_simulator_app_state() {
+  local udid="$1"
+  local data_container=""
+
+  "${SIMCTL_BIN}" terminate "${udid}" "${APP_ID}" >/dev/null 2>&1 || true
+  data_container="$("${SIMCTL_BIN}" get_app_container "${udid}" "${APP_ID}" data 2>/dev/null || true)"
+
+  if [[ -z "${data_container}" ]]; then
+    fail "simulator app data container not found (${udid})"
+    return 1
+  fi
+
+  if [[ "${data_container}" != *"/CoreSimulator/Devices/${udid}/data/Containers/Data/Application/"* ]]; then
+    fail "refusing to clear unexpected simulator container (${udid})"
+    return 1
+  fi
+
+  local target=""
+  for target in "Documents" "Library/Application Support" "Library/Caches" "Library/Preferences" "tmp"; do
+    if [[ -d "${data_container}/${target}" ]]; then
+      find "${data_container}/${target}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + >/dev/null 2>&1 || true
+    fi
+  done
+
+  pass "simulator app data cleared (${udid})"
 }
 
 warm_metro_bundle() {
@@ -218,6 +250,66 @@ const Redis = require('ioredis');
 const passengerUid = process.env.TEST_PASSENGER_UID;
 const driverUid = process.env.TEST_DRIVER_UID;
 const redis = new Redis(process.env.REDIS_URL);
+const terminalStatuses = new Set(['COMPLETED', 'CANCELED', 'CANCELLED', 'FINISHED', 'EXPIRED', 'REFUNDED']);
+
+function parseMaybeJson(value) {
+  if (!value || typeof value !== 'string') return value || null;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return value;
+  }
+}
+
+function normalizeStatus(value) {
+  return String(value?.state || value?.status || '').trim().toUpperCase();
+}
+
+function isRelatedToQaUsers(field, value) {
+  const raw = JSON.stringify(value || {});
+  return (
+    String(field || '').includes(passengerUid) ||
+    String(field || '').includes(driverUid) ||
+    raw.includes(passengerUid) ||
+    raw.includes(driverUid)
+  );
+}
+
+function resolveBookingId(field, value) {
+  return String(value?.bookingId || value?.id || value?.rideId || field || '').trim();
+}
+
+async function scanKeys(pattern) {
+  const keys = [];
+  let cursor = '0';
+  do {
+    const result = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
+    cursor = result[0];
+    keys.push(...result[1]);
+  } while (cursor !== '0');
+  return keys;
+}
+
+async function removeRelatedActiveHashEntries(key, relatedBookingIds) {
+  const type = await redis.type(key);
+  if (type !== 'hash') {
+    return [];
+  }
+
+  const entries = await redis.hgetall(key);
+  const removed = [];
+  for (const [field, raw] of Object.entries(entries || {})) {
+    const value = parseMaybeJson(raw);
+    if (!isRelatedToQaUsers(field, value)) continue;
+    const bookingId = resolveBookingId(field, value);
+    if (bookingId) {
+      relatedBookingIds.add(bookingId);
+    }
+    await redis.hdel(key, field);
+    removed.push({ key, field, bookingId: bookingId || null, status: normalizeStatus(value) || null });
+  }
+  return removed;
+}
 
 async function main() {
   if (!passengerUid || !driverUid) {
@@ -230,6 +322,12 @@ async function main() {
   const beforeDriverNotification = await redis.get(`driver_active_notification:${driverUid}`);
   const beforeDriverTrip = await redis.get(`active_trip_by_driver:${driverUid}`);
   const beforeDriverTripCustomer = await redis.get(`active_trip_customer_by_driver:${driverUid}`);
+  const relatedBookingIds = new Set(
+    [beforePassengerBooking, beforeDriverNotification, beforeDriverTrip, beforeDriverTripCustomer]
+      .filter(Boolean)
+      .map((bookingId) => String(bookingId).trim())
+      .filter(Boolean)
+  );
 
   const keys = new Set([
     `customer_active_booking:${passengerUid}`,
@@ -251,9 +349,41 @@ async function main() {
     keys.add(key);
   }
 
+  const activeHashKeys = ['bookings:active', ...(await scanKeys('ride_queue:*:active'))];
+  const removedActiveHashEntries = [];
+  for (const key of activeHashKeys) {
+    const removed = await removeRelatedActiveHashEntries(key, relatedBookingIds);
+    removedActiveHashEntries.push(...removed);
+  }
+
+  for (const bookingId of relatedBookingIds) {
+    keys.add(`ride_excluded_drivers:${bookingId}`);
+    keys.add(`ride_reoffer_cooldown:${bookingId}:${driverUid}`);
+  }
+
   const deletedKeys = Array.from(keys);
   const deletedCount = deletedKeys.length ? await redis.del(...deletedKeys) : 0;
   await redis.hdel(`driver:${driverUid}`, 'activeTripId', 'activeTripUpdatedAt');
+
+  const canceledBookings = [];
+  const nowIso = new Date().toISOString();
+  for (const bookingId of relatedBookingIds) {
+    const bookingKey = `booking:${bookingId}`;
+    const bookingType = await redis.type(bookingKey);
+    if (bookingType !== 'hash') continue;
+    const booking = await redis.hgetall(bookingKey);
+    const status = normalizeStatus(booking);
+    if (terminalStatuses.has(status)) continue;
+    await redis.hset(bookingKey, {
+      status: 'CANCELED',
+      state: 'CANCELED',
+      canceledBy: 'qa_preflight',
+      reason: 'QA preflight reset for canonical E2E users',
+      qaPreflightClearedAt: nowIso,
+      updatedAt: nowIso
+    });
+    canceledBookings.push({ bookingId, previousStatus: status || null });
+  }
 
   const afterPassengerBooking = await redis.get(`customer_active_booking:${passengerUid}`);
   const afterDriverNotification = await redis.get(`driver_active_notification:${driverUid}`);
@@ -264,6 +394,8 @@ async function main() {
     ok: true,
     deletedCount,
     deletedKeys,
+    removedActiveHashEntries,
+    canceledBookings,
     before: {
       passengerActiveBooking: beforePassengerBooking || null,
       driverActiveNotification: beforeDriverNotification || null,
@@ -303,9 +435,32 @@ else
   warn "runtime cleanup command failed (see ${runtime_cleanup_json})"
 fi
 
-log "checking payment bypass on backend"
-payment_check_json="${REPORT_DIR}/payment-check.json"
-cat > "${REPORT_DIR}/payment-check-payload.json" <<EOF
+if [[ "${RUN_PAYMENT_ADVANCE_PREFLIGHT}" == "true" ]]; then
+  log "checking sandbox payment advance on backend"
+  payment_check_json="${REPORT_DIR}/payment-check.json"
+  payment_check_token="$(
+    node -e '
+      const path = require("path");
+      const rootDir = process.argv[1];
+      const uid = process.argv[2];
+      const { getIdTokenForUid } = require(path.join(
+        rootDir,
+        "leaf-websocket-backend",
+        "tests",
+        "e2e",
+        "backend",
+        "__helpers__",
+        "firebase-id-token.js"
+      ));
+      getIdTokenForUid(uid)
+        .then((token) => process.stdout.write(token))
+        .catch((error) => {
+          console.error(error?.stack || error?.message || String(error));
+          process.exit(1);
+        });
+    ' "${ROOT_DIR}/.." "${PASSENGER_UID}"
+  )"
+  cat > "${REPORT_DIR}/payment-check-payload.json" <<EOF
 {
   "passengerId": "${PASSENGER_UID}",
   "amount": 2390,
@@ -318,24 +473,28 @@ cat > "${REPORT_DIR}/payment-check-payload.json" <<EOF
   "passengerEmail": "qa@leaf.local"
 }
 EOF
-if curl -sS -m 15 -X POST "${API_BASE_URL}/api/payment/advance" \
-  -H "content-type: application/json" \
-  -d @"${REPORT_DIR}/payment-check-payload.json" > "${payment_check_json}" 2>&1; then
-  pay_success="$(jq -r '.success // false' "${payment_check_json}" 2>/dev/null || echo "false")"
-  pay_bypass="$(jq -r '.bypass // false' "${payment_check_json}" 2>/dev/null || echo "false")"
-  pay_charge="$(jq -r '.chargeId // empty' "${payment_check_json}" 2>/dev/null || echo "")"
-  if [[ "${pay_success}" == "true" && -n "${pay_charge}" ]]; then
-    pass "payment advance ok (chargeId=${pay_charge})"
+  if curl -sS -m 15 -X POST "${API_BASE_URL}/api/payment/advance" \
+    -H "content-type: application/json" \
+    -H "authorization: Bearer ${payment_check_token}" \
+    -d @"${REPORT_DIR}/payment-check-payload.json" > "${payment_check_json}" 2>&1; then
+    pay_success="$(jq -r '.success // false' "${payment_check_json}" 2>/dev/null || echo "false")"
+    pay_bypass="$(jq -r '.bypass // false' "${payment_check_json}" 2>/dev/null || echo "false")"
+    pay_charge="$(jq -r '.chargeId // empty' "${payment_check_json}" 2>/dev/null || echo "")"
+    if [[ "${pay_success}" == "true" && -n "${pay_charge}" ]]; then
+      pass "payment advance ok (chargeId=${pay_charge})"
+    else
+      fail "payment advance failed"
+    fi
+    if [[ "${pay_bypass}" == "true" ]]; then
+      fail "payment advance returned bypass=true; Woovi sandbox path is required"
+    else
+      pass "payment bypass disabled; using provider/sandbox payment path"
+    fi
   else
-    fail "payment advance failed"
-  fi
-  if [[ "${pay_bypass}" == "true" ]]; then
-    pass "payment bypass enabled for test passenger"
-  else
-    warn "payment bypass not enabled on backend; relying on app-side E2E auto-confirm path"
+    fail "payment advance request failed"
   fi
 else
-  fail "payment advance request failed"
+  pass "payment advance preflight skipped; quote lock and sandbox Pix are exercised by UI E2E"
 fi
 
 log "reading runtime admin token from vps"
@@ -365,18 +524,22 @@ if [[ -n "${runtime_token}" ]]; then
   fi
 fi
 
-log "running backend smoke (create booking + dispatch)"
-smoke_json="${REPORT_DIR}/smoke-driver-ready-booking.json"
-if run_with_timeout_to_file 120 "${smoke_json}" \
-  bash -lc "cd '${BACKEND_DIR}' && API_BASE_URL='${API_BASE_URL}' WS_URL='${SOCKET_BASE_URL}' TEST_PASSENGER_UID='${PASSENGER_UID}' TEST_DRIVER_UID='${DRIVER_UID}' TEST_PICKUP_LAT=37.7749 TEST_PICKUP_LNG=-122.4194 TEST_DEST_LAT=37.7849 TEST_DEST_LNG=-122.4094 TEST_PICKUP_ADDRESS='SF Pickup' TEST_DEST_ADDRESS='SF Destination' node scripts/tests/smoke-driver-ready-booking.cjs"; then
-  smoke_ok="$(jq -r '.ok // false' "${smoke_json}" 2>/dev/null || echo "false")"
-  if [[ "${smoke_ok}" == "true" ]]; then
-    pass "backend smoke passed"
+if [[ "${RUN_BACKEND_SMOKE:-false}" == "true" ]]; then
+  log "running backend smoke (create booking + dispatch)"
+  smoke_json="${REPORT_DIR}/smoke-driver-ready-booking.json"
+  if run_with_timeout_to_file 120 "${smoke_json}" \
+    bash -lc "cd '${BACKEND_DIR}' && API_BASE_URL='${API_BASE_URL}' WS_URL='${SOCKET_BASE_URL}' TEST_PASSENGER_UID='${PASSENGER_UID}' TEST_DRIVER_UID='${DRIVER_UID}' TEST_PICKUP_LAT=37.7749 TEST_PICKUP_LNG=-122.4194 TEST_DEST_LAT=37.7849 TEST_DEST_LNG=-122.4094 TEST_PICKUP_ADDRESS='SF Pickup' TEST_DEST_ADDRESS='SF Destination' node scripts/tests/smoke-driver-ready-booking.cjs"; then
+    smoke_ok="$(jq -r '.ok // false' "${smoke_json}" 2>/dev/null || echo "false")"
+    if [[ "${smoke_ok}" == "true" ]]; then
+      pass "backend smoke passed"
+    else
+      warn "backend smoke did not return ok=true; continuing to UI validation"
+    fi
   else
-    warn "backend smoke did not return ok=true; continuing to UI validation"
+    warn "backend smoke command failed or timed out (see ${smoke_json}); continuing to UI validation"
   fi
 else
-  warn "backend smoke command failed or timed out (see ${smoke_json}); continuing to UI validation"
+  pass "backend booking smoke skipped; UI E2E must exercise payment and booking"
 fi
 
 log "starting shared metro server for dual simulators"
@@ -391,7 +554,8 @@ sleep 1
     EXPO_PUBLIC_SOCKET_URL="${SOCKET_BASE_URL}" \
     EXPO_PUBLIC_DASHBOARD_URL="${DASHBOARD_URL}" \
     EXPO_PUBLIC_E2E_TEST="true" \
-    EXPO_PUBLIC_FORCE_PAYMENT_BYPASS="true" \
+    EXPO_PUBLIC_FORCE_PAYMENT_BYPASS="false" \
+    EXPO_PUBLIC_BYPASS_PAYMENTS="false" \
     bash -lc "exec npx expo start --dev-client --port '${SHARED_METRO_PORT}' --host localhost --clear" \
     > /tmp/leaf-metro-${PASSENGER_PORT}.log 2>&1 < /dev/null &
   echo $! > /tmp/leaf-metro-${PASSENGER_PORT}.pid
@@ -417,12 +581,23 @@ fi
 
 log "booting simulators and opening deep links"
 open -a Simulator || true
-xcrun simctl boot "${PASSENGER_UDID}" >/dev/null 2>&1 || true
-xcrun simctl boot "${DRIVER_UDID}" >/dev/null 2>&1 || true
+"${SIMCTL_BIN}" boot "${PASSENGER_UDID}" >/dev/null 2>&1 || true
+"${SIMCTL_BIN}" boot "${DRIVER_UDID}" >/dev/null 2>&1 || true
 sleep 1
 
-xcrun simctl openurl "${PASSENGER_UDID}" "${MAESTRO_METRO_URL_PASSENGER}" >/dev/null 2>&1 || true
-xcrun simctl openurl "${DRIVER_UDID}" "${MAESTRO_METRO_URL_DRIVER}" >/dev/null 2>&1 || true
+for udid in "${PASSENGER_UDID}" "${DRIVER_UDID}"; do
+  reset_simulator_app_state "${udid}"
+  "${SIMCTL_BIN}" privacy "${udid}" grant location "${APP_ID}" >/dev/null 2>&1 || true
+  "${SIMCTL_BIN}" privacy "${udid}" grant location-always "${APP_ID}" >/dev/null 2>&1 || true
+  if "${SIMCTL_BIN}" location "${udid}" set "${QA_SIM_LOCATION_LAT},${QA_SIM_LOCATION_LNG}" >/dev/null 2>&1; then
+    pass "simulator gps set (${udid}=${QA_SIM_LOCATION_LAT},${QA_SIM_LOCATION_LNG})"
+  else
+    fail "simulator gps set failed (${udid})"
+  fi
+done
+
+"${SIMCTL_BIN}" openurl "${PASSENGER_UDID}" "${MAESTRO_METRO_URL_PASSENGER}" >/dev/null 2>&1 || true
+"${SIMCTL_BIN}" openurl "${DRIVER_UDID}" "${MAESTRO_METRO_URL_DRIVER}" >/dev/null 2>&1 || true
 pass "deep links sent to both simulators"
 
 env_file="${REPORT_DIR}/maestro-runtime-env.sh"
@@ -436,6 +611,8 @@ export DRIVER_UID="${DRIVER_UID}"
 export PASSENGER_UDID="${PASSENGER_UDID}"
 export DRIVER_UDID="${DRIVER_UDID}"
 export RUNTIME_ADMIN_TOKEN="${runtime_token}"
+export EXPO_PUBLIC_FORCE_PAYMENT_BYPASS="false"
+export EXPO_PUBLIC_BYPASS_PAYMENTS="false"
 EOF
 pass "maestro env file written (${env_file})"
 
@@ -453,6 +630,6 @@ fi
 log "preflight passed"
 log "next:"
 log "  source ${env_file}"
-log "  maestro test .maestro/flows/qa/e2e/01-driver-login-online-8082.yaml --device ${DRIVER_UDID}"
-log "  maestro test .maestro/flows/qa/e2e/02-passenger-login-8081.yaml --device ${PASSENGER_UDID}"
-log "  maestro test .maestro/flows/qa/e2e/03-passenger-request-ride.yaml --device ${PASSENGER_UDID}"
+log "  maestro test --udid ${DRIVER_UDID} .maestro/flows/qa/e2e/01-driver-login-online-8082.yaml"
+log "  maestro test --udid ${PASSENGER_UDID} .maestro/flows/qa/e2e/02-passenger-login-8081.yaml"
+log "  maestro test --udid ${PASSENGER_UDID} .maestro/flows/qa/e2e/03-passenger-request-ride.yaml"

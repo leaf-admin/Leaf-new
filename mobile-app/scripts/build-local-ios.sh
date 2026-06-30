@@ -109,6 +109,8 @@ sync_native_ios_version() {
   local expected_build_number
   local microphone_usage="A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone."
   local speech_usage="A Leaf converte sua fala em texto para preencher o destino com mais rapidez."
+  local allow_insecure_http
+  local ats_bool_value="false"
 
   if [[ ! -f "${info_plist_path}" ]]; then
     echo "❌ Info.plist nativo do iOS não encontrado: ${info_plist_path}"
@@ -117,6 +119,10 @@ sync_native_ios_version() {
 
   expected_version="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
   expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
+  allow_insecure_http="$(printf '%s' "${EXPO_PUBLIC_ALLOW_INSECURE_HTTP:-false}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${allow_insecure_http}" == "1" || "${allow_insecure_http}" == "true" || "${allow_insecure_http}" == "yes" || "${allow_insecure_http}" == "on" ]]; then
+    ats_bool_value="true"
+  fi
 
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${expected_version}" "${info_plist_path}" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${expected_version}" "${info_plist_path}"
@@ -128,10 +134,10 @@ sync_native_ios_version() {
     || /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string ${speech_usage}" "${info_plist_path}"
   /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "${info_plist_path}" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "${info_plist_path}"
-  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads false" "${info_plist_path}" >/dev/null 2>&1 \
-    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool false" "${info_plist_path}"
-  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking false" "${info_plist_path}" >/dev/null 2>&1 \
-    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool false" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads ${ats_bool_value}" "${info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool ${ats_bool_value}" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking ${ats_bool_value}" "${info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool ${ats_bool_value}" "${info_plist_path}"
   /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity:NSExceptionDomains" "${info_plist_path}" >/dev/null 2>&1 || true
 
   echo "✅ Info.plist iOS sincronizado: ${expected_version} (${expected_build_number})."

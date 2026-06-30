@@ -4602,7 +4602,12 @@ io.on('connection', async (socket) => {
                     ? 'Há motoristas disponíveis para esta corrida.'
                     : 'Não há motoristas disponíveis',
                 carType: requestedCarType,
-                radiusKm: availability.radiusKm || requestedRadiusKm
+                radiusKm: availability.radiusKm || requestedRadiusKm,
+                candidates: availability.candidates ?? availability.summary?.candidates ?? null,
+                eligible: availability.eligible ?? availability.summary?.eligible ?? null,
+                rejections: availability.rejections || null,
+                estimatedPickupEtaMin: availability.estimatedPickupEtaMin ?? null,
+                driverId: availability.driverId || null
             });
 
             logStructured('info', 'Pré-check de disponibilidade concluído', {

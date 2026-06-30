@@ -19,6 +19,11 @@ const {
   DEFAULT_POLICY: DEFAULT_RIDE_FINANCIAL_POLICY,
   describeFinancialPolicy
 } = require('../../services/ride-financial-contract');
+const {
+  getDriverSearchMaxRadiusKm,
+  getOperationsPolicyRadiusKm,
+  getPaymentAvailabilityRadiusKm
+} = require('../../utils/dispatch-config');
 
 const REQUIRED_BASE = [
   'NODE_ENV'
@@ -126,6 +131,7 @@ const PAYMENT_PROVIDER_ROLES = new Set([
   'payment',
   'payments'
 ]);
+const APPROVED_DRIVER_SEARCH_RADIUS_KM = 5;
 
 function presence(value) {
   const raw = String(value || '').trim();
@@ -191,6 +197,27 @@ function resolveFinancialPolicyApproval() {
     approved:
       approvedPolicyId === activePolicy.policyId &&
       Boolean(approvalReference)
+  };
+}
+
+function numberMatches(value, expected) {
+  return Math.abs(Number(value) - Number(expected)) < 0.000001;
+}
+
+function resolveDriverSearchRadiusPolicy() {
+  const dispatchMaxRadiusKm = getDriverSearchMaxRadiusKm();
+  const paymentAvailabilityRadiusKm = getPaymentAvailabilityRadiusKm();
+  const operationsPolicyRadiusKm = getOperationsPolicyRadiusKm();
+
+  return {
+    approvedRadiusKm: APPROVED_DRIVER_SEARCH_RADIUS_KM,
+    dispatchMaxRadiusKm,
+    paymentAvailabilityRadiusKm,
+    operationsPolicyRadiusKm,
+    ok:
+      numberMatches(dispatchMaxRadiusKm, APPROVED_DRIVER_SEARCH_RADIUS_KM) &&
+      numberMatches(paymentAvailabilityRadiusKm, APPROVED_DRIVER_SEARCH_RADIUS_KM) &&
+      numberMatches(operationsPolicyRadiusKm, APPROVED_DRIVER_SEARCH_RADIUS_KM)
   };
 }
 
@@ -274,6 +301,7 @@ function main() {
   const paymentProviderSandboxRuntime =
     paymentProviderConfigRequired && (wooviEnv === 'sandbox' || wooviBaseUrlIsSandbox);
   const financialPolicyApproval = resolveFinancialPolicyApproval();
+  const driverSearchRadiusPolicy = resolveDriverSearchRadiusPolicy();
 
   const missingCommon = checkRequired([
     ...REQUIRED_BASE,
@@ -461,6 +489,11 @@ function main() {
     if (boolEnv('MOCK_PAYMENT_FOR_TESTS')) {
       blockers.push('MOCK_PAYMENT_FOR_TESTS=true bloqueado em produção');
     }
+    if (!driverSearchRadiusPolicy.ok) {
+      blockers.push(
+        `Raio de busca de motorista deve permanecer em ${APPROVED_DRIVER_SEARCH_RADIUS_KM}km geográficos em produção (dispatch=${driverSearchRadiusPolicy.dispatchMaxRadiusKm}, payment=${driverSearchRadiusPolicy.paymentAvailabilityRadiusKm}, operations=${driverSearchRadiusPolicy.operationsPolicyRadiusKm})`
+      );
+    }
     if (
       paymentProviderConfigRequired &&
       !financialPolicyApproval.approved
@@ -568,6 +601,7 @@ function main() {
       },
       paymentBypass: paymentBypassDiagnostics,
       coreRidePaymentGuards: coreRidePaymentGuardDiagnostics,
+      driverSearchRadiusPolicy,
       legacyRuntime: legacyRuntimeDiagnostics,
       firebase: {
         databaseUrlConfigured: presence(firebaseDatabaseUrl),

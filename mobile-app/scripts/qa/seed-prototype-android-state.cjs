@@ -118,6 +118,7 @@ const TEST_MODE_STORAGE_KEY = '@test_mode';
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const DEFAULT_QA_FREEZE_MS = 600000;
+const REALTIME_DRIVER_SCENARIOS = new Set(['driver-home']);
 const ADB_BIN = resolveAdbBin();
 const AUTH_FLOW_STALE_STORAGE_KEYS = [
   '@onboarding_data',
@@ -163,6 +164,12 @@ function arg(name, fallback = '') {
 
 function hasFlag(name) {
   return process.argv.includes(name);
+}
+
+function defaultFreezeMsForScenario(scenario) {
+  return REALTIME_DRIVER_SCENARIOS.has(String(scenario || '').trim())
+    ? 0
+    : DEFAULT_QA_FREEZE_MS;
 }
 
 function resolveAdbBin() {
@@ -1075,6 +1082,7 @@ function buildPassengerQuoteBase() {
     bookingStatus: 'idle',
     activeBookingId: null,
     activeBooking: null,
+    quoteLock: null,
     selectedDestination: {
       name: 'Leblon',
       address: LABELS.destinationAddress,
@@ -1104,6 +1112,7 @@ function buildScenarioPatch(scenario) {
       bookingStatus: 'idle',
       activeBookingId: null,
       activeBooking: null,
+      quoteLock: null,
       selectedDestination: null,
       tripDistanceKm: null,
       tripDurationMin: null,
@@ -1679,10 +1688,11 @@ async function main() {
   const isDriverScenario = scenario.startsWith('driver-');
   const defaultUid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
   const screenshotPath = arg('--screenshot', '');
-  const parsedFreezeMs = Number(arg('--freeze-ms', String(DEFAULT_QA_FREEZE_MS)));
+  const defaultFreezeMs = defaultFreezeMsForScenario(scenario);
+  const parsedFreezeMs = Number(arg('--freeze-ms', String(defaultFreezeMs)));
   const freezeMs = Math.max(
     0,
-    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : DEFAULT_QA_FREEZE_MS
+    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : defaultFreezeMs
   );
   const artifactDir = path.resolve(
     arg(
