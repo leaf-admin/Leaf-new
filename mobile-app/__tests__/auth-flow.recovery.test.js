@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   buildRestoredAuthFlowData,
+  buildSerializableConfirmationMeta,
   normalizeAuthFlowProfileData,
   resolveAuthFlowInitialStep,
 } = require('../src/components/auth/authFlowRecovery');
@@ -37,6 +38,28 @@ describe('auth flow recovery helpers', () => {
       firstName: 'Maria',
       lastName: 'da Silva',
     });
+  });
+
+  it('serializes OTP confirmation metadata without keeping Firebase cyclic objects', () => {
+    const confirmation = {
+      verificationId: 'verification_123',
+      isCustomOtp: false,
+      isTestNumber: true,
+      confirm: jest.fn(),
+    };
+    confirmation.self = confirmation;
+
+    const meta = buildSerializableConfirmationMeta(confirmation);
+
+    expect(meta).toEqual({
+      verificationId: 'verification_123',
+      isCustomOtp: false,
+      isReviewAccount: false,
+      isTestOtpBypass: false,
+      isTestNumber: true,
+      source: 'firebase_phone_auth',
+    });
+    expect(() => JSON.stringify(meta)).not.toThrow();
   });
 
   it('merges driver contact data into restored document data for onboarding recovery', () => {

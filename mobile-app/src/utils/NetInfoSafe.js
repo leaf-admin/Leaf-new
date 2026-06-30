@@ -33,6 +33,20 @@ const DEFAULT_STATE = {
   details: null,
 };
 
+export const normalizeNetInfoState = (state = DEFAULT_STATE) => {
+  const source = state && typeof state === 'object' ? state : DEFAULT_STATE;
+  const isConnected = source.isConnected === false ? false : true;
+  const isInternetReachable =
+    source.isInternetReachable === false ? false : true;
+
+  return {
+    ...DEFAULT_STATE,
+    ...source,
+    isConnected,
+    isInternetReachable,
+  };
+};
+
 /**
  * Wrapper seguro para NetInfo.fetch()
  */
@@ -43,7 +57,7 @@ export const fetchNetInfo = async () => {
   }
 
   try {
-    return await NetInfo.fetch();
+    return normalizeNetInfoState(await NetInfo.fetch());
   } catch (error) {
     Logger.error('❌ Erro ao buscar informações de rede:', error);
     return DEFAULT_STATE;
@@ -61,7 +75,9 @@ export const addNetInfoListener = (callback) => {
   }
 
   try {
-    return NetInfo.addEventListener(callback);
+    return NetInfo.addEventListener((state) => {
+      callback(normalizeNetInfoState(state));
+    });
   } catch (error) {
     Logger.error('❌ Erro ao adicionar listener de rede:', error);
     return () => {};
@@ -95,4 +111,3 @@ export const useNetInfo = () => {
 
 // Exportar o NetInfo original se disponível, caso alguém precise
 export default NetInfo;
-

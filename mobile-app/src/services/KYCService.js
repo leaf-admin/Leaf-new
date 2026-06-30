@@ -15,6 +15,43 @@ import * as ImageManipulator from 'expo-image-manipulator';
 
 const TEST_MODE_STORAGE_KEY = '@test_mode';
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
+const QA_AUTH_TOKEN_MIN_TTL_MS = 60000;
+
+function decodeBase64UrlJson(segment) {
+  const normalized = String(segment || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(
+    normalized.length + ((4 - (normalized.length % 4)) % 4),
+    '=',
+  );
+
+  if (typeof globalThis?.atob === 'function') {
+    return JSON.parse(globalThis.atob(padded));
+  }
+
+  if (typeof Buffer !== 'undefined') {
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+  }
+
+  return null;
+}
+
+function isJwtExpiredOrNearExpiry(token, nowMs = Date.now()) {
+  const parts = String(token || '').split('.');
+  if (parts.length < 2) {
+    return false;
+  }
+
+  try {
+    const payload = decodeBase64UrlJson(parts[1]);
+    const expSeconds = Number(payload?.exp);
+    if (!Number.isFinite(expSeconds) || expSeconds <= 0) {
+      return false;
+    }
+    return expSeconds * 1000 <= nowMs + QA_AUTH_TOKEN_MIN_TTL_MS;
+  } catch (_error) {
+    return false;
+  }
+}
 
 async function resolveKycAuthToken({ forceRefresh = false } = {}) {
   try {
@@ -34,6 +71,10 @@ async function resolveKycAuthToken({ forceRefresh = false } = {}) {
     const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
     const qaSocketIdToken = String(qaSocketIdTokenRaw || '').trim();
     if (qaModeEnabled && qaSocketIdToken) {
+      if (isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
+        Logger.warn('⚠️ [KYC] Token QA persistido expirado; autenticação KYC indisponível até restaurar sessão.');
+        return null;
+      }
       return qaSocketIdToken;
     }
   } catch (qaTokenError) {

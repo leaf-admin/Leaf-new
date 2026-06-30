@@ -25,6 +25,7 @@ import onboardingTheme from '../common/onboardingTheme';
 import ContinueButton from '../common/ContinueButton';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import { toUserFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
+import { getReviewAccountInfo } from '../../../config/reviewAccounts';
 
 const { color, radius, spacing } = onboardingTheme;
 
@@ -354,6 +355,20 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                 return;
             }
 
+            const controlledReviewAccount = getReviewAccountInfo(fullPhoneNumber);
+            if (controlledReviewAccount?.phoneNumber) {
+                Logger.log('🔐 Conta controlada detectada: abrindo login por senha sem preflight de OTP.', {
+                    phoneNumber: fullPhoneNumber,
+                    userType: controlledReviewAccount?.userType || null
+                });
+                setRequiresPassword(true);
+                setForgotPasswordMode(false);
+                setPassword('');
+                setPasswordError('');
+                setChecking(false);
+                return;
+            }
+
             const forceCustomOtpFlow =
                 allowForcedQaOtpFlow && FORCE_CUSTOM_OTP_NUMBERS.has(normalizedPhoneInput);
 
@@ -379,8 +394,28 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             }
             const isExistingUser = Boolean(phoneFlow?.exists || phoneFlow?.uid);
             const hasPasswordConfigured = phoneFlow?.hasPassword === true;
+            const reviewAccount = getReviewAccountInfo(fullPhoneNumber);
+            const isControlledReviewAccount = Boolean(reviewAccount?.phoneNumber);
             const nextAction = String(phoneFlow?.nextAction || 'OTP_REQUIRED').toUpperCase();
             setResolvedPhone(phoneFlow);
+
+            if (
+                isControlledReviewAccount &&
+                hasPasswordConfigured &&
+                phoneFlow?.passwordFallbackAvailable === true
+            ) {
+                Logger.log('🔐 Conta controlada com senha detectada: usando login por senha para evitar OTP/SMS no teste.', {
+                    phoneNumber: fullPhoneNumber,
+                    userType: reviewAccount?.userType || phoneFlow?.userType || null,
+                    source: phoneFlow.source || phoneFlowResolutionSource
+                });
+                setRequiresPassword(true);
+                setForgotPasswordMode(false);
+                setPassword('');
+                setPasswordError('');
+                setChecking(false);
+                return;
+            }
 
             if (nextAction === 'PASSWORD_LOGIN' && hasPasswordConfigured) {
                 Logger.log('🔐 Telefone existente detectado: seguir para senha.', {

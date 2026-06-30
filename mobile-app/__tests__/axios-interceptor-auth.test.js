@@ -42,6 +42,14 @@ jest.mock('../src/utils/friendlyErrorMessages', () => ({
 import axios from 'axios';
 import { createAxiosInstance } from '../src/utils/axiosInterceptor';
 
+function buildJwt(payload) {
+  return [
+    Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'),
+    Buffer.from(JSON.stringify(payload)).toString('base64url'),
+    'signature',
+  ].join('.');
+}
+
 describe('axiosInterceptor auth token resolution', () => {
   let requestFulfilled;
   let responseRejected;
@@ -102,6 +110,172 @@ describe('axiosInterceptor auth token resolution', () => {
     expect(config._authTokenSource).toBe('qa_storage');
   });
 
+  it('prefers the seeded QA idToken over a stale Firebase user in test mode', async () => {
+    mockAuthState.currentUser = {
+      getIdToken: mockGetIdToken.mockResolvedValue('stale-firebase-token'),
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@qa_socket_id_token') return 'qa-seeded-id-token';
+      return null;
+    });
+
+    createAxiosInstance({ baseURL: 'https://api.test' });
+
+    const config = await requestFulfilled({
+      headers: {},
+      method: 'post',
+      url: '/api/payment/advance',
+    });
+
+    expect(mockGetIdToken).not.toHaveBeenCalled();
+    expect(config.headers.Authorization).toBe('Bearer qa-seeded-id-token');
+    expect(config._authTokenSource).toBe('qa_storage');
+  });
+
+  it('ignores an expired QA idToken and falls back to Firebase for HTTP calls', async () => {
+    mockAuthState.currentUser = {
+      getIdToken: mockGetIdToken.mockResolvedValue('fresh-firebase-token'),
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@qa_socket_id_token') {
+        return buildJwt({
+          sub: 'qa-driver-uid',
+          exp: Math.floor(Date.now() / 1000) - 60,
+        });
+      }
+      return null;
+    });
+
+    createAxiosInstance({ baseURL: 'https://api.test' });
+
+    const config = await requestFulfilled({
+      headers: {},
+      method: 'post',
+      url: '/api/payment/advance',
+    });
+
+    expect(mockGetIdToken).toHaveBeenCalledWith(false);
+    expect(config.headers.Authorization).toBe('Bearer fresh-firebase-token');
+    expect(config._authTokenSource).toBe('firebase');
+  });
+
+  it('does not use a different Firebase user when the QA passenger token expired for payment advance', async () => {
+    mockAuthState.currentUser = {
+      getIdToken: mockGetIdToken.mockResolvedValue(buildJwt({
+        sub: 'driver_uid',
+        user_id: 'driver_uid',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      })),
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@auth_uid') return 'passenger_uid';
+      if (key === '@qa_socket_id_token') {
+        return buildJwt({
+          sub: 'passenger_uid',
+          user_id: 'passenger_uid',
+          exp: Math.floor(Date.now() / 1000) - 60,
+        });
+      }
+      return null;
+    });
+
+    createAxiosInstance({ baseURL: 'https://api.test' });
+
+    await expect(requestFulfilled({
+      headers: {},
+      method: 'post',
+      url: '/api/payment/advance',
+      data: {
+        passengerId: 'passenger_uid',
+      },
+    })).rejects.toMatchObject({
+      code: 'TOKEN_INVALID_OR_EXPIRED',
+      response: {
+        status: 401,
+        data: {
+          code: 'TOKEN_INVALID_OR_EXPIRED',
+          passengerId: 'passenger_uid',
+          authenticatedPassengerId: 'passenger_uid',
+          tokenSource: 'qa_storage_expired',
+        },
+      },
+    });
+    expect(mockGetIdToken).not.toHaveBeenCalled();
+  });
+
+  it('blocks payment advance when the bearer token subject differs from passengerId', async () => {
+    mockAuthState.currentUser = {
+      getIdToken: mockGetIdToken.mockResolvedValue(buildJwt({
+        sub: 'driver_uid',
+        user_id: 'driver_uid',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      })),
+    };
+
+    createAxiosInstance({ baseURL: 'https://api.test' });
+
+    await expect(requestFulfilled({
+      headers: {},
+      method: 'post',
+      url: '/api/payment/advance',
+      data: {
+        passengerId: 'passenger_uid',
+      },
+    })).rejects.toMatchObject({
+      code: 'PAYMENT_PASSENGER_SCOPE_MISMATCH',
+      response: {
+        status: 403,
+        data: {
+          code: 'PAYMENT_PASSENGER_SCOPE_MISMATCH',
+          passengerId: 'passenger_uid',
+          authenticatedPassengerId: 'driver_uid',
+        },
+      },
+    });
+    expect(mockGetIdToken).toHaveBeenCalledWith(false);
+    expect(mockGetIdToken).toHaveBeenCalledWith(true);
+  });
+
+  it('refreshes a mismatched QA token before payment advance when Firebase matches passengerId', async () => {
+    const firebasePassengerToken = buildJwt({
+      sub: 'passenger_uid',
+      user_id: 'passenger_uid',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    mockAuthState.currentUser = {
+      getIdToken: mockGetIdToken.mockResolvedValue(firebasePassengerToken),
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@qa_socket_id_token') {
+        return buildJwt({
+          sub: 'driver_uid',
+          user_id: 'driver_uid',
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      return null;
+    });
+
+    createAxiosInstance({ baseURL: 'https://api.test' });
+
+    const config = await requestFulfilled({
+      headers: {},
+      method: 'post',
+      url: '/api/payment/advance',
+      data: JSON.stringify({
+        passengerId: 'passenger_uid',
+      }),
+    });
+
+    expect(mockGetIdToken).toHaveBeenCalledWith(true);
+    expect(config.headers.Authorization).toBe(`Bearer ${firebasePassengerToken}`);
+    expect(config._authTokenSource).toBe('firebase');
+  });
+
   it('marks persisted QA token 401 responses as an expired QA session instead of retrying Firebase refresh', async () => {
     createAxiosInstance({ baseURL: 'https://api.test' });
 
@@ -120,5 +294,30 @@ describe('axiosInterceptor auth token resolution', () => {
       code: 'TOKEN_INVALID_OR_EXPIRED',
       message: 'Sessão QA expirada. Reabra o app ou resemeie a autenticação.',
     });
+  });
+
+  it('does not mask payment errors when axios rejects without an original request config', async () => {
+    createAxiosInstance({ baseURL: 'https://api.test' });
+
+    const paymentErrorWithoutConfig = {
+      response: {
+        status: 500,
+        data: {
+          code: 'PAYMENT_PROVIDER_CHARGE_FAILED',
+          message: 'Falha temporária no provedor de pagamento',
+        },
+      },
+      message: 'Request failed before config was attached',
+    };
+
+    await expect(responseRejected(paymentErrorWithoutConfig)).rejects.toMatchObject({
+      response: {
+        status: 500,
+        data: {
+          code: 'PAYMENT_PROVIDER_CHARGE_FAILED',
+        },
+      },
+    });
+    expect(mockGetIdToken).not.toHaveBeenCalled();
   });
 });

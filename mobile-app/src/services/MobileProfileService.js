@@ -28,10 +28,13 @@ class MobileProfileService {
   }
 
   async getCurrentProfile(options = {}) {
-    const { suppressErrors = false } = options;
+    const { suppressErrors = false, timeoutMs = 5000 } = options;
 
     try {
-      const payload = await this.requestProfile('/account/profile', { method: 'GET' });
+      const payload = await this.requestProfile('/account/profile', {
+        method: 'GET',
+        timeoutMs,
+      });
       return payload?.profile || null;
     } catch (error) {
       if (error?.status === 404) {

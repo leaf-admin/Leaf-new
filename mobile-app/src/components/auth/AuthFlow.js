@@ -14,6 +14,7 @@ import onboardingTheme from './common/onboardingTheme';
 import { resolveEditorialProgressMeta } from './common/EditorialOnboardingLayout';
 import {
   buildRestoredAuthFlowData,
+  buildSerializableConfirmationMeta,
   normalizeAuthFlowProfileData,
   normalizeAuthFlowUserType,
   resolveAuthFlowInitialStep,
@@ -501,12 +502,18 @@ const AuthFlow = ({
       // Continuar com fluxo normal de OTP
     }
 
-      // ✅ Fluxo normal: seguir para tela de OTP
-      await saveStepDataLocal({ phoneNumber, confirmation, isExistingUser });
+    // ✅ Fluxo normal: seguir para tela de OTP.
+    // O objeto confirmation do Firebase pode conter métodos/ciclos; ele fica só em memória.
+    setAuthData(prev => ({ ...prev, phoneNumber, confirmation, isExistingUser }));
+    await saveStepData('phone_validation', {
+      phoneNumber,
+      isExistingUser,
+      confirmation: buildSerializableConfirmationMeta(confirmation)
+    });
     // Marcar telefone como validado
     await completeStep('phone_validation');
     goToNextStep();
-  }, [saveStepDataLocal, completeStep, goToNextStep, handleOTPVerified]);
+  }, [completeStep, goToNextStep, handleOTPVerified]);
 
   const handlePasswordLoginSuccess = useCallback(async (userData) => {
     const normalizedUserType = normalizeAuthFlowUserType(userData?.userType || userData?.usertype || 'customer');

@@ -1,3 +1,5 @@
+import { getRuntimeApiBaseUrl } from './runtimeEndpointConfig';
+
 const DEFAULT_BACKEND_BASE_URL = 'https://api.leaf.app.br';
 
 export const normalizeBackendBaseUrl = (url) => {
@@ -8,7 +10,8 @@ export const normalizeBackendBaseUrl = (url) => {
 };
 
 export const BACKEND_BASE_URL = normalizeBackendBaseUrl(
-  process.env.EXPO_PUBLIC_API_URL ||
+  getRuntimeApiBaseUrl(DEFAULT_BACKEND_BASE_URL) ||
+    process.env.EXPO_PUBLIC_API_URL ||
     process.env.EXPO_PUBLIC_BACKEND_URL ||
     DEFAULT_BACKEND_BASE_URL
 );

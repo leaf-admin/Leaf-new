@@ -1098,8 +1098,6 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
             }
         }
         
-        Logger.log('🌐 URL da API Google Directions:', sanitizeSensitiveUrl(url));
-        
         withInFlight(cacheKey, async () => {
             // 1) Backend autoritativo (com cache + telemetria por booking)
             try {
@@ -1168,6 +1166,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
             }
 
             // 2) Fallback permitido somente em desenvolvimento/teste
+            Logger.log('🌐 URL da API Google Directions fallback:', sanitizeSensitiveUrl(url));
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), DIRECTIONS_REQUEST_TIMEOUT_MS);
             return await fetch(url, { signal: controller.signal })

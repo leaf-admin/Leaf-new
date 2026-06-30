@@ -18,6 +18,8 @@ import {
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
 const TEST_MODE_STORAGE_KEY = '@test_mode';
+const PROFILE_BOOTSTRAP_TIMEOUT_MS = 4500;
+const PROFILE_BACKGROUND_REFRESH_TIMEOUT_MS = 8000;
 
 const normalizeUserType = (userType) => {
   if (userType === 'passenger') {
@@ -56,6 +58,22 @@ const resolveStoredProfileRole = (profile) =>
       profile?.profile?.userType ||
       profile?.profile?.role
   );
+
+const isExplicitTestProfile = (profile) => Boolean(
+  profile?.isTestUser ||
+    profile?.isTestCustomer ||
+    profile?.profile?.isTestUser ||
+    profile?.profile?.isTestCustomer
+);
+
+const getMultiGetValue = (entries, key) => {
+  if (!Array.isArray(entries)) {
+    return null;
+  }
+
+  const pair = entries.find((entry) => Array.isArray(entry) && entry[0] === key);
+  return pair ? pair[1] : null;
+};
 
 const normalizePhoneDigits = (phone) => String(phone || '').replace(/\D/g, '');
 
@@ -172,8 +190,70 @@ const AuthProvider = ({ children }) => {
   const { user, loading } = useAuth();
   const dispatch = useDispatch();
   const [isSyncing, setIsSyncing] = useState(false);
+  const [hasLocalBootstrapSession, setHasLocalBootstrapSession] = useState(false);
   const hasSynced = useRef(false);
   const lastSyncedUid = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateLocalBootstrapSession = async () => {
+      try {
+        const localEntries = await AsyncStorage.multiGet([
+          AUTH_UID_STORAGE_KEY,
+          USER_DATA_STORAGE_KEY,
+        ]);
+        const storedUidValue = getMultiGetValue(localEntries, AUTH_UID_STORAGE_KEY);
+        const cachedProfileRaw = getMultiGetValue(localEntries, USER_DATA_STORAGE_KEY);
+        const storedUid = String(storedUidValue || '').trim();
+        const cachedProfile = cachedProfileRaw
+          ? normalizePersistedProfile(JSON.parse(cachedProfileRaw))
+          : null;
+        const cachedRole = resolveStoredProfileRole(cachedProfile);
+        const cacheMatchesStoredUid = Boolean(
+          cachedProfile?.uid &&
+            cachedRole &&
+            (!storedUid || cachedProfile.uid === storedUid)
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setHasLocalBootstrapSession(cacheMatchesStoredUid);
+
+        if (cacheMatchesStoredUid) {
+          const cachedUserData = buildCompleteUserDataFromProfile(null, cachedProfile);
+          if (cachedUserData) {
+            dispatch({
+              type: FETCH_USER_SUCCESS,
+              payload: cachedUserData
+            });
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setHasLocalBootstrapSession(false);
+        }
+        Logger.warn(
+          '⚠️ AuthProvider - falha ao hidratar sessão local de bootstrap:',
+          error?.message || error
+        );
+      }
+    };
+
+    hydrateLocalBootstrapSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      setHasLocalBootstrapSession(false);
+    }
+  }, [loading, user]);
 
   // ✅ Otimização: Memoizar função para evitar recriações desnecessárias
   const syncUserData = useCallback(async (firebaseUser) => {
@@ -255,12 +335,14 @@ const AuthProvider = ({ children }) => {
       let cachedProfile = null;
       let testModeEnabled = false;
       try {
-        const [[, storedUidValue], [, cachedProfileRaw], [, testModeValue]] =
-          await AsyncStorage.multiGet([
-            AUTH_UID_STORAGE_KEY,
-            USER_DATA_STORAGE_KEY,
-            TEST_MODE_STORAGE_KEY,
-          ]);
+        const profileEntries = await AsyncStorage.multiGet([
+          AUTH_UID_STORAGE_KEY,
+          USER_DATA_STORAGE_KEY,
+          TEST_MODE_STORAGE_KEY,
+        ]);
+        const storedUidValue = getMultiGetValue(profileEntries, AUTH_UID_STORAGE_KEY);
+        const cachedProfileRaw = getMultiGetValue(profileEntries, USER_DATA_STORAGE_KEY);
+        const testModeValue = getMultiGetValue(profileEntries, TEST_MODE_STORAGE_KEY);
         const storedUid = String(storedUidValue || '').trim();
         testModeEnabled = String(testModeValue || '').trim() === 'true';
         cachedProfile = cachedProfileRaw
@@ -289,6 +371,7 @@ const AuthProvider = ({ children }) => {
       }
 
       const cachedProfileRole = resolveStoredProfileRole(cachedProfile);
+      const qaLocalProfileEnabled = Boolean(testModeEnabled || isExplicitTestProfile(cachedProfile));
       const firebaseUid = String(firebaseUser?.uid || '').trim();
       const firebasePhoneDigits = normalizePhoneDigits(firebaseUser?.phoneNumber);
       const cachedPhoneDigits = normalizePhoneDigits(
@@ -334,7 +417,10 @@ const AuthProvider = ({ children }) => {
       const refreshCachedProfileInBackground = () => {
         void (async () => {
           try {
-            const remoteProfile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
+            const remoteProfile = await mobileProfileService.getCurrentProfile({
+              suppressErrors: true,
+              timeoutMs: PROFILE_BACKGROUND_REFRESH_TIMEOUT_MS,
+            });
             const normalizedRemoteProfile = normalizePersistedProfile(remoteProfile);
             const remoteProfileRole = resolveStoredProfileRole(normalizedRemoteProfile);
             const remotePhoneDigits = normalizePhoneDigits(
@@ -365,7 +451,7 @@ const AuthProvider = ({ children }) => {
       };
 
       if (
-        testModeEnabled &&
+        qaLocalProfileEnabled &&
         cachedProfile?.uid &&
         cachedProfileRole &&
         firebaseUid &&
@@ -404,11 +490,14 @@ const AuthProvider = ({ children }) => {
         }
       }
 
-      const remoteProfile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
+      const remoteProfile = await mobileProfileService.getCurrentProfile({
+        suppressErrors: true,
+        timeoutMs: PROFILE_BOOTSTRAP_TIMEOUT_MS,
+      });
       const normalizedRemoteProfile = normalizePersistedProfile(remoteProfile);
       const remoteProfileRole = resolveStoredProfileRole(normalizedRemoteProfile);
       const shouldPreferCachedProfile =
-        testModeEnabled &&
+        qaLocalProfileEnabled &&
         cachedProfile?.uid &&
         cachedProfileRole &&
         (!normalizedRemoteProfile?.uid ||
@@ -545,7 +634,11 @@ const AuthProvider = ({ children }) => {
     }
   }, [user, loading, syncUserData]);
 
-  const shouldRenderBootstrapShell = loading || (Boolean(user) && isSyncing);
+  const shouldRenderBootstrapShell = Boolean(
+    loading &&
+      !user &&
+      !hasLocalBootstrapSession
+  );
 
   if (shouldRenderBootstrapShell) {
     return <AuthBootstrapShell user={user} />;

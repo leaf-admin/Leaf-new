@@ -23,6 +23,7 @@ const AUTH_UID_STORAGE_KEY = "@auth_uid";
 const USER_DATA_STORAGE_KEY = "@user_data";
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = "@qa_socket_id_token";
 const QA_SOCKET_ID_TOKEN_MIN_TTL_MS = 60000;
+const QA_SOCKET_BYPASS_TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
 const TERMINAL_ACTIVE_RIDE_SYNC_STATUSES = new Set([
   "CANCELED",
   "CANCELLED",
@@ -75,6 +76,21 @@ const buildSocketError = (
 
 const sleepMs = (delayMs) =>
   new Promise((resolve) => setTimeout(resolve, delayMs));
+
+const isTruthyQaSocketFlag = (value) =>
+  QA_SOCKET_BYPASS_TRUTHY_VALUES.has(
+    String(value ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+
+const getProcessEnvValue = (key) =>
+  typeof process !== "undefined" ? process?.env?.[key] : undefined;
+
+const canUseClientQaSocketBypass = () =>
+  __DEV__ === true ||
+  isTruthyQaSocketFlag(getProcessEnvValue("EXPO_PUBLIC_E2E_TEST")) ||
+  isTruthyQaSocketFlag(getProcessEnvValue("EXPO_PUBLIC_ENABLE_QA_SOCKET_BYPASS"));
 
 const CREATE_BOOKING_RETRYABLE_CODES = new Set([
   "BOOKING_TIMEOUT",
@@ -235,6 +251,20 @@ function getJwtExpirationMs(token) {
   }
 }
 
+function getJwtSubject(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length < 2) {
+    return "";
+  }
+
+  try {
+    const payload = decodeBase64UrlJson(parts[1]);
+    return String(payload?.user_id || payload?.sub || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
 function isJwtExpiredOrNearExpiry(token, nowMs = Date.now()) {
   const expirationMs = getJwtExpirationMs(token);
   if (!Number.isFinite(expirationMs)) {
@@ -389,6 +419,7 @@ class WebSocketManager {
       this.isAuthenticating = false; // ✅ Flag para evitar autenticação duplicada
       this.reconnectTimer = null; // Evitar agendamento duplicado de reconexão manual
       this.lastActiveRideSnapshot = null; // Snapshot de corrida ativa para reidratação pós-reconexão
+      this.lastAuthenticatedPayload = null; // Snapshot do último auth confirmado pelo backend
       this._lastActiveRideSyncAt = 0;
       this.authAckInFlight = null;
       this.authAckInFlightKey = null;
@@ -466,6 +497,15 @@ class WebSocketManager {
   }
 
   _setCachedAvailabilityResult(cacheKey, data) {
+    const hasDrivers =
+      data?.available === true ||
+      data?.hasDrivers === true ||
+      String(data?.code || "").toUpperCase() === "DRIVERS_AVAILABLE";
+    if (!hasDrivers) {
+      this.availabilityRequestCache.delete(cacheKey);
+      return;
+    }
+
     this.availabilityRequestCache.set(cacheKey, {
       createdAt: Date.now(),
       data: cloneSocketPayload(data),
@@ -801,7 +841,9 @@ class WebSocketManager {
       return this.lastSocketAuthPayload;
     }
 
-    const qaBypassPayload = await this._resolveQaSocketBypassPayload();
+    const qaBypassPayload = canUseClientQaSocketBypass()
+      ? await this._resolveQaSocketBypassPayload()
+      : null;
     if (qaBypassPayload) {
       this.qaSocketBypassState = { enabled: true, uid: qaBypassPayload.uid };
       this.lastSocketAuthPayload = {
@@ -814,26 +856,68 @@ class WebSocketManager {
     }
 
     this.qaSocketBypassState = { enabled: false, uid: null };
-    this.lastSocketAuthPayload = { token: null };
+    this.lastSocketAuthPayload = {
+      token: null,
+      authUnavailable: true,
+    };
     return this.lastSocketAuthPayload;
   }
 
   async _resolveQaSocketIdToken() {
     try {
-      const [testModeRaw, qaSocketIdTokenRaw] = await Promise.all([
+      const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw, storedUserDataRaw] = await Promise.all([
         AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
         AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+        AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
+        AsyncStorage.getItem(USER_DATA_STORAGE_KEY),
       ]);
+
+      let storedUserData = null;
+      if (storedUserDataRaw) {
+        try {
+          storedUserData = JSON.parse(storedUserDataRaw);
+        } catch (_error) {
+          storedUserData = null;
+        }
+      }
 
       const qaSocketTokenEnabled =
         String(testModeRaw || "")
           .trim()
           .toLowerCase() === "true";
       const qaSocketIdToken = String(qaSocketIdTokenRaw || "").trim();
+      const tokenSubject = getJwtSubject(qaSocketIdToken);
+      const persistedUid = String(
+        storedUserData?.uid ||
+          storedUserData?.id ||
+          persistedUidRaw ||
+          "",
+      ).trim();
+      const isPersistedTestUser =
+        storedUserData?.isTestUser === true ||
+        storedUserData?.qaUser === true ||
+        storedUserData?.testUser === true;
+      const canUsePersistedTestUserToken =
+        Boolean(qaSocketIdToken) &&
+        isPersistedTestUser &&
+        Boolean(tokenSubject) &&
+        Boolean(persistedUid) &&
+        tokenSubject === persistedUid;
+
       if (qaSocketTokenEnabled && qaSocketIdToken) {
         if (isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
           Logger.warn(
             "⚠️ [WebSocketManager] Token QA do socket expirado ou próximo de expirar; usando autenticação alternativa.",
+          );
+          return null;
+        }
+        return qaSocketIdToken;
+      }
+
+      if (canUsePersistedTestUserToken) {
+        if (isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
+          Logger.warn(
+            "⚠️ [WebSocketManager] Token QA do usuário de teste expirado; usando autenticação alternativa.",
           );
           return null;
         }
@@ -847,6 +931,102 @@ class WebSocketManager {
     }
 
     return null;
+  }
+
+  async _resolveQaSocketIdentityOverride(requestedUserId = "", requestedUserType = "") {
+    try {
+      const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw, storedUserDataRaw] =
+        await Promise.all([
+          AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+          AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+          AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
+          AsyncStorage.getItem(USER_DATA_STORAGE_KEY),
+        ]);
+
+      const qaModeEnabled =
+        String(testModeRaw || "")
+          .trim()
+          .toLowerCase() === "true";
+      const qaSocketIdToken = String(qaSocketIdTokenRaw || "").trim();
+      if (!qaModeEnabled || !qaSocketIdToken || isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
+        return null;
+      }
+
+      let storedUserData = null;
+      if (storedUserDataRaw) {
+        try {
+          storedUserData = JSON.parse(storedUserDataRaw);
+        } catch (_error) {
+          storedUserData = null;
+        }
+      }
+
+      const tokenSubject = getJwtSubject(qaSocketIdToken);
+      const persistedUid = String(
+        storedUserData?.uid ||
+          storedUserData?.id ||
+          persistedUidRaw ||
+          "",
+      ).trim();
+      if (!tokenSubject || !persistedUid || tokenSubject !== persistedUid) {
+        return null;
+      }
+
+      const persistedUserType = String(
+        storedUserData?.usertype ||
+          storedUserData?.userType ||
+          storedUserData?.type ||
+          requestedUserType ||
+          "",
+      ).trim();
+      const normalizedRequestedUserId = String(requestedUserId || "").trim();
+      const normalizedRequestedUserType = String(requestedUserType || "").trim();
+
+      if (
+        normalizedRequestedUserId === persistedUid &&
+        (!persistedUserType || normalizedRequestedUserType === persistedUserType)
+      ) {
+        return null;
+      }
+
+      return {
+        userId: persistedUid,
+        userType: persistedUserType || normalizedRequestedUserType,
+      };
+    } catch (identityError) {
+      Logger.warn(
+        "⚠️ [WebSocketManager] Erro ao resolver identidade QA do socket:",
+        identityError,
+      );
+      return null;
+    }
+  }
+
+  async _resolveSocketAuthIdentity(userId = "", userType = "") {
+    const normalizedUserId = String(userId || "").trim();
+    const normalizedUserType = String(userType || "").trim();
+    const qaIdentityOverride = await this._resolveQaSocketIdentityOverride(
+      normalizedUserId,
+      normalizedUserType,
+    );
+
+    if (qaIdentityOverride?.userId) {
+      Logger.warn(
+        "⚠️ [WebSocketManager] Substituindo identidade de socket pela identidade QA assinada.",
+        {
+          requestedUserId: normalizedUserId || null,
+          requestedUserType: normalizedUserType || null,
+          qaUserId: qaIdentityOverride.userId,
+          qaUserType: qaIdentityOverride.userType || null,
+        },
+      );
+      return qaIdentityOverride;
+    }
+
+    return {
+      userId: normalizedUserId,
+      userType: normalizedUserType,
+    };
   }
 
   async _resolveQaSocketBypassPayload(preferredUserId = "") {
@@ -1068,6 +1248,17 @@ class WebSocketManager {
     const socketAuth = await this._buildSocketAuthPayload({
       forceRefresh: options?.forceRefreshAuth === true,
     });
+    if (socketAuth?.authUnavailable && !socketAuth?.token) {
+      throw buildSocketError(
+        {
+          code: "AUTH_TOKEN_UNAVAILABLE",
+          message:
+            "Sessão expirada. Reabra o app para restabelecer os serviços em tempo real.",
+        },
+        "Sessão expirada. Reabra o app para restabelecer os serviços em tempo real.",
+        "websocket",
+      );
+    }
     const socketQuery = this._buildSocketQueryPayload(socketAuth);
     const candidateUrls = buildSocketCandidateUrls();
     let lastError = null;
@@ -1420,6 +1611,9 @@ class WebSocketManager {
             "⚠️ [WebSocketManager] Servidor não retornou userType no evento authenticated",
           );
         }
+        this.lastAuthenticatedPayload = data && typeof data === "object"
+          ? { ...data }
+          : null;
         // ✅ FASE 2: Retransmitir através do EventEmitter
         this.eventEmitter.emit("authenticated", data);
 
@@ -1606,6 +1800,7 @@ class WebSocketManager {
         this.isAuthenticated = false;
         this.authenticatedUserId = null;
         this.authenticatedUserType = null;
+        this.lastAuthenticatedPayload = null;
       }
       this.isAuthenticating = false;
 
@@ -1622,6 +1817,7 @@ class WebSocketManager {
       // Resetar estado de autenticação (mas MANTER authCredentials para reconexão)
       this.isAuthenticated = false;
       this.isAuthenticating = false;
+      this.lastAuthenticatedPayload = null;
 
       // ✅ FASE 2: Emitir através do EventEmitter
       this.eventEmitter.emit("disconnect", reason);
@@ -1686,6 +1882,7 @@ class WebSocketManager {
     this.authenticatedUserType = null;
     this.qaSocketBypassState = { enabled: false, uid: null };
     this.lastSocketAuthPayload = null;
+    this.lastAuthenticatedPayload = null;
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -1834,7 +2031,62 @@ class WebSocketManager {
       socketId: this.socket?.id || null,
       userId: this.authenticatedUserId,
       userType: this.authenticatedUserType,
+      authPayload: this.isAuthenticated ? this.lastAuthenticatedPayload : null,
       isConnecting: this.isConnecting,
+    };
+  }
+
+  _mergeDriverStatusIntoAuthPayload(payload = {}) {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+
+    const payloadDriverId = String(
+      payload.driverId || payload.uid || payload.userId || "",
+    ).trim();
+    const authenticatedDriverId = String(this.authenticatedUserId || "").trim();
+
+    if (
+      payloadDriverId &&
+      authenticatedDriverId &&
+      payloadDriverId !== authenticatedDriverId
+    ) {
+      return;
+    }
+
+    const hasExplicitOnline =
+      typeof payload.isOnline === "boolean" ||
+      typeof payload.driverOnline === "boolean";
+    const nextOnline = hasExplicitOnline
+      ? payload.isOnline === true || payload.driverOnline === true
+      : null;
+
+    if (!hasExplicitOnline && !payload.driverOnlineDaily && !payload.status) {
+      return;
+    }
+
+    this.lastAuthenticatedPayload = {
+      ...(this.lastAuthenticatedPayload || {}),
+      uid: authenticatedDriverId || payloadDriverId || this.lastAuthenticatedPayload?.uid || null,
+      userId:
+        authenticatedDriverId ||
+        payloadDriverId ||
+        this.lastAuthenticatedPayload?.userId ||
+        null,
+      userType:
+        this.authenticatedUserType ||
+        this.lastAuthenticatedPayload?.userType ||
+        "driver",
+      ...(hasExplicitOnline
+        ? {
+            isOnline: nextOnline,
+            driverOnline: nextOnline,
+          }
+        : {}),
+      ...(payload.status ? { status: payload.status } : {}),
+      ...(payload.driverOnlineDaily
+        ? { driverOnlineDaily: payload.driverOnlineDaily }
+        : {}),
     };
   }
 
@@ -1913,12 +2165,15 @@ class WebSocketManager {
 
     const force = options?.force === true;
     const forceRefreshToken = options?.forceRefreshToken === true;
+    const authIdentity = await this._resolveSocketAuthIdentity(userId, userType);
+    const resolvedUserId = authIdentity.userId;
+    const resolvedUserType = authIdentity.userType;
 
     // ✅ Evitar autenticação duplicada se já está autenticado com os mesmos dados
     if (
       this.isAuthenticated &&
-      this.authenticatedUserId === userId &&
-      this.authenticatedUserType === userType
+      this.authenticatedUserId === resolvedUserId &&
+      this.authenticatedUserType === resolvedUserType
     ) {
       Logger.log(
         "✅ [WebSocketManager] Já autenticado com esses dados, ignorando",
@@ -1936,20 +2191,22 @@ class WebSocketManager {
 
     this.isAuthenticating = true;
     Logger.log(
-      `🔐 [WebSocketManager] Autenticando usuário: ${userId} como ${userType}`,
+      `🔐 [WebSocketManager] Autenticando usuário: ${resolvedUserId} como ${resolvedUserType}`,
     );
 
     // ✅ Salvar credenciais para auto-reautenticação em caso de queda
-    this.authCredentials = { userId, userType };
+    this.authCredentials = { userId: resolvedUserId, userType: resolvedUserType };
 
     // ✅ Definir dados locais
-    this.authenticatedUserType = userType;
-    this.authenticatedUserId = userId;
+    this.authenticatedUserType = resolvedUserType;
+    this.authenticatedUserId = resolvedUserId;
 
-    const qaBypassPayload = await this._resolveQaSocketBypassPayload(userId);
+    const qaBypassPayload = canUseClientQaSocketBypass()
+      ? await this._resolveQaSocketBypassPayload(resolvedUserId)
+      : null;
     const shouldUseQaSocketBypass = Boolean(
       qaBypassPayload?.qaAuthBypass &&
-      String(qaBypassPayload?.uid || "") === String(userId || ""),
+      String(qaBypassPayload?.uid || "") === String(resolvedUserId || ""),
     );
     const socketAuthPayload = await this._buildSocketAuthPayload({
       forceRefresh: forceRefreshToken,
@@ -1958,13 +2215,13 @@ class WebSocketManager {
     if (shouldUseQaSocketBypass) {
       this.qaSocketBypassState = {
         enabled: true,
-        uid: String(userId || "").trim(),
+        uid: String(resolvedUserId || "").trim(),
       };
     }
 
     const authenticatePayload = {
-      uid: userId,
-      userType: userType,
+      uid: resolvedUserId,
+      userType: resolvedUserType,
       ...(shouldUseQaSocketBypass
         ? {
             qaAuthBypass: true,
@@ -1994,7 +2251,10 @@ class WebSocketManager {
     timeoutMs = AUTH_ACK_DEFAULT_TIMEOUT_MS,
     options = {},
   ) {
-    const requestKey = `${userId || ""}:${userType || ""}`;
+    const authIdentity = await this._resolveSocketAuthIdentity(userId, userType);
+    const resolvedUserId = authIdentity.userId;
+    const resolvedUserType = authIdentity.userType;
+    const requestKey = `${resolvedUserId || ""}:${resolvedUserType || ""}`;
     if (this.authAckInFlight && this.authAckInFlightKey === requestKey) {
       return this.authAckInFlight;
     }
@@ -2012,8 +2272,8 @@ class WebSocketManager {
         attempt += 1;
         try {
           const authData = await this._authenticateSingleAttempt(
-            userId,
-            userType,
+            resolvedUserId,
+            resolvedUserType,
             timeoutMs,
             { forceRefreshToken },
           );
@@ -4224,6 +4484,13 @@ class WebSocketManager {
         }
         cleanup();
         if (data.success) {
+          this._mergeDriverStatusIntoAuthPayload({
+            driverId,
+            status: data.status || status,
+            isOnline:
+              typeof data.isOnline === "boolean" ? data.isOnline : isOnline,
+            driverOnlineDaily: data.driverOnlineDaily || null,
+          });
           resolve(data);
         } else {
           reject(buildDriverStatusError(data));

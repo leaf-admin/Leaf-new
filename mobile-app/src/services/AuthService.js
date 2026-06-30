@@ -125,15 +125,19 @@ class AuthService {
             const { getAuthenticatedHeaders } = require('../utils/RequestHeaders');
             
             const url = `${this.baseURL}${endpoint}`;
-            const headers = getAuthenticatedHeaders(token, options.headers);
+            const { timeoutMs, ...fetchOptions } = options || {};
+            const requestTimeoutMs = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0
+                ? Number(timeoutMs)
+                : 30000;
+            const headers = getAuthenticatedHeaders(token, fetchOptions.headers);
 
-            // ✅ Adicionar timeout de 30 segundos
+            // ✅ Adicionar timeout para impedir bootstrap global preso em rede/backend.
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos
+            const timeoutId = setTimeout(() => controller.abort(), requestTimeoutMs);
 
             try {
                 const response = await fetch(url, {
-                    ...options,
+                    ...fetchOptions,
                     headers,
                     signal: controller.signal
                 });
@@ -149,11 +153,11 @@ class AuthService {
                         
                         // Nova requisição com timeout
                         const retryController = new AbortController();
-                        const retryTimeoutId = setTimeout(() => retryController.abort(), 30000);
+                        const retryTimeoutId = setTimeout(() => retryController.abort(), requestTimeoutMs);
                         
                         try {
                             const retryResponse = await fetch(url, {
-                                ...options,
+                                ...fetchOptions,
                                 headers,
                                 signal: retryController.signal
                             });

@@ -41,6 +41,21 @@ export function normalizeAuthFlowProfileData(profileData = {}) {
   };
 }
 
+export function buildSerializableConfirmationMeta(confirmation) {
+  if (!confirmation || typeof confirmation !== 'object') {
+    return null;
+  }
+
+  return {
+    verificationId: String(confirmation.verificationId || '').trim() || null,
+    isCustomOtp: confirmation.isCustomOtp === true,
+    isReviewAccount: confirmation.isReviewAccount === true,
+    isTestOtpBypass: confirmation.isTestOtpBypass === true,
+    isTestNumber: confirmation.isTestNumber === true,
+    source: confirmation.isCustomOtp ? 'custom_otp' : 'firebase_phone_auth',
+  };
+}
+
 export function resolveAuthFlowInitialStep(
   completedSteps = [],
   fallbackStep = 0,

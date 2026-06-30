@@ -191,6 +191,100 @@ describe('WebSocketManager auth QA bypass', () => {
     expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
   });
 
+  it('uses a persisted QA idToken for an explicit test user even when test mode flag is missing', async () => {
+    const token = buildJwt({
+      sub: 'F0CIj7noqrc74qdPJD80T9FCxME2',
+      user_id: 'F0CIj7noqrc74qdPJD80T9FCxME2',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return null;
+      if (key === '@qa_socket_id_token') return token;
+      if (key === '@auth_uid') return 'F0CIj7noqrc74qdPJD80T9FCxME2';
+      if (key === '@user_data') {
+        return JSON.stringify({
+          uid: 'F0CIj7noqrc74qdPJD80T9FCxME2',
+          usertype: 'driver',
+          isTestUser: true,
+        });
+      }
+      return null;
+    });
+
+    const manager = WebSocketManager.getInstance();
+    const authPayload = await manager._buildSocketAuthPayload();
+
+    expect(authPayload).toEqual(
+      expect.objectContaining({
+        token,
+      }),
+    );
+    expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
+  });
+
+  it('uses Firebase auth for real sessions even when QA storage keys exist', async () => {
+    const freshGetIdToken = jest.fn(async () => 'real-firebase-token');
+    mockFirebaseAuthState.currentUser = {
+      uid: 'real-driver-uid',
+      getIdToken: freshGetIdToken,
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'false';
+      if (key === '@qa_socket_id_token') {
+        return buildJwt({
+          sub: 'qa-driver-uid',
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (key === '@auth_uid') return 'real-driver-uid';
+      if (key === '@user_data') {
+        return JSON.stringify({
+          uid: 'real-driver-uid',
+          usertype: 'driver',
+        });
+      }
+      return null;
+    });
+
+    const manager = WebSocketManager.getInstance();
+    const authPayload = await manager._buildSocketAuthPayload({ forceRefresh: true });
+
+    expect(freshGetIdToken).toHaveBeenCalledWith(true);
+    expect(authPayload).toEqual(
+      expect.objectContaining({
+        token: 'real-firebase-token',
+      }),
+    );
+    expect(authPayload.qaAuthBypass).toBeUndefined();
+    expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
+  });
+
+  it('does not send QA bypass or a blank token when production has no Firebase session', async () => {
+    mockFirebaseAuthState.currentUser = null;
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'false';
+      if (key === '@auth_uid') return 'real-driver-uid';
+      if (key === '@user_data') {
+        return JSON.stringify({
+          uid: 'real-driver-uid',
+          usertype: 'driver',
+        });
+      }
+      return null;
+    });
+
+    const manager = WebSocketManager.getInstance();
+    const authPayload = await manager._buildSocketAuthPayload();
+
+    expect(authPayload).toEqual({
+      token: null,
+      authUnavailable: true,
+    });
+    expect(manager._buildSocketQueryPayload(authPayload)).toEqual({});
+    expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
+  });
+
   it('falls back to QA uid bypass when no Firebase user or persisted QA idToken exists', async () => {
     mockAsyncStorageGetItem.mockImplementation(async (key) => {
       if (key === '@test_mode') return 'true';
@@ -243,6 +337,52 @@ describe('WebSocketManager auth QA bypass', () => {
         qaAutomation: true,
       }),
     );
+  });
+
+  it('replaces stale in-memory socket credentials with the signed QA identity during authenticate', async () => {
+    const token = buildJwt({
+      sub: 'passenger_qa_1',
+      user_id: 'passenger_qa_1',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    mockFirebaseAuthState.currentUser = {
+      uid: 'driver_stale_1',
+      getIdToken: jest.fn(async () => 'driver-stale-token'),
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@qa_socket_id_token') return token;
+      if (key === '@auth_uid') return 'passenger_qa_1';
+      if (key === '@user_data') {
+        return JSON.stringify({
+          uid: 'passenger_qa_1',
+          usertype: 'customer',
+          isTestUser: true,
+        });
+      }
+      return null;
+    });
+
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      emit: jest.fn(),
+    };
+
+    await manager.authenticate('driver_stale_1', 'driver', { force: true });
+
+    expect(manager.socket.emit).toHaveBeenCalledWith(
+      'authenticate',
+      expect.objectContaining({
+        uid: 'passenger_qa_1',
+        userType: 'customer',
+        token,
+      }),
+    );
+    expect(manager.authCredentials).toEqual({
+      userId: 'passenger_qa_1',
+      userType: 'customer',
+    });
   });
 
   it('builds query payload for QA handshake duplication', async () => {
@@ -540,6 +680,64 @@ describe('WebSocketManager auth QA bypass', () => {
     );
   });
 
+  it('does not cache no-driver availability results', async () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      emit: jest.fn(),
+      on: jest.fn(),
+    };
+    manager.isAuthenticated = true;
+    manager.authenticatedUserId = 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
+    manager.authenticatedUserType = 'customer';
+
+    const payload = {
+      customerId: 'OjML1wSzdNRaynjqMRlSW1Y0LVy2',
+      carType: 'Leaf Plus',
+      pickupLocation: { lat: -22.857, lng: -43.309 },
+      destinationLocation: { lat: -22.9727, lng: -43.1869 },
+    };
+
+    const unavailablePromise = manager.checkRideAvailability(payload);
+    const [, unavailablePayload] = manager.socket.emit.mock.calls[0];
+
+    manager.emit('rideAvailabilityResult', {
+      success: true,
+      available: false,
+      hasDrivers: false,
+      code: 'NO_DRIVERS_AVAILABLE',
+      requestId: unavailablePayload.requestId,
+    });
+
+    await expect(unavailablePromise).resolves.toEqual(
+      expect.objectContaining({
+        success: true,
+        available: false,
+      }),
+    );
+
+    const nextPromise = manager.checkRideAvailability(payload);
+    expect(manager.socket.emit).toHaveBeenCalledTimes(2);
+
+    const [, nextPayload] = manager.socket.emit.mock.calls[1];
+    expect(nextPayload.requestId).not.toBe(unavailablePayload.requestId);
+
+    manager.emit('rideAvailabilityResult', {
+      success: true,
+      available: true,
+      hasDrivers: true,
+      code: 'DRIVERS_AVAILABLE',
+      requestId: nextPayload.requestId,
+    });
+
+    await expect(nextPromise).resolves.toEqual(
+      expect.objectContaining({
+        success: true,
+        available: true,
+      }),
+    );
+  });
+
   it('registers sessionTerminated as a first-class server event', () => {
     const manager = WebSocketManager.getInstance();
     manager.socket = {
@@ -578,6 +776,133 @@ describe('WebSocketManager auth QA bypass', () => {
         newSocketId: 'socket-new',
         previousSocketId: 'socket-old',
         __source: 'socket_event',
+      }),
+    );
+  });
+
+  it('exposes and clears the latest authenticated payload for runtime rehydration', () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      id: 'socket-driver',
+      io: {
+        engine: {
+          transport: {
+            name: 'websocket',
+          },
+        },
+      },
+      on: jest.fn(),
+    };
+
+    manager.setupListeners();
+
+    const authenticatedRegistration = manager.socket.on.mock.calls.find(
+      ([eventName]) => eventName === 'authenticated',
+    );
+    expect(authenticatedRegistration).toBeTruthy();
+
+    authenticatedRegistration[1]({
+      success: true,
+      uid: 'driver-123',
+      userType: 'driver',
+      driverOnline: true,
+      isOnline: true,
+      driverOnlineDaily: {
+        sessionStartedAtMs: 1782523241715,
+        effectiveMs: 420000,
+      },
+    });
+
+    expect(manager.getConnectionStatus()).toEqual(
+      expect.objectContaining({
+        authenticated: true,
+        userId: 'driver-123',
+        userType: 'driver',
+        authPayload: expect.objectContaining({
+          uid: 'driver-123',
+          userType: 'driver',
+          driverOnline: true,
+          isOnline: true,
+          driverOnlineDaily: expect.objectContaining({
+            effectiveMs: 420000,
+          }),
+        }),
+      }),
+    );
+
+    const disconnectRegistration = manager.socket.on.mock.calls.find(
+      ([eventName]) => eventName === 'disconnect',
+    );
+    expect(disconnectRegistration).toBeTruthy();
+
+    disconnectRegistration[1]('transport close');
+
+    expect(manager.getConnectionStatus()).toEqual(
+      expect.objectContaining({
+        authenticated: false,
+        authPayload: null,
+      }),
+    );
+  });
+
+  it('refreshes the authenticated driver snapshot after driver status ack', async () => {
+    const manager = WebSocketManager.getInstance();
+    const listeners = {};
+    manager.socket = {
+      connected: true,
+      id: 'socket-driver',
+      io: {
+        engine: {
+          transport: {
+            name: 'websocket',
+          },
+        },
+      },
+      on: jest.fn((eventName, handler) => {
+        listeners[eventName] = handler;
+      }),
+      off: jest.fn(),
+      emit: jest.fn((eventName) => {
+        if (eventName === 'setDriverStatus') {
+          listeners.driverStatusUpdated({
+            success: true,
+            driverId: 'driver-123',
+            status: 'available',
+            isOnline: true,
+            driverOnlineDaily: {
+              effectiveMs: 600000,
+              sessionStartedAtMs: 1782523241715,
+            },
+          });
+        }
+      }),
+    };
+
+    manager.isAuthenticated = true;
+    manager.authenticatedUserId = 'driver-123';
+    manager.authenticatedUserType = 'driver';
+    manager.lastAuthenticatedPayload = {
+      success: true,
+      uid: 'driver-123',
+      userType: 'driver',
+      status: 'offline',
+      isOnline: false,
+      driverOnline: false,
+    };
+
+    await manager.setDriverStatus('driver-123', 'available', true);
+
+    expect(manager.getConnectionStatus().authPayload).toEqual(
+      expect.objectContaining({
+        uid: 'driver-123',
+        userType: 'driver',
+        status: 'available',
+        isOnline: true,
+        driverOnline: true,
+        driverOnlineDaily: expect.objectContaining({
+          effectiveMs: 600000,
+        }),
       }),
     );
   });

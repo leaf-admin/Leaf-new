@@ -1,12 +1,23 @@
 import React from 'react';
 import { Text } from 'react-native';
-import { render, waitFor } from '@testing-library/react-native';
+import { act, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthProvider from '../src/components/AuthProvider';
 import mobileProfileService from '../src/services/MobileProfileService';
 
 const mockUseAuth = jest.fn();
 const mockDispatch = jest.fn();
+
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+};
 
 jest.mock('../src/hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
@@ -83,6 +94,53 @@ describe('AuthProvider startup shell', () => {
     expect(queryByText('Bem vindo(a)')).toBeNull();
   });
 
+  it('does not keep the global bootstrap shell over a valid local session', async () => {
+    const cachedProfile = {
+      uid: 'driver-seeded-1',
+      usertype: 'driver',
+      firstName: 'Leaf',
+      lastName: 'Motorista Teste',
+      phone: '+5521123456789',
+      isTestUser: true,
+    };
+
+    mockUseAuth.mockReturnValue({
+      user: {
+        uid: 'driver-seeded-1',
+        displayName: 'Leaf',
+        phoneNumber: '+5521123456789',
+      },
+      loading: true,
+    });
+    AsyncStorage.multiGet.mockResolvedValue([
+      ['@auth_uid', 'driver-seeded-1'],
+      ['@user_data', JSON.stringify(cachedProfile)],
+      ['@test_mode', null],
+    ]);
+
+    const { getByText, queryByText } = render(
+      <AuthProvider>
+        <Text>app-ready-child</Text>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(getByText('app-ready-child')).toBeTruthy();
+      expect(queryByText('Bem vindo(a), Leaf')).toBeNull();
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'FETCH_USER_SUCCESS',
+        payload: expect.objectContaining({
+          uid: 'driver-seeded-1',
+          usertype: 'driver',
+          isTestUser: true,
+        }),
+      })
+    );
+  });
+
   it('releases the app from a matching cached profile while refreshing remotely in background', async () => {
     const cachedProfile = {
       uid: 'firebase-uid-1',
@@ -101,7 +159,7 @@ describe('AuthProvider startup shell', () => {
       },
       loading: false,
     });
-    AsyncStorage.multiGet.mockResolvedValueOnce([
+    AsyncStorage.multiGet.mockResolvedValue([
       ['@auth_uid', 'firebase-uid-1'],
       ['@user_data', JSON.stringify(cachedProfile)],
       ['@test_mode', 'false'],
@@ -136,5 +194,109 @@ describe('AuthProvider startup shell', () => {
       expect(getByText('app-ready-child')).toBeTruthy();
     });
     expect(mobileProfileService.getCurrentProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases an explicit QA cached profile even when @test_mode is missing', async () => {
+    const cachedProfile = {
+      uid: 'driver-seeded-1',
+      usertype: 'driver',
+      firstName: 'Leaf',
+      lastName: 'Motorista Teste',
+      phone: '+5521123456789',
+      isTestUser: true,
+      approved: true,
+    };
+
+    mockUseAuth.mockReturnValue({
+      user: {
+        uid: 'firebase-session-1',
+        phoneNumber: '+5521123456789',
+        email: null,
+      },
+      loading: false,
+    });
+    AsyncStorage.multiGet.mockResolvedValue([
+      ['@auth_uid', 'driver-seeded-1'],
+      ['@user_data', JSON.stringify(cachedProfile)],
+      ['@test_mode', null],
+    ]);
+
+    const { getByText, queryByText } = render(
+      <AuthProvider>
+        <Text>app-ready-child</Text>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(mockDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'FETCH_USER_SUCCESS',
+          payload: expect.objectContaining({
+            uid: 'driver-seeded-1',
+            firstName: 'Leaf',
+            usertype: 'driver',
+            isTestUser: true,
+          }),
+        })
+      );
+    });
+
+    await waitFor(() => {
+      expect(queryByText('Bem vindo(a), Leaf')).toBeNull();
+      expect(getByText('app-ready-child')).toBeTruthy();
+    });
+    expect(mockDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'FETCH_USER_SUCCESS',
+        payload: expect.objectContaining({
+          uid: 'driver-seeded-1',
+          usertype: 'driver',
+        }),
+      })
+    );
+  });
+
+  it('keeps authenticated UI visible while profile sync runs in background', async () => {
+    const remoteProfileDeferred = createDeferred();
+
+    mockUseAuth.mockReturnValue({
+      user: {
+        uid: 'driver-live-session',
+        phoneNumber: '+5521123456789',
+        displayName: 'Leaf',
+      },
+      loading: false,
+    });
+    AsyncStorage.multiGet.mockResolvedValue([
+      ['@auth_uid', null],
+      ['@user_data', null],
+      ['@test_mode', null],
+    ]);
+    mobileProfileService.getCurrentProfile.mockReturnValue(remoteProfileDeferred.promise);
+
+    const { getByText, queryByText } = render(
+      <AuthProvider>
+        <Text>app-ready-child</Text>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(mobileProfileService.getCurrentProfile).toHaveBeenCalled();
+    });
+
+    expect(getByText('app-ready-child')).toBeTruthy();
+    expect(queryByText('Bem vindo(a), Leaf')).toBeNull();
+    expect(queryByText('Bem vindo(a)')).toBeNull();
+
+    await act(async () => {
+      remoteProfileDeferred.resolve({
+        uid: 'driver-live-session',
+        usertype: 'driver',
+        firstName: 'Leaf',
+        phone: '+5521123456789',
+      });
+      await remoteProfileDeferred.promise;
+      await Promise.resolve();
+    });
   });
 });

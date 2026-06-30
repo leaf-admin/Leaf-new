@@ -141,6 +141,9 @@ const PermissionExplanationModal = ({
               style={styles.cancelButton}
               onPress={onClose}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={info.cancelButton}
+              testID="permission-explanation-cancel-button"
             >
               <Text style={styles.cancelButtonText}>{info.cancelButton}</Text>
             </TouchableOpacity>
@@ -149,6 +152,9 @@ const PermissionExplanationModal = ({
               style={styles.acceptButton}
               onPress={onAccept}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={info.acceptButton}
+              testID="permission-explanation-accept-button"
             >
               <Text style={styles.acceptButtonText}>{info.acceptButton}</Text>
             </TouchableOpacity>
