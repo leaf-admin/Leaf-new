@@ -9,7 +9,8 @@ Prepare the `1.0.3` Release Candidate for TestFlight and Android Internal Test w
 - Decision: GO conditioned for assisted RC, not broad rollout.
 - Branch: `codex/production-readiness-audit`
 - Release base requested: `a1451fa6c`
-- Release build commit: `6969a43e28b53a75139df66b03ddd12ee132f6e7`
+- Store build-number commit: `6969a43e28b53a75139df66b03ddd12ee132f6e7`
+- Canonical build method: local native build on the project workstation.
 - Marketing version: `1.0.3`
 - Runtime version: `1.0.3`
 - OTA channel: `production`
@@ -55,51 +56,71 @@ Prepare the `1.0.3` Release Candidate for TestFlight and Android Internal Test w
   - PASS
   - 1014 tests passed
 
-## EAS Build Evidence
+## Local Build Evidence
 
-### Valid RC Builds
+EAS is not the canonical build source for this RC. Local native artifacts are the only release artifacts approved for TestFlight and Android Internal Test.
+
+### Environment Doctor
+
+- Command: `npm --prefix mobile-app run env:local:doctor`
+- Result: PASS, 16 OK, 0 alerts, 0 failed.
+- Toolchain:
+  - Node: `/opt/homebrew/bin/node`
+  - npm: `/opt/homebrew/bin/npm`
+  - Xcode: `/usr/bin/xcodebuild`, Xcode 26.6 build 17F113
+  - CocoaPods: `/Users/izaakdias/.gem/ruby/3.3.0/bin/pod`, version 1.16.2
+  - Java: `/Users/izaakdias/.local/mobile-build-tools/jdk-17/bin/java`
+  - Android SDK: `/Users/izaakdias/Android/Sdk`
+  - iOS signing: valid local signing material detected for `br.com.leaf.ride`
+
+### Canonical RC Artifacts
 
 Android:
 
-- Build ID: `821f16aa-cf2f-4501-8088-ce72f46345c5`
-- Status at final capture: `in queue`
-- Profile: `production`
-- Distribution: `store`
-- Channel: `production`
-- Runtime version: `1.0.3`
-- Version: `1.0.3`
-- Version code: `120`
-- Commit: `6969a43e28b53a75139df66b03ddd12ee132f6e7`
-- Logs: `https://expo.dev/accounts/leaf-app/projects/leafapp-reactnative/builds/821f16aa-cf2f-4501-8088-ce72f46345c5`
-- Auto-submit target: Google Play internal track, draft release
-- Submission details: `https://expo.dev/accounts/leaf-app/projects/leafapp-reactnative/submissions/8e310953-14fe-485e-af30-2157cc8c84e2`
-- Note: Android remained in EAS queue through the final polling cycle. It must finish before Google Play Internal Test can be considered ready.
+- Command: `ANDROID_BUILD_CLEAN=1 EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:android:aab`
+- Result: PASS, `BUILD SUCCESSFUL`
+- Artifact: `/Users/izaakdias/Documents/Leaf-new/mobile-app/android/app/build/outputs/bundle/release/app-release.aab`
+- Size: 136,674,119 bytes, 130 MB
+- Created: `2026-06-30 17:37:47 -0300`
+- SHA-256: `12f03782a6249177ae57e39f04fdf49dfff6decaed963e70e28bdf8fd63d8c68`
+- Embedded config:
+  - Package: `br.com.leaf.ride`
+  - Version: `1.0.3`
+  - Version code: `120`
+  - Runtime version: `1.0.3`
+  - OTA channel: `production`
+- Signature validation: `jarsigner -verify` returned code 0 with `jar verified`.
+- Non-blocking warnings: Android dependency/deprecation warnings and self-signed upload certificate chain warning from `jarsigner`.
 
 iOS:
 
-- Build ID: `84b57ba7-3264-4214-b1bc-64ee80f757d4`
-- Status at final capture: `finished`
-- Profile: `production`
-- Distribution: `store`
-- Channel: `production`
-- Runtime version: `1.0.3`
-- Version: `1.0.3`
-- Build number: `28`
-- Commit: `6969a43e28b53a75139df66b03ddd12ee132f6e7`
-- Logs: `https://expo.dev/accounts/leaf-app/projects/leafapp-reactnative/builds/84b57ba7-3264-4214-b1bc-64ee80f757d4`
-- Application archive: `https://expo.dev/artifacts/eas/Rx_Hq4Huc5MAYru6k31EJhc_zJGlgqGV-nTjBcOOeos.ipa`
-- Fingerprint: `dc7beb0505ca8329df73df749ff1628cde80ed5b`
-- Finished at: `2026-06-30 17:02:04 America/Sao_Paulo`
-- Auto-submit target: App Store Connect / TestFlight
-- ASC App ID: `6757092661`
-- Submission details: `https://expo.dev/accounts/leaf-app/projects/leafapp-reactnative/submissions/410adbba-833c-4579-ad3e-cd5fe7410647`
+- Archive command: `FORCE_SIGNED_ARCHIVE=1 EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:ios:archive`
+- Archive result: PASS, `ARCHIVE SUCCEEDED`
+- Archive: `/Users/izaakdias/Documents/Leaf-new/mobile-app/ios/build/Leaf.xcarchive`
+- Export command: `EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:ios:ipa`
+- Export result: PASS, `EXPORT SUCCEEDED`
+- IPA: `/Users/izaakdias/Documents/Leaf-new/mobile-app/ios/build/export-appstore/Leaf.ipa`
+- Size: 69,182,954 bytes, 66 MB
+- Created: `2026-06-30 17:51:46 -0300`
+- SHA-256: `74e71913e1db938c38eeb955a34f246be28cddd6f08c00c8335515aeb9f76c85`
+- Embedded config:
+  - Bundle ID: `br.com.leaf.ride`
+  - Version: `1.0.3`
+  - Build number: `28`
+  - Runtime version: `1.0.3`
+  - OTA channel: `production`
+- Exported provisioning profile: `iOS Team Store Provisioning Profile: br.com.leaf.ride`
+- Signing validation: `get-task-allow=false`, no provisioned device list, no all-devices flag; suitable App Store/TestFlight profile.
+- Non-blocking warnings: third-party pod deployment-target and run-script dependency warnings.
 
-### Invalid / Canceled Builds
+## Invalid / Non-Canonical EAS Builds
 
-The first EAS build attempt was canceled because native project values still had the old store numbers. It must not be used for RC evidence.
+The EAS builds and submissions created during the first release attempt are not canonical for this RC because the release path was corrected to local native builds. They must not be used for TestFlight, Google Play Internal Test, or release evidence.
 
 - Android canceled build: `8a5d1ebd-ff1d-4b85-84dc-e2806f2c6cfa`, version code `119`
 - iOS canceled build: `ed063cde-774d-4bdf-9682-74b06e75db2f`, build number `27`
+- Android non-canonical EAS build: `821f16aa-cf2f-4501-8088-ce72f46345c5`, artifact `https://expo.dev/artifacts/eas/5ZrkeiXNIAztyrpsUCZTZ2BtwYVSkEulDdvVcwB8zW0.aab`
+- iOS non-canonical EAS build: `84b57ba7-3264-4214-b1bc-64ee80f757d4`, artifact `https://expo.dev/artifacts/eas/Rx_Hq4Huc5MAYru6k31EJhc_zJGlgqGV-nTjBcOOeos.ipa`
 
 ## Backend / Runtime Gate
 
@@ -147,9 +168,9 @@ Stop inviting testers and open P0 if any of these happen:
 
 ## Current Risks
 
-- EAS emitted an included-build-credit warning during build creation. The iOS build finished, but Android remained in queue during final polling. Android must be watched in EAS before testers are invited.
-- Android and iOS submissions are tied to build completion. Store/TestFlight availability is not confirmed until EAS build and submit finish successfully.
+- Store/TestFlight availability is not confirmed until the local AAB and local IPA are uploaded and processed by Google Play Console and App Store Connect.
 - The KYC strict-biometric warning remains accepted only because driver active/KYC policy is backend-governed.
+- Local artifacts are generated and validated, but assisted users should not be invited until both store consoles show the exact build numbers: Android `120`, iOS `28`.
 
 ## Rollback
 
@@ -159,7 +180,7 @@ Stop inviting testers and open P0 if any of these happen:
 
 ## Next Step
 
-Wait for the Android EAS build and both auto-submissions to finish, then verify visibility in:
+Upload the local artifacts, then verify visibility in:
 
 - Google Play Console internal testing draft for Android `1.0.3 (120)`.
 - App Store Connect TestFlight build `1.0.3 (28)`.
