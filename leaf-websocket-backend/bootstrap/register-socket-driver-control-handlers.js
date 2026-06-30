@@ -13,9 +13,14 @@ const {
 const {
     resolveDriverActivationState
 } = require('../services/driver-activation-state-service');
+const driverEligibilityService = require('../services/driver-eligibility-service');
 const {
     resolveDestinationModeIntent
 } = require('../services/driver-destination-mode-service');
+const {
+    DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+    resolveDriverOnlineTransition
+} = require('../services/driver-online-time-policy-service');
 const { buildDriverVehicleIdentity } = require('../utils/driver-vehicle-identity');
 
 const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
@@ -438,6 +443,7 @@ function registerSocketDriverControlHandlers({
             const requestedOnline = data.isOnline !== false && requestedStatus !== 'OFFLINE';
             const status = requestedOnline ? 'AVAILABLE' : 'OFFLINE';
             const isOnline = requestedOnline === true;
+            let driverOnlineDaily = null;
 
             if (!driverId) {
                 socket.emit('driverStatusError', {
@@ -449,7 +455,6 @@ function registerSocketDriverControlHandlers({
 
             const driverKey = `driver:${driverId}`;
             const existingDriverState = await redis.hgetall(driverKey);
-            const existingIsEligible = existingDriverState?.dispatchEligible === 'true';
             const requestedDestinationMode = normalizeDriverDestinationModePayload(data);
             let destinationIntent = {
                 allowed: true,
@@ -460,6 +465,11 @@ function registerSocketDriverControlHandlers({
             };
 
             if (!isOnline) {
+                const transition = await resolveDriverOnlineTransition(redis, {
+                    driverId,
+                    isOnline: false
+                });
+                driverOnlineDaily = transition.snapshot;
                 await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
                 await redis.zrem('driver_locations', driverId);
                 await redis.srem('online_drivers', driverId);
@@ -467,6 +477,38 @@ function registerSocketDriverControlHandlers({
             }
 
             if (isOnline) {
+                const onlineTimeGate = await resolveDriverOnlineTransition(redis, {
+                    driverId,
+                    isOnline: true
+                });
+                driverOnlineDaily = onlineTimeGate.snapshot;
+                if (!onlineTimeGate.allowed) {
+                    await redis
+                        .multi()
+                        .hset(driverKey, {
+                            driverId,
+                            status: 'OFFLINE',
+                            isOnline: 'false',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: onlineTimeGate.code || 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+                            dispatchEligibilityCheckedAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString()
+                        })
+                        .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
+                        .zrem('driver_locations', driverId)
+                        .srem('online_drivers', driverId)
+                        .exec();
+
+                    socket.emit('driverStatusError', {
+                        success: false,
+                        error: onlineTimeGate.message || DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+                        message: onlineTimeGate.message || DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+                        code: onlineTimeGate.code || 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+                        driverOnlineDaily
+                    });
+                    return;
+                }
+
                 const activationState = await resolveDriverActivationState({ driverId }).catch((error) => {
                     logStructured('warn', 'Falha ao resolver estado canonico do motorista para online', {
                         service: 'driver-control-handlers',
@@ -559,40 +601,73 @@ function registerSocketDriverControlHandlers({
             }
             const shouldWriteDestinationMode = destinationIntent.shouldWrite === true;
 
+            let nextDispatchEligible = false;
+            let nextDispatchEligibilityCode = isOnline
+                ? (existingDriverState?.dispatchEligibilityCode || 'AWAITING_LOCATION_SYNC')
+                : 'OFFLINE';
+            const lat = Number(existingDriverState?.lat ?? data?.lat ?? data?.location?.lat);
+            const lng = Number(existingDriverState?.lng ?? data?.lng ?? data?.location?.lng);
+            const hasValidLocation = Number.isFinite(lat) && Number.isFinite(lng);
+
+            if (isOnline) {
+                if (hasValidLocation) {
+                    try {
+                        const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+                            driverId,
+                            null,
+                            existingDriverState || {}
+                        );
+                        nextDispatchEligible = eligibility?.eligible === true;
+                        nextDispatchEligibilityCode = nextDispatchEligible
+                            ? (eligibility?.code || 'ELIGIBLE')
+                            : (eligibility?.code || 'NOT_ELIGIBLE');
+                    } catch (eligibilityError) {
+                        nextDispatchEligible = false;
+                        nextDispatchEligibilityCode = 'ELIGIBILITY_CHECK_FAILED';
+                        logStructured('warn', 'Falha ao recalcular elegibilidade no toggle online', {
+                            service: 'driver-control-handlers',
+                            driverId,
+                            error: eligibilityError?.message || String(eligibilityError)
+                        });
+                    }
+                } else {
+                    nextDispatchEligibilityCode = 'AWAITING_LOCATION_SYNC';
+                }
+            }
+
             await redis.hset(driverKey, {
                 driverId,
                 status,
                 isOnline: String(isOnline),
-                dispatchEligible: String(isOnline && existingIsEligible),
-                dispatchEligibilityCode: isOnline
-                    ? (existingDriverState?.dispatchEligibilityCode || 'AWAITING_LOCATION_SYNC')
-                    : 'OFFLINE',
+                dispatchEligible: String(nextDispatchEligible),
+                dispatchEligibilityCode: nextDispatchEligibilityCode,
                 dispatchEligibilityCheckedAt: new Date().toISOString(),
                 ...(shouldWriteDestinationMode ? destinationIntent.patch : {}),
                 updatedAt: new Date().toISOString()
             });
 
-            if (isOnline && existingIsEligible) {
-                const lat = Number(existingDriverState?.lat);
-                const lng = Number(existingDriverState?.lng);
-                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            if (isOnline && hasValidLocation) {
+                await redis.geoadd('driver_locations', lng, lat, driverId);
+                await redis.sadd('online_drivers', driverId);
+                if (nextDispatchEligible) {
                     await redis.geoadd(ELIGIBLE_DRIVER_GEO_KEY, lng, lat, driverId);
-                    await redis.geoadd('driver_locations', lng, lat, driverId);
-                    await redis.sadd('online_drivers', driverId);
-                    await pricingH3ReadModelService.applyDriverSnapshot(redis, {
-                        driverId,
-                        lat,
-                        lng,
-                        isOnline: true,
-                        available: true
-                    }).catch(() => null);
+                } else {
+                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
                 }
+                await pricingH3ReadModelService.applyDriverSnapshot(redis, {
+                    driverId,
+                    lat,
+                    lng,
+                    isOnline: true,
+                    available: nextDispatchEligible
+                }).catch(() => null);
+            } else if (isOnline) {
+                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
             }
 
             let vehicleIdentity = null;
             if (isOnline) {
                 try {
-                    const driverEligibilityService = require('../services/driver-eligibility-service');
                     const profile = await driverEligibilityService.resolveDriverProfile(
                         driverId,
                         existingDriverState || {}
@@ -612,12 +687,13 @@ function registerSocketDriverControlHandlers({
                 driverId,
                 status,
                 isOnline,
-                dispatchEligible: isOnline && existingIsEligible,
+                dispatchEligible: nextDispatchEligible,
                 destinationMode: shouldWriteDestinationMode
                     ? destinationIntent.destinationMode
                     : undefined,
                 destinationModePolicy: destinationIntent.policy || null,
                 vehicleIdentity,
+                driverOnlineDaily,
                 checkedAt: new Date().toISOString()
             });
             scheduleMapH3Refresh(io, {

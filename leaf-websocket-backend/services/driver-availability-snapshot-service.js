@@ -1,4 +1,8 @@
 const redisPool = require('../utils/redis-pool');
+const {
+    getOperationsPolicyDriverLimit,
+    getOperationsPolicyRadiusKm
+} = require('../utils/dispatch-config');
 
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
@@ -35,8 +39,8 @@ async function readCachedSnapshot(redis, key) {
 
 async function countNearbyEligibleDriversApprox(pickupLocation, {
     regionHash = '*',
-    radiusKm = Number.parseFloat(process.env.OPERATIONS_POLICY_RADIUS_KM || '5'),
-    limit = Number.parseInt(process.env.OPERATIONS_POLICY_DRIVER_LIMIT || '12', 10),
+    radiusKm = getOperationsPolicyRadiusKm(),
+    limit = getOperationsPolicyDriverLimit(),
     cacheTtlSec = Number.parseInt(process.env.OPERATIONS_POLICY_SNAPSHOT_CACHE_TTL_SEC || '2', 10),
     eligibleGeoKey = ELIGIBLE_DRIVER_GEO_KEY
 } = {}) {

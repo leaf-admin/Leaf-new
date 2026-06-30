@@ -42,6 +42,10 @@ jest.mock('../../../services/driver-destination-mode-service', () => ({
 }));
 
 jest.mock('../../../services/driver-eligibility-service', () => ({
+  isDriverEligibleForRide: jest.fn().mockResolvedValue({
+    eligible: true,
+    code: 'ELIGIBLE',
+  }),
   resolveDriverProfile: jest.fn().mockResolvedValue({
     activeVehicleId: 'vehicle_1',
     vehiclePlate: 'RJA2D41',
@@ -56,6 +60,7 @@ jest.mock('../../../services/driver-eligibility-service', () => ({
 const registerSocketDriverControlHandlers = require('../../../bootstrap/register-socket-driver-control-handlers');
 const { assessDriverArrivalAtPickup } = require('../../../utils/pickup-arrival-policy');
 const { resolveDriverActivationState } = require('../../../services/driver-activation-state-service');
+const driverEligibilityService = require('../../../services/driver-eligibility-service');
 
 const createSocket = () => {
   const handlers = new Map();
@@ -79,20 +84,30 @@ const createIo = () => {
   };
 };
 
-const createRedis = () => ({
-  hgetall: jest.fn().mockResolvedValue({
-    bookingId: 'booking_1',
-    customerId: 'customer_1',
-    driverId: 'driver_1',
-  }),
-  hset: jest.fn().mockResolvedValue(1),
-  type: jest.fn().mockResolvedValue('hash'),
-  del: jest.fn().mockResolvedValue(1),
-  zrem: jest.fn().mockResolvedValue(1),
-  srem: jest.fn().mockResolvedValue(1),
-  sadd: jest.fn().mockResolvedValue(1),
-  geoadd: jest.fn().mockResolvedValue(1),
-});
+const createRedis = () => {
+  const redis = {
+    hgetall: jest.fn().mockResolvedValue({
+      bookingId: 'booking_1',
+      customerId: 'customer_1',
+      driverId: 'driver_1',
+    }),
+    hset: jest.fn().mockResolvedValue(1),
+    expire: jest.fn().mockResolvedValue(1),
+    type: jest.fn().mockResolvedValue('hash'),
+    del: jest.fn().mockResolvedValue(1),
+    zrem: jest.fn().mockResolvedValue(1),
+    srem: jest.fn().mockResolvedValue(1),
+    sadd: jest.fn().mockResolvedValue(1),
+    geoadd: jest.fn().mockResolvedValue(1),
+  };
+  redis.multi = jest.fn(() => ({
+    hset: jest.fn().mockReturnThis(),
+    zrem: jest.fn().mockReturnThis(),
+    srem: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue([]),
+  }));
+  return redis;
+};
 
 describe('register-socket-driver-control-handlers notificationAction scope', () => {
   let socket;
@@ -102,6 +117,19 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
 
   beforeEach(() => {
     jest.clearAllMocks();
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
+      eligible: true,
+      code: 'ELIGIBLE',
+    });
+    driverEligibilityService.resolveDriverProfile.mockResolvedValue({
+      activeVehicleId: 'vehicle_1',
+      vehiclePlate: 'RJA2D41',
+      vehicleMake: 'Honda',
+      vehicleModel: 'City',
+      vehicleColor: 'BRANCO',
+      vehicleIdentitySource: 'crlv_pdf_ocr',
+      vehicleIdentityCanonical: true,
+    });
     socket = createSocket();
     io = createIo();
     redis = createRedis();
@@ -248,6 +276,10 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
       expect.objectContaining({
         success: true,
         driverId: 'driver_1',
+        driverOnlineDaily: expect.objectContaining({
+          limitMs: 12 * 60 * 60 * 1000,
+          warningMs: 10 * 60 * 60 * 1000,
+        }),
         vehicleIdentity: {
           activeVehicleId: 'vehicle_1',
           plate: 'RJA2D41',
@@ -258,6 +290,58 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
           canonical: true,
           complete: true,
         },
+      })
+    );
+  });
+
+  it('recomputes dispatch eligibility when a driver goes online from stale ineligible state', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'AWAITING_LOCATION_SYNC',
+      lat: '-22.9207',
+      lng: '-43.4059',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith(
+      'driver_1',
+      null,
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'AWAITING_LOCATION_SYNC',
+      })
+    );
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        isOnline: 'true',
+        status: 'AVAILABLE',
+        dispatchEligible: 'true',
+        dispatchEligibilityCode: 'ELIGIBLE',
+      })
+    );
+    expect(redis.geoadd).toHaveBeenCalledWith(
+      'driver_locations_eligible',
+      -43.4059,
+      -22.9207,
+      'driver_1'
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({
+        success: true,
+        driverId: 'driver_1',
+        isOnline: true,
+        dispatchEligible: true,
       })
     );
   });

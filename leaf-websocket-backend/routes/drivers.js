@@ -732,9 +732,15 @@ router.get('/api/drivers/nearby', async (req, res) => {
                 isOnline: user.isOnline || false,
                 status: user.status || 'OFFLINE',
                 rating: parseFloat(user.driverRating || user.rating || 5.0),
-                carType: user.carType || null,
-                vehicleNumber: user.vehicleNumber || null
-              };
+	                carType: user.carType || null,
+	                vehicleNumber: user.vehicleNumber || null,
+	                vehicleColor:
+	                  user.vehicleColor ||
+	                  user.carColor ||
+	                  user.vehicle?.color ||
+	                  user.car?.color ||
+	                  null
+	              };
               logger.debug(`✅ [DriversRoute] Driver ${driverId} encontrado no Firebase:`, {
                 isOnline: driverInfo.isOnline,
                 status: driverInfo.status
@@ -754,10 +760,16 @@ router.get('/api/drivers/nearby', async (req, res) => {
           lastName: driverData.lastName || '',
           isOnline: driverData.isOnline === 'true' || driverData.isOnline === true,
           status: driverData.status || 'OFFLINE',
-          rating: parseFloat(driverData.rating || 5.0),
-          carType: driverData.carType || null,
-          vehicleNumber: driverData.vehicleNumber || null
-        };
+	          rating: parseFloat(driverData.rating || 5.0),
+	          carType: driverData.carType || null,
+	          vehicleNumber: driverData.vehicleNumber || null,
+	          vehicleColor:
+	            driverData.vehicleColor ||
+	            driverData.carColor ||
+	            driverData.vehicle_color ||
+	            driverData.car_color ||
+	            null
+	        };
         logger.debug(`✅ [DriversRoute] Driver ${driverId} usando dados do Redis:`, {
           isOnline: driverInfo.isOnline,
           status: driverInfo.status,
@@ -791,10 +803,11 @@ router.get('/api/drivers/nearby', async (req, res) => {
         distance: parseFloat((distance * 1000).toFixed(2)), // Converter km para metros
         firstName: driverInfo.firstName,
         lastName: driverInfo.lastName,
-        rating: driverInfo.rating,
-        carType: driverInfo.carType,
-        vehicleNumber: driverInfo.vehicleNumber,
-        source: 'redis_geo',
+	        rating: driverInfo.rating,
+	        carType: driverInfo.carType,
+	        vehicleNumber: driverInfo.vehicleNumber,
+	        vehicleColor: driverInfo.vehicleColor || null,
+	        source: 'redis_geo',
         geoKey: activeGeoKey
       });
 

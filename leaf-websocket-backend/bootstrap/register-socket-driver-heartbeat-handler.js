@@ -1,4 +1,12 @@
 const driverEligibilityService = require('../services/driver-eligibility-service');
+const {
+    DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+    readDriverOnlineDailySnapshot,
+    resolveDriverOnlineTransition
+} = require('../services/driver-online-time-policy-service');
+const {
+    upsertDriverSocketPresence
+} = require('../services/driver-socket-presence-service');
 
 const parseTimestampMs = (rawValue) => {
     if (!rawValue) return 0;
@@ -53,6 +61,19 @@ function registerSocketDriverHeartbeatHandler({
             // ✅ Heartbeat: apenas renovar TTL usando última localização conhecida
             const isInTripState = isInTrip || tripStatus === 'started' || tripStatus === 'accepted';
             const redis = redisPool.getConnection();
+            await upsertDriverSocketPresence(redis, {
+                driverId,
+                socket,
+                source: 'driverHeartbeat',
+                fallbackRooms: ['drivers_room', `driver_${driverId}`]
+            }).catch((presenceError) => {
+                logStructured('warn', 'Falha ao renovar presença distribuída do motorista no heartbeat', {
+                    service: 'driverHeartbeat',
+                    driverId,
+                    socketId: socket.id,
+                    error: presenceError.message
+                });
+            });
 
             // Aplicar validação KYC diária na transição offline -> online via updateLocation
             const existingDriverState = await redis.hgetall(`driver:${driverId}`);
@@ -107,6 +128,46 @@ function registerSocketDriverHeartbeatHandler({
                         reason: kycError.message,
                         code: 'kycCheckFailed',
                         kycRequired: true
+                    });
+                    return;
+                }
+            }
+
+            if (wasOnline && !isInTripState) {
+                const onlineDailySnapshot = await readDriverOnlineDailySnapshot(redis, driverId);
+                if (onlineDailySnapshot.limitReached) {
+                    const transition = await resolveDriverOnlineTransition(redis, {
+                        driverId,
+                        isOnline: false
+                    });
+                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+                    await redis.zrem('driver_locations', driverId);
+                    await redis.srem('online_drivers', driverId);
+                    await redis.hset(`driver:${driverId}`, {
+                        status: 'OFFLINE',
+                        isOnline: 'false',
+                        dispatchEligible: 'false',
+                        dispatchEligibilityCode: 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+                        dispatchEligibilityCheckedAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString()
+                    });
+                    socket.emit('driverStatusError', {
+                        success: false,
+                        error: DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+                        message: DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+                        code: 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+                        driverOnlineDaily: transition.snapshot
+                    });
+                    socket.emit('driverStatusUpdated', {
+                        success: true,
+                        driverId,
+                        status: 'OFFLINE',
+                        isOnline: false,
+                        dispatchEligible: false,
+                        code: 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+                        message: DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+                        driverOnlineDaily: transition.snapshot,
+                        checkedAt: new Date().toISOString()
                     });
                     return;
                 }
