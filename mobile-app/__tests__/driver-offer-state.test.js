@@ -74,4 +74,39 @@ describe("driverOfferState", () => {
       }),
     );
   });
+
+  it("clears a passenger-cancelled offer before the driver can accept it", () => {
+    const result = dismissDriverOfferRuntimeState(
+      {
+        bookingStatus: "searching",
+        activeBookingId: "booking_cancelled_before_accept",
+        activeBooking: {
+          bookingId: "booking_cancelled_before_accept",
+          paymentStatus: "in_holding",
+        },
+        driverOffers: [
+          {
+            bookingId: "booking_cancelled_before_accept",
+            passengerName: "Leaf Passageira Teste",
+          },
+        ],
+        driverActiveRide: null,
+        lastError: "",
+      },
+      "booking_cancelled_before_accept",
+    );
+
+    expect(result.didDismissOffer).toBe(true);
+    expect(result.clearedActiveBooking).toBe(true);
+    expect(result.clearedActiveRide).toBe(false);
+    expect(result.patch).toEqual(
+      expect.objectContaining({
+        bookingStatus: "idle",
+        activeBookingId: null,
+        activeBooking: null,
+        driverOffers: [],
+        lastError: "",
+      }),
+    );
+  });
 });

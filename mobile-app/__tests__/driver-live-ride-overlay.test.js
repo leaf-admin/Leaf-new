@@ -31,6 +31,36 @@ jest.mock("../src/components/prototype/PrototypeUI", () => {
 });
 
 describe("DriverLiveRideOverlay", () => {
+  it("renders live driver offer distance and passenger pickup context from authoritative aliases", () => {
+    const screen = render(
+      <DriverLiveRideOverlay
+        driverOffers={[
+          {
+            bookingId: "booking_offer_aliases",
+            passenger: "Passageira Leaf",
+            pickup: "Av. Meriti, 9 - Vila Kosmos, Rio de Janeiro",
+            dropoff: "Av. das Américas, 4666",
+            estimatedDriverNetAmount: 50.91,
+            payout: "R$ 50,91",
+            estimatedTripDistanceKm: 16.43,
+            estimatedTripDurationMin: 31,
+            eta: "6 min",
+            pricingSnapshotLocked: true,
+          },
+        ]}
+        paymentMethod="pix"
+        acceptDriverOffer={jest.fn()}
+        rejectDriverOffer={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Passageira Leaf")).toBeTruthy();
+    expect(screen.getAllByText(/Rio de Janeiro/).length).toBeGreaterThan(0);
+    expect(screen.getByText("16 km")).toBeTruthy();
+    expect(screen.getByText("31 min")).toBeTruthy();
+    expect(screen.queryByText("Local combinado")).toBeNull();
+  });
+
   it("renders an accepted active ride without requiring driverTripMeta", () => {
     const screen = render(
       <DriverLiveRideOverlay

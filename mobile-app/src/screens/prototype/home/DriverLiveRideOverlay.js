@@ -124,6 +124,16 @@ function formatDistanceKm(value) {
   return formatDistanceMeters(numeric * 1000);
 }
 
+function pickPositiveNumber(...values) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+  }
+  return null;
+}
+
 function formatPaymentMethod(method, compact = false) {
   const normalized = String(method || "")
     .trim()
@@ -482,7 +492,21 @@ function DriverLiveRideOverlay({
         "",
     ).trim() || null;
   const etaLabel = String(offer?.eta || "").trim();
-  const distanceLabel = formatDistanceKm(offer?.distanceKm ?? tripDistanceKm);
+  const offerTripDistanceKm = pickPositiveNumber(
+    offer?.distanceKm,
+    offer?.tripDistanceKm,
+    offer?.estimatedTripDistanceKm,
+    offer?.routeDistanceKm,
+    offer?.estimatedDistanceKm,
+    tripDistanceKm,
+  );
+  const offerTripDurationMin = pickPositiveNumber(
+    offer?.tripDurationMin,
+    offer?.estimatedTripDurationMin,
+    offer?.durationMin,
+    offer?.durationMinutes,
+  );
+  const distanceLabel = formatDistanceKm(offerTripDistanceKm);
   const offerPickupEtaLabel =
     resolveFirstUsableLabel(
       formatDurationMinutes(
@@ -492,11 +516,17 @@ function DriverLiveRideOverlay({
       etaLabel,
     ) || "--";
   const offerTripDurationLabel = formatDurationMinutes(
-    offer?.tripDurationMin || offer?.durationMin || offer?.durationMinutes,
+    offerTripDurationMin,
     "--",
   );
   const activeDistanceLabel = formatDistanceKm(
-    activeRide?.distanceKm ?? tripDistanceKm,
+    pickPositiveNumber(
+      activeRide?.distanceKm,
+      activeRide?.tripDistanceKm,
+      activeRide?.estimatedTripDistanceKm,
+      activeRide?.routeDistanceKm,
+      tripDistanceKm,
+    ),
   );
   const pickupLocation = splitLocationLabel(pickupLabel);
   const dropoffLocation = splitLocationLabel(dropoffLabel);
@@ -659,7 +689,11 @@ function DriverLiveRideOverlay({
       ? "A bordo"
       : normalizedActiveStatus === "arrived"
         ? "No ponto"
-        : "Local combinado";
+        : resolveFirstUsableLabel(
+            pickupLocation.subtitle,
+            pickupLocation.title,
+            "Ponto de embarque",
+          );
   const tripStatusMessage =
     ["accepted", "started"].includes(normalizedActiveStatus)
       ? ""
@@ -1066,7 +1100,7 @@ function DriverLiveRideOverlay({
             initial={passengerInitial}
             photoUri={passengerPhotoUri}
             name={passengerLabel}
-            meta={normalizedActiveStatus === "started" ? "A bordo" : "Local combinado"}
+            meta={passengerMetaLabel}
             style={styles.expandedTripPassengerIdentity}
             testID="driver-live-passenger-identity"
           />
@@ -1284,7 +1318,7 @@ function DriverLiveRideOverlay({
                     initial={passengerInitial}
                     photoUri={passengerPhotoUri}
                     name={passengerLabel}
-                    meta="Local combinado"
+                    meta={passengerMetaLabel}
                     style={styles.headerPassengerIdentity}
                     testID="driver-live-passenger-identity"
                   />
@@ -1470,7 +1504,7 @@ function DriverLiveRideOverlay({
                     initial={passengerInitial}
                     photoUri={passengerPhotoUri}
                     name={passengerLabel}
-                    meta={normalizedActiveStatus === "started" ? "A bordo" : "Local combinado"}
+                    meta={passengerMetaLabel}
                     style={styles.headerPassengerIdentity}
                     testID="driver-live-passenger-identity"
                   />

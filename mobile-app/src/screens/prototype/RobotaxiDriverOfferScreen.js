@@ -10,7 +10,6 @@ import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
 import {
   LeafButton,
   LeafRideSheet,
-  LeafStateHeader,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
@@ -72,6 +71,14 @@ const DRIVER_OFFER_FIELD_TEST_IDS = createRideCardFieldTestIDs(
   DRIVER_OFFER_FIELD_TEST_ID_OVERRIDES,
 );
 
+const GENERIC_OFFER_LABELS = new Set([
+  "local combinado",
+  "motorista",
+  "driver",
+  "null",
+  "undefined",
+]);
+
 export const DRIVER_OFFER_RENDERED_CARD_FIELDS = defineRideCardRenderedFields(
   RIDE_CARD_ROLES.DRIVER,
   RIDE_CARD_STATES.DRIVER_NEW_OFFER,
@@ -119,25 +126,17 @@ function formatCurrency(value) {
   return `R$ ${toNumber(value, 0).toFixed(2).replace(".", ",")}`;
 }
 
-function formatDistanceKm(valueMi) {
-  const numeric = Number(valueMi);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
-    return "--";
-  }
-
-  const km = numeric * 1.60934;
-  const digits = km >= 10 ? 0 : 1;
-  return `${km.toFixed(digits).replace(".", ",")} km`;
-}
-
 function formatDistanceKmValue(valueKm) {
   const numeric = Number(valueKm);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
+  if (!Number.isFinite(numeric) || numeric < 0) {
     return "--";
   }
 
   if (numeric < 1) {
-    return `${Math.max(10, Math.round((numeric * 1000) / 10) * 10)} m`;
+    const meters = numeric <= 0
+      ? 0
+      : Math.max(10, Math.round((numeric * 1000) / 10) * 10);
+    return `${meters} m`;
   }
 
   const digits = numeric >= 10 ? 0 : 1;
@@ -192,6 +191,94 @@ function toRouteNumber(value, fallback = null) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toPositiveRouteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function toNonNegativeRouteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function pickPositiveRouteNumber(...values) {
+  for (const value of values) {
+    const parsed = toPositiveRouteNumber(value);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function pickNonNegativeRouteNumber(...values) {
+  for (const value of values) {
+    const parsed = toNonNegativeRouteNumber(value);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function normalizeOfferTextValue(value) {
+  if (typeof value === "object" && value !== null) {
+    return "";
+  }
+  return String(value ?? "").trim();
+}
+
+function isGenericOfferLabel(value) {
+  const normalized = normalizeOfferTextValue(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return !normalized || GENERIC_OFFER_LABELS.has(normalized);
+}
+
+function pickOfferText(values = [], fallback = "") {
+  for (const value of values) {
+    const normalized = normalizeOfferTextValue(value);
+    if (normalized && !isGenericOfferLabel(normalized)) {
+      return normalized;
+    }
+  }
+
+  return fallback;
+}
+
+function toRadians(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+
+function computeRouteDistanceKm(coordinates = []) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+    return null;
+  }
+
+  let totalKm = 0;
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const previous = normalizeMapCoordinate(coordinates[index - 1]);
+    const current = normalizeMapCoordinate(coordinates[index]);
+    if (!previous || !current) {
+      continue;
+    }
+
+    const deltaLatitude = toRadians(current.latitude - previous.latitude);
+    const deltaLongitude = toRadians(current.longitude - previous.longitude);
+    const startLatitude = toRadians(previous.latitude);
+    const endLatitude = toRadians(current.latitude);
+    const haversine =
+      Math.sin(deltaLatitude / 2) ** 2 +
+      Math.cos(startLatitude) *
+        Math.cos(endLatitude) *
+        Math.sin(deltaLongitude / 2) ** 2;
+    totalKm += 6371 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  }
+
+  return totalKm > 0 ? totalKm : null;
+}
+
 function normalizeMapCoordinate(value) {
   const latitude = Number(value?.latitude ?? value?.lat);
   const longitude = Number(value?.longitude ?? value?.lng);
@@ -199,6 +286,29 @@ function normalizeMapCoordinate(value) {
     return null;
   }
   return { latitude, longitude };
+}
+
+function normalizeMapTrafficSegments(value = []) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((segment) => {
+      const coordinates = Array.isArray(segment?.coordinates)
+        ? segment.coordinates.map(normalizeMapCoordinate).filter(Boolean)
+        : [];
+      if (coordinates.length < 2) {
+        return null;
+      }
+
+      return {
+        level: String(segment?.level || segment?.trafficLevel || "normal").trim(),
+        color: String(segment?.color || "").trim(),
+        coordinates,
+      };
+    })
+    .filter(Boolean);
 }
 
 function buildFallbackOfferRegion(points = []) {
@@ -337,23 +447,35 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   const visibleLastError =
     hasRequest && isActivationOrVehicleStatusError(lastError) ? "" : lastError;
 
-  const distanceMi = useMemo(() => {
+  const pickupDistanceKm = useMemo(() => {
     if (!hasRequest) {
       return null;
     }
 
-    const directMiles = toNumber(request?.distanceMi ?? request?.distance, NaN);
-    if (Number.isFinite(directMiles) && directMiles > 0) {
-      return directMiles;
+    const directKm = pickNonNegativeRouteNumber(
+      request?.driverDistanceToPickupKm,
+      request?.pickupDistanceKm,
+      request?.distanceToPickupKm,
+      request?.distanceKm,
+    );
+    if (directKm !== null) {
+      return directKm;
     }
 
-    const distanceKm = toNumber(request?.distanceKm, NaN);
-    if (Number.isFinite(distanceKm) && distanceKm > 0) {
-      return distanceKm * 0.621371;
-    }
-
-    return null;
-  }, [hasRequest, request?.distance, request?.distanceKm, request?.distanceMi]);
+    const directMiles = pickPositiveRouteNumber(
+      request?.distanceMi,
+      request?.distance,
+    );
+    return directMiles !== null ? directMiles * 1.60934 : null;
+  }, [
+    hasRequest,
+    request?.distance,
+    request?.distanceKm,
+    request?.distanceMi,
+    request?.distanceToPickupKm,
+    request?.driverDistanceToPickupKm,
+    request?.pickupDistanceKm,
+  ]);
 
   const passengerRating = useMemo(() => {
     if (!hasRequest) {
@@ -376,46 +498,82 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     return getDriverOfferPayoutLabel(request) || "--";
   }, [hasRequest, request]);
 
-  const pickupLabel =
-    String(request?.pickup || request?.pickupAddress || "").trim() ||
-    "Origem indisponível";
-  const dropoffLabel =
-    String(request?.dropoff || request?.dropoffAddress || "").trim() ||
-    "Destino indisponível";
-  const pickupDistanceLabel = formatDistanceKm(distanceMi);
-  const tripDistanceLabel = formatDistanceKmValue(
-    request?.tripDistanceKm ||
-      request?.routeDistanceKm ||
-      request?.estimatedTripDistanceKm ||
-      route?.params?.tripDistanceKm,
+  const pickupLabel = pickOfferText(
+    [
+      request?.pickup,
+      request?.pickupAddress,
+      request?.pickupLocation?.add,
+      request?.pickupLocation?.address,
+      request?.originAddress,
+      request?.origin?.address,
+      request?.origin?.add,
+    ],
+    "Partida em confirmação",
   );
-  const pickupEtaLabel = `${Math.max(
-    1,
-    toNumber(
-      request?.pickupEtaMin ||
-        request?.pickupDurationMin ||
-        request?.etaMin ||
-        route?.params?.pickupEtaMin,
-      4,
-    ),
-  )} min`;
-  const tripDurationLabel = `${Math.max(
-    1,
-    toNumber(
-      request?.tripDurationMin ||
-        request?.durationMin ||
-        request?.durationMinutes ||
-        route?.params?.tripDurationMin,
-      12,
-    ),
-  )} min`;
+  const dropoffLabel = pickOfferText(
+    [
+      request?.dropoff,
+      request?.dropoffAddress,
+      request?.destinationAddress,
+      request?.destinationLocation?.add,
+      request?.destinationLocation?.address,
+      request?.destination?.address,
+      request?.destination?.add,
+      request?.destination?.name,
+      request?.destinationName,
+    ],
+    "Destino em confirmação",
+  );
+  const tripDistanceKm = pickPositiveRouteNumber(
+    request?.tripDistanceKm,
+    request?.routeDistanceKm,
+    request?.estimatedTripDistanceKm,
+    route?.params?.tripDistanceKm,
+  );
+  const pickupEtaMin = pickPositiveRouteNumber(
+    request?.pickupEtaMin,
+    request?.pickupDurationMin,
+    request?.estimatedArrivalToPickupMin,
+    request?.routeToPickupDurationMin,
+    request?.pickupRoute?.durationMin,
+    request?.pickupRoute?.durationMinutes,
+    request?.etaMin,
+    route?.params?.pickupEtaMin,
+  );
+  const pickupEtaLabel = pickupEtaMin
+    ? `${Math.max(1, Math.round(pickupEtaMin))} min`
+    : "ETA em cálculo";
+  const tripDurationMin = pickPositiveRouteNumber(
+    request?.tripDurationMin,
+    request?.durationMin,
+    request?.durationMinutes,
+    request?.estimatedTripDurationMin,
+    request?.estimatedDurationMin,
+    request?.route?.durationMin,
+    request?.route?.durationMinutes,
+    request?.tripRoute?.durationMin,
+    request?.tripRoute?.durationMinutes,
+    route?.params?.tripDurationMin,
+  );
+  const tripDurationLabel = tripDurationMin
+    ? `${Math.max(1, Math.round(tripDurationMin))} min`
+    : "tempo em cálculo";
   const passengerRatingLabel =
     passengerRating == null
       ? "4,9"
       : passengerRating.toFixed(1).replace(".", ",");
-  const passengerName =
-    String(request?.passengerName || request?.passenger || "Passageiro Leaf").trim() ||
-    "Passageiro Leaf";
+  const passengerName = pickOfferText(
+    [
+      request?.passengerName,
+      request?.customerName,
+      request?.customer?.name,
+      request?.passenger?.name,
+      request?.riderName,
+      request?.rider?.name,
+      request?.passenger,
+    ],
+    "Passageiro Leaf",
+  );
   const passengerInitial = passengerName.charAt(0).toUpperCase() || "P";
   const countdownLabel = formatCountdown(
     request?.expiresInSec ||
@@ -433,32 +591,111 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     normalizeMapCoordinate(request?.driverCoordinate) ||
     normalizeMapCoordinate(request?.currentCoordinate) ||
     normalizeMapCoordinate(request?.originCoordinate);
-  const offerRouteCoordinates = useMemo(() => {
+  const pickupRouteCoordinates = useMemo(() => {
     const routePlan = driverTripMeta?.routePlan || {};
     const candidateRoute =
       routePlan.pickupCoordinates ||
       request?.pickupRouteCoordinates ||
+      [];
+    const normalizedCandidate = Array.isArray(candidateRoute)
+      ? candidateRoute.map(normalizeMapCoordinate).filter(Boolean)
+      : [];
+    return normalizedCandidate.length >= 2 ? normalizedCandidate : [];
+  }, [
+    driverTripMeta?.routePlan,
+    request?.pickupRouteCoordinates,
+  ]);
+  const pickupRouteTrafficSegments = useMemo(() => {
+    const routePlan = driverTripMeta?.routePlan || {};
+    return normalizeMapTrafficSegments(
+      routePlan.pickupTrafficSegments ||
+        request?.pickupTrafficSegments ||
+        [],
+    );
+  }, [
+    driverTripMeta?.routePlan,
+    request?.pickupTrafficSegments,
+  ]);
+  const tripRouteCoordinates = useMemo(() => {
+    const routePlan = driverTripMeta?.routePlan || {};
+    const candidateRoute =
+      routePlan.destinationCoordinates ||
+      request?.tripRouteCoordinates ||
+      request?.destinationRouteCoordinates ||
       request?.routeCoordinates ||
       [];
     const normalizedCandidate = Array.isArray(candidateRoute)
       ? candidateRoute.map(normalizeMapCoordinate).filter(Boolean)
       : [];
-    if (normalizedCandidate.length >= 2) {
-      return normalizedCandidate;
-    }
-
-    return [];
+    return normalizedCandidate.length >= 2 ? normalizedCandidate : [];
   }, [
     driverTripMeta?.routePlan,
-    request?.pickupRouteCoordinates,
+    request?.destinationRouteCoordinates,
     request?.routeCoordinates,
+    request?.tripRouteCoordinates,
   ]);
+  const tripRouteTrafficSegments = useMemo(() => {
+    const routePlan = driverTripMeta?.routePlan || {};
+    return normalizeMapTrafficSegments(
+      routePlan.destinationTrafficSegments ||
+        request?.trafficSegments ||
+        request?.tripTrafficSegments ||
+        [],
+    );
+  }, [
+    driverTripMeta?.routePlan,
+    request?.trafficSegments,
+    request?.tripTrafficSegments,
+  ]);
+  const resolvedPickupDistanceKm =
+    pickupDistanceKm ?? computeRouteDistanceKm(pickupRouteCoordinates);
+  const resolvedTripDistanceKm =
+    tripDistanceKm ?? computeRouteDistanceKm(tripRouteCoordinates);
+  const pickupDistanceLabel = formatDistanceKmValue(resolvedPickupDistanceKm);
+  const tripDistanceLabel = formatDistanceKmValue(resolvedTripDistanceKm);
+  const isTripRoutePreview =
+    pickupRouteCoordinates.length < 2 && tripRouteCoordinates.length >= 2;
+  const offerRouteCoordinates = isTripRoutePreview
+    ? tripRouteCoordinates
+    : pickupRouteCoordinates;
+  const offerRouteTrafficSegments = isTripRoutePreview
+    ? tripRouteTrafficSegments
+    : pickupRouteTrafficSegments;
   const offerOriginCoordinate =
     routeDriverCoordinate ||
     normalizeMapCoordinate(driverCoordinate) ||
     normalizeMapCoordinate(currentCoordinate) ||
-    offerRouteCoordinates[0] ||
+    pickupRouteCoordinates[0] ||
     PROTOTYPE_ORIGIN_COORDINATE;
+  const offerDestinationCoordinate =
+    normalizeMapCoordinate(driverTripMeta?.destinationCoordinate) ||
+    normalizeMapCoordinate(request?.destinationCoordinate) ||
+    normalizeMapCoordinate(request?.destinationLocation) ||
+    tripRouteCoordinates[tripRouteCoordinates.length - 1] ||
+    null;
+  const offerPickupCoordinate =
+    normalizeMapCoordinate(driverTripMeta?.pickupCoordinate) ||
+    normalizeMapCoordinate(request?.pickupCoordinate) ||
+    normalizeMapCoordinate(request?.pickupLocation) ||
+    pickupRouteCoordinates[pickupRouteCoordinates.length - 1] ||
+    tripRouteCoordinates[0] ||
+    offerOriginCoordinate;
+  const offerMapOriginCoordinate = isTripRoutePreview
+    ? offerPickupCoordinate
+    : offerOriginCoordinate;
+  const offerMapDestinationCoordinate = isTripRoutePreview
+    ? offerDestinationCoordinate || offerPickupCoordinate
+    : offerPickupCoordinate;
+  const offerMapOriginLabel = isTripRoutePreview ? "Partida" : "Você";
+  const offerMapDestinationLabel = isTripRoutePreview
+    ? "Chegada"
+    : passengerName;
+  const offerMapOriginAddress = isTripRoutePreview
+    ? pickupLabel
+    : "Sua localização atual";
+  const offerMapDestinationAddress = isTripRoutePreview
+    ? dropoffLabel
+    : pickupLabel;
   const offerVehicleColor = String(
     profile?.vehicleColor ||
       profile?.vehicle?.color ||
@@ -481,11 +718,6 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       state: hasRequest ? 'offer_visible' : 'empty',
     },
   });
-  const offerPickupCoordinate =
-    normalizeMapCoordinate(driverTripMeta?.pickupCoordinate) ||
-    normalizeMapCoordinate(request?.pickupCoordinate) ||
-    offerRouteCoordinates[offerRouteCoordinates.length - 1] ||
-    offerOriginCoordinate;
   const offerMapOcclusion = useMemo(
     () => ({
       top: 0,
@@ -538,12 +770,14 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     () =>
       offerVisibleRouteRegion || buildFallbackOfferRegion([
         offerOriginCoordinate,
-        offerPickupCoordinate,
+        offerMapOriginCoordinate,
+        offerMapDestinationCoordinate,
         ...offerRouteCoordinates,
       ]),
     [
       offerOriginCoordinate,
-      offerPickupCoordinate,
+      offerMapDestinationCoordinate,
+      offerMapOriginCoordinate,
       offerRouteCoordinates,
       offerVisibleRouteRegion,
     ]
@@ -720,12 +954,14 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
           driverCoordinate={offerOriginCoordinate}
           driverHeading={currentHeading}
           routeCoordinates={offerRouteCoordinates}
-          originCoordinate={offerOriginCoordinate}
-          destinationCoordinate={offerPickupCoordinate}
-          destinationLabel="Embarque"
-          destinationAddress={pickupLabel}
-          originLabel="Motorista"
-          originAddress="Sua localização atual"
+          routeTrafficSegments={offerRouteTrafficSegments}
+          showTraffic={offerRouteTrafficSegments.length > 0}
+          originCoordinate={offerMapOriginCoordinate}
+          destinationCoordinate={offerMapDestinationCoordinate}
+          destinationLabel={offerMapDestinationLabel}
+          destinationAddress={offerMapDestinationAddress}
+          originLabel={offerMapOriginLabel}
+          originAddress={offerMapOriginAddress}
           viewportPadding={offerViewportPadding}
           routeViewportRegion={offerVisibleRouteRegion}
           onMapLayout={handleMapLayout}
@@ -741,15 +977,6 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
           destinationMarkerLetter={passengerInitial}
           mapSafetyProfile="driver"
         />
-        {hasRequest ? (
-          <LeafStateHeader
-            title="Nova corrida"
-            subtitle="Pagamento confirmado"
-            rightLabel={countdownLabel}
-            rightTone="dark"
-            insetsTop={insets.top}
-          />
-        ) : null}
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
           backdropDismissEnabled={!hasRequest}

@@ -249,8 +249,15 @@ function formatCurrency(value) {
 
 function formatDistanceLabel(value) {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
+  if (!Number.isFinite(numeric) || numeric < 0) {
     return "--";
+  }
+
+  if (numeric < 1) {
+    const meters = numeric <= 0
+      ? 0
+      : Math.max(10, Math.round((numeric * 1000) / 10) * 10);
+    return `${meters} m`;
   }
 
   const fractionDigits = numeric >= 10 ? 0 : numeric >= 2 ? 1 : 2;
@@ -1427,11 +1434,17 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     null;
   const etaMin = Math.max(2, Number(tripDurationMin || request?.pickupEtaMin || 4));
   const effectiveDistanceKm =
-    Number.isFinite(Number(tripDistanceKm)) && Number(tripDistanceKm) > 0
+    Number.isFinite(Number(tripDistanceKm)) && Number(tripDistanceKm) >= 0
       ? Number(tripDistanceKm)
       : normalizedBookingStatus === "accepted" || normalizedBookingStatus === "arrived"
-        ? request?.pickupDistanceKm || request?.distanceKm || request?.tripDistanceKm
-        : request?.tripDistanceKm || request?.distanceKm;
+        ? pickDriverTripMoney(
+            request?.driverDistanceToPickupKm,
+            request?.pickupDistanceKm,
+            request?.distanceToPickupKm,
+            request?.distanceKm,
+            request?.tripDistanceKm,
+          )
+        : pickDriverTripMoney(request?.tripDistanceKm, request?.distanceKm);
   const distanceLabel = formatDistanceLabel(effectiveDistanceKm);
   const routeTotalMinutes =
     request?.initialTripDurationMin ||

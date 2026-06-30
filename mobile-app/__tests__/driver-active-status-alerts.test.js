@@ -277,4 +277,27 @@ describe("driver active status alerts", () => {
 
     expect(screen.queryByTestId("driver-transient-state-card")).toBeNull();
   });
+
+  it("keeps passenger cancellation transient cards visible to the driver", () => {
+    const screen = render(
+      <DriverTransientStateCard
+        suppressActivationStatusAlerts
+        card={{
+          id: "passenger-cancelled-before-accept",
+          type: "rider_cancelled_before_accept",
+          title: "Corrida cancelada pelo passageiro",
+          message:
+            "Essa solicitação foi cancelada antes do seu aceite. Você já voltou para o mapa.",
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("driver-transient-state-card")).toBeTruthy();
+    expect(screen.getByText("Corrida cancelada pelo passageiro")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Essa solicitação foi cancelada antes do seu aceite. Você já voltou para o mapa.",
+      ),
+    ).toBeTruthy();
+  });
 });
