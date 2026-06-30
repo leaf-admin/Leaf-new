@@ -3,7 +3,9 @@ jest.unmock('express');
 const mockRedisSet = jest.fn();
 const mockRedisDel = jest.fn();
 
-jest.mock('axios', () => ({}));
+jest.mock('axios', () => ({
+  get: jest.fn()
+}));
 
 jest.mock('../../../config/woovi-config', () => ({
   getWooviConfig: jest.fn(() => ({
@@ -56,11 +58,14 @@ const {
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking,
   validateSandboxTestWebhookPayload,
+  canSandboxTestPaymentActorConfirm,
   resolveSandboxTestWebhookPayload,
+  requestWooviSandboxTestPayment,
   resolveSandboxPaymentIntentAsBooking,
   isRetryableWebhookEvent
 } = wooviRoutes.__private;
 const firebaseConfig = require('../../../firebase-config');
+const axios = require('axios');
 
 function createInMemoryFirestore() {
   const docs = new Map();
@@ -165,6 +170,10 @@ describe('woovi webhook guards', () => {
     delete process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED;
     delete process.env.WOOVI_ENVIRONMENT;
     delete process.env.WOOVI_BASE_URL;
+    delete process.env.WOOVI_SANDBOX_TEST_APP_ID;
+    delete process.env.WOOVI_SANDBOX_TEST_AUTHORIZATION_APP_ID;
+    delete process.env.OPENPIX_SANDBOX_TEST_APP_ID;
+    delete process.env.OPENPIX_SANDBOX_TEST_AUTHORIZATION_APP_ID;
     process.env.NODE_ENV = 'test';
     firebaseConfig.getFirestore.mockReturnValue(null);
     mockRedisDel.mockResolvedValue(1);
@@ -566,6 +575,98 @@ describe('woovi webhook guards', () => {
     expect(result.amountInCents).toBe(7690);
     expect(result.payload.charge.value).toBe(7690);
     expect(result.payload.account.environment).toBe('TESTING');
+  });
+
+  it('allows sandbox app confirmation only for the matching passenger or sandbox roles', () => {
+    expect(
+      canSandboxTestPaymentActorConfirm(
+        { type: 'firebase', uid: 'passenger-latest', role: 'user' },
+        'passenger-latest'
+      )
+    ).toBe(true);
+
+    expect(
+      canSandboxTestPaymentActorConfirm(
+        { type: 'firebase', uid: 'other-passenger', role: 'user' },
+        'passenger-latest'
+      )
+    ).toBe(false);
+
+    expect(
+      canSandboxTestPaymentActorConfirm(
+        { type: 'admin', id: 'dev-1', role: 'development' },
+        'passenger-latest'
+      )
+    ).toBe(true);
+  });
+
+  it('confirms sandbox Pix charge through Woovi official testing endpoint', async () => {
+    axios.get.mockResolvedValue({
+      status: 200,
+      data: { ok: true }
+    });
+
+    const result = await requestWooviSandboxTestPayment({
+      transactionID: 'charge-latest',
+      chargeId: 'charge-latest',
+      paymentIntentId: 'intent-latest'
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.transactionID).toBe('charge-latest');
+    expect(result.endpointHost).toBe('api.woovi.com');
+    expect(axios.get).toHaveBeenCalledWith(
+      'https://api.woovi.com/openpix/testing',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'test-token'
+        }),
+        params: {
+          transactionID: 'charge-latest'
+        }
+      })
+    );
+  });
+
+  it('uses explicit Woovi sandbox testing AppID before generic sandbox token', async () => {
+    process.env.WOOVI_SANDBOX_TEST_APP_ID = 'test-app-id-for-openpix-testing';
+    axios.get.mockResolvedValue({
+      status: 200,
+      data: { ok: true }
+    });
+
+    const result = await requestWooviSandboxTestPayment({
+      transactionID: 'charge-explicit-app-id'
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.authorizationSource).toBe('WOOVI_SANDBOX_TEST_APP_ID');
+    expect(axios.get).toHaveBeenCalledWith(
+      'https://api.woovi.com/openpix/testing',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'test-app-id-for-openpix-testing'
+        }),
+        params: {
+          transactionID: 'charge-explicit-app-id'
+        }
+      })
+    );
+  });
+
+  it('does not materialize sandbox payment when Woovi testing endpoint rejects it', async () => {
+    axios.get.mockResolvedValue({
+      status: 404,
+      data: { error: 'not found' }
+    });
+
+    const result = await requestWooviSandboxTestPayment({
+      transactionID: 'missing-charge'
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('WOOVI_SANDBOX_TEST_PAYMENT_REJECTED');
+    expect(result.status).toBe(404);
   });
 
   it('does not resolve an exact sandbox intent for a different passenger', async () => {

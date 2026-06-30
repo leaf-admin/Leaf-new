@@ -287,7 +287,6 @@ describe('gradual-radius-expander', () => {
   it('uses the configured empty wave interval when a radius returns no eligible drivers', async () => {
     jest.useFakeTimers();
     process.env.MATCH_EMPTY_WAVE_INTERVAL_MS = '1500';
-    process.env.MATCH_EXPANSION_STEP_KM = '1';
     expander = new GradualRadiusExpander(io);
 
     jest.spyOn(expander, 'getSearchDispatchability').mockResolvedValue({
@@ -327,7 +326,7 @@ describe('gradual-radius-expander', () => {
     expect(scheduleSpy).toHaveBeenCalledWith(
       'booking_3',
       { lat: -23.55, lng: -46.63 },
-      3,
+      2 + expander.config.expansionStep,
       5,
       1500,
       1

@@ -75,7 +75,27 @@ const createInMemoryFirestore = () => {
   };
 
   const collection = (path) => ({
-    doc: (id = `auto_${docs.size + 1}`) => doc(`${path}/${id}`)
+    doc: (id = `auto_${docs.size + 1}`) => doc(`${path}/${id}`),
+    where: (field, _operator, value) => ({
+      limit: (limitCount = 1) => ({
+        get: async () => {
+          const matches = [];
+          for (const [docPath, data] of docs.entries()) {
+            if (!docPath.startsWith(`${path}/`)) continue;
+            if (data?.[field] !== value) continue;
+            matches.push({
+              id: docPath.split('/').pop(),
+              data: () => data
+            });
+            if (matches.length >= limitCount) break;
+          }
+          return {
+            empty: matches.length === 0,
+            docs: matches
+          };
+        }
+      })
+    })
   });
 
   const doc = (path) => ({
@@ -353,7 +373,10 @@ describe('PaymentService payment status cache', () => {
       success: true,
       idempotentReplay: true,
       chargeId: 'charge_retry_1',
-      paymentIntentId: service.buildAdvancePaymentIntentId('ride_retry_1')
+      paymentIntentId: service.buildAdvancePaymentIntentId('ride_retry_1'),
+      passengerName: 'Passageiro',
+      customerName: 'Passageiro',
+      passengerEmail: 'passenger@leaf.app.br'
     });
     expect(mockCreateCharge).toHaveBeenCalledTimes(1);
     expect(mockCreateCharge.mock.calls[0][0]).toMatchObject({
@@ -363,11 +386,14 @@ describe('PaymentService payment status cache', () => {
     expect(firestore.docs.get(`payment_intents/${service.buildAdvancePaymentIntentId('ride_retry_1')}`)).toMatchObject({
       status: 'charge_created',
       chargeId: 'charge_retry_1',
-      amountCents: 2210
+      amountCents: 2210,
+      passengerName: 'Passageiro',
+      customerName: 'Passageiro',
+      passengerEmail: 'passenger@leaf.app.br'
     });
   });
 
-  it('persists driver reservation metadata and expires the Pix charge with the reservation TTL', async () => {
+  it('persists driver reservation metadata and clamps the Pix charge expiration to the provider minimum', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
     mockCreateCharge.mockResolvedValueOnce({
@@ -405,7 +431,7 @@ describe('PaymentService payment status cache', () => {
       paymentDriverReservationTtlSeconds: 180
     });
     expect(mockCreateCharge).toHaveBeenCalledWith(expect.objectContaining({
-      expiresIn: 180,
+      expiresIn: 300,
       additionalInfo: expect.arrayContaining([
         expect.objectContaining({
           key: 'payment_driver_reservation_id',
@@ -648,6 +674,20 @@ describe('PaymentService financial rules', () => {
       allocatedTotalCents: 3250,
       balanced: true
     });
+  });
+
+  it('prefers quote lock toll values when resolving Pix split tolls', () => {
+    const service = new PaymentService();
+
+    expect(service.resolveTollFeeCents({
+      tollFee: 0,
+      tollFeeCents: 0,
+      rideDetails: { tollFee: 0 },
+      quoteLockSnapshot: {
+        quoteLockId: 'ql_with_toll',
+        tollFee: 4
+      }
+    })).toBe(400);
   });
 
   it('does not generate unbalanced fees for anomalous tiny fares', () => {
@@ -1470,6 +1510,35 @@ describe('PaymentService refund terminal status handling', () => {
       bookingId: 'booking_existing',
       canonicalRideId: 'booking_existing',
       consumedChargeId: 'charge_2'
+    });
+  });
+
+  it('finds an advance payment intent by chargeId', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    await firestore.collection('payment_intents').doc('advance_charge_lookup').set({
+      paymentIntentId: 'advance_charge_lookup',
+      status: 'charge_created',
+      rideId: 'temp_ride_session_canonical_hash',
+      chargeId: 'charge_lookup_1',
+      passengerId: 'customer_1',
+      quoteLockSnapshot: {
+        routeDistanceKm: 27.1,
+        routeDurationSecs: 1800
+      }
+    });
+
+    const result = await service.getAdvancePaymentIntentByChargeId('charge_lookup_1');
+
+    expect(result).toMatchObject({
+      found: true,
+      paymentIntentId: 'advance_charge_lookup',
+      chargeId: 'charge_lookup_1',
+      quoteLockSnapshot: {
+        routeDistanceKm: 27.1,
+        routeDurationSecs: 1800
+      }
     });
   });
 

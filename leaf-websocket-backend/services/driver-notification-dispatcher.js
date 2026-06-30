@@ -71,6 +71,50 @@ const incrementCounter = (target, key) => {
     const normalizedKey = String(key || 'UNKNOWN').trim() || 'UNKNOWN';
     target[normalizedKey] = Number.parseInt(target[normalizedKey] || 0, 10) + 1;
 };
+function parseMaybeJson(value, fallback) {
+    if (!value) return fallback;
+    if (typeof value === 'object') return value;
+    try {
+        return JSON.parse(value);
+    } catch (_error) {
+        return fallback;
+    }
+}
+function normalizeRouteCoordinate(value) {
+    const lat = Number(value?.lat ?? value?.latitude);
+    const lng = Number(value?.lng ?? value?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+}
+function normalizeRouteCoordinatesPayload(value = []) {
+    const parsed = parseMaybeJson(value, []);
+    const source = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.coordinates)
+            ? parsed.coordinates
+            : [];
+    return source
+        .map(normalizeRouteCoordinate)
+        .filter(Boolean)
+        .slice(0, 800);
+}
+function normalizeTrafficSegmentsPayload(value = []) {
+    const parsed = parseMaybeJson(value, []);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+        .slice(0, 80)
+        .map((segment) => {
+            const coordinates = normalizeRouteCoordinatesPayload(segment?.coordinates);
+            if (coordinates.length < 2) return null;
+            return {
+                level: String(segment?.level || segment?.trafficLevel || 'normal').trim().slice(0, 32),
+                color: String(segment?.color || '').trim().slice(0, 32),
+                coordinates
+            };
+        })
+        .filter(Boolean);
+}
 const DISPATCH_GEO_CANDIDATE_MIN = parsePositiveInt(process.env.DISPATCH_GEO_CANDIDATE_MIN, 200);
 const DISPATCH_GEO_CANDIDATE_MAX = parsePositiveInt(process.env.DISPATCH_GEO_CANDIDATE_MAX, 800);
 const DISPATCH_SCORE_POOL_MIN = parsePositiveInt(process.env.DISPATCH_SCORE_POOL_MIN, 48);
@@ -338,9 +382,17 @@ class DriverNotificationDispatcher {
      */
     async getDispatchability(bookingId, bookingData = null) {
         const bookingKey = `booking:${bookingId}`;
-        const snapshot = bookingData && Object.keys(bookingData).length > 0
-            ? bookingData
-            : await this.redis.hgetall(bookingKey);
+        const providedSnapshot =
+            bookingData && Object.keys(bookingData).length > 0
+                ? bookingData
+                : null;
+        const persistedSnapshot = await this.redis.hgetall(bookingKey).catch(() => null);
+        const snapshot = {
+            ...(providedSnapshot || {}),
+            ...(persistedSnapshot && Object.keys(persistedSnapshot).length > 0
+                ? persistedSnapshot
+                : {})
+        };
 
         if (!snapshot || Object.keys(snapshot).length === 0) {
             return { ok: false, reason: 'BOOKING_NOT_FOUND' };
@@ -495,6 +547,10 @@ class DriverNotificationDispatcher {
                 rideRequirements.vehicleCategory ||
                 null;
             const shouldApplyDriverEligibility = Boolean(requestedCategory);
+            const bookingData =
+                rideRequirements?.bookingData && typeof rideRequirements.bookingData === 'object'
+                    ? rideRequirements.bookingData
+                    : (rideRequirements && typeof rideRequirements === 'object' ? rideRequirements : {});
             const paymentReservationContext = {
                 bookingId,
                 rideId: bookingData?.paymentReferenceRideId,
@@ -809,7 +865,7 @@ class DriverNotificationDispatcher {
         try {
             const finish = (ok, reason, extra = {}) =>
                 this.finishNotificationOutcome(options, ok, reason, extra);
-            const responseTimeoutSeconds = DISPATCH_DRIVER_RESPONSE_TIMEOUT_SECONDS;
+            const responseTimeoutSeconds = getDriverResponseTimeoutSeconds(bookingData);
             const skipInitialDispatchabilityCheck = options?.skipInitialDispatchabilityCheck === true;
             let dispatchabilitySnapshot = options?.precomputedDispatchability || null;
 
@@ -996,8 +1052,11 @@ class DriverNotificationDispatcher {
             }
 
             const effectiveBookingData = {
-                ...finalDispatchability.bookingData,
-                ...bookingData
+                ...(bookingData || {}),
+                ...(finalDispatchability.bookingData || {}),
+                driverDistanceToPickupKm: bookingData?.driverDistanceToPickupKm,
+                estimatedArrivalToPickupMin: bookingData?.estimatedArrivalToPickupMin,
+                score: bookingData?.score
             };
             const pickupLocationParsed = this.safeJSONParse(effectiveBookingData.pickupLocation);
             const destinationLocationParsed = this.safeJSONParse(effectiveBookingData.destinationLocation);
@@ -1005,13 +1064,21 @@ class DriverNotificationDispatcher {
                 effectiveBookingData.operationalContinuation || effectiveBookingData.reassignmentContext,
                 null
             );
+            const routeCoordinates = normalizeRouteCoordinatesPayload(effectiveBookingData.routeCoordinates);
+            const trafficSegments = normalizeTrafficSegmentsPayload(effectiveBookingData.trafficSegments);
 
             const pickupLat = Number(pickupLocationParsed?.lat);
             const pickupLng = Number(pickupLocationParsed?.lng);
             const destinationLat = Number(destinationLocationParsed?.lat);
             const destinationLng = Number(destinationLocationParsed?.lng);
-            let estimatedTripDistanceKm = null;
+            const routeDistanceKmFromBooking = Number(effectiveBookingData.routeDistanceKm);
+            const routeDurationSecsFromBooking = Number(effectiveBookingData.routeDurationSecs);
+            let estimatedTripDistanceKm =
+                Number.isFinite(routeDistanceKmFromBooking) && routeDistanceKmFromBooking > 0
+                    ? Number(routeDistanceKmFromBooking.toFixed(2))
+                    : null;
             if (
+                estimatedTripDistanceKm === null &&
                 Number.isFinite(pickupLat) &&
                 Number.isFinite(pickupLng) &&
                 Number.isFinite(destinationLat) &&
@@ -1035,6 +1102,10 @@ class DriverNotificationDispatcher {
             const estimatedArrivalToPickupMin = Number.isFinite(Number(effectiveBookingData.estimatedArrivalToPickupMin))
                 ? Number(effectiveBookingData.estimatedArrivalToPickupMin)
                 : estimatedArrivalToPickupMinFromDistance;
+            const estimatedTripDurationMin =
+                Number.isFinite(routeDurationSecsFromBooking) && routeDurationSecsFromBooking > 0
+                    ? Math.max(1, Math.round(routeDurationSecsFromBooking / 60))
+                    : null;
 
             // 3. Preparar dados da notificação
             const notificationData = {
@@ -1049,6 +1120,14 @@ class DriverNotificationDispatcher {
                 pickupAddress: pickupLocationParsed?.add || pickupLocationParsed?.address || null,
                 destinationAddress: destinationLocationParsed?.add || destinationLocationParsed?.address || null,
                 ...(Number.isFinite(estimatedTripDistanceKm) ? { estimatedTripDistanceKm } : {}),
+                ...(Number.isFinite(estimatedTripDurationMin) ? { estimatedTripDurationMin } : {}),
+                ...(routeCoordinates.length >= 2
+                    ? {
+                        routeCoordinates,
+                        tripRouteCoordinates: routeCoordinates
+                    }
+                    : {}),
+                ...(trafficSegments.length > 0 ? { trafficSegments } : {}),
                 ...(Number.isFinite(estimatedArrivalToPickupMin) ? { estimatedArrivalToPickupMin } : {}),
                 ...(Number.isFinite(driverDistanceToPickupKm) ? { driverDistanceToPickupKm } : {}),
                 ...(operationalContinuation

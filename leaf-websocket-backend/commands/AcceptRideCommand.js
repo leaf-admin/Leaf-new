@@ -172,7 +172,7 @@ class AcceptRideCommand extends Command {
                         currentStatus: currentStatusUpper || null
                     });
                     metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                    return CommandResult.failure('A corrida já foi aceita por outro motorista ou não está mais disponível.');
+                    return CommandResult.failure('Oferta expirada para este motorista. Aguarde uma nova solicitação.');
                 }
 
                 // Garantir lock da corrida aceita (evita re-oferta até completeTrip/cancelRide).

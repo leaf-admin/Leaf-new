@@ -97,4 +97,31 @@ describe('PaymentRuntimeProfileService', () => {
       expiresAtIso: new Date(Date.now() + 60 * 60 * 1000).toISOString()
     })).toEqual({ ok: false, error: 'Sandbox global bloqueado por segurança' });
   });
+
+  it('allows durable sandbox profiles only for explicit test users', () => {
+    const PaymentRuntimeProfileService = loadClass();
+    const service = new PaymentRuntimeProfileService({ cacheTtlMs: 1 });
+
+    expect(service.validateProfilePayload({
+      environment: 'sandbox',
+      scope: 'users',
+      testUserSandbox: true,
+      userIds: ['passenger-a']
+    })).toEqual({ ok: true, environment: 'sandbox', status: 'paused', scope: 'users' });
+
+    expect(service.validateProfilePayload({
+      environment: 'sandbox',
+      scope: 'canary',
+      testUserSandbox: true,
+      userIds: ['passenger-a']
+    })).toEqual({ ok: false, error: 'Perfis sandbox precisam de expiresAtIso' });
+
+    expect(service.validateProfilePayload({
+      environment: 'sandbox',
+      scope: 'users',
+      testUserSandbox: true,
+      userIds: ['passenger-a'],
+      phones: ['5521102938475']
+    })).toEqual({ ok: false, error: 'Perfis sandbox precisam de expiresAtIso' });
+  });
 });

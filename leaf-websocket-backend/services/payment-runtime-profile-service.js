@@ -47,6 +47,25 @@ function isExpired(profile, nowMs = Date.now()) {
   return Boolean(expiresAtMs && expiresAtMs <= nowMs);
 }
 
+function isDurableTestUserSandboxProfile(profile = {}) {
+  const environment = normalizeEnvironment(profile.environment);
+  const scope = String(profile.scope || 'canary').trim().toLowerCase();
+  const testUserSandbox =
+    profile.testUserSandbox === true ||
+    profile.testUserSandbox === 'true' ||
+    profile.requiresTestUserSandbox === true ||
+    profile.requiresTestUserSandbox === 'true';
+  const userIds = splitList(profile.userIds || profile.passengerIds);
+  const phones = splitList(profile.phones || profile.phoneNumbers);
+  return (
+    environment === 'sandbox' &&
+    scope === 'users' &&
+    testUserSandbox &&
+    userIds.length > 0 &&
+    phones.length === 0
+  );
+}
+
 function hasStarted(profile, nowMs = Date.now()) {
   const startsAtMs = parseTime(profile.startsAtIso || profile.startsAt);
   return !startsAtMs || startsAtMs <= nowMs;
@@ -85,6 +104,7 @@ function summarizeProfile(profile = {}) {
     priority: Number(sanitized.priority || 0),
     startsAtIso: toIso(sanitized.startsAtIso || sanitized.startsAt),
     expiresAtIso: toIso(sanitized.expiresAtIso || sanitized.expiresAt),
+    testUserSandbox: sanitized.testUserSandbox === true,
     reason: sanitized.reason || sanitized.description || ''
   };
 }
@@ -311,19 +331,24 @@ class PaymentRuntimeProfileService {
     const status = normalizeStatus(profile.status || 'paused');
     const scope = String(profile.scope || 'canary').trim().toLowerCase();
     const expiresAtMs = parseTime(profile.expiresAtIso || profile.expiresAt);
+    const durableTestSandbox = isDurableTestUserSandboxProfile({
+      ...profile,
+      environment,
+      scope
+    });
 
     if (!['global', 'users', 'phones', 'canary', 'app_review'].includes(scope)) {
       return { ok: false, error: 'scope inválido para perfil de pagamento' };
     }
 
     if (environment === 'sandbox') {
-      if (!expiresAtMs) {
+      if (!expiresAtMs && !durableTestSandbox) {
         return { ok: false, error: 'Perfis sandbox precisam de expiresAtIso' };
       }
-      if (expiresAtMs <= Date.now()) {
+      if (expiresAtMs && expiresAtMs <= Date.now()) {
         return { ok: false, error: 'expiresAtIso precisa estar no futuro' };
       }
-      if (expiresAtMs - Date.now() > SANDBOX_MAX_TTL_MS) {
+      if (expiresAtMs && expiresAtMs - Date.now() > SANDBOX_MAX_TTL_MS && !durableTestSandbox) {
         return { ok: false, error: 'Perfis sandbox podem durar no máximo 24h' };
       }
       if (
@@ -378,6 +403,11 @@ class PaymentRuntimeProfileService {
       environment: validation.environment,
       status: validation.status,
       scope: validation.scope,
+      testUserSandbox:
+        profile.testUserSandbox === true ||
+        profile.testUserSandbox === 'true' ||
+        profile.requiresTestUserSandbox === true ||
+        profile.requiresTestUserSandbox === 'true',
       priority: Number.parseInt(profile.priority || '0', 10) || 0,
       reason: String(profile.reason || profile.description || '').trim(),
       userIds: splitList(profile.userIds || profile.passengerIds),

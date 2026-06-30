@@ -97,6 +97,10 @@ class PaymentService {
       process.env.PAYMENT_STATUS_CACHE_TTL_SECONDS || '900',
       10
     );
+    this.WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS = Math.max(
+      300,
+      Number.parseInt(process.env.WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS || '300', 10) || 300
+    );
 
     // Estados válidos de payment holding
     this.PAYMENT_STATES = {
@@ -136,6 +140,12 @@ class PaymentService {
     }
 
     return this.isPassengerAllowedForForcedBypass(paymentData.passengerId);
+  }
+
+  resolveAdvanceChargeExpiresInSeconds(paymentIntent = {}) {
+    const ttlSeconds = Number.parseInt(paymentIntent.paymentDriverReservationTtlSeconds, 10);
+    if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) return null;
+    return Math.max(ttlSeconds, this.WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS);
   }
 
   buildWooviAdditionalInfo(entries = []) {
@@ -225,6 +235,47 @@ class PaymentService {
   normalizePaymentAmountCents(value) {
     const amountCents = Math.round(Number(value));
     return Number.isFinite(amountCents) ? amountCents : 0;
+  }
+
+  normalizeMoneyReais(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const normalized = typeof value === 'string'
+      ? value.replace(/[^\d,.-]/g, '').replace(',', '.')
+      : value;
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.max(0, Number(parsed.toFixed(2)));
+  }
+
+  resolveTollFeeCents(paymentData = {}) {
+    const quoteLockSnapshot = paymentData.quoteLockSnapshot || {};
+    const lockedCents = quoteLockSnapshot.tollFeeCents;
+    if (Number.isFinite(Number(lockedCents))) {
+      return Math.max(0, Math.round(Number(lockedCents)));
+    }
+
+    const lockedReais = this.normalizeMoneyReais(
+      quoteLockSnapshot.tollFee ??
+        quoteLockSnapshot.tollAmount ??
+        quoteLockSnapshot.pricingPayload?.toll_fee ??
+        quoteLockSnapshot.pricingPayload?.tollFee
+    );
+    if (lockedReais !== null) {
+      return this.toCents(lockedReais);
+    }
+
+    if (Number.isFinite(Number(paymentData.tollFeeCents))) {
+      return Math.max(0, Math.round(Number(paymentData.tollFeeCents)));
+    }
+
+    const incomingReais = this.normalizeMoneyReais(
+      paymentData.tollFee ??
+        paymentData.rideDetails?.tollFee ??
+        paymentData.rideDetails?.tollAmount ??
+        paymentData.rideDetails?.pricingPayload?.toll_fee ??
+        paymentData.rideDetails?.pricingPayload?.tollFee
+    );
+    return this.toCents(incomingReais || 0);
   }
 
   normalizeQuoteVersion(paymentData = {}) {
@@ -332,6 +383,9 @@ class PaymentService {
       paymentDriverReservationDriverId: existing.paymentDriverReservationDriverId || null,
       paymentDriverReservationExpiresAt: existing.paymentDriverReservationExpiresAt || null,
       paymentDriverReservationTtlSeconds: existing.paymentDriverReservationTtlSeconds || null,
+      passengerName: existing.passengerName || null,
+      customerName: existing.customerName || existing.passengerName || null,
+      passengerEmail: existing.passengerEmail || null,
       splitApplied: false,
       splitDeferred: true,
       settlementPolicy: 'post_ride_ledger',
@@ -369,9 +423,20 @@ class PaymentService {
     const paymentDriverReservationTtlSeconds = Number.parseInt(
       paymentData.paymentDriverReservationTtlSeconds ||
       process.env.PAYMENT_DRIVER_RESERVATION_TTL_SECONDS ||
-      '180',
+      String(this.WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS),
       10
     ) || null;
+    const passengerName = String(
+      paymentData.passengerName ||
+      paymentData.customerName ||
+      ''
+    ).trim() || null;
+    const customerName = String(
+      paymentData.customerName ||
+      paymentData.passengerName ||
+      ''
+    ).trim() || null;
+    const passengerEmail = String(paymentData.passengerEmail || '').trim() || null;
     const paymentIntentId = this.buildAdvancePaymentIntentId(rideId);
     const correlationID = this.buildAdvanceChargeCorrelationID(paymentData);
     const nowIso = new Date().toISOString();
@@ -409,6 +474,9 @@ class PaymentService {
         paymentDriverReservationDriverId,
         paymentDriverReservationExpiresAt,
         paymentDriverReservationTtlSeconds,
+        passengerName,
+        customerName,
+        passengerEmail,
         quoteVersion
       };
     }
@@ -488,6 +556,9 @@ class PaymentService {
               paymentDriverReservationDriverId: existing.paymentDriverReservationDriverId || paymentDriverReservationDriverId || null,
               paymentDriverReservationExpiresAt: existing.paymentDriverReservationExpiresAt || paymentDriverReservationExpiresAt || null,
               paymentDriverReservationTtlSeconds: existing.paymentDriverReservationTtlSeconds || paymentDriverReservationTtlSeconds || null,
+              passengerName: existing.passengerName || passengerName || null,
+              customerName: existing.customerName || customerName || null,
+              passengerEmail: existing.passengerEmail || passengerEmail || null,
               quoteVersion
             };
           }
@@ -525,6 +596,9 @@ class PaymentService {
           paymentDriverReservationDriverId,
           paymentDriverReservationExpiresAt,
           paymentDriverReservationTtlSeconds,
+          passengerName,
+          customerName,
+          passengerEmail,
           quoteVersion,
           correlationID,
           status: 'creating_charge',
@@ -565,6 +639,9 @@ class PaymentService {
           paymentDriverReservationDriverId,
           paymentDriverReservationExpiresAt,
           paymentDriverReservationTtlSeconds,
+          passengerName,
+          customerName,
+          passengerEmail,
           provider: 'woovi',
           providerEnvironment: paymentProfile.environment || 'production',
           paymentProfileId: paymentProfile.profileId || null,
@@ -613,6 +690,9 @@ class PaymentService {
         paymentDriverReservationDriverId,
         paymentDriverReservationExpiresAt,
         paymentDriverReservationTtlSeconds,
+        passengerName,
+        customerName,
+        passengerEmail,
         quoteVersion,
         intentPersistenceError: error.message
       };
@@ -785,6 +865,51 @@ class PaymentService {
     }
   }
 
+  async getAdvancePaymentIntentByChargeId(chargeId) {
+    const safeChargeId = String(chargeId || '').trim();
+    if (!safeChargeId) return { found: false };
+
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) {
+        return {
+          found: false,
+          unavailable: true,
+          code: 'PAYMENT_INTENT_STORE_UNAVAILABLE'
+        };
+      }
+
+      const snapshot = await firestore
+        .collection('payment_intents')
+        .where('chargeId', '==', safeChargeId)
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) {
+        return { found: false };
+      }
+
+      const doc = snapshot.docs[0];
+      const data = doc.data() || {};
+      return {
+        found: true,
+        paymentIntentId: data.paymentIntentId || doc.id,
+        ...data
+      };
+    } catch (error) {
+      logStructured('warn', 'Falha ao consultar payment intent por chargeId', {
+        service: 'PaymentService',
+        chargeId: safeChargeId,
+        error: error.message
+      });
+      return {
+        found: false,
+        unavailable: true,
+        code: 'PAYMENT_INTENT_LOOKUP_FAILED'
+      };
+    }
+  }
+
   async resolveDriverSplitTarget(paymentData = {}) {
     const directPixKey = this.normalizePixKey(
       paymentData.driverSubaccountPixKey ||
@@ -864,9 +989,7 @@ class PaymentService {
       return target;
     }
 
-    const tollFeeCents = Number.isFinite(Number(paymentData.tollFeeCents))
-      ? Math.max(0, Math.round(Number(paymentData.tollFeeCents)))
-      : this.toCents(paymentData.tollFee || paymentData.rideDetails?.tollFee || 0);
+    const tollFeeCents = this.resolveTollFeeCents(paymentData);
     const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents);
 
     if (!calculation.netAmount || calculation.netAmount <= 0) {
@@ -1226,6 +1349,7 @@ class PaymentService {
         commentRaw.length > 140 ? `${commentRaw.slice(0, 137)}...` : commentRaw;
 
       const uniqueCorrelationID = paymentIntent.correlationID || this.buildAdvanceChargeCorrelationID(paymentData);
+      const chargeExpiresIn = this.resolveAdvanceChargeExpiresInSeconds(paymentIntent);
 
       logStructured('debug', 'Usando correlationID determinístico para cobrança', {
         service: 'PaymentService',
@@ -1237,8 +1361,8 @@ class PaymentService {
         value: paymentIntent.amountCents || paymentData.amount,
         comment,
         correlationID: uniqueCorrelationID,
-        ...(paymentIntent.paymentDriverReservationTtlSeconds
-          ? { expiresIn: paymentIntent.paymentDriverReservationTtlSeconds }
+        ...(chargeExpiresIn
+          ? { expiresIn: chargeExpiresIn }
           : {}),
         additionalInfo: this.buildWooviAdditionalInfo([
           { key: 'passenger_id', value: paymentData.passengerId },
@@ -1283,6 +1407,7 @@ class PaymentService {
         comment: chargeData.comment,
         correlationID: chargeData.correlationID,
         expiresIn: chargeData.expiresIn || null,
+        paymentDriverReservationTtlSeconds: paymentIntent.paymentDriverReservationTtlSeconds || null,
         customerName: chargeData.customer.name,
         customerEmail: chargeData.customer.email,
         splitEnabled: false,
@@ -1436,6 +1561,9 @@ class PaymentService {
         paymentDriverReservationDriverId: paymentIntent.paymentDriverReservationDriverId || null,
         paymentDriverReservationExpiresAt: paymentIntent.paymentDriverReservationExpiresAt || null,
         paymentDriverReservationTtlSeconds: paymentIntent.paymentDriverReservationTtlSeconds || null,
+        passengerName: paymentIntent.passengerName || paymentData.passengerName || null,
+        customerName: paymentIntent.customerName || paymentData.customerName || paymentData.passengerName || null,
+        passengerEmail: paymentIntent.passengerEmail || paymentData.passengerEmail || null,
         splitApplied: false,
         splitDeferred: true,
         settlementPolicy: 'post_ride_ledger',

@@ -82,8 +82,11 @@ jest.mock('../../../utils/logger', () => ({
 const paymentRoutes = require('../../../routes/payment');
 const { logStructured } = require('../../../utils/logger');
 
-function createApp() {
+function createApp({ io = null } = {}) {
   const app = express();
+  if (io) {
+    app.set('io', io);
+  }
   app.use(express.json());
   app.use('/api', paymentRoutes);
   return app;
@@ -214,7 +217,8 @@ describe('payment advance availability guard', () => {
   });
 
   it('continues Pix creation only after availability is confirmed', async () => {
-    const app = createApp();
+    const io = { marker: 'socket-io-context' };
+    const app = createApp({ io });
     mockHasPaymentEligibleDriver.mockResolvedValue(buildAvailableDriver());
     mockProcessAdvancePayment.mockResolvedValue({
       success: true,
@@ -246,6 +250,7 @@ describe('payment advance availability guard', () => {
       })
     );
     expect(mockHasPaymentEligibleDriver).toHaveBeenCalledWith(expect.objectContaining({
+      io,
       reserveDriver: true,
       reservationContext: expect.objectContaining({
         passengerId: 'passenger-1'
@@ -384,6 +389,59 @@ describe('payment advance availability guard', () => {
       }),
       paymentDriverReservationId: 'pdr_reservation_1',
       paymentDriverReservationDriverId: 'driver-1'
+    }));
+  });
+
+  it('uses toll values from the validated quote lock instead of trusting the client payload', async () => {
+    const app = createApp();
+    mockHasPaymentEligibleDriver.mockResolvedValue(buildAvailableDriver());
+    mockValidateQuoteLock.mockResolvedValue({
+      success: true,
+      quoteLock: {
+        quoteLockId: 'ql_with_toll',
+        estimatedFare: 53.41,
+        payableAmountInCents: 5341,
+        grossAmountInCents: 5341,
+        tollFee: 4
+      },
+      payableAmountInCents: 5341,
+      grossAmountInCents: 5341
+    });
+    mockProcessAdvancePayment.mockResolvedValue({
+      success: true,
+      chargeId: 'charge-1',
+      qrCode: 'qr',
+      paymentLink: 'https://pay.local/charge-1'
+    });
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .set('Authorization', 'Bearer passenger-token')
+      .send({
+        ...validPaymentPayload,
+        amount: 5341,
+        grossAmountInCents: 5341,
+        quoteSessionId: 'quote_session_toll',
+        quoteLockId: 'ql_with_toll',
+        enforceQuoteLock: true,
+        tollFee: 0,
+        tollFeeCents: 0,
+        rideDetails: {
+          ...validPaymentPayload.rideDetails,
+          tollFee: 0
+        }
+      });
+
+    expect(response.status).toBe(200);
+    expect(mockProcessAdvancePayment).toHaveBeenCalledWith(expect.objectContaining({
+      amount: 5341,
+      grossAmountInCents: 5341,
+      tollFee: 4,
+      tollFeeCents: 400,
+      quoteLockSnapshot: expect.objectContaining({
+        quoteLockId: 'ql_with_toll',
+        tollFee: 4
+      })
     }));
   });
 });

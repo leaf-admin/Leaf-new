@@ -167,6 +167,32 @@ describe('AcceptRideCommand', () => {
     expect(metrics.recordCommand).toHaveBeenCalledWith('AcceptRide', expect.any(Number), true);
   });
 
+  it('keeps zero driver-to-pickup distance when driver is at the pickup point', async () => {
+    redis.eval.mockResolvedValue(
+      'customer_1|||{"lat":-22.857,"lng":-43.309,"add":"Rua Alecrim, 497"}'
+    );
+    redis.geopos.mockResolvedValue([[-43.309, -22.857]]);
+
+    const command = new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(redis.hset).toHaveBeenCalledWith(
+      'booking:booking_1',
+      expect.objectContaining({
+        driverAcceptedLocation: JSON.stringify({ lat: -22.857, lng: -43.309 }),
+        driverDistanceToPickupKm: '0',
+        estimatedArrivalToPickupMin: '1'
+      })
+    );
+    expect(result.data.driverDistanceToPickupKm).toBe(0);
+    expect(result.data.estimatedArrivalToPickupMin).toBe(1);
+  });
+
   it('reuses the acceptance when the same driver already owns the booking', async () => {
     redis.eval.mockResolvedValue(
       'OK_ALREADY_ACCEPTED|||customer_1|||{"lat":-23.55,"lng":-46.63,"add":"Rua A, 10"}'
@@ -185,7 +211,7 @@ describe('AcceptRideCommand', () => {
     expect(RideAcceptedEvent).not.toHaveBeenCalled();
   });
 
-  it('fails early when the driver no longer has a valid reservation for the offer', async () => {
+  it('fails early with an expired-offer reason when the driver no longer has a valid reservation', async () => {
     redis.get.mockResolvedValue(null);
     redis.hmget.mockResolvedValue(['', 'SEARCHING', 'PENDING']);
     hasOfferReservation.mockResolvedValue(false);
@@ -198,7 +224,7 @@ describe('AcceptRideCommand', () => {
     const result = await command.execute();
 
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/não está mais disponível/i);
+    expect(result.error).toMatch(/oferta expirada/i);
     expect(redis.eval).not.toHaveBeenCalled();
   });
 

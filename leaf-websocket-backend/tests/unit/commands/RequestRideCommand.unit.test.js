@@ -252,6 +252,15 @@ describe('RequestRideCommand', () => {
         grossAmountInCents: 1960,
         quoteSessionId: 'quote_session_123',
         quoteLockId: 'ql_123',
+        paymentDriverReservationId: 'pdr_123',
+        paymentDriverReservationDriverId: 'driver_123',
+        paymentDriverReservationExpiresAt: '2026-06-27T14:00:00.000Z',
+        paymentDriverReservationTtlSeconds: 21600,
+        providerEnvironment: 'sandbox',
+        paymentProviderEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+        paymentProfileSource: 'firestore',
         paymentStatus: 'confirmed',
         serverValidated: true,
         confirmedAt: '2026-04-07T23:59:00.000Z'
@@ -270,6 +279,15 @@ describe('RequestRideCommand', () => {
         paymentGrossAmountInCents: 1960,
         paymentQuoteSessionId: 'quote_session_123',
         paymentQuoteLockId: 'ql_123',
+        paymentDriverReservationId: 'pdr_123',
+        paymentDriverReservationDriverId: 'driver_123',
+        paymentDriverReservationExpiresAt: '2026-06-27T14:00:00.000Z',
+        paymentDriverReservationTtlSeconds: 21600,
+        providerEnvironment: 'sandbox',
+        paymentProviderEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+        paymentProfileSource: 'firestore',
         paymentConfirmedAt: '2026-04-07T23:59:00.000Z'
       }),
       expect.objectContaining({
@@ -284,6 +302,15 @@ describe('RequestRideCommand', () => {
       paymentGrossAmountInCents: 1960,
       paymentQuoteSessionId: 'quote_session_123',
       paymentQuoteLockId: 'ql_123',
+      paymentDriverReservationId: 'pdr_123',
+      paymentDriverReservationDriverId: 'driver_123',
+      paymentDriverReservationExpiresAt: '2026-06-27T14:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 21600,
+      providerEnvironment: 'sandbox',
+      paymentProviderEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+      paymentProfileSource: 'firestore',
       paymentConfirmedAt: '2026-04-07T23:59:00.000Z'
     }));
     expect(result.data.event).toEqual(expect.objectContaining({
@@ -360,6 +387,68 @@ describe('RequestRideCommand', () => {
     expect(result.data.event).toEqual(expect.objectContaining({
       estimatedFare: 14.22,
       estimatedDriverNetAmount: 12.73
+    }));
+  });
+
+  test('deve persistir metrica de rota da cotacao paga quando estimativa retorna fallback', async () => {
+    fareEstimationService.estimateRideFare.mockResolvedValueOnce({
+      estimatedFare: 53.67,
+      routeMetrics: {
+        distanceKm: 16.43,
+        durationSecs: 987,
+        source: 'fallback_haversine'
+      },
+      tollFee: 0,
+      pricingPayload: {
+        final_price: 53.67,
+        operational_state: 'NORMAL'
+      },
+      operationalState: 'NORMAL',
+      scorePressao: 0,
+      scoreExcecao: 0,
+      pricingAudit: {}
+    });
+
+    const command = new RequestRideCommand({
+      customerId: 'customer_123',
+      pickupLocation: { lat: -22.857, lng: -43.309 },
+      destinationLocation: { lat: -22.9976583, lng: -43.3581268 },
+      estimatedFare: 53.67,
+      routeDistanceKm: 27.1,
+      routeDurationSecs: 1920,
+      tollFee: 0,
+      carType: 'Leaf Plus',
+      paymentMethod: 'pix',
+      paymentStatus: 'in_holding',
+      paymentId: 'charge_route_lock',
+      paymentData: {
+        chargeId: 'charge_route_lock',
+        rideId: 'ride_route_lock',
+        amountInCents: 5367,
+        paymentStatus: 'in_holding',
+        serverValidated: true,
+        confirmedAt: '2026-06-27T10:35:33.194Z'
+      }
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(rideQueueManager.enqueueRide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeDistanceKm: 27.1,
+        routeDurationSecs: 1920,
+        fareSource: 'payment_quote_lock',
+        estimatedFare: 53.67
+      }),
+      expect.objectContaining({
+        deferEventSourcing: true
+      })
+    );
+    expect(result.data.bookingData).toEqual(expect.objectContaining({
+      routeDistanceKm: 27.1,
+      routeDurationSecs: 1920,
+      fareSource: 'payment_quote_lock'
     }));
   });
 

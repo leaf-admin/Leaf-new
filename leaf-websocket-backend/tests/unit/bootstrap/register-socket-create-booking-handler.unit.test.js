@@ -1,5 +1,6 @@
 const mockPaymentServiceInstance = {
   getAdvancePaymentIntent: jest.fn(),
+  getAdvancePaymentIntentByChargeId: jest.fn(),
   getPaymentStatus: jest.fn(),
   markAdvancePaymentIntentConsumed: jest.fn()
 };
@@ -331,6 +332,9 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       paymentSessionId: 'pay_session_1',
       quoteLockId: 'ql_bound_1'
     });
+    mockPaymentServiceInstance.getAdvancePaymentIntentByChargeId.mockReset().mockResolvedValue({
+      found: false
+    });
     mockPaymentServiceInstance.getPaymentStatus.mockReset().mockResolvedValue({
         success: true,
         status: 'in_holding',
@@ -497,6 +501,54 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
     expect(harness.idempotencyService.beginRequest).not.toHaveBeenCalled();
   });
 
+  it('recovers an expired sandbox driver reservation when the same driver is still eligible', async () => {
+    mockFirestore = createFirestoreWithDocs({
+      'payment_holdings/temp_ride_1': {
+        status: 'in_holding',
+        source: 'woovi_webhook',
+        chargeId: 'charge_1',
+        paymentId: 'charge_1',
+        amount: 8785
+      }
+    });
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValueOnce({
+      found: true,
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'real-smoke-passenger-sandbox',
+      paymentSessionId: 'pay_session_1',
+      quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1'
+    });
+    const harness = createHarness({ reservationPayload: false });
+
+    await harness.handlers.createBooking(createRequestPayload());
+
+    expect(harness.findAvailableDriversForPickup).toHaveBeenCalledWith(
+      { lat: -22.9, lng: -43.2 },
+      expect.objectContaining({
+        carType: 'leaf_plus',
+        destinationLocation: { lat: -22.91, lng: -43.21 }
+      })
+    );
+    expect(harness.RequestRideCommand).toHaveBeenCalled();
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'bookingCreated',
+      expect.objectContaining({
+        success: true,
+        bookingId: 'booking_1'
+      })
+    );
+    expect(harness.redis.set).toHaveBeenCalledWith(
+      'driver_payment_reservation:driver_1',
+      'pdr_create_booking_1',
+      'EX',
+      expect.any(Number),
+      'NX'
+    );
+  });
+
   it('rejects a provider-confirmed payment intent bound to a different route before creating the booking', async () => {
     mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
       found: true,
@@ -512,6 +564,7 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       paymentDriverReservationDriverId: 'driver_1',
       paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
       paymentDriverReservationTtlSeconds: 180,
+      passengerName: 'Leaf Passageiro Teste',
       quoteLockSnapshot: {
         quoteLockId: 'ql_bound_1',
         quoteSessionId: 'quote_session_1',
@@ -573,6 +626,7 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       paymentDriverReservationDriverId: 'driver_1',
       paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
       paymentDriverReservationTtlSeconds: 180,
+      passengerName: 'Leaf Passageiro Teste',
       quoteLockSnapshot: {
         quoteLockId: 'ql_bound_1',
         quoteSessionId: 'quote_session_1',
@@ -629,6 +683,160 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
         })
       })
     );
+  });
+
+  it('fills booking route metrics and passenger name from the validated payment quote lock', async () => {
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
+      found: true,
+      status: 'charge_created',
+      passengerId: 'customer_1',
+      amountCents: 8785,
+      payableAmountInCents: 8785,
+      paymentSessionId: 'pay_session_1',
+      quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1',
+      paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 180,
+      passengerName: 'Leaf Passageiro Teste',
+      quoteLockSnapshot: {
+        quoteLockId: 'ql_bound_1',
+        passengerId: 'customer_1',
+        payableAmountInCents: 8785,
+        routeSignature: '-22.90000|-43.20000|-22.91000|-43.21000|leaf_plus',
+        carType: 'leaf_plus',
+        routeDistanceKm: 27,
+        routeDurationSecs: 1800
+      }
+    });
+    mockFirestore = createFirestoreWithDocs({
+      'payment_holdings/temp_ride_1': {
+        status: 'in_holding',
+        source: 'woovi_webhook',
+        chargeId: 'charge_1',
+        paymentId: 'charge_1',
+        amount: 8785
+      }
+    });
+    const harness = createHarness();
+
+    await harness.handlers.createBooking(createRequestPayload({
+      routeDistanceKm: undefined,
+      routeDurationSecs: undefined,
+      passengerName: 'Leaf Passageiro Teste',
+      paymentData: {
+        chargeId: 'charge_1',
+        rideId: 'temp_ride_1',
+        amountInCents: 8785,
+        paymentSessionId: 'pay_session_1',
+        quoteLockId: 'ql_bound_1',
+        paymentDriverReservationId: 'pdr_create_booking_1',
+        paymentStatus: 'confirmed'
+      }
+    }));
+
+    expect(harness.RequestRideCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeDistanceKm: 27,
+        routeDurationSecs: 1800,
+        passengerName: 'Leaf Passageiro Teste',
+        customerName: 'Leaf Passageiro Teste'
+      })
+    );
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'bookingCreated',
+      expect.objectContaining({
+        success: true,
+        bookingId: 'booking_1'
+      })
+    );
+  });
+
+  it('recovers payment quote metrics by chargeId when the temporary ride id is not canonical', async () => {
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
+      found: false,
+      paymentIntentId: 'advance_wrong_temp_id'
+    });
+    mockPaymentServiceInstance.getAdvancePaymentIntentByChargeId.mockResolvedValue({
+      found: true,
+      status: 'charge_created',
+      paymentIntentId: 'advance_canonical_1',
+      rideId: 'temp_ride_session_canonical_hash',
+      passengerId: 'customer_1',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+      amountCents: 8785,
+      payableAmountInCents: 8785,
+      paymentSessionId: 'pay_session_1',
+      quoteSessionId: 'quote_session_1',
+      quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1',
+      paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
+      paymentDriverReservationTtlSeconds: 180,
+      passengerName: 'Leaf Passageiro Teste',
+      quoteLockSnapshot: {
+        quoteLockId: 'ql_bound_1',
+        passengerId: 'customer_1',
+        payableAmountInCents: 8785,
+        routeSignature: '-22.90000|-43.20000|-22.91000|-43.21000|leaf_plus',
+        carType: 'leaf_plus',
+        routeDistanceKm: 27.1,
+        routeDurationSecs: 1800
+      }
+    });
+    mockFirestore = createFirestoreWithDocs({
+      'payment_holdings/charge_1': {
+        status: 'in_holding',
+        source: 'woovi_webhook',
+        chargeId: 'charge_1',
+        paymentId: 'charge_1',
+        amount: 8785
+      }
+    });
+    const harness = createHarness();
+
+    await harness.handlers.createBooking(createRequestPayload({
+      routeDistanceKm: 16.43,
+      routeDurationSecs: 987,
+      paymentData: {
+        chargeId: 'charge_1',
+        rideId: 'temp_ride_session_pay_client_id',
+        amountInCents: 8785,
+        paymentSessionId: 'pay_session_1',
+        quoteSessionId: 'quote_session_1',
+        quoteLockId: 'ql_bound_1',
+        paymentDriverReservationId: 'pdr_create_booking_1',
+        paymentStatus: 'confirmed'
+      }
+    }));
+
+    expect(mockPaymentServiceInstance.getAdvancePaymentIntentByChargeId)
+      .toHaveBeenCalledWith('charge_1');
+    expect(harness.RequestRideCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeDistanceKm: 27.1,
+        routeDurationSecs: 1800,
+        passengerName: 'Leaf Passageiro Teste',
+        customerName: 'Leaf Passageiro Teste',
+        paymentData: expect.objectContaining({
+          quoteLockId: 'ql_bound_1',
+          paymentDriverReservationId: 'pdr_create_booking_1',
+          passengerName: 'Leaf Passageiro Teste',
+          customerName: 'Leaf Passageiro Teste',
+          providerEnvironment: 'sandbox',
+          paymentProviderEnvironment: 'sandbox',
+          paymentProfileId: 'qa-test-users-sandbox-durable',
+          paymentProfileSource: 'firestore',
+          paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+          routeDistanceKm: 27.1,
+          routeDurationSecs: 1800
+        })
+      })
+    );
+    expect(harness.socket.emit.mock.calls.filter(([event]) => event === 'bookingError')).toEqual([]);
   });
 
   it('creates a paid booking only after provider proof and availability are both confirmed', async () => {

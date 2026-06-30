@@ -9,14 +9,198 @@ const {
     buildRouteSignature,
     normalizeAmountCents: normalizeQuoteAmountCents
 } = require('../services/quote-lock-service');
+const {
+    getOperationsPolicyDriverLimit,
+    getOperationsPolicyRadiusKm
+} = require('../utils/dispatch-config');
 const { normalizeOperationalCarType } = require('../utils/operational-car-type');
 
 function normalizeText(value) {
     return String(value || '').trim();
 }
 
+function normalizePositiveNumber(value, fallback = 0) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : fallback;
+}
+
+function normalizeRouteCoordinate(value) {
+    const lat = Number(value?.lat ?? value?.latitude);
+    const lng = Number(value?.lng ?? value?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+}
+
+function normalizeRouteCoordinates(value = []) {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map(normalizeRouteCoordinate)
+        .filter(Boolean)
+        .slice(0, 800);
+}
+
+function normalizeTrafficSegments(value = []) {
+    if (!Array.isArray(value)) return [];
+    return value
+        .slice(0, 80)
+        .map((segment) => {
+            const coordinates = normalizeRouteCoordinates(segment?.coordinates);
+            if (coordinates.length < 2) return null;
+            return {
+                level: normalizeText(segment?.level || segment?.trafficLevel || 'normal').slice(0, 32),
+                color: normalizeText(segment?.color || '').slice(0, 32),
+                coordinates
+            };
+        })
+        .filter(Boolean);
+}
+
+function parsePositiveInteger(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function normalizeComparableCarType(value) {
     return normalizeOperationalCarType(value, '');
+}
+
+function isTruthyEnv(value) {
+    return ['1', 'true', 'yes', 'on', 'sim'].includes(
+        String(value || '').trim().toLowerCase()
+    );
+}
+
+function isSandboxOrSmokePaymentIntent(advancePaymentIntent = {}) {
+    if (isTruthyEnv(process.env.REAL_SMOKE_DISABLE_TTLS)) return true;
+    if (isTruthyEnv(process.env.ALLOW_SANDBOX_PAYMENT_DRIVER_RESERVATION_RECOVERY)) return true;
+
+    const haystack = [
+        advancePaymentIntent.providerEnvironment,
+        advancePaymentIntent.paymentProfileId,
+        advancePaymentIntent.paymentProfileReason,
+        advancePaymentIntent.paymentProfileSource
+    ].map((value) => String(value || '').trim().toLowerCase());
+
+    return haystack.some((value) =>
+        value === 'sandbox' ||
+        value.includes('sandbox') ||
+        value.includes('smoke') ||
+        value.includes('test')
+    );
+}
+
+function isRecoverablePaymentDriverReservationCode(code) {
+    return new Set([
+        'PAYMENT_DRIVER_RESERVATION_MISSING',
+        'PAYMENT_DRIVER_RESERVATION_EXPIRED',
+        'PAYMENT_DRIVER_RESERVATION_RELEASED'
+    ]).has(String(code || '').trim().toUpperCase());
+}
+
+function availabilityContainsDriver(availability = {}, driverId) {
+    const safeDriverId = normalizeText(driverId);
+    if (!safeDriverId) return false;
+    return Array.isArray(availability.drivers) && availability.drivers.some((driver) =>
+        normalizeText(driver?.id || driver?.driverId || driver) === safeDriverId
+    );
+}
+
+async function recoverSandboxPaymentDriverReservation({
+    redis,
+    validationCode,
+    advancePaymentIntent,
+    paymentIntentBinding,
+    customerId,
+    paymentReferenceRideId,
+    pickupLocation,
+    destinationLocation,
+    requestedCarType,
+    preferences,
+    checkAvailability,
+    logStructured = () => {},
+    logContext = {}
+} = {}) {
+    if (!isRecoverablePaymentDriverReservationCode(validationCode)) {
+        return { success: false, code: validationCode || 'PAYMENT_DRIVER_RESERVATION_INVALID' };
+    }
+
+    if (!isSandboxOrSmokePaymentIntent(advancePaymentIntent)) {
+        return { success: false, code: validationCode || 'PAYMENT_DRIVER_RESERVATION_INVALID' };
+    }
+
+    const driverId = normalizeText(
+        paymentIntentBinding?.paymentDriverReservationDriverId ||
+        advancePaymentIntent?.paymentDriverReservationDriverId
+    );
+    const reservationId = normalizeText(
+        paymentIntentBinding?.paymentDriverReservationId ||
+        advancePaymentIntent?.paymentDriverReservationId
+    );
+    if (!driverId || !reservationId || typeof checkAvailability !== 'function') {
+        return { success: false, code: validationCode || 'PAYMENT_DRIVER_RESERVATION_INVALID' };
+    }
+
+    const availability = await checkAvailability(pickupLocation, {
+        destinationLocation,
+        preferences,
+        carType: requestedCarType
+    });
+
+    if (!availability?.success || !availabilityContainsDriver(availability, driverId)) {
+        logStructured('warn', 'Recuperação sandbox da reserva de motorista negada: motorista não está elegível', {
+            ...logContext,
+            validationCode,
+            driverId,
+            reservationId,
+            availabilityCode: availability?.code || null
+        });
+        return { success: false, code: 'PAYMENT_DRIVER_RESERVATION_RECOVERY_DRIVER_UNAVAILABLE' };
+    }
+
+    const { reservePaymentDriver } = require('../services/payment-driver-reservation-service');
+    const ttlSeconds = parsePositiveInteger(
+        process.env.SANDBOX_PAYMENT_DRIVER_RESERVATION_RECOVERY_TTL_SECONDS ||
+        process.env.REAL_SMOKE_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS,
+        6 * 60 * 60
+    );
+    const reservationResult = await reservePaymentDriver({
+        redis,
+        driverId,
+        reservationId,
+        passengerId: customerId,
+        rideId: paymentReferenceRideId || advancePaymentIntent?.rideId || null,
+        paymentSessionId: paymentIntentBinding?.paymentSessionId || advancePaymentIntent?.paymentSessionId || null,
+        paymentContextKey: paymentIntentBinding?.paymentContextKey || advancePaymentIntent?.paymentContextKey || null,
+        quoteSessionId: paymentIntentBinding?.quoteSessionId || advancePaymentIntent?.quoteSessionId || null,
+        quoteLockId: paymentIntentBinding?.quoteLockId || advancePaymentIntent?.quoteLockId || null,
+        pickupLocation,
+        destinationLocation,
+        carType: requestedCarType,
+        paymentIntentId: advancePaymentIntent?.paymentIntentId || null,
+        ttlSeconds
+    });
+
+    if (!reservationResult?.success) {
+        return {
+            success: false,
+            code: reservationResult?.code || 'PAYMENT_DRIVER_RESERVATION_RECOVERY_FAILED'
+        };
+    }
+
+    logStructured('warn', 'Reserva de motorista recuperada para smoke sandbox após TTL', {
+        ...logContext,
+        validationCode,
+        driverId,
+        reservationId: reservationResult.reservationId,
+        ttlSeconds
+    });
+
+    return {
+        success: true,
+        reservation: reservationResult.reservation,
+        code: 'PAYMENT_DRIVER_RESERVATION_RECOVERED_FOR_SANDBOX'
+    };
 }
 
 function resolvePaymentIntentValue(intent = {}, snapshot = {}, ...keys) {
@@ -251,8 +435,39 @@ function validateAdvancePaymentIntentBinding({
             paymentDriverReservationDriverId: normalizeText(advancePaymentIntent.paymentDriverReservationDriverId) || null,
             paymentDriverReservationExpiresAt: normalizeText(advancePaymentIntent.paymentDriverReservationExpiresAt) || null,
             paymentDriverReservationTtlSeconds: advancePaymentIntent.paymentDriverReservationTtlSeconds || null,
+            providerEnvironment: normalizeText(advancePaymentIntent.providerEnvironment) || null,
+            paymentProviderEnvironment: normalizeText(advancePaymentIntent.providerEnvironment) || null,
+            paymentProfileId: normalizeText(advancePaymentIntent.paymentProfileId) || null,
+            paymentProfileReason: normalizeText(advancePaymentIntent.paymentProfileReason) || null,
+            paymentProfileSource: normalizeText(advancePaymentIntent.paymentProfileSource) || null,
             payableAmountInCents: expectedPayableAmountInCents || incomingPayableAmountInCents || null,
             grossAmountInCents: expectedGrossAmountInCents || incoming.grossAmountInCents || null,
+            passengerName: normalizeText(
+                advancePaymentIntent.passengerName ||
+                advancePaymentIntent.customerName ||
+                quoteLockSnapshot.passengerName ||
+                quoteLockSnapshot.customerName
+            ) || null,
+            customerName: normalizeText(
+                advancePaymentIntent.customerName ||
+                advancePaymentIntent.passengerName ||
+                quoteLockSnapshot.customerName ||
+                quoteLockSnapshot.passengerName
+            ) || null,
+            routeDistanceKm: normalizePositiveNumber(
+                quoteLockSnapshot.routeDistanceKm ||
+                quoteLockSnapshot.distanceKm ||
+                advancePaymentIntent.routeDistanceKm ||
+                advancePaymentIntent.distanceKm,
+                null
+            ),
+            routeDurationSecs: normalizePositiveNumber(
+                quoteLockSnapshot.routeDurationSecs ||
+                quoteLockSnapshot.durationSecs ||
+                advancePaymentIntent.routeDurationSecs ||
+                advancePaymentIntent.durationSecs,
+                null
+            ),
             routeSignature: expectedRouteSignature || incomingRouteSignature || null
         }
     };
@@ -541,10 +756,14 @@ function registerSocketCreateBookingHandler({
                         estimatedFare,
                         routeDistanceKm,
                         routeDurationSecs,
+                        routeCoordinates,
+                        trafficSegments,
                         tollFee,
                         carType: sanitizedCarType,
                         paymentMethod
                     } = validation.sanitized;
+                    const sanitizedRouteCoordinates = normalizeRouteCoordinates(routeCoordinates);
+                    const sanitizedTrafficSegments = normalizeTrafficSegments(trafficSegments);
                     const customerId = authCustomerId || sanitizedCustomerId;
                     const ridePreferences =
                         data?.preferences && typeof data.preferences === 'object'
@@ -673,6 +892,36 @@ function registerSocketCreateBookingHandler({
                     if (paymentReferenceRideId) {
                         advancePaymentIntent =
                             await paymentServiceSingleton.getAdvancePaymentIntent(paymentReferenceRideId);
+                        if (advancePaymentIntent?.unavailable) {
+                            socket.emit('bookingError', {
+                                error: 'Validação de pagamento indisponível',
+                                message: 'Não foi possível validar o vínculo deste pagamento agora. Tente novamente em alguns segundos.',
+                                code: advancePaymentIntent.code || 'PAYMENT_INTENT_VALIDATION_UNAVAILABLE',
+                                retryAfterSec: 2
+                            });
+                            recordFailure('active_guard', 'payment_intent_validation_unavailable');
+                            return;
+                        }
+                        if (String(advancePaymentIntent?.status || '').trim().toLowerCase() === 'consumed') {
+                            socket.emit('bookingError', {
+                                error: 'Pagamento já utilizado',
+                                message: 'Este pagamento já está vinculado a uma corrida. Sincronize a corrida ativa antes de tentar novamente.',
+                                code: 'PAYMENT_ALREADY_CONSUMED',
+                                activeBookingId: advancePaymentIntent?.bookingId || null,
+                                chargeId: advancePaymentIntent?.chargeId || paymentChargeId || null
+                            });
+                            recordFailure('active_guard', 'payment_already_consumed');
+                            return;
+                        }
+                    }
+
+                    if (
+                        (!advancePaymentIntent?.found) &&
+                        paymentChargeId &&
+                        typeof paymentServiceSingleton.getAdvancePaymentIntentByChargeId === 'function'
+                    ) {
+                        advancePaymentIntent =
+                            await paymentServiceSingleton.getAdvancePaymentIntentByChargeId(paymentChargeId);
                         if (advancePaymentIntent?.unavailable) {
                             socket.emit('bookingError', {
                                 error: 'Validação de pagamento indisponível',
@@ -920,17 +1169,41 @@ function registerSocketCreateBookingHandler({
                             });
 
                             if (!reservationValidation.success) {
+                                const recoveryResult = await recoverSandboxPaymentDriverReservation({
+                                    redis,
+                                    validationCode: reservationValidation.code,
+                                    advancePaymentIntent,
+                                    paymentIntentBinding,
+                                    customerId,
+                                    paymentReferenceRideId,
+                                    pickupLocation,
+                                    destinationLocation,
+                                    requestedCarType,
+                                    preferences: ridePreferences,
+                                    checkAvailability: findAvailableDriversForPickup,
+                                    logStructured,
+                                    logContext: {
+                                        userId,
+                                        customerId,
+                                        eventType: 'createBooking',
+                                        paymentDriverReservationId
+                                    }
+                                });
+                                if (recoveryResult?.success) {
+                                    paymentDriverReservation = recoveryResult.reservation;
+                                } else {
                                 socket.emit('bookingError', {
                                     error: 'Reserva de motorista expirada',
                                     message: 'A reserva do motorista expirou ou não confere com este pagamento. Gere um novo Pix.',
-                                    code: reservationValidation.code || 'PAYMENT_DRIVER_RESERVATION_INVALID',
+                                    code: recoveryResult?.code || reservationValidation.code || 'PAYMENT_DRIVER_RESERVATION_INVALID',
                                     retryAfterSec: 0
                                 });
-                                recordFailure('active_guard', reservationValidation.code || 'payment_driver_reservation_invalid');
+                                recordFailure('active_guard', recoveryResult?.code || reservationValidation.code || 'payment_driver_reservation_invalid');
                                 return;
+                                }
+                            } else {
+                                paymentDriverReservation = reservationValidation.reservation;
                             }
-
-                            paymentDriverReservation = reservationValidation.reservation;
                         } catch (reservationError) {
                             logStructured('warn', 'Falha ao validar reserva de motorista antes do createBooking', {
                                 userId,
@@ -1024,8 +1297,8 @@ function registerSocketCreateBookingHandler({
                         const pendingRides = await redis.zcard(queueKey).catch(() => 0);
                         const availabilitySnapshot = await countNearbyEligibleDriversApprox(pickupLocation, {
                             regionHash: areaPolicyRegionHash,
-                            limit: Number.parseInt(process.env.OPERATIONS_POLICY_DRIVER_LIMIT || '12', 10),
-                            radiusKm: Number.parseFloat(process.env.OPERATIONS_POLICY_RADIUS_KM || '5')
+                            limit: getOperationsPolicyDriverLimit(),
+                            radiusKm: getOperationsPolicyRadiusKm()
                         }).catch(() => ({ success: false, availableDrivers: 0, source: 'error' }));
 
                         areaPolicyDecision = await operationalAreaPolicyService.evaluateCreateBooking({
@@ -1351,7 +1624,16 @@ function registerSocketCreateBookingHandler({
                         'paymentDriverReservationId',
                         'paymentDriverReservationDriverId',
                         'paymentDriverReservationExpiresAt',
-                        'paymentDriverReservationTtlSeconds'
+                        'paymentDriverReservationTtlSeconds',
+                        'providerEnvironment',
+                        'paymentProviderEnvironment',
+                        'paymentProfileId',
+                        'paymentProfileReason',
+                        'paymentProfileSource',
+                        'passengerName',
+                        'customerName',
+                        'routeDistanceKm',
+                        'routeDurationSecs'
                     ].forEach((key) => {
                         if (!commandPaymentData[key] && paymentIntentBinding[key]) {
                             commandPaymentData[key] = paymentIntentBinding[key];
@@ -1373,16 +1655,35 @@ function registerSocketCreateBookingHandler({
                     ) {
                         commandPaymentData.grossAmountInCents = paymentIntentBinding.grossAmountInCents;
                     }
+                    const effectiveRouteDistanceKm =
+                        normalizePositiveNumber(paymentIntentBinding.routeDistanceKm) ||
+                        normalizePositiveNumber(routeDistanceKm) ||
+                        0;
+                    const effectiveRouteDurationSecs =
+                        normalizePositiveNumber(paymentIntentBinding.routeDurationSecs) ||
+                        normalizePositiveNumber(routeDurationSecs) ||
+                        0;
+                    const passengerDisplayName = normalizeText(
+                        data?.passengerName ||
+                        data?.customerName ||
+                        data?.riderName ||
+                        commandPaymentData.passengerName ||
+                        commandPaymentData.customerName
+                    );
 
                     try {
                         const command = new RequestRideCommand({
                             customerId,
                             pickupLocation,
                             destinationLocation,
-                            estimatedFare: estimatedFare || 0,
-                            routeDistanceKm: routeDistanceKm || 0,
-                            routeDurationSecs: routeDurationSecs || 0,
-                            tollFee: tollFee || 0,
+	                            estimatedFare: estimatedFare || 0,
+	                            routeDistanceKm: effectiveRouteDistanceKm,
+	                            routeDurationSecs: effectiveRouteDurationSecs,
+	                            routeCoordinates: sanitizedRouteCoordinates,
+	                            trafficSegments: sanitizedTrafficSegments,
+	                            tollFee: tollFee || 0,
+                            passengerName: passengerDisplayName || null,
+                            customerName: passengerDisplayName || null,
                             carType: requestedCarType,
                             paymentMethod: paymentMethod || 'pix',
                             paymentStatus: normalizedPaymentStatus,
@@ -1564,8 +1865,12 @@ function registerSocketCreateBookingHandler({
                         customerId,
                         pickupLocation,
                         destinationLocation,
-                        estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
-                        paymentMethod,
+	                        estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
+	                        routeDistanceKm: commandBookingData?.routeDistanceKm || routeDistanceKm || 0,
+	                        routeDurationSecs: commandBookingData?.routeDurationSecs || routeDurationSecs || 0,
+	                        routeCoordinates: commandBookingData?.routeCoordinates || sanitizedRouteCoordinates,
+	                        trafficSegments: commandBookingData?.trafficSegments || sanitizedTrafficSegments,
+	                        paymentMethod,
                         status: 'requested'
                     });
 
@@ -1925,8 +2230,12 @@ function registerSocketCreateBookingHandler({
                                 passengerId: customerId,
                                 pickupLocation: pickupLocation,
                                 destinationLocation: destinationLocation,
-                                estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
-                                paymentMethod: paymentMethod || 'pix',
+	                                estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
+	                                routeDistanceKm: commandBookingData?.routeDistanceKm || effectiveRouteDistanceKm || 0,
+	                                routeDurationSecs: commandBookingData?.routeDurationSecs || effectiveRouteDurationSecs || 0,
+	                                routeCoordinates: commandBookingData?.routeCoordinates || sanitizedRouteCoordinates,
+	                                trafficSegments: commandBookingData?.trafficSegments || sanitizedTrafficSegments,
+	                                paymentMethod: paymentMethod || 'pix',
                                 paymentStatus: data.paymentStatus || 'pending_payment',
                                 status: hasConfirmedPayment ? 'pending' : 'awaiting_payment',
                                 carType: data.carType || null

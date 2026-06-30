@@ -16,7 +16,10 @@ const {
 const {
   DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS
 } = require('../services/payment-driver-reservation-service');
-const { validateQuoteLock } = require('../services/quote-lock-service');
+const {
+  validateQuoteLock,
+  validateQuoteLockPayload
+} = require('../services/quote-lock-service');
 const { logStructured, logError } = require('../utils/logger');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
@@ -72,6 +75,90 @@ function resolveAdvancePaymentFailureStatus(code) {
   }
   if (normalized.includes('WOOVI') || normalized.includes('PROVIDER')) return 502;
   return 400;
+}
+
+function canRecoverQuoteLockFromIntentSnapshot(code) {
+  return code === 'QUOTE_LOCK_NOT_FOUND_OR_EXPIRED' || code === 'QUOTE_LOCK_EXPIRED';
+}
+
+async function validateQuoteLockFromPaymentIntentSnapshot({
+  rideId,
+  quoteLockId,
+  quoteSessionId,
+  passengerId,
+  amountInCents,
+  grossAmountInCents,
+  pickupLocation,
+  destinationLocation,
+  carType,
+  toleranceInCents
+} = {}) {
+  const safeRideId = String(rideId || '').trim();
+  const safeQuoteLockId = String(quoteLockId || '').trim();
+  const safePassengerId = String(passengerId || '').trim();
+  if (!safeRideId || !safeQuoteLockId || !safePassengerId) return null;
+
+  const firestore = firebaseConfig.getFirestore();
+  if (!firestore) return null;
+
+  const paymentIntentId = paymentService.buildAdvancePaymentIntentId(safeRideId);
+  let paymentIntentSnapshot = await firestore.collection('payment_intents').doc(paymentIntentId).get();
+  let recoveredPaymentIntentId = paymentIntentId;
+
+  if (!paymentIntentSnapshot.exists) {
+    const candidates = await firestore
+      .collection('payment_intents')
+      .where('passengerId', '==', safePassengerId)
+      .where('quoteLockId', '==', safeQuoteLockId)
+      .limit(20)
+      .get();
+    const candidateDoc = candidates.docs
+      .map((doc) => ({ id: doc.id, data: doc.data() || {} }))
+      .filter(({ data }) => data.quoteLockSnapshot)
+      .sort((left, right) => {
+        const leftTime = Date.parse(left.data.updatedAtIso || left.data.createdAtIso || '') || 0;
+        const rightTime = Date.parse(right.data.updatedAtIso || right.data.createdAtIso || '') || 0;
+        return rightTime - leftTime;
+      })[0];
+    if (!candidateDoc) return null;
+    recoveredPaymentIntentId = candidateDoc.id;
+    paymentIntentSnapshot = {
+      exists: true,
+      data: () => candidateDoc.data
+    };
+  }
+
+  const intent = paymentIntentSnapshot.data() || {};
+  const intentPassengerId = String(intent.passengerId || '').trim();
+  const intentRideId = String(intent.rideId || '').trim();
+  const intentQuoteLockId = String(intent.quoteLockId || intent.quoteLockSnapshot?.quoteLockId || '').trim();
+  const status = String(intent.status || '').trim().toLowerCase();
+
+  if (status === 'consumed') return null;
+  if (recoveredPaymentIntentId === paymentIntentId && intentRideId && intentRideId !== safeRideId) return null;
+  if (intentPassengerId && intentPassengerId !== safePassengerId) return null;
+  if (intentQuoteLockId && intentQuoteLockId !== safeQuoteLockId) return null;
+  if (!intent.quoteLockSnapshot) return null;
+
+  const validation = validateQuoteLockPayload({
+    quoteLock: intent.quoteLockSnapshot,
+    quoteSessionId,
+    passengerId,
+    amountInCents,
+    grossAmountInCents,
+    pickupLocation,
+    destinationLocation,
+    carType,
+    toleranceInCents,
+    allowExpired: true
+  });
+
+  if (!validation.success) return validation;
+  return {
+    ...validation,
+    recoveredFromPaymentIntentSnapshot: true,
+    paymentIntentId: recoveredPaymentIntentId
+  };
 }
 
 function extractBearerToken(req) {
@@ -393,6 +480,65 @@ function normalizePaymentAmountCents(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
   return Math.max(0, Math.round(parsed));
+}
+
+function normalizeMoneyReais(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = typeof value === 'string'
+    ? value.replace(/[^\d,.-]/g, '').replace(',', '.')
+    : value;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Number(parsed.toFixed(2)));
+}
+
+function resolvePaymentTollAmounts({
+  quoteLockValidation = null,
+  tollFee = null,
+  tollFeeCents = null,
+  rideDetails = null
+} = {}) {
+  const quoteLock = quoteLockValidation?.success ? quoteLockValidation.quoteLock : null;
+  if (quoteLock) {
+    const lockedCents = normalizePaymentAmountCents(quoteLock.tollFeeCents);
+    if (Number.isFinite(Number(quoteLock.tollFeeCents))) {
+      return {
+        tollFee: Number((lockedCents / 100).toFixed(2)),
+        tollFeeCents: lockedCents
+      };
+    }
+
+    const lockedReais = normalizeMoneyReais(
+      quoteLock.tollFee ??
+        quoteLock.tollAmount ??
+        quoteLock.pricingPayload?.toll_fee ??
+        quoteLock.pricingPayload?.tollFee
+    ) ?? 0;
+    return {
+      tollFee: lockedReais,
+      tollFeeCents: normalizePaymentAmountCents(lockedReais * 100)
+    };
+  }
+
+  if (Number.isFinite(Number(tollFeeCents))) {
+    const cents = normalizePaymentAmountCents(tollFeeCents);
+    return {
+      tollFee: Number((cents / 100).toFixed(2)),
+      tollFeeCents: cents
+    };
+  }
+
+  const incomingReais = normalizeMoneyReais(
+    tollFee ??
+      rideDetails?.tollFee ??
+      rideDetails?.tollAmount ??
+      rideDetails?.pricingPayload?.toll_fee ??
+      rideDetails?.pricingPayload?.tollFee
+  ) ?? 0;
+  return {
+    tollFee: incomingReais,
+    tollFeeCents: normalizePaymentAmountCents(incomingReais * 100)
+  };
 }
 
 async function validatePassengerDiscountPayload({
@@ -721,6 +867,49 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
         };
       }
 
+      if (
+        !quoteLockValidation?.success &&
+        canRecoverQuoteLockFromIntentSnapshot(quoteLockValidation?.code)
+      ) {
+        try {
+          const recoveredQuoteLockValidation = await validateQuoteLockFromPaymentIntentSnapshot({
+            rideId,
+            quoteLockId,
+            quoteSessionId,
+            passengerId,
+            amountInCents: authoritativeAmountInCents,
+            grossAmountInCents: authoritativeGrossAmountInCents,
+            pickupLocation: availabilityInput.pickupLocation,
+            destinationLocation: availabilityInput.destinationLocation,
+            carType: availabilityInput.carType,
+            toleranceInCents: Number.parseInt(process.env.PAYMENT_QUOTE_LOCK_TOLERANCE_CENTS || '1', 10) || 1
+          });
+
+          if (recoveredQuoteLockValidation?.success) {
+            quoteLockValidation = recoveredQuoteLockValidation;
+            logStructured('warn', 'payment/advance recuperou quote lock expirado via payment intent snapshot', {
+              service: 'payment-routes',
+              passengerId,
+              rideId: rideId || paymentSessionId || null,
+              quoteSessionId: quoteSessionId || null,
+              quoteLockId: quoteLockId || null,
+              paymentIntentId: recoveredQuoteLockValidation.paymentIntentId || null,
+              quoteLockExpirationBypassed: recoveredQuoteLockValidation.quoteLockExpirationBypassed === true
+            });
+          } else if (recoveredQuoteLockValidation) {
+            quoteLockValidation = recoveredQuoteLockValidation;
+          }
+        } catch (recoveryError) {
+          logStructured('warn', 'payment/advance falhou ao recuperar quote lock expirado via payment intent snapshot', {
+            service: 'payment-routes',
+            passengerId,
+            rideId: rideId || paymentSessionId || null,
+            quoteLockId: quoteLockId || null,
+            error: recoveryError.message
+          });
+        }
+      }
+
       if (!quoteLockValidation?.success) {
         const statusCode = resolveQuoteLockFailureStatus(quoteLockValidation?.code);
         logStructured(statusCode >= 500 ? 'error' : 'warn', 'payment/advance bloqueado por quote lock inválido', {
@@ -750,6 +939,7 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
 
     const availability = await hasPaymentEligibleDriver({
       ...availabilityInput,
+      io: req.app.get('io'),
       reserveDriver: true,
       reservationTtlSeconds: DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS,
       reservationContext: {
@@ -810,6 +1000,13 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       return res.status(discountValidation.statusCode || 400).json(discountValidation.payload);
     }
 
+    const authoritativeTollAmounts = resolvePaymentTollAmounts({
+      quoteLockValidation,
+      tollFee,
+      tollFeeCents,
+      rideDetails
+    });
+
     const paymentData = {
       passengerId,
       amount: authoritativeAmountInCents,
@@ -835,8 +1032,8 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       driverSubaccountPixKey,
       wooviSubaccountPixKey,
       subaccountPixKey,
-      tollFee,
-      tollFeeCents,
+      tollFee: authoritativeTollAmounts.tollFee,
+      tollFeeCents: authoritativeTollAmounts.tollFeeCents,
       passengerPhone: passengerPhone || phone || phoneNumber || req.paymentActor?.phoneNumber || req.paymentActor?.phone || null,
       grossAmountInCents: discountValidation.grossAmountInCents,
       payableAmountInCents: discountValidation.payableAmountInCents,

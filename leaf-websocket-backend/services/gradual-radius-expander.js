@@ -19,7 +19,13 @@ const DriverNotificationDispatcher = require('./driver-notification-dispatcher')
 const { logger } = require('../utils/logger');
 const { clearOfferReservationsForBooking } = require('./offer-reservation-service');
 const { recordDispatchWave } = require('./dispatch-wave-trace-service');
-const { getDriverResponseTimeoutSeconds } = require('../utils/dispatch-config');
+const {
+    getDriverResponseTimeoutSeconds,
+    getDriverSearchDriversPerWave,
+    getDriverSearchExpansionStepKm,
+    getDriverSearchInitialRadiusKm,
+    getDriverSearchMaxRadiusKm
+} = require('../utils/dispatch-config');
 const PaymentService = require('./payment-service');
 
 // ✅ Compartilhar intervalos entre instâncias para permitir cancelamento global
@@ -69,9 +75,9 @@ class GradualRadiusExpander {
         const isTest = process.env.NODE_ENV === 'test';
         this.config = {
             // Regras padrão de busca: 2.5km inicial -> 5km em 8s (alinhado com UX do passageiro).
-            initialRadius: parsePositiveNumber(process.env.MATCH_INITIAL_RADIUS_KM, isTest ? 5.0 : 2.5),
-            maxRadius: parsePositiveNumber(process.env.MATCH_MAX_RADIUS_KM, isTest ? 30 : 5.0),
-            expansionStep: parsePositiveNumber(process.env.MATCH_EXPANSION_STEP_KM, isTest ? 5.0 : 2.5),
+            initialRadius: isTest ? 5.0 : getDriverSearchInitialRadiusKm(),
+            maxRadius: isTest ? 30 : getDriverSearchMaxRadiusKm(),
+            expansionStep: isTest ? 5.0 : getDriverSearchExpansionStepKm(),
             expansionInterval: parsePositiveNumber(process.env.MATCH_EXPANSION_INTERVAL_MS, isTest ? 1000 : 8000),
             emptyWaveExpansionInterval: parsePositiveNumber(
                 process.env.MATCH_EMPTY_WAVE_INTERVAL_MS,
@@ -87,7 +93,7 @@ class GradualRadiusExpander {
                 process.env.MATCH_MINIMUM_SEARCH_DURATION_MS,
                 isTest ? 0 : 180000
             ),
-            driversPerWave: Number.parseInt(process.env.MATCH_DRIVERS_PER_WAVE || (isTest ? '1' : '12'), 10),
+            driversPerWave: isTest ? 1 : getDriverSearchDriversPerWave(),
             responsePauseMinUniqueDrivers: parsePositiveInt(
                 process.env.MATCH_RESPONSE_PAUSE_MIN_UNIQUE_DRIVERS,
                 1
@@ -494,6 +500,7 @@ class GradualRadiusExpander {
                 limit,
                 bookingId,
                 {
+                    bookingData: safeBookingData,
                     pickupLocation,
                     destinationLocation: this.safeJSONParse(
                         safeBookingData.destinationLocation,

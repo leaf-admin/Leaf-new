@@ -204,6 +204,11 @@ function registerSocketCancelRideHandler({
 
                 // 3. Liberar locks de todos os motoristas notificados
                 const notifiedDrivers = await redis.smembers(`ride_notifications:${bookingId}`);
+                const notifiedDriverIds = new Set(
+                    Array.isArray(notifiedDrivers)
+                        ? notifiedDrivers.map(driverId => String(driverId || '').trim()).filter(Boolean)
+                        : []
+                );
                 const driverLockManager = require('../services/driver-lock-manager');
                 const DriverNotificationDispatcher = require('../services/driver-notification-dispatcher');
                 const dispatcher = new DriverNotificationDispatcher(io);
@@ -541,10 +546,12 @@ function registerSocketCancelRideHandler({
                 // ✅ Padronizar uso de rooms para alta escalabilidade
                 const initiatorId = socket.userId || socket.id;
                 const initiatorType = socket.userType || 'unknown';
+                const notifiedDriversAlreadyCancelled = new Set();
 
                 // Emitir para quem iniciou o cancelamento via room
                 if (initiatorType === 'driver') {
                     io.to(`driver_${initiatorId}`).emit('rideCancelled', cancellationResponse);
+                    notifiedDriversAlreadyCancelled.add(String(initiatorId));
                     logStructured('info', 'rideCancelled enviado para driver', {
                         driverId: initiatorId,
                         bookingId,
@@ -591,11 +598,53 @@ function registerSocketCancelRideHandler({
                 const driverIdFromBooking = bookingDataForDriver?.driverId;
                 if (driverIdFromBooking && driverIdFromBooking !== initiatorId) {
                     io.to(`driver_${driverIdFromBooking}`).emit('rideCancelled', cancellationResponse);
+                    notifiedDriversAlreadyCancelled.add(String(driverIdFromBooking));
                     logStructured('info', 'rideCancelled enviado para driver (motorista)', {
                         driverId: driverIdFromBooking,
                         bookingId,
                         eventType: 'cancelRide'
                     });
+                }
+                if (notifiedDriverIds.size > 0) {
+                    const passengerCancelledMessage =
+                        initiatorType === 'customer' || initiatorType === 'passenger'
+                            ? 'Corrida cancelada pelo passageiro'
+                            : cancellationResponse.message;
+                    const notifiedDriverCancellationResponse = {
+                        ...cancellationResponse,
+                        message: passengerCancelledMessage,
+                        data: {
+                            ...(cancellationResponse.data || {}),
+                            cancelledBy: initiatorType,
+                            cancelledById: initiatorId,
+                            reason: cancellationData.reason
+                        }
+                    };
+                    for (const notifiedDriverId of notifiedDriverIds) {
+                        if (
+                            !notifiedDriverId ||
+                            notifiedDriverId === String(initiatorId) ||
+                            notifiedDriversAlreadyCancelled.has(String(notifiedDriverId))
+                        ) {
+                            continue;
+                        }
+
+                        await redis.del(`driver_active_notification:${notifiedDriverId}`).catch(() => null);
+                        io.to(`driver_${notifiedDriverId}`).emit('rideCancelled', notifiedDriverCancellationResponse);
+                        io.to(`driver_${notifiedDriverId}`).emit('clearRideRequest', {
+                            success: true,
+                            bookingId,
+                            rideId: bookingId,
+                            reason: 'passenger_cancelled',
+                            message: passengerCancelledMessage,
+                            timestamp: new Date().toISOString()
+                        });
+                        logStructured('info', 'rideCancelled enviado para driver notificado antes do aceite', {
+                            driverId: notifiedDriverId,
+                            bookingId,
+                            eventType: 'cancelRide'
+                        });
+                    }
                 }
                 if (passengerId && refundSummary.status !== 'NO_PAYMENT_FOUND') {
                     const refundEventPayload = {

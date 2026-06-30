@@ -23,7 +23,10 @@ const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const FCMService = require('./fcm-service');
-const { getDriverResponseTimeoutSeconds } = require('../utils/dispatch-config');
+const {
+    getDriverResponseTimeoutSeconds,
+    getDriverSearchMaxRadiusKm
+} = require('../utils/dispatch-config');
 
 const parsePositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(value, 10);
@@ -40,7 +43,7 @@ const DRIVER_REOFFER_MAX_REJECTIONS = parsePositiveInt(
     process.env.DRIVER_REOFFER_MAX_REJECTIONS,
     2
 );
-const DRIVER_RESPONSE_TIMEOUT_SECONDS = getDriverResponseTimeoutSeconds();
+const DRIVER_SEARCH_MAX_RADIUS_KM = getDriverSearchMaxRadiusKm();
 
 class ResponseHandler {
     constructor(io) {
@@ -1039,8 +1042,8 @@ class ResponseHandler {
                                     pickupLocation.lng
                                 ) / 1000; // Converter para km
 
-                                // Verificar se está dentro do raio máximo (5km)
-                                if (distance > 5) {
+                                // Verificar se está dentro do raio máximo canônico de busca.
+                                if (distance > DRIVER_SEARCH_MAX_RADIUS_KM) {
                                     continue; // Pular esta corrida
                                 }
 
@@ -1140,7 +1143,7 @@ class ResponseHandler {
                             continue;
                         }
 
-                        // ✅ Verificar se corrida está dentro do raio do motorista (5km máximo)
+                        // ✅ Verificar se corrida está dentro do raio máximo canônico do motorista.
                         const pickupLocation = this.safeJSONParse(bookingData.pickupLocation, null);
 
                         if (!pickupLocation) {
@@ -1155,9 +1158,9 @@ class ResponseHandler {
                                 pickupLocation.lng
                             ) / 1000; // Converter para km
 
-                            // Verificar se está dentro do raio máximo (5km)
-                            if (distance > 5) {
-                                logger.debug(`⚠️ [ResponseHandler] Corrida ${bookingId} fora do raio (${distance.toFixed(2)}km > 5km) para ${driverId}`);
+                            // Verificar se está dentro do raio máximo canônico.
+                            if (distance > DRIVER_SEARCH_MAX_RADIUS_KM) {
+                                logger.debug(`⚠️ [ResponseHandler] Corrida ${bookingId} fora do raio (${distance.toFixed(2)}km > ${DRIVER_SEARCH_MAX_RADIUS_KM}km) para ${driverId}`);
                                 continue; // Pular esta corrida, buscar próxima
                             }
                         }
@@ -1265,7 +1268,7 @@ class ResponseHandler {
                 destinationLocation: this.safeJSONParse(bookingData.destinationLocation),
                 estimatedFare: parseFloat(bookingData.estimatedFare || 0),
                 paymentMethod: bookingData.paymentMethod || 'pix',
-                timeout: DRIVER_RESPONSE_TIMEOUT_SECONDS,
+                timeout: getDriverResponseTimeoutSeconds(bookingData),
                 timestamp: new Date().toISOString()
             };
 

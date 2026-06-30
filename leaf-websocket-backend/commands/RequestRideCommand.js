@@ -42,8 +42,15 @@ class RequestRideCommand extends Command {
         this.estimatedFare = data.estimatedFare || 0;
         this.routeDistanceKm = data.routeDistanceKm || 0;
         this.routeDurationSecs = data.routeDurationSecs || 0;
+        this.routeCoordinates = Array.isArray(data.routeCoordinates)
+            ? data.routeCoordinates
+            : [];
+        this.trafficSegments = Array.isArray(data.trafficSegments)
+            ? data.trafficSegments
+            : [];
         this.tollFee = data.tollFee || 0;
         this.carType = data.carType || null;
+        this.passengerName = String(data.passengerName || data.customerName || '').trim();
         this.paymentMethod = data.paymentMethod || 'pix';
         this.paymentStatus = data.paymentStatus || 'pending_payment';
         this.paymentId = data.paymentId || null;
@@ -254,6 +261,23 @@ class RequestRideCommand extends Command {
                     String(this.paymentData?.paymentDriverReservationTtlSeconds || ''),
                     10
                 );
+                const paymentProviderEnvironment = String(
+                    this.paymentData?.paymentProviderEnvironment ||
+                    this.paymentData?.providerEnvironment ||
+                    ''
+                ).trim();
+                const paymentProfileId = String(
+                    this.paymentData?.paymentProfileId ||
+                    ''
+                ).trim();
+                const paymentProfileReason = String(
+                    this.paymentData?.paymentProfileReason ||
+                    ''
+                ).trim();
+                const paymentProfileSource = String(
+                    this.paymentData?.paymentProfileSource ||
+                    ''
+                ).trim();
                 const parsedPaymentAmountInCents = Number.parseInt(
                     String(this.paymentData?.amountInCents ?? ''),
                     10
@@ -283,6 +307,17 @@ class RequestRideCommand extends Command {
                     lockedEstimatedFareFromPayment !== null
                         ? lockedEstimatedFareFromPayment
                         : fareEstimation.estimatedFare;
+                const hasLockedRouteMetrics =
+                    hasConfirmedPayment &&
+                    Number(this.routeDistanceKm) > 0 &&
+                    Number(this.routeDurationSecs) > 0;
+                const bookingRouteMetrics = hasLockedRouteMetrics
+                    ? {
+                        distanceKm: Number(this.routeDistanceKm),
+                        durationSecs: Math.max(0, Math.round(Number(this.routeDurationSecs))),
+                        source: 'payment_quote_lock'
+                    }
+                    : fareEstimation.routeMetrics;
                 const pricingPayloadForBooking =
                     fareEstimation.pricingPayload &&
                     typeof fareEstimation.pricingPayload === 'object'
@@ -329,6 +364,8 @@ class RequestRideCommand extends Command {
                 const bookingData = {
                     bookingId,
                     customerId: this.customerId,
+                    passengerName: this.passengerName || null,
+                    customerName: this.passengerName || null,
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
                     estimatedFare: estimatedFareForBooking,
@@ -343,10 +380,12 @@ class RequestRideCommand extends Command {
                             : 0,
                     passengerDiscountBenefit: paymentDiscountBenefit || null,
                     passengerDiscountUsage: consumedDiscount?.usage || null,
-                    routeDistanceKm: fareEstimation.routeMetrics.distanceKm,
-                    routeDurationSecs: fareEstimation.routeMetrics.durationSecs,
+                    routeDistanceKm: bookingRouteMetrics.distanceKm,
+                    routeDurationSecs: bookingRouteMetrics.durationSecs,
+                    routeCoordinates: this.routeCoordinates,
+                    trafficSegments: this.trafficSegments,
                     tollFee: fareEstimation.tollFee,
-                    fareSource: fareEstimation.routeMetrics.source,
+                    fareSource: bookingRouteMetrics.source,
                     pricingPayload: pricingPayloadForBooking,
                     pricingAudit: fareEstimation.pricingAudit,
                     operationalState: fareEstimation.operationalState,
@@ -371,6 +410,11 @@ class RequestRideCommand extends Command {
                         paymentDriverReservationTtlSeconds > 0
                             ? paymentDriverReservationTtlSeconds
                             : '',
+                    paymentProviderEnvironment,
+                    providerEnvironment: paymentProviderEnvironment,
+                    paymentProfileId,
+                    paymentProfileReason,
+                    paymentProfileSource,
                     paymentConfirmedAt,
                     preferences: { ...(this.preferences || {}) },
                     femaleDriverOnly: this.preferences?.femaleDriverOnly === true ||

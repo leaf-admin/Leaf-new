@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const crypto = require('crypto');
+const admin = require('firebase-admin');
 const router = express.Router();
 const { logStructured, logError } = require('../utils/logger');
 const { getWooviConfig, getWooviAuthHeaders } = require('../config/woovi-config');
@@ -10,6 +11,8 @@ const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const WOOVI_CONFIG = getWooviConfig();
 const WOOVI_ADMIN_ROLES = ['admin', 'super-admin', 'manager'];
 const WOOVI_SANDBOX_TEST_ROLES = [...WOOVI_ADMIN_ROLES, 'development'];
+const WOOVI_SANDBOX_TEST_PAYMENT_URL =
+  process.env.WOOVI_SANDBOX_TEST_PAYMENT_URL || 'https://api.woovi.com/openpix/testing';
 const legacyWooviAliasRouteEnabled =
   String(process.env.ENABLE_LEGACY_WOOVI_ALIAS_ROUTE || 'false').toLowerCase() === 'true';
 
@@ -94,6 +97,73 @@ function normalizeBearerToken(value) {
   const token = String(value || '').trim();
   if (!token) return '';
   return token.replace(/^bearer\s+/i, '').trim();
+}
+
+function canSandboxTestPaymentActorConfirm(actor = null, passengerId = '') {
+  const safePassengerId = String(passengerId || '').trim();
+  if (!actor || !safePassengerId) {
+    return false;
+  }
+
+  if (WOOVI_SANDBOX_TEST_ROLES.includes(String(actor.role || '').trim())) {
+    return true;
+  }
+
+  const identifiers = new Set();
+  [
+    actor.uid,
+    actor.id,
+    actor.userId,
+    actor.sub,
+    actor.phoneNumber,
+    actor.phone_number,
+    actor.phone,
+    actor.email
+  ].forEach((value) => {
+    const normalized = String(value || '').trim();
+    if (normalized) identifiers.add(normalized);
+  });
+
+  return identifiers.has(safePassengerId);
+}
+
+async function authenticateFirebaseSandboxPaymentActor(req, res, next) {
+  const token = normalizeBearerToken(req.headers.authorization || '');
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: 'Token não fornecido',
+      code: 'SANDBOX_PAYMENT_AUTH_TOKEN_MISSING'
+    });
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    const actor = {
+      type: 'firebase',
+      uid: decoded.uid,
+      id: decoded.uid,
+      userId: decoded.uid,
+      sub: decoded.sub || decoded.uid,
+      phoneNumber: decoded.phone_number || decoded.phoneNumber || null,
+      email: decoded.email || null,
+      role: decoded.role || decoded.userType || decoded.user_type || 'user'
+    };
+    req.sandboxPaymentActor = actor;
+    req.user = req.user || actor;
+    return next();
+  } catch (error) {
+    logStructured('warn', 'Confirmação sandbox bloqueada por token Firebase inválido', {
+      service: 'woovi-routes',
+      operation: 'sandbox_payment_app_auth',
+      code: error?.code || null
+    });
+    return res.status(401).json({
+      success: false,
+      error: 'Token inválido ou expirado',
+      code: 'SANDBOX_PAYMENT_AUTH_TOKEN_INVALID'
+    });
+  }
 }
 
 function extractWebhookChargePayload(data = {}) {
@@ -408,6 +478,188 @@ function getWebhookAuthorizationCandidates(req) {
   ]
     .map((value) => String(value || '').trim())
     .filter(Boolean);
+}
+
+function sanitizeProviderBody(body) {
+  if (!body || typeof body !== 'object') {
+    return body || null;
+  }
+
+  const redacted = JSON.parse(JSON.stringify(body));
+  const sensitiveKeys = new Set([
+    'authorization',
+    'authorizationappid',
+    'appid',
+    'appId',
+    'apiToken',
+    'token',
+    'secret',
+    'clientSecret'
+  ]);
+
+  const redactObject = (value) => {
+    if (!value || typeof value !== 'object') return;
+    Object.keys(value).forEach((key) => {
+      if (sensitiveKeys.has(key) || sensitiveKeys.has(String(key).toLowerCase())) {
+        value[key] = '[redacted]';
+        return;
+      }
+      redactObject(value[key]);
+    });
+  };
+
+  redactObject(redacted);
+  return redacted;
+}
+
+function getWooviSandboxTestPaymentUrl() {
+  return String(process.env.WOOVI_SANDBOX_TEST_PAYMENT_URL || WOOVI_SANDBOX_TEST_PAYMENT_URL).trim();
+}
+
+function firstConfiguredValue(entries = []) {
+  for (const entry of entries) {
+    const value = String(entry?.value || '').trim();
+    if (value) {
+      return {
+        value,
+        source: entry.source || 'unknown'
+      };
+    }
+  }
+  return { value: '', source: 'missing' };
+}
+
+function resolveWooviSandboxTestAuthorization(sandboxConfig = {}) {
+  return firstConfiguredValue([
+    { source: 'WOOVI_SANDBOX_TEST_APP_ID', value: process.env.WOOVI_SANDBOX_TEST_APP_ID },
+    {
+      source: 'WOOVI_SANDBOX_TEST_AUTHORIZATION_APP_ID',
+      value: process.env.WOOVI_SANDBOX_TEST_AUTHORIZATION_APP_ID
+    },
+    {
+      source: 'OPENPIX_SANDBOX_TEST_APP_ID',
+      value: process.env.OPENPIX_SANDBOX_TEST_APP_ID
+    },
+    {
+      source: 'OPENPIX_SANDBOX_TEST_AUTHORIZATION_APP_ID',
+      value: process.env.OPENPIX_SANDBOX_TEST_AUTHORIZATION_APP_ID
+    },
+    {
+      source: 'woovi_sandbox_config.authorizationAppId',
+      value: sandboxConfig.authorizationAppId
+    },
+    {
+      source: 'woovi_sandbox_config.apiToken',
+      value: sandboxConfig.apiToken
+    }
+  ]);
+}
+
+async function requestWooviSandboxTestPayment({ transactionID, chargeId, paymentIntentId } = {}) {
+  const resolvedTransactionID = String(transactionID || chargeId || '').trim();
+  if (!resolvedTransactionID) {
+    return {
+      success: false,
+      code: 'WOOVI_SANDBOX_TEST_TRANSACTION_ID_REQUIRED',
+      error: 'transactionID da cobrança sandbox é obrigatório'
+    };
+  }
+
+  const sandboxConfig = getWooviConfig({ environment: 'sandbox' });
+  const authorization = resolveWooviSandboxTestAuthorization(sandboxConfig);
+  if (!authorization.value) {
+    return {
+      success: false,
+      code: 'WOOVI_SANDBOX_AUTHORIZATION_MISSING',
+      error: 'Authorization AppID sandbox da Woovi não configurado',
+      authorizationSource: authorization.source
+    };
+  }
+
+  const endpointUrl = getWooviSandboxTestPaymentUrl();
+  try {
+    const response = await axios.get(endpointUrl, {
+      headers: {
+        ...getWooviAuthHeaders(sandboxConfig),
+        Authorization: authorization.value
+      },
+      params: {
+        transactionID: resolvedTransactionID
+      },
+      timeout: Math.max(
+        5000,
+        Number.parseInt(process.env.WOOVI_SANDBOX_TEST_PAYMENT_TIMEOUT_MS || '20000', 10) || 20000
+      ),
+      validateStatus: (status) => status >= 200 && status < 500
+    });
+
+    const status = Number(response.status || 0);
+    const providerBody = sanitizeProviderBody(response.data);
+    const endpointHost = (() => {
+      try {
+        return new URL(endpointUrl).host;
+      } catch (_error) {
+        return endpointUrl;
+      }
+    })();
+
+    if (status < 200 || status >= 300) {
+      logStructured('warn', 'Woovi recusou confirmação sandbox oficial', {
+        service: 'woovi-routes',
+        operation: 'woovi_sandbox_testing_payment',
+        chargeId: chargeId || resolvedTransactionID,
+        paymentIntentId: paymentIntentId || null,
+        transactionID: resolvedTransactionID,
+        status,
+        endpointHost,
+        authorizationSource: authorization.source,
+        providerBody
+      });
+      return {
+        success: false,
+        code: 'WOOVI_SANDBOX_TEST_PAYMENT_REJECTED',
+        status,
+        transactionID: resolvedTransactionID,
+        endpointHost,
+        authorizationSource: authorization.source,
+        providerBody
+      };
+    }
+
+    logStructured('info', 'Woovi confirmou pagamento sandbox pelo endpoint oficial', {
+      service: 'woovi-routes',
+      operation: 'woovi_sandbox_testing_payment',
+      chargeId: chargeId || resolvedTransactionID,
+      paymentIntentId: paymentIntentId || null,
+      transactionID: resolvedTransactionID,
+      status,
+      endpointHost,
+      authorizationSource: authorization.source
+    });
+
+    return {
+      success: true,
+      status,
+      transactionID: resolvedTransactionID,
+      endpointHost,
+      authorizationSource: authorization.source,
+      providerBody
+    };
+  } catch (error) {
+    logError(error, 'Erro ao chamar endpoint oficial de pagamento sandbox Woovi', {
+      service: 'woovi-routes',
+      operation: 'woovi_sandbox_testing_payment',
+      chargeId: chargeId || resolvedTransactionID,
+      paymentIntentId: paymentIntentId || null,
+      transactionID: resolvedTransactionID
+    });
+    return {
+      success: false,
+      code: 'WOOVI_SANDBOX_TEST_PAYMENT_REQUEST_FAILED',
+      error: error.message,
+      transactionID: resolvedTransactionID
+    };
+  }
 }
 
 function verifyWebhookAuthorization(req) {
@@ -1568,60 +1820,121 @@ router.post('/woovi/test-webhook', authenticateJWT, requireRole(WOOVI_ADMIN_ROLE
   }
 });
 
+async function handleSandboxTestPaymentConfirmation(req, res) {
+  try {
+    const resolved = await resolveSandboxTestWebhookPayload(req.body || {});
+    if (!resolved.found) {
+      return res.status(404).json({
+        success: false,
+        code: resolved.reason
+      });
+    }
+
+    if (
+      req.sandboxPaymentActor &&
+      !canSandboxTestPaymentActorConfirm(req.sandboxPaymentActor, resolved.passengerId)
+    ) {
+      logStructured('warn', 'Confirmação sandbox recusada por passageiro divergente', {
+        service: 'woovi-routes',
+        actorId: req.sandboxPaymentActor.uid || req.sandboxPaymentActor.id || null,
+        passengerId: resolved.passengerId,
+        chargeId: resolved.chargeId,
+        paymentIntentId: resolved.paymentIntentId
+      });
+      return res.status(403).json({
+        success: false,
+        code: 'SANDBOX_PAYMENT_PASSENGER_SCOPE_MISMATCH',
+        error: 'Passageiro não autorizado para confirmar esta cobrança sandbox'
+      });
+    }
+
+    const validation = await validateSandboxTestWebhookPayload(resolved.payload);
+    if (!validation.allowed) {
+      return res.status(409).json({
+        success: false,
+        code: validation.reason
+      });
+    }
+
+    const providerConfirmation = await requestWooviSandboxTestPayment({
+      transactionID: resolved.chargeId,
+      chargeId: resolved.chargeId,
+      paymentIntentId: resolved.paymentIntentId
+    });
+    if (!providerConfirmation.success) {
+      return res.status(502).json({
+        success: false,
+        code: providerConfirmation.code || 'WOOVI_SANDBOX_TEST_PAYMENT_FAILED',
+        error: providerConfirmation.error || 'Woovi não confirmou a cobrança sandbox',
+        chargeId: resolved.chargeId,
+        paymentIntentId: resolved.paymentIntentId,
+        status: providerConfirmation.status || null,
+        endpointHost: providerConfirmation.endpointHost || null,
+        providerBody: providerConfirmation.providerBody || null
+      });
+    }
+
+    const io = req.app.get('io');
+    const payload = {
+      ...resolved.payload,
+      _sandboxProviderConfirmation: {
+        source: 'woovi_openpix_testing',
+        transactionID: providerConfirmation.transactionID,
+        status: providerConfirmation.status,
+        endpointHost: providerConfirmation.endpointHost,
+        confirmedAt: new Date().toISOString()
+      }
+    };
+    const result = await handleChargeCompleted(payload, io);
+    logStructured('info', 'Pagamento sandbox de teste confirmado pela Woovi', {
+      service: 'woovi-routes',
+      actorId: req.user?.id || req.sandboxPaymentActor?.uid || null,
+      actorRole: req.user?.role || req.sandboxPaymentActor?.role || null,
+      passengerId: resolved.passengerId,
+      rideId: resolved.rideId,
+      chargeId: resolved.chargeId,
+      paymentIntentId: resolved.paymentIntentId,
+      providerStatus: providerConfirmation.status,
+      providerEndpointHost: providerConfirmation.endpointHost
+    });
+
+    return res.status(200).json({
+      success: true,
+      mode: 'woovi_sandbox_testing_confirmed',
+      rideId: resolved.rideId,
+      chargeId: resolved.chargeId,
+      paymentIntentId: resolved.paymentIntentId,
+      amountInCents: resolved.amountInCents,
+      providerConfirmation: {
+        status: providerConfirmation.status,
+        transactionID: providerConfirmation.transactionID,
+        endpointHost: providerConfirmation.endpointHost
+      },
+      result
+    });
+  } catch (error) {
+    logError(error, 'Erro ao confirmar pagamento sandbox de teste', {
+      service: 'woovi-routes',
+      actorId: req.user?.id || req.sandboxPaymentActor?.uid || null
+    });
+    return res.status(500).json({
+      success: false,
+      error: 'Não foi possível confirmar o pagamento sandbox'
+    });
+  }
+}
+
 router.post(
   '/woovi/test-confirm-sandbox-payment',
   authenticateJWT,
   requireRole(WOOVI_SANDBOX_TEST_ROLES),
-  async (req, res) => {
-    try {
-      const resolved = await resolveSandboxTestWebhookPayload(req.body || {});
-      if (!resolved.found) {
-        return res.status(404).json({
-          success: false,
-          code: resolved.reason
-        });
-      }
+  handleSandboxTestPaymentConfirmation
+);
 
-      const validation = await validateSandboxTestWebhookPayload(resolved.payload);
-      if (!validation.allowed) {
-        return res.status(409).json({
-          success: false,
-          code: validation.reason
-        });
-      }
-
-      const io = req.app.get('io');
-      const result = await handleChargeCompleted(resolved.payload, io);
-      logStructured('info', 'Pagamento sandbox de teste confirmado', {
-        service: 'woovi-routes',
-        actorId: req.user?.id || null,
-        actorRole: req.user?.role || null,
-        passengerId: resolved.passengerId,
-        rideId: resolved.rideId,
-        chargeId: resolved.chargeId,
-        paymentIntentId: resolved.paymentIntentId
-      });
-
-      return res.status(200).json({
-        success: true,
-        mode: 'sandbox_intent_confirmed',
-        rideId: resolved.rideId,
-        chargeId: resolved.chargeId,
-        paymentIntentId: resolved.paymentIntentId,
-        amountInCents: resolved.amountInCents,
-        result
-      });
-    } catch (error) {
-      logError(error, 'Erro ao confirmar pagamento sandbox de teste', {
-        service: 'woovi-routes',
-        actorId: req.user?.id || null
-      });
-      return res.status(500).json({
-        success: false,
-        error: 'Não foi possível confirmar o pagamento sandbox'
-      });
-    }
-  }
+router.post(
+  '/woovi/test-confirm-sandbox-payment-app',
+  authenticateFirebaseSandboxPaymentActor,
+  handleSandboxTestPaymentConfirmation
 );
 
 // Webhook principal para receber notificações da Woovi
@@ -1884,6 +2197,7 @@ async function handleChargeCompleted(data, io = null) {
     const status = charge.status || charge.state;
     const normalizedWebhookStatus = normalizePaymentStatus(status);
     const additionalInfo = normalizeAdditionalInfo(charge.additionalInfo);
+    const sandboxProviderConfirmation = data?._sandboxProviderConfirmation || null;
 
     if (!chargeId) {
       logStructured('error', 'chargeId (identifier) não encontrado no webhook', { service: 'woovi-routes', data });
@@ -2021,6 +2335,9 @@ async function handleChargeCompleted(data, io = null) {
               additionalInfo,
               pixStatus: pix?.status || 'N/A',
               paidAt: charge?.paidAt || null,
+              source: sandboxProviderConfirmation ? 'sandbox_provider_verification' : 'woovi_webhook',
+              providerEnvironment: sandboxProviderConfirmation ? 'sandbox' : null,
+              providerConfirmation: sandboxProviderConfirmation,
               signatureMethod: data?._webhookSignatureMethod || null,
               providerConfirmationEnforced: forceProviderConfirmation,
               correlationID
@@ -2736,7 +3053,9 @@ router.__private = {
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking,
   validateSandboxTestWebhookPayload,
+  canSandboxTestPaymentActorConfirm,
   resolveSandboxTestWebhookPayload,
+  requestWooviSandboxTestPayment,
   extractWebhookChargePayload,
   resolveSandboxPaymentIntentAsBooking,
   isRetryableWebhookEvent,

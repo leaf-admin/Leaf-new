@@ -2,9 +2,14 @@
 
 const crypto = require('crypto');
 
+const WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS = Math.max(
+  300,
+  Number.parseInt(process.env.WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS || '300', 10) || 300
+);
 const DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS = Math.max(
-  30,
-  Number.parseInt(process.env.PAYMENT_DRIVER_RESERVATION_TTL_SECONDS || '180', 10) || 180
+  WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS,
+  Number.parseInt(process.env.PAYMENT_DRIVER_RESERVATION_TTL_SECONDS || String(WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS), 10) ||
+    WOOVI_MIN_CHARGE_EXPIRES_IN_SECONDS
 );
 const PAYMENT_DRIVER_RESERVATION_BOOKING_TTL_SECONDS = Math.max(
   60,
@@ -32,13 +37,18 @@ function buildPaymentDriverReservationId({
   passengerId,
   rideId,
   paymentSessionId,
+  paymentContextKey,
   quoteLockId,
   quoteSessionId
 } = {}) {
+  const canonicalContext =
+    normalizeText(quoteLockId) ||
+    normalizeText(paymentContextKey) ||
+    normalizeText(paymentSessionId) ||
+    normalizeText(rideId);
   const stableContext = [
     normalizeText(passengerId),
-    normalizeText(rideId) || normalizeText(paymentSessionId),
-    normalizeText(quoteLockId),
+    canonicalContext,
     normalizeText(quoteSessionId)
   ].join(':');
   const hash = crypto
@@ -55,6 +65,32 @@ function getPaymentDriverReservationKey(reservationId) {
 
 function getDriverPaymentReservationKey(driverId) {
   return `driver_payment_reservation:${normalizeText(driverId)}`;
+}
+
+function isReservationExpired(reservation = {}, nowMs = Date.now()) {
+  const expiresAtMs = Number(reservation.expiresAtMs || Date.parse(reservation.expiresAtIso || ''));
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
+}
+
+async function clearDriverPaymentReservationPointer(redis, driverId, reservationId = null) {
+  if (!redis) return;
+
+  const driverKey = getDriverPaymentReservationKey(driverId);
+  const pipeline = typeof redis.multi === 'function' ? redis.multi() : null;
+
+  if (pipeline) {
+    pipeline.del(driverKey);
+    if (reservationId) {
+      pipeline.del(getPaymentDriverReservationKey(reservationId));
+    }
+    await pipeline.exec();
+    return;
+  }
+
+  await redis.del(driverKey);
+  if (reservationId) {
+    await redis.del(getPaymentDriverReservationKey(reservationId));
+  }
 }
 
 function buildReservationPayload(input = {}, ttlSeconds = DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS) {
@@ -104,7 +140,14 @@ async function getDriverPaymentReservation(redis, driverId) {
   if (!reservationId) return null;
 
   const reservation = await readPaymentDriverReservation(redis, reservationId);
-  if (!reservation) return { reservationId };
+  if (!reservation) {
+    await clearDriverPaymentReservationPointer(redis, safeDriverId, reservationId);
+    return null;
+  }
+  if (isReservationExpired(reservation)) {
+    await clearDriverPaymentReservationPointer(redis, safeDriverId, reservationId);
+    return null;
+  }
   return reservation;
 }
 
@@ -129,12 +172,23 @@ function reservationMatchesContext(reservation = {}, context = {}) {
     return true;
   }
 
+  const expectedPaymentContextKey = normalizeText(context.paymentContextKey);
+  if (expectedPaymentContextKey && expectedPaymentContextKey === normalizeText(reservation.paymentContextKey)) {
+    return true;
+  }
+
   const expectedQuoteLockId = normalizeText(context.quoteLockId || context.paymentQuoteLockId);
   if (expectedQuoteLockId && expectedQuoteLockId === normalizeText(reservation.quoteLockId)) {
     return true;
   }
 
   return false;
+}
+
+function reservationHasSamePassenger(reservation = {}, context = {}) {
+  const expectedPassengerId = normalizeText(context.passengerId);
+  const reservationPassengerId = normalizeText(reservation.passengerId);
+  return !expectedPassengerId || !reservationPassengerId || expectedPassengerId === reservationPassengerId;
 }
 
 async function reservePaymentDriver({
@@ -146,6 +200,7 @@ async function reservePaymentDriver({
   paymentContextKey,
   quoteSessionId,
   quoteLockId,
+  reservationId: requestedReservationId = null,
   pickupLocation,
   destinationLocation,
   carType,
@@ -157,20 +212,69 @@ async function reservePaymentDriver({
     return { success: false, code: 'PAYMENT_DRIVER_RESERVATION_INPUT_INVALID' };
   }
 
-  const reservationId = buildPaymentDriverReservationId({
-    passengerId,
-    rideId,
-    paymentSessionId,
-    quoteLockId,
-    quoteSessionId
-  });
+  const reservationId =
+    normalizeText(requestedReservationId) ||
+    buildPaymentDriverReservationId({
+      passengerId,
+      rideId,
+      paymentSessionId,
+      paymentContextKey,
+      quoteLockId,
+      quoteSessionId
+    });
   const safeTtlSeconds = normalizeTtlSeconds(ttlSeconds);
   const driverKey = getDriverPaymentReservationKey(safeDriverId);
   const reservationKey = getPaymentDriverReservationKey(reservationId);
-  const existingReservationId = await redis.get(driverKey);
+  let existingReservationId = await redis.get(driverKey);
 
   if (existingReservationId && existingReservationId !== reservationId) {
     const existing = await readPaymentDriverReservation(redis, existingReservationId);
+    if (!existing || isReservationExpired(existing)) {
+      await clearDriverPaymentReservationPointer(redis, safeDriverId, existingReservationId);
+      existingReservationId = null;
+    }
+  }
+
+  if (existingReservationId && existingReservationId !== reservationId) {
+    const existing = await readPaymentDriverReservation(redis, existingReservationId);
+    const reusable =
+      existing &&
+      reservationHasSamePassenger(existing, { passengerId }) &&
+      reservationMatchesContext(existing, {
+        passengerId,
+        rideId,
+        paymentSessionId,
+        paymentContextKey,
+        quoteLockId,
+        quoteSessionId
+      });
+
+    if (reusable) {
+      const refreshedPayload = buildReservationPayload({
+        ...existing,
+        paymentIntentId: existing.paymentIntentId || paymentIntentId,
+        updatedAtIso: undefined
+      }, safeTtlSeconds);
+
+      await redis.set(driverKey, existingReservationId, 'EX', safeTtlSeconds);
+      await redis.set(
+        getPaymentDriverReservationKey(existingReservationId),
+        JSON.stringify(refreshedPayload),
+        'EX',
+        safeTtlSeconds
+      );
+
+      return {
+        success: true,
+        reservationId: existingReservationId,
+        driverId: safeDriverId,
+        expiresAtIso: refreshedPayload.expiresAtIso,
+        ttlSeconds: safeTtlSeconds,
+        reservation: refreshedPayload,
+        reused: true
+      };
+    }
+
     return {
       success: false,
       code: 'DRIVER_ALREADY_RESERVED_FOR_PAYMENT',
@@ -357,5 +461,6 @@ module.exports = {
   validatePaymentDriverReservation,
   consumePaymentDriverReservationForBooking,
   releasePaymentDriverReservation,
-  reservationMatchesContext
+  reservationMatchesContext,
+  isReservationExpired
 };

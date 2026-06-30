@@ -89,7 +89,10 @@ describe('registerSocketSearchDriversHandler availability parity', () => {
         hasDrivers: true,
         code: 'DRIVERS_AVAILABLE',
         carType: 'plus',
-        radiusKm: 4
+        radiusKm: 4,
+        candidates: 2,
+        eligible: 1,
+        rejections: { locked: 1 }
       })
     );
     expect(logStructured).toHaveBeenCalledWith(
