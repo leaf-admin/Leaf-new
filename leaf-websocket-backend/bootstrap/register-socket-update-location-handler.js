@@ -6,6 +6,9 @@ const driverEligibilityService = require('../services/driver-eligibility-service
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const rideHealthMonitor = require('../services/ride-health-monitor');
 const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+const {
+    upsertDriverSocketPresence
+} = require('../services/driver-socket-presence-service');
 
 const ENABLE_ACTIVE_TRIP_INDEX = process.env.ENABLE_ACTIVE_TRIP_INDEX !== 'false';
 const ENABLE_TRIP_LOCATION_STREAM = process.env.ENABLE_TRIP_LOCATION_STREAM !== 'false';
@@ -245,6 +248,20 @@ function registerSocketUpdateLocationHandler({
                 tripStatus === 'accepted' ||
                 hasSharedRoutePlanCandidate;
             const redis = redisPool.getConnection();
+            await upsertDriverSocketPresence(redis, {
+                driverId,
+                socket,
+                source: sourceEvent,
+                fallbackRooms: ['drivers_room', `driver_${driverId}`]
+            }).catch((presenceError) => {
+                logStructured('warn', 'Falha ao renovar presença distribuída do motorista no updateLocation', {
+                    service: 'websocket',
+                    operation: sourceEvent,
+                    driverId,
+                    socketId: socket.id,
+                    error: presenceError.message
+                });
+            });
 
             // Aplicar validação KYC diária na transição offline -> online via updateLocation
             const driverHashKey = `driver:${driverId}`;

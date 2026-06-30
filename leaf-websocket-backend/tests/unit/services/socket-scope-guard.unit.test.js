@@ -70,6 +70,45 @@ describe('socket-scope-guard', () => {
     });
   });
 
+  it('prefers a terminal persistent scope over stale in-memory scope when requested', async () => {
+    const redis = {
+      hgetall: jest.fn().mockResolvedValue({
+        bookingId: 'ride_completed_1',
+        customerId: 'passenger_1',
+        driverId: 'driver_1',
+        status: 'COMPLETED'
+      })
+    };
+    const io = {
+      activeBookings: new Map([
+        ['ride_completed_1', {
+          bookingId: 'ride_completed_1',
+          customerId: 'passenger_1',
+          driverId: 'driver_1',
+          status: 'IN_PROGRESS'
+        }]
+      ])
+    };
+
+    const result = await assertRideParticipant({
+      socket: { userId: 'passenger_1', userType: 'customer' },
+      io,
+      redisPool: { getConnection: () => redis },
+      bookingId: 'ride_completed_1',
+      preferPersistentTerminal: true
+    });
+
+    expect(redis.hgetall).toHaveBeenCalledWith('booking:ride_completed_1');
+    expect(result).toMatchObject({
+      allowed: true,
+      participantRole: 'passenger',
+      scope: expect.objectContaining({
+        source: 'redis',
+        status: 'COMPLETED'
+      })
+    });
+  });
+
   it('does not let a normal support chat user target another user id', () => {
     const result = resolveSupportChatAuthorization(
       { userId: 'user_1', userType: 'passenger' },

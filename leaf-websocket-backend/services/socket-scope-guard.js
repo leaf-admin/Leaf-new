@@ -19,6 +19,15 @@ const SUPPORT_PERMISSIONS = new Set([
   'tickets:write'
 ]);
 const DEFAULT_TEXT_MESSAGE_MAX_LENGTH = 2000;
+const TERMINAL_RIDE_SCOPE_STATUSES = new Set([
+  'COMPLETE',
+  'COMPLETED',
+  'TRIP_COMPLETED',
+  'RIDE_COMPLETED',
+  'EARLY_ENDED_BY_RIDER',
+  'EARLY_ENDED_REVIEW',
+  'INTERRUPTED_OPERATIONAL_ENDED'
+]);
 
 function normalizeId(value) {
   if (value && typeof value === 'object') {
@@ -144,6 +153,10 @@ function extractRideScope(raw = {}, bookingId = '') {
   };
 }
 
+function isTerminalRideScopeStatus(status) {
+  return TERMINAL_RIDE_SCOPE_STATUSES.has(String(status || '').trim().toUpperCase());
+}
+
 async function readRedisBooking(redis, bookingId) {
   if (!redis || !bookingId) return null;
 
@@ -165,21 +178,31 @@ async function readRedisBooking(redis, bookingId) {
   return null;
 }
 
-async function resolveRideScope({ io, redisPool, bookingId }) {
+async function resolveRideScope({ io, redisPool, bookingId, preferPersistentTerminal = false }) {
   const safeBookingId = normalizeId(bookingId);
   if (!safeBookingId) {
     return { found: false, bookingId: '', customerId: '', driverId: '', status: '', raw: null };
   }
 
   const fromMemory = io?.activeBookings?.get?.(safeBookingId);
-  if (fromMemory) {
-    return { found: true, ...extractRideScope(fromMemory, safeBookingId), source: 'memory' };
+  const memoryScope = fromMemory
+    ? { found: true, ...extractRideScope(fromMemory, safeBookingId), source: 'memory' }
+    : null;
+  if (memoryScope && !preferPersistentTerminal) {
+    return memoryScope;
   }
 
   const redis = redisPool?.getConnection?.();
   const fromRedis = await readRedisBooking(redis, safeBookingId);
   if (fromRedis) {
-    return { found: true, ...extractRideScope(fromRedis, safeBookingId), source: 'redis' };
+    const redisScope = { found: true, ...extractRideScope(fromRedis, safeBookingId), source: 'redis' };
+    if (!memoryScope || !preferPersistentTerminal || isTerminalRideScopeStatus(redisScope.status)) {
+      return redisScope;
+    }
+  }
+
+  if (memoryScope) {
+    return memoryScope;
   }
 
   const fromRealtime = await firebaseConfig.getFromRealtimeDB?.(`bookings/${safeBookingId}`);
@@ -204,7 +227,8 @@ async function assertRideParticipant({
   redisPool,
   bookingId,
   allowedRoles = ['passenger', 'driver'],
-  allowSupport = true
+  allowSupport = true,
+  preferPersistentTerminal = false
 }) {
   const identity = getSocketIdentity(socket);
   if (!identity.userId) {
@@ -216,7 +240,12 @@ async function assertRideParticipant({
     };
   }
 
-  const scope = await resolveRideScope({ io, redisPool, bookingId });
+  const scope = await resolveRideScope({
+    io,
+    redisPool,
+    bookingId,
+    preferPersistentTerminal
+  });
   if (!scope.found) {
     return {
       allowed: false,

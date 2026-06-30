@@ -1,3 +1,10 @@
+const {
+    closeDriverOnlineSessionAt
+} = require('../services/driver-online-time-policy-service');
+const {
+    clearDriverSocketPresence
+} = require('../services/driver-socket-presence-service');
+
 function registerSocketDisconnectHandler({
     socket,
     io,
@@ -89,6 +96,9 @@ function registerSocketDisconnectHandler({
     };
 
     const finalizeDriverDisconnect = async () => {
+        const disconnectedAtMs = Date.now();
+        const disconnectedAtIso = new Date(disconnectedAtMs).toISOString();
+
         // ✅ FASE 1: Liberar lock de veículo ao desconectar
         if (socket.vehiclePlate) {
             logStructured('info', 'Liberando lock de veículo na desconexão', {
@@ -142,7 +152,7 @@ function registerSocketDisconnectHandler({
                 parseFloat(driverData.lng),
                 parseFloat(driverData.heading || 0),
                 parseFloat(driverData.speed || 0),
-                Date.now(),
+                disconnectedAtMs,
                 false
             );
             logStructured('info', 'Motorista desconectado - salvo como OFFLINE com última localização', {
@@ -168,12 +178,29 @@ function registerSocketDisconnectHandler({
             }
         }
 
+        try {
+            await closeDriverOnlineSessionAt(redis, {
+                driverId: socket.userId,
+                closedAtMs: disconnectedAtMs
+            });
+        } catch (error) {
+            logStructured('warn', 'Erro ao fechar sessão diária online na desconexão', {
+                service: 'websocket',
+                socketId: socket.id,
+                userId: socket.userId,
+                error: error.message
+            });
+        }
+
         await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, socket.userId);
         await redis.srem('online_drivers', socket.userId);
         await redis.hset(`driver:${socket.userId}`, {
+            status: 'OFFLINE',
+            isOnline: 'false',
             dispatchEligible: 'false',
             dispatchEligibilityCode: 'OFFLINE',
-            dispatchEligibilityCheckedAt: new Date().toISOString()
+            dispatchEligibilityCheckedAt: disconnectedAtIso,
+            updatedAt: disconnectedAtIso
         });
 
         await recoverAcceptedRideOnDriverDisconnect({ redis, driverData });
@@ -203,6 +230,18 @@ function registerSocketDisconnectHandler({
         if (socket.userId && socket.userType === 'driver') {
             try {
                 const redis = redisPool.getConnection();
+                await clearDriverSocketPresence(redis, {
+                    driverId: socket.userId,
+                    socketId: socket.id,
+                    source: 'disconnect'
+                }).catch((presenceError) => {
+                    logStructured('warn', 'Falha ao limpar presença distribuída do motorista na desconexão', {
+                        service: 'websocket',
+                        socketId: socket.id,
+                        userId: socket.userId,
+                        error: presenceError.message
+                    });
+                });
                 const acceptedRideCandidates = await resolveAcceptedBookingCandidatesForDriver(redis, socket.userId, {
                     scanLimit: 300
                 }).catch(() => ({ bookingIds: [] }));
