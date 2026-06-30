@@ -125,7 +125,8 @@ Android:
 - Command: `fastlane supply --aab /Users/izaakdias/Documents/Leaf-new/mobile-app/android/app/build/outputs/bundle/release/app-release.aab --package_name br.com.leaf.ride --track internal --release_status draft --json_key /Users/izaakdias/Downloads/leaf-reactnative-455823-0e5c77cad705.json --skip_upload_metadata true --skip_upload_images true --skip_upload_screenshots true --skip_upload_changelogs true --timeout 600`
 - Result: PASS, `Successfully finished the upload to Google Play`.
 - Track: Google Play Internal Test.
-- Release status: draft.
+- Initial release status: draft.
+- Final track update: PASS via Android Publisher API; internal track now contains release `1.0.4`, `versionCode 122`, status `completed`.
 - Submitted artifact: Android `1.0.4`, `versionCode 122`.
 
 iOS:
@@ -195,9 +196,10 @@ Stop inviting testers and open P0 if any of these happen:
 
 ## Current Risks
 
-- Store/TestFlight processing is not fully complete until Google Play Console and App Store Connect show the exact uploaded builds as available to testers.
+- TestFlight processing is not fully complete until App Store Connect shows iOS build `30` as available to testers.
+- Google Play Internal Test is updated to Android `1.0.4 (122)` with status `completed`; allow normal Play Console propagation delay before tester install attempts.
 - The KYC strict-biometric warning remains accepted only because driver active/KYC policy is backend-governed.
-- Local artifacts are generated, validated, and uploaded, but assisted users should not be invited until both store consoles show the exact build numbers: Android `122`, iOS `30`.
+- Local artifacts are generated, validated, and uploaded; assisted users should not be invited until App Store Connect finishes processing iOS build `30` and Play Console propagation shows Android `122` to testers.
 - iOS dSYM upload warning should be handled before broad rollout to improve crash diagnostics.
 
 ## Rollback
@@ -210,7 +212,7 @@ Stop inviting testers and open P0 if any of these happen:
 
 Verify processing/visibility in:
 
-- Google Play Console internal testing draft for Android `1.0.4 (122)`.
+- Google Play Console internal testing completed release for Android `1.0.4 (122)`.
 - App Store Connect TestFlight build `1.0.4 (30)`.
 
 Only after both are visible should the controlled assisted-production cohort start.
