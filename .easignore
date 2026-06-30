@@ -13,9 +13,13 @@ node_modules
 
 # Root-level local artifacts and evidence not needed by mobile EAS builds.
 /reports/
+/test-results/
+/artifacts/
+/qa-artifacts/
 /tmp/
 /.tmp/
 /.tmp-*/
+/QA/
 /.local-tools/
 /.venv/
 /.venv_*/
@@ -32,6 +36,8 @@ node_modules
 /store-assets/
 /system-images/
 /vehicle-image-bank/
+/generated-assets/
+/emulator/
 
 # Exclude sibling workspaces from mobile EAS uploads.
 /leaf-websocket-backend/
@@ -40,6 +46,8 @@ node_modules
 # Mobile local build artifacts and QA evidence.
 mobile-app/node_modules
 mobile-app/.expo
+mobile-app/QA/
+mobile-app/dist/
 mobile-app/android/.gradle
 mobile-app/android/build
 mobile-app/android/app/build
