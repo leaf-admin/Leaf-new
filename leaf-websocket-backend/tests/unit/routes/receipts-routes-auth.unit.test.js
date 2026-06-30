@@ -6,6 +6,8 @@ const request = require('supertest');
 const mockGetReceiptByRideId = jest.fn();
 const mockGenerateReceipt = jest.fn();
 const mockGenerateStaticMapImage = jest.fn();
+const mockRealtimeDb = { ref: jest.fn() };
+const mockGetRealtimeDB = jest.fn(() => mockRealtimeDb);
 
 const mockSupportRoles = new Set(['admin', 'manager', 'super-admin', 'support', 'development']);
 
@@ -48,6 +50,10 @@ jest.mock('../../../middleware/support-auth', () => ({
   }
 }));
 
+jest.mock('../../../firebase-config', () => ({
+  getRealtimeDB: (...args) => mockGetRealtimeDB(...args)
+}));
+
 jest.mock('../../../utils/logger', () => ({
   logger: {
     info: jest.fn(),
@@ -74,6 +80,7 @@ describe('receipts routes auth', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetRealtimeDB.mockReturnValue(mockRealtimeDb);
     mockGetReceiptByRideId.mockResolvedValue(receipt);
     mockGenerateReceipt.mockResolvedValue(receipt);
     mockGenerateStaticMapImage.mockReturnValue('https://maps.test/static.png');
@@ -101,6 +108,16 @@ describe('receipts routes auth', () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ success: true, receipt });
+  });
+
+  it('falls back to Realtime Database when app locals do not expose firebaseDb', async () => {
+    const response = await request(createApp())
+      .get('/api/receipts/ride_1')
+      .set('Authorization', 'Bearer passenger_1');
+
+    expect(response.status).toBe(200);
+    expect(mockGetRealtimeDB).toHaveBeenCalled();
+    expect(mockGetReceiptByRideId).toHaveBeenCalledWith('ride_1', undefined, mockRealtimeDb);
   });
 
   it('blocks a user that does not own the ride receipt', async () => {

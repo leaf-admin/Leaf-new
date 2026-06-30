@@ -73,8 +73,14 @@ describe('fare-estimation-service', () => {
     expect(result.routeMetrics.distanceKm).toBe(5);
     expect(result.routeMetrics.durationSecs).toBe(900);
     expect(result.estimatedFare).toBeGreaterThan(0);
+    expect(result.tollFee).toBe(2.5);
+    expect(result.pricingPayload.final_price).toBe(result.estimatedFare);
+    expect(result.pricingPayload.toll_fee).toBe(2.5);
+    expect(result.pricingPayload.final_price_before_toll).toBeCloseTo(result.estimatedFare - 2.5, 2);
     expect(result.pricingPayload).toEqual(expect.objectContaining({
-      final_price: result.estimatedFare,
+      pickup_adjustment: 0,
+      pickup_adjustment_source: 'disabled_non_authoritative_eta',
+      pickup_eta_authoritative: false,
       score_pressao: expect.any(Number),
       score_excecao: expect.any(Number),
       operational_state: expect.any(String)
@@ -104,6 +110,43 @@ describe('fare-estimation-service', () => {
     expect(result.routeMetrics.durationSecs).toBeGreaterThan(0);
     expect(result.estimatedFare).toBeGreaterThanOrEqual(8.5);
     expect(result.pricingPayload.final_price).toBe(result.estimatedFare);
+  });
+
+  test('estimateRideFare deve cobrar adicional de embarque apenas com ETA autoritativa', async () => {
+    const result = await estimateRideFare({
+      pickupLocation: { lat: -22.9075, lng: -43.1736 },
+      destinationLocation: { lat: -22.9121, lng: -43.1825 },
+      carType: 'Leaf Plus',
+      routeDistanceKm: 5,
+      routeDurationSecs: 900,
+      clientEstimatedFare: 0,
+      pricingContext: {
+        trip: {
+          eta_pickup_min: 7,
+          eta_pickup_source: 'reserved_driver_route',
+          eta_pickup_authoritative: true
+        },
+        operational: {
+          current: {
+            active_requests_5m: 3,
+            idle_drivers: 5,
+            avg_pickup_eta_min: 7,
+            trip_time_inflation: 1,
+            accept_rate: 0.95,
+            avg_speed_kmh: 22
+          }
+        }
+      }
+    });
+
+    expect(result.pricingPayload).toEqual(expect.objectContaining({
+      eta_pickup_min: 7,
+      eta_pickup_pricing_min: 7,
+      pickup_adjustment: 1.2,
+      pickup_adjustment_source: 'reserved_driver_route',
+      pickup_eta_authoritative: true,
+      pickup_eta_source: 'reserved_driver_route'
+    }));
   });
 
   test('estimateRideFare deve reaproveitar cache quente para inputs equivalentes', async () => {

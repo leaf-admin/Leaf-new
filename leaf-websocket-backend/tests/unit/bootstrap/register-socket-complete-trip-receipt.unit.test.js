@@ -34,10 +34,10 @@ jest.mock('../../../services/receipt-service', () =>
 
 jest.mock('../../../services/payment-service', () =>
   jest.fn().mockImplementation(() => ({
-    calculateFareBreakdownFromReais: jest.fn(() => ({
+    calculateFareBreakdownFromReais: jest.fn((_fare, tollFee = 0) => ({
       totalFare: 81.17,
       grossAmount: 81.17,
-      tollFee: 0,
+      tollFee,
       operationalFee: 999,
       paymentIntermediationFee: 999,
       totalFees: 1998,
@@ -104,7 +104,15 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
             operationalFee: '1.00',
             paymentIntermediationFee: '1.00',
             totalFees: '2.00',
-            driverNetAmount: '79.17'
+            driverNetAmount: '79.17',
+            estimatedTripDistanceKm: '27.1',
+            tripDurationMin: '33',
+            paymentMethod: 'pix',
+            pricingPayload: JSON.stringify({
+              toll_fee: 4,
+              distance_km: 27.1,
+              duration_min: 33
+            })
           };
         }
         return {};
@@ -137,9 +145,9 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
           event: { type: 'ride.completed', data: { bookingId: 'booking_1' } },
           endLocation: { lat: -22.9, lng: -43.2 },
           finalFare: 81.17,
-          tollFee: 0,
-          distance: 12.4,
-          duration: 1320,
+          tollFee: 4,
+          distance: 27.1,
+          duration: 1980,
           paymentDistribution: { status: 'PENDING' },
           operationalFee: 2.44,
           paymentIntermediationFee: 0.65,
@@ -195,6 +203,13 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
     await flushImmediate();
     await flushImmediate();
 
+    expect(CompleteTripCommand).toHaveBeenCalledWith(expect.objectContaining({
+      bookingId: 'booking_1',
+      tollFee: 4,
+      distance: 27.1,
+      duration: 1980
+    }));
+
     expect(idempotencyService.cacheResult).toHaveBeenCalledWith(
       'idem_booking_1_complete',
       expect.objectContaining({
@@ -208,6 +223,9 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
         financialSnapshotSource: 'backend_final',
         authoritativeSnapshot: true,
         financialSnapshot,
+        tollFee: 4,
+        routeDistanceKm: 27.1,
+        routeDurationSecs: 1980,
         fareBreakdown: expect.objectContaining({
           operationalFee: 2.44,
           paymentIntermediationFee: 0.65,
@@ -227,6 +245,11 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
         paymentIntermediationFee: 0.65,
         totalFees: 3.09,
         driverNetAmount: 78.08,
+        tollFee: 4,
+        distance: 27.1,
+        routeDistanceKm: 27.1,
+        durationSeconds: 1980,
+        payment_mode: 'pix',
         authoritativeSnapshot: true,
         financialSnapshotSource: 'backend_final',
         financialSnapshot

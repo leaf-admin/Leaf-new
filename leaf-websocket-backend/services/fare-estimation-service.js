@@ -23,6 +23,14 @@ const RATE_CARDS = Object.fromEntries(
 const DEFAULT_CAR_TYPE = 'leaf_plus';
 const PRICING_RECORD_EVALUATION_ASYNC = process.env.PRICING_RECORD_EVALUATION_ASYNC !== 'false';
 const FARE_ESTIMATION_CACHE_ENABLED = process.env.FARE_ESTIMATION_CACHE_ENABLED !== 'false';
+const AUTHORITATIVE_PICKUP_ETA_SOURCES = new Set([
+  'driver_route',
+  'nearest_driver_route',
+  'reserved_driver_route',
+  'assigned_driver_route',
+  'google_directions_driver_to_pickup',
+  'directions_driver_to_pickup'
+]);
 const FARE_ESTIMATION_CACHE_TTL_MS = Math.max(
   250,
   Number.parseInt(process.env.FARE_ESTIMATION_CACHE_TTL_MS || '15000', 10) || 15000
@@ -189,22 +197,41 @@ function buildFallbackRouteMetrics({ pickupLocation, destinationLocation }) {
 function normalizePricingContext(pricingContext = {}, effectiveDurationSecs = 0) {
   const operational = pricingContext.operational || pricingContext || {};
   const current = operational.current || {};
+  const trip = pricingContext.trip || {};
   const etaPickupMin = pricingContext.trip?.eta_pickup_min
     ?? pricingContext.eta_pickup_min
     ?? current.avg_pickup_eta_min
     ?? 0;
+  const pickupEtaSource = String(
+    trip.eta_pickup_source ||
+      trip.pickup_eta_source ||
+      operational.state_context?.pickup_eta_source ||
+      current.avg_pickup_eta_source ||
+      pricingContext.eta_pickup_source ||
+      pricingContext.pickup_eta_source ||
+      'unknown'
+  ).trim();
+  const pickupEtaAuthoritative =
+    trip.eta_pickup_authoritative === true ||
+    trip.pickup_eta_authoritative === true ||
+    operational.state_context?.pickup_eta_authoritative === true ||
+    AUTHORITATIVE_PICKUP_ETA_SOURCES.has(pickupEtaSource);
 
   return {
     trip: {
-      distance_km: pricingContext.trip?.distance_km,
-      duration_min_traffic: pricingContext.trip?.duration_min_traffic,
-      eta_pickup_min: toNumber(etaPickupMin, 0)
+      distance_km: trip.distance_km,
+      duration_min_traffic: trip.duration_min_traffic,
+      eta_pickup_min: toNumber(etaPickupMin, 0),
+      eta_pickup_source: pickupEtaSource || 'unknown',
+      eta_pickup_authoritative: pickupEtaAuthoritative
     },
     operational: {
       current: {
         active_requests_5m: toNumber(current.active_requests_5m, 0),
         idle_drivers: toNumber(current.idle_drivers, 0),
         avg_pickup_eta_min: toNumber(current.avg_pickup_eta_min, toNumber(etaPickupMin, 0)),
+        avg_pickup_eta_source: String(current.avg_pickup_eta_source || pickupEtaSource || 'unknown'),
+        avg_pickup_eta_authoritative: current.avg_pickup_eta_authoritative === true,
         trip_time_inflation: toNumber(current.trip_time_inflation, 1),
         cancel_rate: toNumber(current.cancel_rate, 0),
         accept_rate: current.accept_rate === undefined ? 1 : toNumber(current.accept_rate, 1),
@@ -227,7 +254,9 @@ function normalizePricingContext(pricingContext = {}, effectiveDurationSecs = 0)
           : [],
         degraded_neighbor_count: toNumber(operational.state_context?.degraded_neighbor_count, 0),
         is_special_zone: operational.state_context?.is_special_zone === true,
-        zone_type: operational.state_context?.zone_type || null
+        zone_type: operational.state_context?.zone_type || null,
+        pickup_eta_source: pickupEtaSource || 'unknown',
+        pickup_eta_authoritative: pickupEtaAuthoritative
       }
     },
     effectiveDurationMin: Math.max(0, effectiveDurationSecs / 60)
@@ -321,13 +350,17 @@ async function estimateRideFare({
     derivedPricingContext.pricingContext,
     effectiveDurationSecs
   );
+  const pickupEtaAuthoritative = normalizedPricingContext.trip.eta_pickup_authoritative === true;
+  const pricingPickupEtaMin = pickupEtaAuthoritative
+    ? normalizedPricingContext.trip.eta_pickup_min
+    : 0;
 
   const engineStartedAt = Date.now();
   const engineResult = runDynamicPricingEngine({
     trip: {
       distance_km: effectiveDistanceKm,
       duration_min_traffic: normalizedPricingContext.trip.duration_min_traffic || normalizedPricingContext.effectiveDurationMin,
-      eta_pickup_min: normalizedPricingContext.trip.eta_pickup_min,
+      eta_pickup_min: pricingPickupEtaMin,
       carType: normalizedCarType
     },
     carType: normalizedCarType,
@@ -337,6 +370,16 @@ async function estimateRideFare({
       state_context: normalizedPricingContext.operational.state_context
     }
   });
+  engineResult.pricingPayload = {
+    ...engineResult.pricingPayload,
+    eta_pickup_min: normalizedPricingContext.trip.eta_pickup_min,
+    eta_pickup_pricing_min: pricingPickupEtaMin,
+    pickup_eta_source: normalizedPricingContext.trip.eta_pickup_source,
+    pickup_eta_authoritative: pickupEtaAuthoritative,
+    pickup_adjustment_source: pickupEtaAuthoritative
+      ? normalizedPricingContext.trip.eta_pickup_source
+      : 'disabled_non_authoritative_eta'
+  };
   perfBreakdownMs.runDynamicPricingEngine = Math.max(0, Date.now() - engineStartedAt);
   const recordEvaluationPromise = Promise.resolve(
     pricingContextProvider.recordPricingEvaluation(derivedPricingContext.metadata, engineResult)
@@ -364,7 +407,14 @@ async function estimateRideFare({
     scoreExcecao: Number(engineResult.pricingPayload.score_excecao || 0)
   });
 
-  const estimatedFare = roundCurrency(engineResult.pricingPayload.final_price);
+  const fareBeforeToll = roundCurrency(engineResult.pricingPayload.final_price);
+  const estimatedFare = roundCurrency(fareBeforeToll + effectiveTollFee);
+  engineResult.pricingPayload = {
+    ...engineResult.pricingPayload,
+    final_price_before_toll: fareBeforeToll,
+    toll_fee: roundCurrency(effectiveTollFee),
+    final_price: estimatedFare
+  };
   const fareDiff = roundCurrency(Math.abs(clientFare - estimatedFare));
 
   if (clientFare > 0 && fareDiff >= 1) {

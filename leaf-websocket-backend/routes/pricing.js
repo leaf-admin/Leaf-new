@@ -3,10 +3,13 @@ const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const fareEstimationService = require('../services/fare-estimation-service');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
+const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
 const { getPublicRateCards, RATE_CARD_VERSION } = require('../services/pricing/calculateFare');
 const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured } = require('../utils/logger');
 const geofenceService = require('../services/geofence-service');
+const { hasPaymentEligibleDriver } = require('../services/payment-driver-availability-guard');
+const routeTollService = require('../services/route-toll-service');
 const {
   createQuoteLock,
   getQuoteLockTtlSeconds
@@ -21,6 +24,10 @@ const QUOTE_SESSION_COUNTER_TTL_SECONDS = Math.max(
   60,
   Number.parseInt(process.env.PRICING_QUOTE_SESSION_COUNTER_TTL_SECONDS || '900', 10) || 900
 );
+
+function isSandboxQuoteLockTtlExtensionEnabled() {
+  return String(process.env.PRICING_SANDBOX_LONG_QUOTE_LOCK_TTL || 'true').toLowerCase() !== 'false';
+}
 
 function shouldRequireQuoteLockForPayment() {
   const configured = process.env.REQUIRE_PAYMENT_QUOTE_LOCK;
@@ -39,6 +46,16 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toBoolean(value, fallback = false) {
+  if (value === true || value === false) {
+    return value;
+  }
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+  return ['1', 'true', 'yes', 'sim'].includes(String(value).trim().toLowerCase());
+}
+
 function hasCoordinate(location = {}) {
   const latRaw = location?.lat;
   const lngRaw = location?.lng;
@@ -49,6 +66,27 @@ function hasCoordinate(location = {}) {
     return false;
   }
   return Number.isFinite(toNumber(latRaw, NaN)) && Number.isFinite(toNumber(lngRaw, NaN));
+}
+
+function hasRouteGeometry(payload = {}) {
+  const polyline = String(
+    payload.routePolyline ||
+      payload.polylinePoints ||
+      payload.encodedPolyline ||
+      payload.routeDetails?.polylinePoints ||
+      payload.route?.polylinePoints ||
+      ''
+  ).trim();
+  if (polyline.length > 0) {
+    return true;
+  }
+
+  const coordinates =
+    payload.routeCoordinates ||
+    payload.route?.coordinates ||
+    payload.routeDetails?.coordinates ||
+    [];
+  return Array.isArray(coordinates) && coordinates.filter(hasCoordinate).length >= 2;
 }
 
 function normalizeQuoteSessionId(value) {
@@ -93,6 +131,70 @@ async function incrementQuoteSessionCounter(redis, quoteSessionId) {
   }
 }
 
+async function resolveQuoteDriverAvailability({
+  redis,
+  io,
+  pickupLocation,
+  destinationLocation,
+  carType,
+  quoteSessionId,
+  quoteLockId,
+  passengerId
+}) {
+  const availability = await hasPaymentEligibleDriver({
+    redis,
+    io,
+    pickupLocation,
+    destinationLocation,
+    carType,
+    reserveDriver: false,
+    reservationContext: {
+      passengerId,
+      quoteSessionId,
+      quoteLockId
+    },
+    logStructured,
+    logContext: {
+      service: 'pricing-routes',
+      operation: 'pricing_quote_driver_availability',
+      quoteSessionId: quoteSessionId || null
+    }
+  });
+
+  if (!availability?.success) {
+    return {
+      status: 'unknown',
+      hasDrivers: null,
+      code: availability?.code || 'DRIVER_AVAILABILITY_UNKNOWN',
+      pickupEtaMin: null,
+      radiusKm: availability?.radiusKm || null,
+      source: 'payment_driver_availability_guard'
+    };
+  }
+
+  return {
+    status: availability.hasDrivers ? 'available' : 'unavailable',
+    hasDrivers: Boolean(availability.hasDrivers),
+    code: availability.code || (availability.hasDrivers ? 'DRIVERS_AVAILABLE' : 'NO_DRIVERS_AVAILABLE'),
+    pickupEtaMin: Number.isFinite(Number(availability.estimatedPickupEtaMin))
+      ? Number(availability.estimatedPickupEtaMin)
+      : null,
+    driverDistanceKm: Number.isFinite(Number(availability.driverDistanceKm))
+      ? Number(availability.driverDistanceKm)
+      : null,
+    candidates: Number.isFinite(Number(availability.candidates))
+      ? Number(availability.candidates)
+      : 0,
+    eligible: Number.isFinite(Number(availability.eligible))
+      ? Number(availability.eligible)
+      : 0,
+    radiusKm: Number.isFinite(Number(availability.radiusKm))
+      ? Number(availability.radiusKm)
+      : null,
+    source: 'payment_driver_availability_guard'
+  };
+}
+
 function haversineDistanceKm(lat1, lng1, lat2, lng2) {
   const toRad = (value) => (value * Math.PI) / 180;
   const earthRadiusKm = 6371;
@@ -118,6 +220,49 @@ async function resolveOptionalFirebaseUserId(req) {
   }
 }
 
+async function resolveQuoteLockTtlPolicy({ passengerId = '', body = {} } = {}) {
+  const baseTtlSeconds = getQuoteLockTtlSeconds();
+  const safePassengerId = String(passengerId || '').trim();
+  if (!safePassengerId) {
+    return {
+      ttlSeconds: baseTtlSeconds,
+      reason: 'default'
+    };
+  }
+
+  try {
+    const paymentProfile = await paymentRuntimeProfileService.resolveProfile({
+      passengerId: safePassengerId,
+      userId: safePassengerId,
+      phone: body.passengerPhone || body.phone || body.phoneNumber,
+      phoneNumber: body.passengerPhone || body.phone || body.phoneNumber,
+      appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+    });
+    if (
+      isSandboxQuoteLockTtlExtensionEnabled() &&
+      String(paymentProfile?.environment || '').toLowerCase() === 'sandbox'
+    ) {
+      return {
+        ttlSeconds: getQuoteLockTtlSeconds({ longLived: true }),
+        reason: 'sandbox_payment_profile',
+        paymentProfileId: paymentProfile.profileId || null
+      };
+    }
+  } catch (error) {
+    logStructured('warn', 'Falha ao resolver perfil de pagamento para TTL da cotação', {
+      service: 'pricing-routes',
+      operation: 'pricing_quote_lock_ttl_policy',
+      passengerId: safePassengerId,
+      error: error.message
+    });
+  }
+
+  return {
+    ttlSeconds: baseTtlSeconds,
+    reason: 'default'
+  };
+}
+
 router.get('/pricing/categories', (_req, res) => {
   return res.json({
     success: true,
@@ -137,6 +282,14 @@ router.post('/pricing/quote', async (req, res) => {
     return res.status(400).json({
       error: 'pickup_and_destination_required',
       message: 'Pickup e destino com lat/lng válidos são obrigatórios.'
+    });
+  }
+
+  if (toBoolean(body.requireRouteGeometry, false) && !hasRouteGeometry(body)) {
+    metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
+    return res.status(422).json({
+      error: 'route_geometry_required',
+      message: 'Rota canônica com geometria é obrigatória para cotação.'
     });
   }
 
@@ -183,6 +336,7 @@ router.post('/pricing/quote', async (req, res) => {
   try {
     const redis = redisPool.getConnection();
     const quoteRequestCount = await incrementQuoteSessionCounter(redis, quoteSessionId);
+    const tollEstimate = routeTollService.resolveTollFeeFromPricingPayload(body);
     const result = await fareEstimationService.estimateRideFare({
       redis,
       pickupLocation: normalizedPickupLocation,
@@ -190,7 +344,7 @@ router.post('/pricing/quote', async (req, res) => {
       carType: body.carType,
       routeDistanceKm: body.routeDistanceKm,
       routeDurationSecs: body.routeDurationSecs,
-      tollFee: body.tollFee,
+      tollFee: tollEstimate.tollFee,
       clientEstimatedFare: body.clientEstimatedFare,
       pricingContext: body.pricingContext || body.operational || null
     });
@@ -207,6 +361,10 @@ router.post('/pricing/quote', async (req, res) => {
     const estimatedFare = discountPreview.applied
       ? discountPreview.payableFare
       : result.estimatedFare;
+    const quoteLockTtlPolicy = await resolveQuoteLockTtlPolicy({
+      passengerId,
+      body
+    });
 
     const quoteLockResult = await createQuoteLock({
       redis,
@@ -225,7 +383,7 @@ router.post('/pricing/quote', async (req, res) => {
       rateCardVersion: result.rateCardVersion,
       pricingPayload: result.pricingPayload || null,
       pricingAudit: result.pricingAudit || null,
-      ttlSeconds: getQuoteLockTtlSeconds()
+      ttlSeconds: quoteLockTtlPolicy.ttlSeconds
     });
 
     if (!quoteLockResult.success && shouldRequireQuoteLockForPayment()) {
@@ -244,6 +402,17 @@ router.post('/pricing/quote', async (req, res) => {
       });
     }
 
+    const driverAvailability = await resolveQuoteDriverAvailability({
+      redis,
+      io: req.app.get('io'),
+      pickupLocation: normalizedPickupLocation,
+      destinationLocation: normalizedDestinationLocation,
+      carType: result.normalizedCarType,
+      quoteSessionId,
+      quoteLockId: quoteLockResult.success ? quoteLockResult.quoteLockId : null,
+      passengerId
+    });
+
     metrics.recordPricingQuoteRequest?.({ success: true, source: quoteSessionId ? 'session' : 'anonymous' });
 
     if (quoteSessionId) {
@@ -259,7 +428,14 @@ router.post('/pricing/quote', async (req, res) => {
       quoteSessionId: quoteSessionId || null,
       quoteRequestCount: quoteRequestCount || null,
       carType: result.normalizedCarType,
-      estimatedFare
+      estimatedFare,
+      quoteLockTtlSeconds: quoteLockResult.success ? quoteLockResult.ttlSeconds : null,
+      quoteLockTtlReason: quoteLockTtlPolicy.reason,
+      paymentProfileId: quoteLockTtlPolicy.paymentProfileId || null,
+      tollFee: result.tollFee || 0,
+      tollDetectionSource: tollEstimate.source || null,
+      driverAvailabilityStatus: driverAvailability.status,
+      driverAvailabilityCode: driverAvailability.code
     });
 
     return res.json({
@@ -277,8 +453,15 @@ router.post('/pricing/quote', async (req, res) => {
       routeDistanceKm: result.routeMetrics?.distanceKm || 0,
       routeDurationSecs: result.routeMetrics?.durationSecs || 0,
       tollFee: result.tollFee || 0,
+      tolls: tollEstimate.tolls || [],
+      tollDetection: {
+        source: tollEstimate.source || null,
+        toleranceKm: tollEstimate.toleranceKm || null,
+        tollCount: tollEstimate.tollCount || 0
+      },
       pricingPayload: result.pricingPayload || null,
       pricingAudit: result.pricingAudit || null,
+      driverAvailability,
       operationalState: result.operationalState || 'NORMAL',
       scorePressao: result.scorePressao || 0,
       scoreExcecao: result.scoreExcecao || 0,

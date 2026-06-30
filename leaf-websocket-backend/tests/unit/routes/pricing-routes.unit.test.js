@@ -10,9 +10,12 @@ const mockRedis = {
 };
 const mockGetConnection = jest.fn(() => mockRedis);
 const mockEstimateRideFare = jest.fn();
+const mockResolvePaymentProfile = jest.fn();
+const mockHasPaymentEligibleDriver = jest.fn();
 const mockIsActive = jest.fn(() => false);
 const mockValidateRideLocations = jest.fn(() => ({ valid: true }));
 const mockRecordPricingQuoteRequest = jest.fn();
+const mockResolveTollFeeFromPricingPayload = jest.fn();
 
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: () => mockGetConnection()
@@ -20,6 +23,14 @@ jest.mock('../../../utils/redis-pool', () => ({
 
 jest.mock('../../../services/fare-estimation-service', () => ({
   estimateRideFare: (...args) => mockEstimateRideFare(...args)
+}));
+
+jest.mock('../../../services/payment-runtime-profile-service', () => ({
+  resolveProfile: (...args) => mockResolvePaymentProfile(...args)
+}));
+
+jest.mock('../../../services/payment-driver-availability-guard', () => ({
+  hasPaymentEligibleDriver: (...args) => mockHasPaymentEligibleDriver(...args)
 }));
 
 jest.mock('../../../services/pricing/calculateFare', () => ({
@@ -47,6 +58,10 @@ jest.mock('../../../services/geofence-service', () => ({
   validateRideLocations: (...args) => mockValidateRideLocations(...args)
 }));
 
+jest.mock('../../../services/route-toll-service', () => ({
+  resolveTollFeeFromPricingPayload: (...args) => mockResolveTollFeeFromPricingPayload(...args)
+}));
+
 const pricingRoutes = require('../../../routes/pricing');
 
 function createApp() {
@@ -63,8 +78,29 @@ describe('pricing routes', () => {
     mockRedis.expire.mockResolvedValue(1);
     mockRedis.set.mockResolvedValue('OK');
     mockGetConnection.mockReturnValue(mockRedis);
+    mockResolvePaymentProfile.mockResolvedValue({
+      environment: 'production',
+      profileId: 'env-production'
+    });
+    mockHasPaymentEligibleDriver.mockResolvedValue({
+      success: true,
+      hasDrivers: true,
+      code: 'DRIVERS_AVAILABLE',
+      candidates: 1,
+      eligible: 1,
+      radiusKm: 5,
+      driverDistanceKm: 1.2,
+      estimatedPickupEtaMin: 4
+    });
     mockIsActive.mockReturnValue(false);
     mockValidateRideLocations.mockReturnValue({ valid: true });
+    mockResolveTollFeeFromPricingPayload.mockReturnValue({
+      tollFee: 0,
+      tolls: [],
+      tollCount: 0,
+      source: 'leaf_toll_catalog',
+      toleranceKm: 2
+    });
     mockEstimateRideFare.mockResolvedValue({
       estimatedFare: 22.15,
       normalizedCarType: 'leaf_plus',
@@ -94,6 +130,25 @@ describe('pricing routes', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('pickup_and_destination_required');
+    expect(mockEstimateRideFare).not.toHaveBeenCalled();
+  });
+
+  it('returns 422 when canonical quote requires route geometry but none is provided', async () => {
+    const app = createApp();
+    const response = await request(app)
+      .post('/pricing/quote')
+      .send({
+        pickupLocation: { lat: -22.857, lng: -43.309 },
+        destinationLocation: { lat: -22.9976583, lng: -43.3581268 },
+        routeDistanceKm: 24.4,
+        routeDurationSecs: 2100,
+        carType: 'Leaf Plus',
+        requireRouteGeometry: true
+      });
+
+    expect(response.status).toBe(422);
+    expect(response.body.error).toBe('route_geometry_required');
+    expect(mockResolveTollFeeFromPricingPayload).not.toHaveBeenCalled();
     expect(mockEstimateRideFare).not.toHaveBeenCalled();
   });
 
@@ -147,6 +202,15 @@ describe('pricing routes', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.estimatedFare).toBe(22.15);
+    expect(response.body.driverAvailability).toEqual(
+      expect.objectContaining({
+        status: 'available',
+        hasDrivers: true,
+        code: 'DRIVERS_AVAILABLE',
+        pickupEtaMin: 4,
+        driverDistanceKm: 1.2
+      })
+    );
     expect(response.body.quoteLockId).toMatch(/^ql_/);
     expect(response.body.quoteLockExpiresAt).toEqual(expect.any(String));
     expect(mockRedis.set).toHaveBeenCalledWith(
@@ -159,6 +223,121 @@ describe('pricing routes', () => {
       expect.objectContaining({
         pickupLocation: expect.objectContaining({ lat: -22.966, lng: -43.182 }),
         destinationLocation: expect.objectContaining({ lat: -22.974, lng: -43.207 })
+      })
+    );
+    expect(mockHasPaymentEligibleDriver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pickupLocation: expect.objectContaining({ lat: -22.966, lng: -43.182 }),
+        destinationLocation: expect.objectContaining({ lat: -22.974, lng: -43.207 }),
+        carType: 'leaf_plus',
+        reserveDriver: false
+      })
+    );
+  });
+
+  it('resolve pedágio pela geometria antes de estimar a tarifa', async () => {
+    mockResolveTollFeeFromPricingPayload.mockReturnValue({
+      tollFee: 4,
+      tolls: [
+        {
+          id: 'p09_linha_amarela',
+          name: 'P09 - Linha Amarela',
+          amount: 4
+        }
+      ],
+      tollCount: 1,
+      source: 'leaf_toll_catalog',
+      toleranceKm: 2
+    });
+    mockEstimateRideFare.mockResolvedValueOnce({
+      estimatedFare: 26.15,
+      normalizedCarType: 'leaf_plus',
+      rateCardVersion: 'test-rate-card-v1',
+      routeMetrics: {
+        distanceKm: 9.7,
+        durationSecs: 920
+      },
+      tollFee: 4,
+      pricingPayload: {
+        final_price: 26.15,
+        toll_fee: 4,
+        passenger_notice: null
+      },
+      pricingAudit: null,
+      operationalState: 'NORMAL',
+      scorePressao: 0,
+      scoreExcecao: 0,
+      exceptionalMode: null
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/pricing/quote')
+      .send({
+        pickupLocation: { lat: -22.89, lng: -43.32 },
+        destinationLocation: { lat: -22.85, lng: -43.28 },
+        routeDistanceKm: 9.7,
+        routeDurationSecs: 920,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B',
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(200);
+    expect(mockResolveTollFeeFromPricingPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
+      })
+    );
+    expect(mockEstimateRideFare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tollFee: 4
+      })
+    );
+    expect(response.body.tollFee).toBe(4);
+    expect(response.body.tolls).toEqual([
+      expect.objectContaining({
+        id: 'p09_linha_amarela',
+        amount: 4
+      })
+    ]);
+    expect(response.body.tollDetection).toEqual(
+      expect.objectContaining({
+        source: 'leaf_toll_catalog',
+        tollCount: 1
+      })
+    );
+  });
+
+  it('returns driver availability unavailable with quote when no eligible driver is nearby', async () => {
+    mockHasPaymentEligibleDriver.mockResolvedValue({
+      success: true,
+      hasDrivers: false,
+      code: 'NO_DRIVERS_AVAILABLE',
+      candidates: 0,
+      eligible: 0,
+      radiusKm: 5
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/pricing/quote')
+      .send({
+        pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+        destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+        routeDistanceKm: 9.7,
+        routeDurationSecs: 920,
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.driverAvailability).toEqual(
+      expect.objectContaining({
+        status: 'unavailable',
+        hasDrivers: false,
+        code: 'NO_DRIVERS_AVAILABLE',
+        pickupEtaMin: null,
+        candidates: 0,
+        eligible: 0
       })
     );
   });
@@ -193,5 +372,38 @@ describe('pricing routes', () => {
       success: true,
       source: 'session'
     });
+  });
+
+  it('uses long quote lock ttl for passengers routed to sandbox payment profile', async () => {
+    mockResolvePaymentProfile.mockResolvedValue({
+      environment: 'sandbox',
+      profileId: 'sandbox-test-profile'
+    });
+    const app = createApp();
+    const response = await request(app)
+      .post('/pricing/quote')
+      .send({
+        passengerId: 'passenger-sandbox',
+        pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+        destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+        routeDistanceKm: 9.7,
+        routeDurationSecs: 920,
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.quoteLockTtlSeconds).toBe(21600);
+    expect(mockResolvePaymentProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        passengerId: 'passenger-sandbox',
+        userId: 'passenger-sandbox'
+      })
+    );
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      expect.stringMatching(/^pricing:quote-lock:ql_/),
+      expect.any(String),
+      'EX',
+      21600
+    );
   });
 });

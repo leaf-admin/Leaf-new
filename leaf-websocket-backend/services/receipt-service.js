@@ -135,6 +135,47 @@ class ReceiptService {
         return null;
     }
 
+    firstFiniteNumber(...values) {
+        for (const value of values) {
+            if (value === null || value === undefined || value === '') {
+                continue;
+            }
+            const parsed = Number(value);
+            if (Number.isFinite(parsed)) {
+                return parsed;
+            }
+        }
+        return null;
+    }
+
+    normalizeDistanceKm(value, unit = '') {
+        const parsed = this.firstFiniteNumber(value);
+        if (parsed === null || parsed < 0) {
+            return null;
+        }
+
+        const normalizedUnit = String(unit || '').trim().toLowerCase();
+        if (normalizedUnit === 'm' || normalizedUnit === 'meter' || normalizedUnit === 'meters' || normalizedUnit === 'metros') {
+            return parsed / 1000;
+        }
+
+        return parsed > 1000 ? parsed / 1000 : parsed;
+    }
+
+    resolveReceiptDistanceKm(rideData = {}) {
+        return this.normalizeDistanceKm(
+            this.firstFiniteNumber(
+                rideData.distanceKm,
+                rideData.tripDistanceKm,
+                rideData.estimatedTripDistanceKm,
+                rideData.routeDistanceKm,
+                rideData.distance,
+                rideData.estimateDistance
+            ),
+            rideData.distanceUnit || rideData.distance_unit
+        ) || 0;
+    }
+
     isTruthyFlag(value) {
         if (value === true) {
             return true;
@@ -311,6 +352,17 @@ class ReceiptService {
 
             // 2. Calcular métricas da viagem
             const tripMetrics = this.calculateTripMetrics(receiptRideData);
+            const actualDistanceKm = this.resolveReceiptDistanceKm(receiptRideData);
+            const estimatedDistanceKm =
+                this.normalizeDistanceKm(
+                    this.firstFiniteNumber(
+                        receiptRideData.estimateDistance,
+                        receiptRideData.estimatedTripDistanceKm,
+                        receiptRideData.routeDistanceKm,
+                        actualDistanceKm
+                    ),
+                    receiptRideData.distanceUnit || receiptRideData.distance_unit
+                ) || actualDistanceKm;
 
             // 3. Gerar URL da imagem estática do mapa
             const mapImageUrl = this.generateStaticMapImage(receiptRideData);
@@ -378,10 +430,10 @@ class ReceiptService {
                     duration: tripMetrics.duration, // em minutos
                     durationFormatted: tripMetrics.durationFormatted,
                     distance: {
-                        estimated: parseFloat(receiptRideData.estimateDistance || 0),
-                        actual: parseFloat(receiptRideData.distance || receiptRideData.estimateDistance || 0),
+                        estimated: estimatedDistanceKm,
+                        actual: actualDistanceKm,
                         unit: 'km',
-                        formatted: `${(parseFloat(receiptRideData.distance || receiptRideData.estimateDistance || 0) / 1000).toFixed(2)} km`
+                        formatted: `${actualDistanceKm.toFixed(2)} km`
                     },
 
                     // Mapa do trajeto
@@ -394,23 +446,23 @@ class ReceiptService {
 
                 // === DADOS DO PASSAGEIRO ===
                 customer: {
-                    name: receiptRideData.customer_name || 'Passageiro',
-                    email: receiptRideData.customer_email || '',
-                    phone: receiptRideData.customer_contact || '',
-                    id: receiptRideData.customer || ''
+                    name: receiptRideData.customer_name || receiptRideData.passengerName || 'Passageiro',
+                    email: receiptRideData.customer_email || receiptRideData.passengerEmail || '',
+                    phone: receiptRideData.customer_contact || receiptRideData.passengerPhone || '',
+                    id: receiptRideData.customer || receiptRideData.customerId || receiptRideData.passengerId || receiptRideData.userId || ''
                 },
 
                 // === DADOS DO MOTORISTA ===
                 driver: {
-                    name: receiptRideData.driver_name || 'Motorista Parceiro',
-                    fullName: receiptRideData.driver_name || 'Motorista Parceiro', // Nome completo
-                    id: receiptRideData.driver || '',
+                    name: receiptRideData.driver_name || receiptRideData.driverName || 'Motorista Parceiro',
+                    fullName: receiptRideData.driver_name || receiptRideData.driverName || 'Motorista Parceiro', // Nome completo
+                    id: receiptRideData.driver || receiptRideData.driverId || '',
                     vehicle: {
                         type: receiptRideData.carType || 'Veículo',
-                        plate: receiptRideData.vehicle_plate || 'N/A',
+                        plate: receiptRideData.vehicle_plate || receiptRideData.vehiclePlate || receiptRideData.carPlate || 'N/A',
                         brand: receiptRideData.vehicleMake || '',
-                        model: receiptRideData.vehicleModel || '',
-                        brandModel: `${receiptRideData.vehicleMake || ''} ${receiptRideData.vehicleModel || ''}`.trim() || 'Veículo'
+                        model: receiptRideData.vehicleModel || receiptRideData.carModel || '',
+                        brandModel: `${receiptRideData.vehicleMake || ''} ${receiptRideData.vehicleModel || receiptRideData.carModel || ''}`.trim() || 'Veículo'
                     }
                 },
 
@@ -711,6 +763,11 @@ class ReceiptService {
         try {
             logger.info(`🔍 Buscando dados da corrida: ${rideId}`);
 
+            const storedReceipt = await this.getReceiptFromFirestore(rideId, firebaseDb);
+            if (storedReceipt) {
+                return storedReceipt;
+            }
+
             // Tentar buscar do Redis primeiro
             let rideData = null;
             if (redis) {
@@ -727,7 +784,7 @@ class ReceiptService {
             }
 
             if (!rideData) {
-                throw new Error(`Corrida ${rideId} não encontrada`);
+                return null;
             }
 
             // Gerar recibo

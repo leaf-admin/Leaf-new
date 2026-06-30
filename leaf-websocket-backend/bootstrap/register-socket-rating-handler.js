@@ -30,7 +30,8 @@ function registerSocketRatingHandler({
                 redisPool,
                 bookingId: tripId,
                 allowedRoles: ['passenger', 'driver'],
-                allowSupport: false
+                allowSupport: false,
+                preferPersistentTerminal: true
             });
 
             if (!participant.allowed) {

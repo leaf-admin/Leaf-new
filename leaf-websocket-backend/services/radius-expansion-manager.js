@@ -1,13 +1,13 @@
 /**
  * RADIUS EXPANSION MANAGER
  * 
- * Monitora corridas em SEARCHING há mais de 60 segundos
- * e expande o raio de busca de 3km para 5km se necessário.
+ * Monitora corridas em SEARCHING e mantem compatibilidade com o fluxo antigo
+ * de expansao secundaria. A regua canonica atual e 5km geograficos.
  * 
  * Fluxo:
  * - Verifica corridas em SEARCHING periodicamente
- * - Se corrida está há > 60s sem motorista e raio = 3km:
- *   → Expande para 5km
+ * - Se corrida esta ha > 60s sem motorista e ainda nao atingiu o raio canonico:
+ *   -> Expande ate o raio canonico
  *   → Busca novos motoristas
  *   → Notifica novos motoristas encontrados
  */
@@ -20,6 +20,10 @@ const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const { recordDispatchWave } = require('./dispatch-wave-trace-service');
+const {
+    getDriverSearchDriversPerWave,
+    getDriverSearchMaxRadiusKm
+} = require('../utils/dispatch-config');
 
 class RadiusExpansionManager {
     constructor(io) {
@@ -33,18 +37,18 @@ class RadiusExpansionManager {
             // Intervalo para VERIFICAR se há corridas que precisam expandir (não é intervalo de notificação)
             checkInterval: 10000, // Verificar a cada 10 segundos
             
-            // Tempo mínimo em SEARCHING antes de expandir para 5km
+            // Tempo minimo em SEARCHING antes de tentar expansao secundaria.
             expansionTimeout: 60, // 60 segundos em SEARCHING antes de expandir
             
-            // Raio máximo inicial da busca gradual (0.5km → 3km)
-            initialMaxRadius: 3, // km (raio máximo inicial)
+            // Raio maximo canonico aprovado para busca geografica de motorista.
+            initialMaxRadius: getDriverSearchMaxRadiusKm(),
             
-            // Raio após expansão secundária (expansão única após 60s)
-            expandedMaxRadius: 5, // km (raio após expansão)
+            // Mantido para compatibilidade com chaves/telemetria antigas.
+            expandedMaxRadius: getDriverSearchMaxRadiusKm(),
             
             // Quantidade de motoristas para notificar após expansão (apenas UMA VEZ)
             // Nota: Apenas motoristas NOVOS serão notificados (já filtrado por ride_notifications)
-            driversPerWave: 10, // Mais motoristas após expansão (área maior)
+            driversPerWave: getDriverSearchDriversPerWave(),
 
             // Hotfix de performance: limitar SCAN em loops de monitoramento.
             redisScanCount: Math.max(

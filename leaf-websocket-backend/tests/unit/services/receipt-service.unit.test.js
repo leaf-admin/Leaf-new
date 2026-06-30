@@ -130,6 +130,29 @@ describe('ReceiptService financial snapshot', () => {
     expect(receipt.financial.totals.tollPassThrough).toBeCloseTo(15, 2);
   });
 
+  it('keeps receipt distance in kilometers and route duration in minutes', async () => {
+    const service = createReceiptService();
+
+    const receipt = await service.generateReceipt('ride_backend_route_metrics', {
+      ...finalRideData,
+      distance: 27.1,
+      routeDistanceKm: 27.1,
+      durationSeconds: 1980,
+      routeDurationSecs: 1980,
+      payment_mode: 'pix',
+    });
+
+    expect(receipt.trip.distance).toMatchObject({
+      actual: 27.1,
+      estimated: 27.1,
+      formatted: '27.10 km',
+      unit: 'km',
+    });
+    expect(receipt.trip.duration).toBe(33);
+    expect(receipt.trip.durationFormatted).toBe('33min');
+    expect(receipt.payment.method).toBe('PIX');
+  });
+
   it('rejects receipt generation without a backend final source', async () => {
     const service = createReceiptService();
 
@@ -216,5 +239,84 @@ describe('ReceiptService financial snapshot', () => {
 
     expect(financial.totalPaid.amount).toBe(0);
     expect(financial.totals.customerPaid).toBe(0);
+  });
+
+  it('loads a stored final receipt before trying to regenerate from an active booking', async () => {
+    const service = createReceiptService();
+    const storedReceipt = {
+      receiptId: 'LEAF-ride_stored',
+      rideId: 'ride_stored',
+      metadata: {
+        status: 'COMPLETED',
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+      },
+      customer: { id: 'passenger_1' },
+      driver: { id: 'driver_1' },
+    };
+    const firebaseDb = {
+      ref: jest.fn((path) => ({
+        once: jest.fn(async () => ({
+          val: () => (path === 'receipts/ride_stored' ? storedReceipt : null),
+        })),
+      })),
+    };
+    const redis = {
+      hget: jest.fn(),
+    };
+
+    await expect(service.getReceiptByRideId('ride_stored', redis, firebaseDb)).resolves.toBe(storedReceipt);
+    expect(redis.hget).not.toHaveBeenCalled();
+    expect(firebaseDb.ref).toHaveBeenCalledWith('receipts/ride_stored');
+  });
+
+  it('returns null instead of throwing when neither stored receipt nor active booking exists', async () => {
+    const service = createReceiptService();
+    const firebaseDb = {
+      ref: jest.fn(() => ({
+        once: jest.fn(async () => ({
+          val: () => null,
+        })),
+      })),
+    };
+    const redis = {
+      hget: jest.fn(async () => null),
+    };
+
+    await expect(service.getReceiptByRideId('ride_missing', redis, firebaseDb)).resolves.toBeNull();
+    expect(firebaseDb.ref).toHaveBeenCalledWith('receipts/ride_missing');
+    expect(firebaseDb.ref).toHaveBeenCalledWith('bookings/ride_missing');
+  });
+
+  it('uses passenger and driver ids as receipt owners when legacy customer/driver fields are absent', async () => {
+    const service = createReceiptService();
+
+    const receipt = await service.generateReceipt('ride_owner_ids', {
+      ...finalRideData,
+      customer: '',
+      driver: '',
+      customer_name: '',
+      driver_name: '',
+      customerId: 'passenger_from_booking',
+      driverId: 'driver_from_booking',
+      passengerName: 'Passageiro Canonico',
+      driverName: 'Motorista Canonico',
+      carPlate: 'TES6789',
+      carModel: 'Toyota Prius',
+    });
+
+    expect(receipt.customer).toMatchObject({
+      id: 'passenger_from_booking',
+      name: 'Passageiro Canonico',
+    });
+    expect(receipt.driver).toMatchObject({
+      id: 'driver_from_booking',
+      name: 'Motorista Canonico',
+    });
+    expect(receipt.driver.vehicle).toMatchObject({
+      plate: 'TES6789',
+      model: 'Toyota Prius',
+      brandModel: 'Toyota Prius',
+    });
   });
 });

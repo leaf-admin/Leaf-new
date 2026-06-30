@@ -45,6 +45,8 @@ describe('pricing-context-provider', () => {
       perfBreakdownMs: expect.any(Object)
     }));
     expect(result.pricingContext.trip.eta_pickup_min).toBe(7);
+    expect(result.pricingContext.trip.eta_pickup_source).toBe('unavailable');
+    expect(result.pricingContext.trip.eta_pickup_authoritative).toBe(false);
     expect(result.pricingContext.operational.current.active_requests_5m).toBe(9);
     expect(result.pricingContext.operational.state_context.now).toEqual(expect.any(String));
   });

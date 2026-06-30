@@ -1,3 +1,110 @@
+function parseMaybeJsonObject(value) {
+    if (!value || typeof value !== 'string') {
+        return value && typeof value === 'object' ? value : {};
+    }
+
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function firstFiniteNumber(...values) {
+    for (const value of values) {
+        if (value === null || value === undefined || value === '') {
+            continue;
+        }
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return null;
+}
+
+function normalizeDistanceKm(value) {
+    const parsed = firstFiniteNumber(value);
+    if (parsed === null || parsed < 0) {
+        return null;
+    }
+    return parsed > 1000 ? parsed / 1000 : parsed;
+}
+
+function resolveBookingPricingPayload(bookingData = {}) {
+    return parseMaybeJsonObject(
+        bookingData.pricingPayload ||
+        bookingData.pricing_payload ||
+        bookingData.fareBreakdown ||
+        bookingData.fare_breakdown
+    );
+}
+
+function resolveCanonicalTollFee(bookingData = {}, fallback = 0) {
+    const pricingPayload = resolveBookingPricingPayload(bookingData);
+    const parsed = firstFiniteNumber(
+        bookingData.tollFee,
+        bookingData.toll_fee,
+        bookingData.pedagio,
+        pricingPayload.tollFee,
+        pricingPayload.toll_fee,
+        pricingPayload.toll,
+        pricingPayload.toll_amount,
+        fallback
+    );
+    return parsed !== null && parsed >= 0 ? parsed : 0;
+}
+
+function resolveCanonicalDistanceKm(bookingData = {}, fallback = null) {
+    const pricingPayload = resolveBookingPricingPayload(bookingData);
+    return normalizeDistanceKm(
+        firstFiniteNumber(
+            bookingData.estimatedTripDistanceKm,
+            bookingData.tripDistanceKm,
+            bookingData.routeDistanceKm,
+            bookingData.distanceKm,
+            bookingData.distance_km,
+            pricingPayload.distanceKm,
+            pricingPayload.distance_km,
+            fallback
+        )
+    );
+}
+
+function resolveCanonicalDurationSeconds(bookingData = {}, fallbackSeconds = null) {
+    const pricingPayload = resolveBookingPricingPayload(bookingData);
+    const explicitSeconds = firstFiniteNumber(
+        bookingData.tripDurationSecs,
+        bookingData.routeDurationSecs,
+        bookingData.durationSeconds,
+        bookingData.duration_seconds,
+        pricingPayload.durationSeconds,
+        pricingPayload.duration_seconds,
+        pricingPayload.duration_secs
+    );
+    if (explicitSeconds !== null && explicitSeconds >= 0) {
+        return Math.round(explicitSeconds);
+    }
+
+    const explicitMinutes = firstFiniteNumber(
+        bookingData.tripDurationMin,
+        bookingData.tripDurationMinutes,
+        bookingData.routeDurationMinutes,
+        bookingData.durationMinutes,
+        bookingData.duration_min,
+        pricingPayload.durationMin,
+        pricingPayload.duration_min,
+        pricingPayload.durationMinutes
+    );
+    if (explicitMinutes !== null && explicitMinutes >= 0) {
+        return Math.round(explicitMinutes * 60);
+    }
+
+    const fallback = firstFiniteNumber(fallbackSeconds);
+    return fallback !== null && fallback >= 0 ? Math.round(fallback) : null;
+}
+
 function registerSocketCompleteTripHandler({
     socket,
     io,
@@ -130,6 +237,7 @@ function registerSocketCompleteTripHandler({
                 }
                 outerIdempotencyOwner = true;
                 const redis = redisPool.getConnection();
+                const bookingSnapshotBeforeComplete = await redis.hgetall(`booking:${bookingId}`);
                 let offlineIntentValidation = null;
 
                 if (hasRideOfflineIntentPayload(data)) {
@@ -186,6 +294,14 @@ function registerSocketCompleteTripHandler({
                 const timerData = await redis.hgetall(timerKey);
                 const duration = timerData.startTimestamp ?
                     Math.floor((Date.now() - parseInt(timerData.startTimestamp)) / 1000) : 0;
+                const commandTollFee = resolveCanonicalTollFee(bookingSnapshotBeforeComplete, data.tollFee || 0);
+                const commandDistanceKm =
+                    resolveCanonicalDistanceKm(bookingSnapshotBeforeComplete, parseFloat(distance) || 0) ||
+                    parseFloat(distance) ||
+                    0;
+                const commandDurationSeconds =
+                    resolveCanonicalDurationSeconds(bookingSnapshotBeforeComplete, duration) ||
+                    duration;
 
                 // ✅ FASE 1.3: Criar span para Command
                 const tracer = getTracer();
@@ -210,8 +326,9 @@ function registerSocketCompleteTripHandler({
                         bookingId,
                         endLocation,
                         finalFare: parseFloat(fare) || 0,
-                        distance: parseFloat(distance) || 0,
-                        duration: duration,
+                        tollFee: commandTollFee,
+                        distance: commandDistanceKm,
+                        duration: commandDurationSeconds,
                         traceId, // ✅ Passar traceId para o command
                         correlationId // ✅ Passar correlationId para o command
                     });
@@ -358,14 +475,23 @@ function registerSocketCompleteTripHandler({
                 }
 
                 // Emitir confirmação imediatamente para reduzir latência no caminho crítico
-                const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+                const bookingSnapshot = {
+                    ...(bookingSnapshotBeforeComplete || {}),
+                    ...(await redis.hgetall(`booking:${bookingId}`))
+                };
+                const receiptDistanceKm =
+                    resolveCanonicalDistanceKm(bookingSnapshot, resultDistance || distance) ||
+                    commandDistanceKm;
+                const receiptDurationSeconds =
+                    resolveCanonicalDurationSeconds(bookingSnapshot, resultDuration || duration) ||
+                    commandDurationSeconds;
                 const tripCompletedData = buildTripCompletedPayload({
                     bookingId,
                     bookingData: bookingSnapshot,
                     resultEndLocation,
                     endLocation,
-                    distance: resultDistance || distance,
-                    duration: resultDuration,
+                    distance: receiptDistanceKm,
+                    duration: receiptDurationSeconds,
                     fareBreakdown,
                     paymentDistribution,
                     rideLegs: bookingSnapshot?.rideLegs ? JSON.parse(bookingSnapshot.rideLegs) : null,
@@ -417,8 +543,10 @@ function registerSocketCompleteTripHandler({
                             fare: finalFare || fare,
                             tollFee: tollFeeReais,
                             netFare: null,
-                            distance: resultDistance || distance,
-                            duration: resultDuration || duration || null,
+                            distance: receiptDistanceKm,
+                            routeDistanceKm: receiptDistanceKm,
+                            duration: receiptDurationSeconds,
+                            routeDurationSecs: receiptDurationSeconds,
                             endLocation: resultEndLocation || endLocation,
                             driverEarnings: null,
                             fareBreakdown,
@@ -501,14 +629,21 @@ function registerSocketCompleteTripHandler({
                                 totalFees: fareBreakdown.totalFees,
                                 driverNetAmount: fareBreakdown.driverNetAmount,
                                 tollFee: fareBreakdown.tollFee,
+                                payment_mode: bookingDataForReceipt.paymentMethod || bookingDataForReceipt.payment_mode || 'pix',
+                                payment_status: bookingDataForReceipt.paymentStatus || bookingDataForReceipt.payment_status || 'completed',
                                 fareBreakdown,
                                 financialBreakdown: paymentDistribution || bookingDataForReceipt.financialBreakdown || null,
                                 paymentDistribution,
                                 financialSnapshot: result.data?.financialSnapshot || bookingDataForReceipt.financialSnapshot || null,
                                 financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
                                 authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
-                                distance: resultDistance || distance,
-                                duration: resultDuration || duration || null,
+                                distance: receiptDistanceKm,
+                                routeDistanceKm: receiptDistanceKm,
+                                distanceKm: receiptDistanceKm,
+                                estimateDistance: receiptDistanceKm,
+                                duration: receiptDurationSeconds,
+                                durationSeconds: receiptDurationSeconds,
+                                routeDurationSecs: receiptDurationSeconds,
                                 endLocation: resultEndLocation || endLocation,
                                 endTime: completionTimestamp,
                                 completedAt: completionTimestamp,

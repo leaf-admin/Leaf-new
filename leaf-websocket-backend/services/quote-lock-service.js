@@ -2,13 +2,40 @@ const crypto = require('crypto');
 const { normalizeOperationalCarType } = require('../utils/operational-car-type');
 
 const DEFAULT_QUOTE_LOCK_TTL_SECONDS = 120;
+const DEFAULT_LONG_QUOTE_LOCK_TTL_SECONDS = 6 * 60 * 60;
 const QUOTE_LOCK_KEY_PREFIX = 'pricing:quote-lock';
 
-function getQuoteLockTtlSeconds() {
+function isTruthyEnv(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function getLongQuoteLockTtlSeconds() {
+  const configured = Number.parseInt(
+    process.env.PRICING_LONG_QUOTE_LOCK_TTL_SECONDS ||
+      process.env.REAL_SMOKE_QUOTE_LOCK_TTL_SECONDS ||
+      '',
+    10
+  );
+  return Math.max(300, Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_LONG_QUOTE_LOCK_TTL_SECONDS);
+}
+
+function getQuoteLockTtlSeconds(options = {}) {
   const configured = Number.parseInt(process.env.PRICING_QUOTE_LOCK_TTL_SECONDS || '', 10);
-  return Math.max(30, Number.isFinite(configured) && configured > 0
+  const baseTtlSeconds = Math.max(30, Number.isFinite(configured) && configured > 0
     ? configured
     : DEFAULT_QUOTE_LOCK_TTL_SECONDS);
+
+  if (
+    options.longLived === true ||
+    isTruthyEnv(process.env.REAL_SMOKE_DISABLE_TTLS) ||
+    isTruthyEnv(process.env.REAL_SMOKE_LONG_TTLS)
+  ) {
+    return Math.max(baseTtlSeconds, getLongQuoteLockTtlSeconds());
+  }
+
+  return baseTtlSeconds;
 }
 
 function normalizeText(value) {
@@ -228,9 +255,8 @@ async function readQuoteLock({ redis, quoteLockId } = {}) {
   }
 }
 
-async function validateQuoteLock({
-  redis,
-  quoteLockId,
+function validateQuoteLockPayload({
+  quoteLock,
   quoteSessionId = null,
   passengerId = null,
   amountInCents,
@@ -239,16 +265,20 @@ async function validateQuoteLock({
   destinationLocation = null,
   carType = null,
   toleranceInCents = 1,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  allowExpired = false
 } = {}) {
-  const readResult = await readQuoteLock({ redis, quoteLockId });
-  if (!readResult.success) {
-    return readResult;
+  if (!quoteLock || typeof quoteLock !== 'object') {
+    return {
+      success: false,
+      code: 'QUOTE_LOCK_INVALID',
+      error: 'Quote lock payload invalid'
+    };
   }
 
-  const quoteLock = readResult.quoteLock || {};
   const expiresAtMs = Number(quoteLock.expiresAtMs || Date.parse(quoteLock.expiresAtIso || ''));
-  if (Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs) {
+  const isExpired = Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
+  if (isExpired && !allowExpired) {
     return {
       success: false,
       code: 'QUOTE_LOCK_EXPIRED',
@@ -335,10 +365,45 @@ async function validateQuoteLock({
   return {
     success: true,
     quoteLock,
+    quoteLockExpirationBypassed: Boolean(isExpired && allowExpired),
     expectedAmountInCents,
     payableAmountInCents: expectedAmountInCents,
     grossAmountInCents: expectedGrossAmountInCents
   };
+}
+
+async function validateQuoteLock({
+  redis,
+  quoteLockId,
+  quoteSessionId = null,
+  passengerId = null,
+  amountInCents,
+  grossAmountInCents = null,
+  pickupLocation = null,
+  destinationLocation = null,
+  carType = null,
+  toleranceInCents = 1,
+  nowMs = Date.now(),
+  allowExpired = false
+} = {}) {
+  const readResult = await readQuoteLock({ redis, quoteLockId });
+  if (!readResult.success) {
+    return readResult;
+  }
+
+  return validateQuoteLockPayload({
+    quoteLock: readResult.quoteLock,
+    quoteSessionId,
+    passengerId,
+    amountInCents,
+    grossAmountInCents,
+    pickupLocation,
+    destinationLocation,
+    carType,
+    toleranceInCents,
+    nowMs,
+    allowExpired
+  });
 }
 
 module.exports = {
@@ -352,5 +417,6 @@ module.exports = {
   normalizeAmountCents,
   normalizeLocation,
   readQuoteLock,
+  validateQuoteLockPayload,
   validateQuoteLock
 };

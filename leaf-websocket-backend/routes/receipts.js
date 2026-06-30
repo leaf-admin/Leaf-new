@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const ReceiptService = require('../services/receipt-service');
+const firebaseConfig = require('../firebase-config');
 const {
     authenticateSupport,
     requireSupportRoles,
@@ -22,6 +23,18 @@ const RECEIPT_ADMIN_ROLES = ['admin', 'manager', 'super-admin', 'support', 'deve
 
 function normalizeId(value) {
     return String(value || '').trim();
+}
+
+function resolveRealtimeDb(req) {
+    if (req.app?.locals?.firebaseDb) {
+        return req.app.locals.firebaseDb;
+    }
+
+    if (typeof firebaseConfig?.getRealtimeDB === 'function') {
+        return firebaseConfig.getRealtimeDB();
+    }
+
+    return null;
 }
 
 function collectRideOwnerIds(rideData = {}) {
@@ -137,7 +150,7 @@ router.get('/api/receipts/:rideId', authenticateSupport, async (req, res) => {
         const receipt = await receiptService.getReceiptByRideId(
             rideId,
             req.app.locals.redis,
-            req.app.locals.firebaseDb
+            resolveRealtimeDb(req)
         );
 
         if (!receipt) {
@@ -228,7 +241,7 @@ router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUser
 
         logger.info(`📋 Listando recibos do usuário: ${userId} (${role})`);
 
-        const firebaseDb = req.app.locals.firebaseDb;
+        const firebaseDb = resolveRealtimeDb(req);
         if (!firebaseDb) {
             return res.status(503).json({
                 success: false,
@@ -315,7 +328,7 @@ router.get('/api/receipts/:rideId/map', authenticateSupport, async (req, res) =>
         logger.info(`🗺️ Solicitação de mapa para corrida: ${rideId}`);
 
         // Buscar dados da corrida
-        const firebaseDb = req.app.locals.firebaseDb;
+        const firebaseDb = resolveRealtimeDb(req);
         const redis = req.app.locals.redis;
 
         let rideData = null;
