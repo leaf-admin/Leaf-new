@@ -2,7 +2,7 @@
 
 ## Objective
 
-Prepare the `1.0.3` Release Candidate for TestFlight and Android Internal Test with new store build numbers, production build profile, production OTA channel/runtime, and release evidence for a small assisted cohort.
+Prepare the assisted Release Candidate for TestFlight and Android Internal Test with local native builds, production build profile, production OTA channel/runtime, and release evidence for a small assisted cohort.
 
 ## Release Position
 
@@ -10,29 +10,34 @@ Prepare the `1.0.3` Release Candidate for TestFlight and Android Internal Test w
 - Branch: `codex/production-readiness-audit`
 - Release base requested: `a1451fa6c`
 - Store build-number commit: `6969a43e28b53a75139df66b03ddd12ee132f6e7`
+- Store release versioning commit: `5314c88ff42e9928fbef8e4bf1e440bf5c62c7be`
 - Canonical build method: local native build on the project workstation.
-- Marketing version: `1.0.3`
+- Marketing version: `1.0.4`
 - Runtime version: `1.0.3`
 - OTA channel: `production`
-- Android target: Google Play Internal Test, `versionCode 120`
-- iOS target: TestFlight, build number `28`
+- Android target: Google Play Internal Test, `versionCode 122`
+- iOS target: TestFlight, build number `30`
+- Reason for marketing-version bump: App Store Connect rejected new uploads for train `1.0.3` because that pre-release train is closed.
 
 ## Changes Applied
 
-1. Store build numbers updated in `mobile-app/config/AppConfig.js`.
-   - `ios_build_number: '28'`
-   - `android_app_version: 120`
+1. Store build numbers and marketing version updated in `mobile-app/config/AppConfig.js`.
+   - `ios_app_version: '1.0.4'`
+   - `ios_build_number: '30'`
+   - `android_app_version: 122`
 2. EAS archive hygiene updated so release builds do not upload local QA dumps, generated assets, test artifacts, or diagnostic archives.
 3. Native store build numbers updated because this repository has checked-in native projects and EAS uses native values when `android/` and `ios/` exist.
-   - `mobile-app/android/app/build.gradle`: `versionCode 120`
-   - `mobile-app/ios/Leaf/Info.plist`: `CFBundleVersion 28`
-   - `mobile-app/ios/Leaf.xcodeproj/project.pbxproj`: `CURRENT_PROJECT_VERSION 28`
+   - `mobile-app/android/app/build.gradle`: `versionCode 122`, `versionName 1.0.4`
+   - `mobile-app/ios/Leaf/Info.plist`: `CFBundleShortVersionString 1.0.4`, `CFBundleVersion 30`
+   - `mobile-app/ios/Leaf.xcodeproj/project.pbxproj`: `MARKETING_VERSION 1.0.4`, `CURRENT_PROJECT_VERSION 30`
+4. Local iOS archive/export validation now respects `LEAF_RUNTIME_VERSION` / `EXPO_RUNTIME_VERSION`, allowing marketing version `1.0.4` with OTA runtime `1.0.3`.
 
 ## Commits
 
 - `7069ef246` - Bump mobile store build numbers
 - `1b80653e4` - Trim EAS release archive
 - `6969a43e2` - Track native store build numbers
+- `5314c88ff` - Bump assisted RC store version
 
 ## Validation Commands
 
@@ -77,16 +82,16 @@ EAS is not the canonical build source for this RC. Local native artifacts are th
 
 Android:
 
-- Command: `ANDROID_BUILD_CLEAN=1 EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:android:aab`
+- Command: `EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production LEAF_RUNTIME_VERSION=1.0.3 EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:android:aab`
 - Result: PASS, `BUILD SUCCESSFUL`
 - Artifact: `/Users/izaakdias/Documents/Leaf-new/mobile-app/android/app/build/outputs/bundle/release/app-release.aab`
-- Size: 136,674,119 bytes, 130 MB
-- Created: `2026-06-30 17:37:47 -0300`
-- SHA-256: `12f03782a6249177ae57e39f04fdf49dfff6decaed963e70e28bdf8fd63d8c68`
+- Size: 136,673,907 bytes, 130 MB
+- Created: `2026-06-30 18:44:28 -0300`
+- SHA-256: `d34c55413df7f774a704c775cf1334d10ffb368ab05d57a2d14b4fd46a8ceb3d`
 - Embedded config:
   - Package: `br.com.leaf.ride`
-  - Version: `1.0.3`
-  - Version code: `120`
+  - Version: `1.0.4`
+  - Version code: `122`
   - Runtime version: `1.0.3`
   - OTA channel: `production`
 - Signature validation: `jarsigner -verify` returned code 0 with `jar verified`.
@@ -94,24 +99,42 @@ Android:
 
 iOS:
 
-- Archive command: `FORCE_SIGNED_ARCHIVE=1 EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:ios:archive`
+- Archive command: `FORCE_SIGNED_ARCHIVE=1 EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production LEAF_RUNTIME_VERSION=1.0.3 EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:ios:archive`
 - Archive result: PASS, `ARCHIVE SUCCEEDED`
 - Archive: `/Users/izaakdias/Documents/Leaf-new/mobile-app/ios/build/Leaf.xcarchive`
-- Export command: `EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:ios:ipa`
+- Export command: `EAS_BUILD_PROFILE=production EXPO_UPDATE_CHANNEL=production LEAF_UPDATES_CHANNEL=production LEAF_RUNTIME_VERSION=1.0.3 EXPO_RUNTIME_VERSION=1.0.3 npm --prefix mobile-app run build:local:ios:ipa`
 - Export result: PASS, `EXPORT SUCCEEDED`
 - IPA: `/Users/izaakdias/Documents/Leaf-new/mobile-app/ios/build/export-appstore/Leaf.ipa`
-- Size: 69,182,954 bytes, 66 MB
-- Created: `2026-06-30 17:51:46 -0300`
-- SHA-256: `74e71913e1db938c38eeb955a34f246be28cddd6f08c00c8335515aeb9f76c85`
+- Size: 69,182,855 bytes, 66 MB
+- Created: `2026-06-30 18:56:36 -0300`
+- SHA-256: `43bbdf88127ad128e388ea8583e630e1e2762313cab37c4c8462f7e72e29117d`
 - Embedded config:
   - Bundle ID: `br.com.leaf.ride`
-  - Version: `1.0.3`
-  - Build number: `28`
+  - Version: `1.0.4`
+  - Build number: `30`
   - Runtime version: `1.0.3`
   - OTA channel: `production`
 - Exported provisioning profile: `iOS Team Store Provisioning Profile: br.com.leaf.ride`
 - Signing validation: `get-task-allow=false`, no provisioned device list, no all-devices flag; suitable App Store/TestFlight profile.
 - Non-blocking warnings: third-party pod deployment-target and run-script dependency warnings.
+
+## Store Submission Evidence
+
+Android:
+
+- Command: `fastlane supply --aab /Users/izaakdias/Documents/Leaf-new/mobile-app/android/app/build/outputs/bundle/release/app-release.aab --package_name br.com.leaf.ride --track internal --release_status draft --json_key /Users/izaakdias/Downloads/leaf-reactnative-455823-0e5c77cad705.json --skip_upload_metadata true --skip_upload_images true --skip_upload_screenshots true --skip_upload_changelogs true --timeout 600`
+- Result: PASS, `Successfully finished the upload to Google Play`.
+- Track: Google Play Internal Test.
+- Release status: draft.
+- Submitted artifact: Android `1.0.4`, `versionCode 122`.
+
+iOS:
+
+- Upload command: local `xcodebuild -exportArchive` with `destination=upload`, using the Xcode account/session on this workstation.
+- Result: PASS, `Upload succeeded`, `Uploaded package is processing`, `Uploaded Leaf`, `EXPORT SUCCEEDED`.
+- Target: App Store Connect / TestFlight.
+- Submitted artifact: iOS `1.0.4`, build `30`.
+- Non-blocking warning: App Store Connect symbol upload reported missing dSYM entries for `React.framework`, `ReactNativeDependencies.framework`, and `hermes.framework`. The binary upload succeeded; crash symbolication for those frameworks may be degraded until dSYM handling is tightened.
 
 ## Invalid / Non-Canonical EAS Builds
 
@@ -121,6 +144,10 @@ The EAS builds and submissions created during the first release attempt are not 
 - iOS canceled build: `ed063cde-774d-4bdf-9682-74b06e75db2f`, build number `27`
 - Android non-canonical EAS build: `821f16aa-cf2f-4501-8088-ce72f46345c5`, artifact `https://expo.dev/artifacts/eas/5ZrkeiXNIAztyrpsUCZTZ2BtwYVSkEulDdvVcwB8zW0.aab`
 - iOS non-canonical EAS build: `84b57ba7-3264-4214-b1bc-64ee80f757d4`, artifact `https://expo.dev/artifacts/eas/Rx_Hq4Huc5MAYru6k31EJhc_zJGlgqGV-nTjBcOOeos.ipa`
+- Local/store attempts superseded by the final RC:
+  - Android `1.0.3 (120)` and iOS `1.0.3 (28)`: superseded after the release path was corrected and App Store Connect rejected the closed `1.0.3` train.
+  - Android `1.0.3 (121)`: uploaded as internal draft during the transition, superseded by Android `1.0.4 (122)`.
+  - iOS `1.0.3 (29)`: upload rejected by App Store Connect because train `1.0.3` is closed.
 
 ## Backend / Runtime Gate
 
@@ -168,9 +195,10 @@ Stop inviting testers and open P0 if any of these happen:
 
 ## Current Risks
 
-- Store/TestFlight availability is not confirmed until the local AAB and local IPA are uploaded and processed by Google Play Console and App Store Connect.
+- Store/TestFlight processing is not fully complete until Google Play Console and App Store Connect show the exact uploaded builds as available to testers.
 - The KYC strict-biometric warning remains accepted only because driver active/KYC policy is backend-governed.
-- Local artifacts are generated and validated, but assisted users should not be invited until both store consoles show the exact build numbers: Android `120`, iOS `28`.
+- Local artifacts are generated, validated, and uploaded, but assisted users should not be invited until both store consoles show the exact build numbers: Android `122`, iOS `30`.
+- iOS dSYM upload warning should be handled before broad rollout to improve crash diagnostics.
 
 ## Rollback
 
@@ -180,9 +208,9 @@ Stop inviting testers and open P0 if any of these happen:
 
 ## Next Step
 
-Upload the local artifacts, then verify visibility in:
+Verify processing/visibility in:
 
-- Google Play Console internal testing draft for Android `1.0.3 (120)`.
-- App Store Connect TestFlight build `1.0.3 (28)`.
+- Google Play Console internal testing draft for Android `1.0.4 (122)`.
+- App Store Connect TestFlight build `1.0.4 (30)`.
 
 Only after both are visible should the controlled assisted-production cohort start.
