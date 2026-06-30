@@ -161,6 +161,21 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     });
   });
 
+  it('re-applies the canonical home region when no route geometry exists', () => {
+    render(
+      <PrototypeMapLayer
+        mapRef={React.createRef()}
+        region={baseRegion}
+        userCoordinate={routeCoordinates[0]}
+        viewportPadding={{ top: 128, right: 44, bottom: 440, left: 44 }}
+        forceRegionUpdate
+      />,
+    );
+
+    expect(mockAnimateToRegion).toHaveBeenCalledWith(baseRegion, 0);
+    expect(mockFitToCoordinates).not.toHaveBeenCalled();
+  });
+
   it('does not infer synthetic styling from a short real route', () => {
     const { UNSAFE_getAllByProps } = render(
       <PrototypeMapLayer
@@ -192,5 +207,42 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     );
 
     expect(UNSAFE_getAllByProps({ strokeWidth: 7 }).length).toBeGreaterThan(0);
+  });
+
+  it('does not paint an explicit traffic route with one uniform route color', () => {
+    const trafficSegments = [
+      {
+        level: 'normal',
+        color: '#198754',
+        coordinates: [
+          routeCoordinates[0],
+          { latitude: -22.8818, longitude: -43.344 },
+        ],
+      },
+      {
+        level: 'moderate',
+        color: '#F59E0B',
+        coordinates: [
+          { latitude: -22.8818, longitude: -43.344 },
+          routeCoordinates[1],
+        ],
+      },
+    ];
+
+    const { UNSAFE_getAllByProps } = render(
+      <PrototypeMapLayer
+        mapRef={React.createRef()}
+        region={baseRegion}
+        userCoordinate={routeCoordinates[0]}
+        routeCoordinates={routeCoordinates}
+        routeTrafficSegments={trafficSegments}
+        routeMainColor="#123456"
+        animateRoute={false}
+      />,
+    );
+
+    expect(() => UNSAFE_getAllByProps({ strokeColor: '#123456' })).toThrow();
+    expect(UNSAFE_getAllByProps({ strokeColor: '#198754' }).length).toBeGreaterThan(0);
+    expect(UNSAFE_getAllByProps({ strokeColor: '#F59E0B' }).length).toBeGreaterThan(0);
   });
 });

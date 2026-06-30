@@ -59,15 +59,15 @@ describe('prototypeTrafficRoute', () => {
 
   it('maps traffic levels to passenger fare status labels', () => {
     expect(resolveTrafficFareStatusPresentation('moderate')).toEqual({
-      label: 'Trânsito moderado',
+      label: 'Tarifa moderada',
       tariffHigh: true,
     });
     expect(resolveTrafficFareStatusPresentation('heavy')).toEqual({
-      label: 'Trânsito intenso',
+      label: 'Tarifa alta',
       tariffHigh: true,
     });
     expect(resolveTrafficFareStatusPresentation()).toEqual({
-      label: 'Tarifa normal',
+      label: 'Tarifa baixa',
       tariffHigh: false,
     });
   });

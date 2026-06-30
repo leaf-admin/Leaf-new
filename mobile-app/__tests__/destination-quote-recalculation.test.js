@@ -94,8 +94,8 @@ jest.mock("../src/components/prototype/PrototypeUI", () => {
       <TextInput value={value} onChangeText={onChangeText} placeholder={placeholder} />
     ),
     PrototypeCard: ({ children, ...props }) => <View {...props}>{children}</View>,
-    PrototypePrimaryButton: ({ label, onPress, disabled }) => (
-      <TouchableOpacity onPress={onPress} disabled={disabled}>
+    PrototypePrimaryButton: ({ label, onPress, disabled, ...props }) => (
+      <TouchableOpacity onPress={onPress} disabled={disabled} {...props}>
         <Text>{label}</Text>
       </TouchableOpacity>
     ),
@@ -105,7 +105,17 @@ jest.mock("../src/components/prototype/PrototypeUI", () => {
 jest.mock("../src/components/payment/WooviPaymentModal", () => {
   const React = require("react");
   const { Text, TouchableOpacity, View } = require("react-native");
-  return ({ visible, onPaymentConfirmed, estimates, tripData, quoteSessionId, quoteLockId }) => {
+  return ({
+    visible,
+    onClose,
+    onPaymentAborted,
+    onPaymentConfirmed,
+    onPaymentExpired,
+    estimates,
+    tripData,
+    quoteSessionId,
+    quoteLockId,
+  }) => {
     const amount = Number(estimates?.estimateFare ?? tripData?.estimatedFare);
     const confirmationOverrides =
       global.__LEAF_TEST_PIX_CONFIRMATION_OVERRIDES__ || {};
@@ -131,6 +141,24 @@ jest.mock("../src/components/payment/WooviPaymentModal", () => {
           }
         >
           <Text>Mock Pix confirmado</Text>
+        </TouchableOpacity>
+        <TouchableOpacity testID="mock-expire-pix" onPress={() => onPaymentExpired?.()}>
+          <Text>Mock Pix expirado</Text>
+        </TouchableOpacity>
+        <TouchableOpacity testID="mock-close-pix" onPress={() => onClose?.()}>
+          <Text>Mock Pix fechado</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          testID="mock-fail-pix-close"
+          onPress={() =>
+            onPaymentAborted?.({
+              reason: "generation_failed",
+              error: "Sua sessão expirou. Entre novamente para continuar.",
+              diagnostics: { status: 401, code: "PAYMENT_AUTH_TOKEN_MISSING" },
+            })
+          }
+        >
+          <Text>Mock Pix falhou</Text>
         </TouchableOpacity>
       </View>
     ) : null;
@@ -590,7 +618,6 @@ describe("RobotaxiDestinationScreen", () => {
       expect(fetchDynamicPricingQuote).toHaveBeenCalledWith(
         expect.objectContaining({
           carType: "Leaf Plus",
-          clientEstimatedFare: expect.any(Number),
           quoteSessionId: expect.stringMatching(/^passenger_quote_/),
           pickupLocation: expect.objectContaining({
             lat: -22.9711,
@@ -658,7 +685,11 @@ describe("RobotaxiDestinationScreen", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/R\$ 17,77/)).toBeTruthy();
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("17.77");
+      expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
+        "ql_backend_dynamic_1777",
+      );
+      expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
     });
     expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(1);
   });
@@ -896,12 +927,14 @@ describe("RobotaxiDestinationScreen", () => {
             }),
           }),
           vehicle: "Leaf Plus",
+          routeDistanceKm: 20.7,
+          routeDurationSecs: 2280,
         }),
       );
     });
   });
 
-  it("keeps the home quote locked through confirmation and PIX even if context changes", async () => {
+  it("refreshes the home quote before direct PIX even if context changes", async () => {
     const destination = {
       id: "destination_copacabana_palace",
       name: "Copacabana Palace",
@@ -913,6 +946,13 @@ describe("RobotaxiDestinationScreen", () => {
       eta: "4",
     };
     const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 81.59,
+      grossEstimatedFare: 81.59,
+      quoteLockId: "ql_fresh_home_quote_lock_1",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
 
     usePrototypeRideRuntime.mockImplementation(() => ({
       bookingStatus: "idle",
@@ -943,14 +983,16 @@ describe("RobotaxiDestinationScreen", () => {
       clearFlowPreview: jest.fn(),
     }));
 
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
     const screen = render(
       <RobotaxiDestinationScreen
-        navigation={{
-          navigate: jest.fn(),
-          replace: jest.fn(),
-          canGoBack: jest.fn(() => false),
-          goBack: jest.fn(),
-        }}
+        navigation={navigation}
         route={{
           params: {
             initialPickupCoordinate: {
@@ -962,6 +1004,7 @@ describe("RobotaxiDestinationScreen", () => {
             initialSelectedPlan: "plus",
             startAtConfirmation: true,
             skipDestinationSearch: true,
+            openPixOnReady: true,
             initialPricingQuote: {
               quote: {
                 estimatedFare: 81.59,
@@ -988,15 +1031,6 @@ describe("RobotaxiDestinationScreen", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/R\$ 81,59/)).toBeTruthy();
-      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
-    });
-
-    expect(fetchDynamicPricingQuote).not.toHaveBeenCalled();
-
-    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
-
-    await waitFor(() => {
       expect(checkRideAvailability).toHaveBeenCalledWith(
         expect.objectContaining({
           vehicle: "Leaf Plus",
@@ -1007,12 +1041,561 @@ describe("RobotaxiDestinationScreen", () => {
       );
       expect(screen.getByTestId("mock-pix-amount").props.children).toBe("81.59");
       expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
-        "ql_home_quote_lock_1",
+        "ql_fresh_home_quote_lock_1",
+      );
+    });
+
+    expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
+    expect(fetchDynamicPricingQuote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        carType: "Leaf Plus",
+        quoteSessionId: expect.stringMatching(/^passenger_quote_/),
+      }),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-leaf-quote-session-id": expect.stringMatching(/^passenger_quote_/),
+        }),
+      }),
+    );
+  });
+
+  it("shows a preparing state while direct PIX auto-open waits for availability", async () => {
+    const destination = {
+      id: "destination_copacabana_palace",
+      name: "Copacabana Palace",
+      address: "Av. Atlântica, 1702 - Copacabana, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9673111,
+        longitude: -43.1789541,
+      },
+      eta: "4",
+    };
+    const checkRideAvailability = jest.fn(() => new Promise(() => {}));
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "Av. Meriti, 9 - Vila Kosmos",
+      currentCoordinate: {
+        latitude: -22.857,
+        longitude: -43.309,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 80.39,
+      selectedDestination: destination,
+      tripDistanceKm: 23.8,
+      tripDurationMin: 22,
+      tripArrivalText: "22:48",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{
+          params: {
+            initialPickupCoordinate: {
+              latitude: -22.857,
+              longitude: -43.309,
+            },
+            initialPickupAddress: "Av. Meriti, 9 - Vila Kosmos",
+            initialSelectedDestination: destination,
+            initialSelectedPlan: "plus",
+            startAtConfirmation: true,
+            skipDestinationSearch: true,
+            openPixOnReady: true,
+            initialPricingQuote: {
+              quote: {
+                estimatedFare: 81.59,
+                grossEstimatedFare: 81.59,
+                carType: "leaf_plus",
+                quoteLockId: "ql_home_quote_lock_pending_availability",
+                quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+                pricingPayload: {},
+              },
+              planId: "plus",
+              carType: "Leaf Plus",
+              quoteSessionId: "passenger_home_quote_lock_pending_availability",
+              quoteLockId: "ql_home_quote_lock_pending_availability",
+              quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+              routeKey: "-22.857|-43.309|-22.967|-43.179",
+              distanceKm: 23.8,
+              durationMin: 22,
+              arrivalTime: "22:48",
+              expiresAt: Date.now() + 120000,
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(checkRideAvailability).toHaveBeenCalled();
+    });
+    expect(screen.queryByText("Escolha a categoria")).toBeNull();
+    expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
+    expect(screen.queryByTestId("mock-pix-amount")).toBeNull();
+    expect(screen.getByTestId("passenger-destination-direct-pix-preparing")).toBeTruthy();
+    expect(screen.getByText("Preparando Pix")).toBeTruthy();
+  });
+
+  it("returns to the initial passenger home when a direct PIX payment expires", async () => {
+    const destination = {
+      id: "destination_copacabana_palace",
+      name: "Copacabana Palace",
+      address: "Av. Atlântica, 1702 - Copacabana, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9673111,
+        longitude: -43.1789541,
+      },
+      eta: "4",
+    };
+    const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 81.59,
+      grossEstimatedFare: 81.59,
+      quoteLockId: "ql_fresh_home_quote_lock_expiring",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "4, Rua das Pastorinhas",
+      currentCoordinate: {
+        latitude: -22.920772,
+        longitude: -43.4060272,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 80.39,
+      selectedDestination: destination,
+      tripDistanceKm: 23.8,
+      tripDurationMin: 22,
+      tripArrivalText: "22:48",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{
+          params: {
+            initialPickupCoordinate: {
+              latitude: -22.920781,
+              longitude: -43.406005,
+            },
+            initialPickupAddress: "4, Rua das Pastorinhas",
+            initialSelectedDestination: destination,
+            initialSelectedPlan: "plus",
+            startAtConfirmation: true,
+            skipDestinationSearch: true,
+            openPixOnReady: true,
+            initialPricingQuote: {
+              quote: {
+                estimatedFare: 81.59,
+                grossEstimatedFare: 81.59,
+                carType: "leaf_plus",
+                quoteLockId: "ql_home_quote_lock_expiring",
+                quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+                pricingPayload: {},
+              },
+              planId: "plus",
+              carType: "Leaf Plus",
+              quoteSessionId: "passenger_home_quote_lock_expiring",
+              quoteLockId: "ql_home_quote_lock_expiring",
+              quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+              routeKey: "-22.921|-43.406|-22.967|-43.179",
+              distanceKm: 23.8,
+              durationMin: 22,
+              arrivalTime: "22:48",
+              expiresAt: Date.now() + 120000,
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("81.59");
+      expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
+        "ql_fresh_home_quote_lock_expiring",
+      );
+      expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
+    });
+
+    fireEvent.press(screen.getByTestId("mock-expire-pix"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-pix-amount")).toBeNull();
+      expect(navigation.replace).toHaveBeenCalledWith("RobotaxiPrototype", {});
+      expect(screen.queryByText("Para onde vamos?")).toBeNull();
+      expect(screen.queryByText("Escolha a categoria")).toBeNull();
+      expect(screen.queryByText("Tempo do PIX esgotado. Gere um novo pagamento para continuar.")).toBeNull();
+      expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
+    });
+  });
+
+  it("returns to the initial passenger home when a manually opened PIX payment expires", async () => {
+    const destination = {
+      id: "destination_barra_shopping",
+      name: "BarraShopping",
+      address: "Av. das Americas, 4666 - Barra da Tijuca, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9996,
+        longitude: -43.3659,
+      },
+      eta: "24",
+    };
+    const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 52.74,
+      grossEstimatedFare: 52.74,
+      quoteLockId: "ql_manual_pix_expiry",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "Av. Meriti, 9 - Vila Kosmos",
+      currentCoordinate: {
+        latitude: -22.857,
+        longitude: -43.309,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 52.74,
+      selectedDestination: destination,
+      tripDistanceKm: 24,
+      tripDurationMin: 34,
+      tripArrivalText: "23:41",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{
+          params: {
+            initialPickupCoordinate: {
+              latitude: -22.857,
+              longitude: -43.309,
+            },
+            initialPickupAddress: "Av. Meriti, 9 - Vila Kosmos",
+            initialSelectedDestination: destination,
+            initialSelectedPlan: "plus",
+            startAtConfirmation: true,
+            skipDestinationSearch: true,
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+      expect(screen.getByText(/R\$ 52,74/)).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("52.74");
+      expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
+        "ql_manual_pix_expiry",
+      );
+    });
+
+    fireEvent.press(screen.getByTestId("mock-expire-pix"));
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith("RobotaxiPrototype", {});
+      expect(screen.queryByTestId("mock-pix-amount")).toBeNull();
+      expect(screen.queryByText("Para onde vamos?")).toBeNull();
+      expect(screen.queryByText("Escolha a categoria")).toBeNull();
+      expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
+    });
+  });
+
+  it("returns to the initial passenger home when direct PIX generation fails and closes", async () => {
+    const destination = {
+      id: "destination_barra_shopping",
+      name: "BarraShopping",
+      address: "Av. das Americas, 4666 - Barra da Tijuca, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9996,
+        longitude: -43.3659,
+      },
+      eta: "24",
+    };
+    const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 52.74,
+      grossEstimatedFare: 52.74,
+      quoteLockId: "ql_home_generation_failure",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "Av. Meriti, 9 - Vila Kosmos",
+      currentCoordinate: {
+        latitude: -22.857,
+        longitude: -43.309,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 52.74,
+      selectedDestination: destination,
+      tripDistanceKm: 24,
+      tripDurationMin: 34,
+      tripArrivalText: "23:41",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{
+          params: {
+            initialPickupCoordinate: {
+              latitude: -22.857,
+              longitude: -43.309,
+            },
+            initialPickupAddress: "Av. Meriti, 9 - Vila Kosmos",
+            initialSelectedDestination: destination,
+            initialSelectedPlan: "plus",
+            startAtConfirmation: true,
+            skipDestinationSearch: true,
+            openPixOnReady: true,
+            initialPricingQuote: {
+              quote: {
+                estimatedFare: 52.74,
+                grossEstimatedFare: 52.74,
+                carType: "leaf_plus",
+                quoteLockId: "ql_home_generation_failure",
+                quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+                pricingPayload: {},
+              },
+              planId: "plus",
+              carType: "Leaf Plus",
+              quoteSessionId: "passenger_home_generation_failure",
+              quoteLockId: "ql_home_generation_failure",
+              quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+              routeKey: "-22.857|-43.309|-22.999|-43.365",
+              distanceKm: 24,
+              durationMin: 34,
+              arrivalTime: "23:41",
+              expiresAt: Date.now() + 120000,
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("52.74");
+      expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
+    });
+
+    fireEvent.press(screen.getByTestId("mock-fail-pix-close"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-pix-amount")).toBeNull();
+      expect(screen.queryByText("Para onde vamos?")).toBeNull();
+      expect(screen.queryByText("Escolha a categoria")).toBeNull();
+      expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "RobotaxiPrototype",
+        expect.objectContaining({
+          passengerHomeAvailabilityNotice:
+            "Sua sessão expirou. Entre novamente para continuar.",
+        }),
       );
     });
   });
 
-  it("keeps the home quote locked by route snapshot when route keys differ", async () => {
+  it("returns direct home confirmation to the home card when final availability fails", async () => {
+    const destination = {
+      id: "destination_barra_shopping",
+      name: "BarraShopping",
+      address: "Av. das Americas, 4666 - Barra da Tijuca, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9996,
+        longitude: -43.3659,
+      },
+      eta: "24",
+    };
+    const checkRideAvailability = jest.fn().mockResolvedValue({
+      available: false,
+      code: "DRIVER_SERVICE_UNAVAILABLE",
+      message: "Servico de corridas indisponivel.",
+      candidates: 1,
+      eligible: 0,
+      rejections: {
+        offlineOrIneligible: 1,
+      },
+    });
+
+    usePrototypeRideRuntime.mockReturnValue({
+      bookingStatus: "idle",
+      activeBookingId: null,
+      activeBooking: null,
+      lastRideBookingId: null,
+      selectedFare: null,
+      selectedVehicle: null,
+      driverInfo: null,
+      riderProfile: { uid: "passenger_home_direct_unavailable" },
+      profileUid: "passenger_home_direct_unavailable",
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{
+          params: {
+            initialPickupCoordinate: {
+              latitude: -22.857,
+              longitude: -43.309,
+            },
+            initialPickupAddress: "Av. Meriti, 9 - Vila Kosmos",
+            initialSelectedDestination: destination,
+            initialSelectedPlan: "plus",
+            startAtConfirmation: true,
+            skipDestinationSearch: true,
+            openPixOnReady: true,
+            initialPricingQuote: {
+              quote: {
+                estimatedFare: 52.74,
+                grossEstimatedFare: 52.74,
+                carType: "leaf_plus",
+                quoteLockId: "ql_home_unavailable_1",
+                quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+                pricingPayload: {},
+              },
+              planId: "plus",
+              carType: "Leaf Plus",
+              quoteSessionId: "passenger_home_unavailable_1",
+              quoteLockId: "ql_home_unavailable_1",
+              quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+              routeKey: "-22.857|-43.309|-22.999|-43.365",
+              distanceKm: 24,
+              durationMin: 34,
+              arrivalTime: "23:41",
+              expiresAt: Date.now() + 120000,
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(checkRideAvailability).toHaveBeenCalled();
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "RobotaxiPrototype",
+        expect.objectContaining({
+          passengerHomeAvailabilityNotice:
+            "Motorista encontrado, mas ainda não elegível para receber corridas.",
+        }),
+      );
+    });
+
+    expect(screen.queryByText("Categoria escolhida")).toBeNull();
+    expect(screen.queryByTestId("mock-pix-amount")).toBeNull();
+    expect(screen.queryByText("Para onde vamos?")).toBeNull();
+    expect(screen.queryByText("Escolha a categoria")).toBeNull();
+    expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
+  });
+
+  it("refreshes the home quote by route snapshot when route keys differ", async () => {
     const destination = {
       id: "destination_carioca_shopping",
       name: "Carioca Shopping",
@@ -1041,6 +1624,13 @@ describe("RobotaxiDestinationScreen", () => {
       },
       carType: "Leaf Plus",
     };
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 97.76,
+      grossEstimatedFare: 97.76,
+      quoteLockId: "ql_fresh_snapshot_lock",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
 
     usePrototypeRideRuntime.mockImplementation(() => ({
       bookingStatus: "idle",
@@ -1116,14 +1706,24 @@ describe("RobotaxiDestinationScreen", () => {
       expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
     });
 
-    expect(fetchDynamicPricingQuote).not.toHaveBeenCalled();
+    expect(fetchDynamicPricingQuote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        carType: "Leaf Plus",
+        quoteSessionId: expect.stringMatching(/^passenger_quote_/),
+      }),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-leaf-quote-session-id": expect.stringMatching(/^passenger_quote_/),
+        }),
+      }),
+    );
 
     fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
 
     await waitFor(() => {
       expect(screen.getByTestId("mock-pix-amount").props.children).toBe("97.76");
       expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
-        "ql_home_snapshot_lock",
+        "ql_fresh_snapshot_lock",
       );
     });
   });
@@ -1432,6 +2032,7 @@ describe("RobotaxiDestinationScreen", () => {
       expect(screen.getByTestId("passenger-preference-countdown-modal")).toBeTruthy();
     });
 
+    fireEvent.press(screen.getByTestId("passenger-sound-selector"));
     fireEvent.press(screen.getByTestId("passenger-sound-option-low_music"));
     fireEvent.press(screen.getByTestId("passenger-preference-confirm-button"));
 

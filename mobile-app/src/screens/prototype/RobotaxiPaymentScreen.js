@@ -279,18 +279,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
 
   const handleOpenPixModal = useCallback(async () => {
     if (!canRequestRide) {
-      navigation.navigate("RobotaxiPrototypeDestination", {
-        initialSelectedDestination:
-          destination && destination !== "Destino"
-            ? {
-                name: destination,
-                address: destinationAddress || destination,
-                coordinate: destinationCoordinate,
-              }
-            : null,
-        initialSelectedPlan: route?.params?.initialSelectedPlan || "plus",
-        initialPickupAddress: originAddress,
-      });
+      navigation.navigate("RobotaxiPrototype");
       return;
     }
 

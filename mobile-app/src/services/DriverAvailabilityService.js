@@ -100,9 +100,17 @@ class DriverAvailabilityService {
                         distance: driver.distance,
                         firstName: driver.firstName || '',
                         lastName: driver.lastName || '',
-                        carType: driver.carType || null,
-                        vehicleNumber: driver.vehicleNumber || null,
-                        rating: driver.rating || 5.0,
+	                        carType: driver.carType || null,
+	                        vehicleNumber: driver.vehicleNumber || null,
+	                        vehicleColor:
+	                            driver.vehicleColor ||
+	                            driver.carColor ||
+	                            driver.color ||
+	                            null,
+	                        heading: Number.isFinite(Number(driver.heading))
+	                            ? Number(driver.heading)
+	                            : null,
+	                        rating: driver.rating || 5.0,
                         source: 'redis_geo'
                     }));
                     

@@ -80,20 +80,20 @@ export function resolveTrafficFareStatusPresentation(level = 'normal') {
 
   if (normalizedLevel === 'heavy') {
     return {
-      label: 'Trânsito intenso',
+      label: 'Tarifa alta',
       tariffHigh: true,
     };
   }
 
   if (normalizedLevel === 'moderate') {
     return {
-      label: 'Trânsito moderado',
+      label: 'Tarifa moderada',
       tariffHigh: true,
     };
   }
 
   return {
-    label: 'Tarifa normal',
+    label: 'Tarifa baixa',
     tariffHigh: false,
   };
 }

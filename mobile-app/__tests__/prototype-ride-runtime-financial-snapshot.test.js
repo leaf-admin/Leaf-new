@@ -116,6 +116,10 @@ const {
   shouldPreserveActiveRideOnIdleSync,
   resolveCompletedReceiptRecoveryBookingId,
   hasBackendFinalRecoveredReceiptForBooking,
+  buildRuntimeReceiptFromRecoveredReceipt,
+  buildDriverRoutePlanWithCanonicalDestination,
+  resolveCanonicalDestinationRouteSnapshot,
+  resolveCanonicalBookingRouteForRequest,
 } = require('../src/screens/prototype/prototypeRideRuntime');
 
 describe('prototype ride runtime financial snapshot', () => {
@@ -474,5 +478,241 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(mergedReceipt.driverNetAmount).toBeCloseTo(78.08, 2);
     expect(mergedReceipt.financialSnapshotSource).toBe('backend_final');
     expect(mergedReceipt.authoritativeSnapshot).toBe(true);
+  });
+
+  it('preserves vehicle identity when rebuilding a runtime receipt from the API receipt', () => {
+    const runtimeReceipt = buildRuntimeReceiptFromRecoveredReceipt(
+      {
+        receiptId: 'LEAF-booking_vehicle_recovery',
+        metadata: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          status: 'COMPLETED',
+        },
+        driver: {
+          id: 'driver_1',
+          name: 'Motorista Leaf',
+          vehicle: {
+            brand: 'Toyota',
+            brandModel: 'Toyota Prius',
+            model: 'Prius',
+            plate: 'TES6789',
+            color: 'PRETO',
+          },
+        },
+        customer: {
+          id: 'customer_1',
+          name: 'Passageira Leaf',
+        },
+        trip: {
+          pickup: { address: 'Av. Meriti, 9' },
+          dropoff: { address: 'Av. das Americas, 4666' },
+          distance: { actual: 27.1 },
+          duration: 34,
+        },
+        financial: {
+          totalPaid: { amount: 58.19 },
+          breakdown: {
+            tripFare: { amount: 58.19 },
+            operationalCost: { amount: 1.63 },
+            wooviFee: { amount: 0.5 },
+            driverAmount: { amount: 56.06 },
+          },
+        },
+        payment: { status: 'paid' },
+      },
+      {
+        activeBookingId: 'booking_vehicle_recovery',
+        activeBooking: null,
+        driverActiveRide: null,
+        driverInfo: {},
+        tripHistory: [],
+      },
+      'booking_vehicle_recovery',
+    );
+
+    expect(runtimeReceipt.id).toBe('booking_vehicle_recovery');
+    expect(runtimeReceipt.vehicleLabel).toBe('Toyota Prius');
+    expect(runtimeReceipt.vehiclePlate).toBe('TES6789');
+    expect(runtimeReceipt.vehicleColor).toBe('PRETO');
+    expect(runtimeReceipt.fare).toBeCloseTo(58.19, 2);
+    expect(runtimeReceipt.driverNetAmount).toBeCloseTo(56.06, 2);
+    expect(runtimeReceipt.financialSnapshotSource).toBe('backend_final');
+    expect(runtimeReceipt.authoritativeSnapshot).toBe(true);
+  });
+
+  it('promotes the canonical quote route into the active destination route plan', () => {
+    const driverCoordinate = { latitude: -22.84, longitude: -43.32 };
+    const pickupCoordinate = { latitude: -22.853, longitude: -43.352 };
+    const destinationCoordinate = { latitude: -23.000, longitude: -43.365 };
+    const fallbackDestination = [
+      pickupCoordinate,
+      { latitude: -22.91, longitude: -43.355 },
+      destinationCoordinate,
+    ];
+    const canonicalDestination = [
+      pickupCoordinate,
+      { latitude: -22.86, longitude: -43.34 },
+      { latitude: -22.9, longitude: -43.33 },
+      { latitude: -22.94, longitude: -43.34 },
+      { latitude: -22.97, longitude: -43.35 },
+      destinationCoordinate,
+    ];
+    const canonicalTrafficSegments = [
+      {
+        level: 'heavy',
+        color: '#DC2626',
+        coordinates: [canonicalDestination[1], canonicalDestination[2]],
+      },
+    ];
+    const canonicalSnapshot = resolveCanonicalDestinationRouteSnapshot({
+      routeCoordinates: canonicalDestination,
+      trafficSegments: canonicalTrafficSegments,
+      routeDistanceKm: 27.1,
+      routeDurationSecs: 2040,
+    });
+
+    const routePlan = buildDriverRoutePlanWithCanonicalDestination({
+      routePlan: {
+        pickupCoordinates: [driverCoordinate, pickupCoordinate],
+        destinationCoordinates: fallbackDestination,
+        combinedCoordinates: [driverCoordinate, pickupCoordinate, ...fallbackDestination.slice(1)],
+        pickupDistanceKm: 4.8,
+        pickupDurationMinutes: 7,
+        destinationDistanceKm: 17,
+        destinationDurationMinutes: 38,
+      },
+      canonicalDestinationRoute: canonicalSnapshot,
+      originCoordinate: driverCoordinate,
+      pickupCoordinate,
+      destinationCoordinate,
+    });
+
+    expect(routePlan.destinationCoordinates).toHaveLength(canonicalDestination.length);
+    expect(routePlan.destinationCoordinates).toEqual(canonicalDestination);
+    expect(routePlan.destinationTrafficSegments).toEqual(canonicalTrafficSegments);
+    expect(routePlan.destinationDistanceKm).toBeCloseTo(27.1, 1);
+    expect(routePlan.destinationDurationMinutes).toBe(34);
+    expect(routePlan.pickupCoordinates).toEqual([driverCoordinate, pickupCoordinate]);
+  });
+
+  it('does not replace an already rich active route with a poorer fallback snapshot', () => {
+    const pickupCoordinate = { latitude: -22.853, longitude: -43.352 };
+    const destinationCoordinate = { latitude: -23.000, longitude: -43.365 };
+    const richDestination = [
+      pickupCoordinate,
+      { latitude: -22.87, longitude: -43.34 },
+      { latitude: -22.91, longitude: -43.33 },
+      { latitude: -22.95, longitude: -43.35 },
+      destinationCoordinate,
+    ];
+    const routePlan = buildDriverRoutePlanWithCanonicalDestination({
+      routePlan: {
+        pickupCoordinates: [
+          { latitude: -22.84, longitude: -43.32 },
+          pickupCoordinate,
+        ],
+        destinationCoordinates: richDestination,
+        combinedCoordinates: richDestination,
+        pickupDistanceKm: 4.8,
+        pickupDurationMinutes: 7,
+        destinationDistanceKm: 27.1,
+        destinationDurationMinutes: 34,
+      },
+      canonicalDestinationRoute: {
+        coordinates: [pickupCoordinate, destinationCoordinate],
+        distanceKm: 17,
+        durationMinutes: 38,
+      },
+      pickupCoordinate,
+      destinationCoordinate,
+    });
+
+    expect(routePlan.destinationCoordinates).toEqual(richDestination);
+    expect(routePlan.destinationDistanceKm).toBeCloseTo(27.1, 1);
+    expect(routePlan.destinationDurationMinutes).toBe(34);
+  });
+
+  it('uses the quote-locked route when creating a booking without a rich payload route', () => {
+    const originCoordinate = { latitude: -22.857, longitude: -43.309 };
+    const destinationCoordinate = { latitude: -22.997, longitude: -43.358 };
+    const quoteCoordinates = [
+      originCoordinate,
+      { latitude: -22.88, longitude: -43.32 },
+      { latitude: -22.91, longitude: -43.34 },
+      { latitude: -22.95, longitude: -43.35 },
+      destinationCoordinate,
+    ];
+    const quoteLock = {
+      routeKey: '-22.857:-43.309:-22.997:-43.358',
+      distanceKm: 27.1,
+      durationMinutes: 40,
+      etaText: '13:17',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 120000,
+      coordinates: quoteCoordinates,
+    };
+
+    const bookingRoute = resolveCanonicalBookingRouteForRequest({
+      payload: {
+        routeDistanceKm: 17.1,
+        routeDurationSecs: 2280,
+        routeCoordinates: [originCoordinate, destinationCoordinate],
+      },
+      quoteLock,
+      originCoordinate,
+      destinationCoordinate,
+    });
+
+    expect(bookingRoute.source).toBe('quoteLock');
+    expect(bookingRoute.routeCoordinates).toEqual(quoteCoordinates);
+    expect(bookingRoute.routeDistanceKm).toBeCloseTo(27.1, 1);
+    expect(bookingRoute.routeDurationMinutes).toBe(40);
+    expect(bookingRoute.routeDurationSecs).toBe(2400);
+  });
+
+  it('samples long quote-locked routes across the full path instead of truncating near the pickup', () => {
+    const originCoordinate = { latitude: -22.857, longitude: -43.309 };
+    const destinationCoordinate = { latitude: -22.997, longitude: -43.358 };
+    const quoteCoordinates = Array.from({ length: 1000 }, (_, index) => {
+      const progress = index / 999;
+      return {
+        latitude:
+          originCoordinate.latitude +
+          (destinationCoordinate.latitude - originCoordinate.latitude) * progress,
+        longitude:
+          originCoordinate.longitude +
+          (destinationCoordinate.longitude - originCoordinate.longitude) * progress,
+      };
+    });
+    const quoteLock = {
+      routeKey: '-22.857:-43.309:-22.997:-43.358',
+      distanceKm: 27.1,
+      durationMinutes: 43,
+      etaText: '13:45',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 120000,
+      coordinates: quoteCoordinates,
+    };
+
+    const bookingRoute = resolveCanonicalBookingRouteForRequest({
+      payload: {
+        routeDistanceKm: 16.4,
+        routeDurationSecs: 2280,
+        routeCoordinates: [originCoordinate, destinationCoordinate],
+      },
+      quoteLock,
+      originCoordinate,
+      destinationCoordinate,
+    });
+
+    expect(bookingRoute.source).toBe('quoteLock');
+    expect(bookingRoute.routeCoordinates).toHaveLength(180);
+    expect(bookingRoute.routeCoordinates[0]).toEqual(originCoordinate);
+    expect(bookingRoute.routeCoordinates[179]).toEqual(destinationCoordinate);
+    expect(bookingRoute.routeCoordinates[90].latitude).toBeLessThan(-22.92);
+    expect(bookingRoute.routeCoordinates[170].latitude).toBeLessThan(-22.98);
+    expect(bookingRoute.routeDistanceKm).toBeCloseTo(27.1, 1);
+    expect(bookingRoute.routeDurationMinutes).toBe(43);
   });
 });

@@ -180,17 +180,23 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
 
   const replaceWithPrototypeHome = useCallback(() => {
     terminalExitRef.current = true;
+    const resetParams = {
+      resetPassengerHomeSearch: true,
+      resetPassengerHomeSearchAt: new Date().toISOString(),
+      source: "rating_completed",
+    };
+
     if (typeof navigation.replace === "function") {
-      navigation.replace("RobotaxiPrototype");
+      navigation.replace("RobotaxiPrototype", resetParams);
       return;
     }
 
     if (typeof navigation.dispatch === "function") {
-      navigation.dispatch(StackActions.replace("RobotaxiPrototype"));
+      navigation.dispatch(StackActions.replace("RobotaxiPrototype", resetParams));
       return;
     }
 
-    navigation.navigate("RobotaxiPrototype");
+    navigation.navigate("RobotaxiPrototype", resetParams);
   }, [navigation]);
 
   const handleDismiss = useCallback(() => {

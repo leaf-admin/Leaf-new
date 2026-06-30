@@ -182,6 +182,7 @@ describe('LeafNativeNavigationEngine', () => {
     expect(state.cameraHeadingDegrees).toBeLessThan(360);
     expect(state.cameraAnchorY).toBe(0.68);
     expect(state.cameraAnimationDurationMs).toBe(800);
+    expect(state.routeCoordinates).toEqual(routeCoordinates);
   });
 
   it('adapts navigation camera zoom and pitch by driver speed', () => {

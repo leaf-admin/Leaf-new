@@ -13,10 +13,26 @@ function resolveNumber(value, defaultValue) {
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+function resolveBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
 export function getPrototypePlaybackConfigSnapshot() {
   const extraConfig = expoExtra()?.prototypePlayback || {};
 
   return {
+    enabled: resolveBoolean(
+      firstDefined(
+        extraConfig.enabled,
+        process.env.EXPO_PUBLIC_PROTOTYPE_ROUTE_PLAYBACK_ENABLED,
+        process.env.LEAF_PROTOTYPE_ROUTE_PLAYBACK_ENABLED,
+      ),
+      false,
+    ),
     tickMs: resolveNumber(
       firstDefined(
         extraConfig.tickMs,

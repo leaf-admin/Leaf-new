@@ -88,6 +88,32 @@ class WooviService {
         });
     }
 
+    async resolvePaymentRuntimeProfile({ passengerId, phone, phoneNumber } = {}) {
+        const headers = {};
+        const safePassengerId = String(passengerId || '').trim();
+        const safePhone = String(phone || phoneNumber || '').trim();
+
+        if (safePassengerId) {
+            headers['x-leaf-user-id'] = safePassengerId;
+            headers['x-passenger-id'] = safePassengerId;
+        }
+        if (safePhone) {
+            headers['x-leaf-phone'] = safePhone;
+            headers['x-phone'] = safePhone;
+        }
+
+        const response = await this.backendApi.get('/api/app/runtime-config', { headers });
+        const paymentRuntime = response?.data?.paymentRuntime || {};
+        return {
+            success: true,
+            provider: paymentRuntime.provider || 'woovi',
+            defaultEnvironment: paymentRuntime.defaultEnvironment || null,
+            canarySandboxEnabled: paymentRuntime.canarySandboxEnabled === true,
+            globalSandboxEnabled: paymentRuntime.globalSandboxEnabled === true,
+            effectiveProfile: paymentRuntime.effectiveProfile || null,
+        };
+    }
+
     // NOVO SISTEMA: Processar pagamento antecipado
     async processAdvancePayment(paymentData) {
         try {
@@ -231,7 +257,14 @@ class WooviService {
                 }
             };
 
-            const response = await this.backendApi.post('/api/woovi/test-webhook', payload);
+            const response = await this.backendApi.post('/api/woovi/test-confirm-sandbox-payment-app', {
+                passengerId,
+                paymentIntentId,
+                chargeId,
+                rideId,
+                amountInCents,
+                webhookPayload: payload
+            });
             return response.data;
         } catch (error) {
             Logger.error('Erro ao simular webhook de pagamento:', error);

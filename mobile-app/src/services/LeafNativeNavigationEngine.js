@@ -906,6 +906,7 @@ export function buildLeafNativeNavigationState({
     status: normalizedStatus,
     currentCoordinate: current,
     targetCoordinate: target,
+    routeCoordinates: routeGeometryCoordinates,
     currentStepIndex,
     currentInstruction: upcomingTarget.instruction,
     maneuverDistanceMeters,

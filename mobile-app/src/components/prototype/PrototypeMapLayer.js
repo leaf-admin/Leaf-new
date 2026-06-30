@@ -1405,6 +1405,7 @@ function PrototypeMapLayer({
   const [activeNearbyRequestIndex, setActiveNearbyRequestIndex] = useState(0);
   const [androidMapLayout, setAndroidMapLayout] = useState({ width: 0, height: 0 });
   const [androidVisibleRegion, setAndroidVisibleRegion] = useState(region);
+  const [nativeMapReadyVersion, setNativeMapReadyVersion] = useState(0);
   const [userAvatarFailed, setUserAvatarFailed] = useState(false);
   const [smoothedDriverCoordinate, setSmoothedDriverCoordinate] = useState(targetDriverCoordinate);
   const [smoothedDriverHeading, setSmoothedDriverHeading] = useState(
@@ -1412,6 +1413,7 @@ function PrototypeMapLayer({
   );
   const androidPendingRegionRef = useRef(region);
   const androidRegionFrameRef = useRef(null);
+  const nativeMapLayoutKeyRef = useRef('');
   const driverSmoothFrameRef = useRef(null);
   const driverPredictionFrameRef = useRef(null);
   const driverPredictionBaseRef = useRef(null);
@@ -1516,10 +1518,11 @@ function PrototypeMapLayer({
   );
   const effectiveRouteShadowColor =
     routeShadowColor || '#FFFFFF';
+  const hasExplicitTrafficRouteSegments = normalizedTrafficRouteSegments.length > 0;
   const effectiveRouteMainColor =
     routeMainColor || '#1A330E';
   const effectiveRouteHighlightColor =
-    routeHighlightColor === undefined
+    hasExplicitTrafficRouteSegments || routeHighlightColor === undefined
       ? null
       : routeHighlightColor;
   const trafficRouteSegmentCount = normalizedTrafficRouteSegments.length;
@@ -1533,6 +1536,7 @@ function PrototypeMapLayer({
       hasRenderableRoute
         ? 1 +
           (!useSimplifiedIosMap ? 1 : 0) +
+          (hasExplicitTrafficRouteSegments ? 0 : 1) +
           trafficRouteSegmentCount +
           (!useSimplifiedIosMap && effectiveRouteHighlightColor ? 1 : 0)
         : 0;
@@ -1551,6 +1555,7 @@ function PrototypeMapLayer({
     ].join('|');
   }, [
     effectiveRouteHighlightColor,
+    hasExplicitTrafficRouteSegments,
     hasDestination,
     hasDestinationMarker,
     hasDisplayedDriverCoordinate,
@@ -1849,62 +1854,108 @@ function PrototypeMapLayer({
     });
   }, []);
 
-  useEffect(() => {
+  const markNativeMapReady = useCallback(() => {
+    setNativeMapReadyVersion(previous => previous + 1);
+  }, []);
+
+  const applyForcedRegionUpdate = useCallback((duration = Platform.OS === 'android' ? 0 : 180) => {
     const targetViewportRegion = resolvedRouteViewportRegion || region;
     if (!forceRegionUpdate || !mapRef?.current || !isValidMapRegion(targetViewportRegion)) {
-      return undefined;
+      return false;
     }
 
     scheduleAndroidVisibleRegionUpdate(targetViewportRegion);
-    const timeoutId = setTimeout(() => {
-      if (!mapRef?.current) {
-        return;
+
+    if (
+      resolvedRouteViewportRegion &&
+      typeof mapRef.current.animateToRegion === 'function'
+    ) {
+      mapRef.current.animateToRegion(resolvedRouteViewportRegion, duration);
+      return true;
+    }
+
+    if (
+      routeViewportFitCoordinates.length >= 2 &&
+      typeof mapRef.current.fitToCoordinates === 'function'
+    ) {
+      try {
+        mapRef.current.fitToCoordinates(routeViewportFitCoordinates, {
+          edgePadding: resolvedViewportPadding,
+          animated: Platform.OS !== 'android' && duration > 0,
+        });
+        return true;
+      } catch (_error) {
+        // Fallback to direct region animation below.
+      }
+    }
+
+    if (typeof mapRef.current.animateToRegion === 'function') {
+      mapRef.current.animateToRegion(region, duration);
+      return true;
+    }
+
+    return false;
+  }, [
+    forceRegionUpdate,
+    mapRef,
+    region,
+    resolvedRouteViewportRegion,
+    resolvedViewportPadding,
+    routeViewportFitCoordinates,
+    scheduleAndroidVisibleRegionUpdate,
+  ]);
+
+  const handleNativeMapLoaded = useCallback((event) => {
+    markNativeMapReady();
+    applyForcedRegionUpdate(0);
+    if (typeof onMapLoaded === 'function') {
+      onMapLoaded(event);
+    }
+  }, [applyForcedRegionUpdate, markNativeMapReady, onMapLoaded]);
+
+  const handleNativeMapReady = useCallback((event) => {
+    markNativeMapReady();
+    applyForcedRegionUpdate(0);
+    if (typeof onMapReady === 'function') {
+      onMapReady(event);
+    }
+  }, [applyForcedRegionUpdate, markNativeMapReady, onMapReady]);
+
+  const handleNativeMapLayout = useCallback((event) => {
+    onMapLayout?.(event);
+    const width = event?.nativeEvent?.layout?.width;
+    const height = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      const layoutKey = `${Math.round(width)}x${Math.round(height)}`;
+      if (nativeMapLayoutKeyRef.current !== layoutKey) {
+        nativeMapLayoutKeyRef.current = layoutKey;
+        markNativeMapReady();
       }
 
-      if (resolvedRouteViewportRegion && typeof mapRef.current.animateToRegion === 'function') {
-        mapRef.current.animateToRegion(
-          resolvedRouteViewportRegion,
-          Platform.OS === 'android' ? 0 : 180,
-        );
-        return;
-      }
-
-      if (
-        routeViewportFitCoordinates.length >= 2 &&
-        typeof mapRef.current.fitToCoordinates === 'function'
-      ) {
-        try {
-          mapRef.current.fitToCoordinates(routeViewportFitCoordinates, {
-            edgePadding: resolvedViewportPadding,
-            animated: Platform.OS !== 'android',
-          });
-          return;
-        } catch (_error) {
-          // Fallback to the previous region behavior if the native map is not ready yet.
+      setAndroidMapLayout(previous => {
+        if (previous.width === width && previous.height === height) {
+          return previous;
         }
-      }
 
-      mapRef.current.animateToRegion(region, Platform.OS === 'android' ? 0 : 180);
+        return { width, height };
+      });
+    }
+  }, [markNativeMapReady, onMapLayout]);
+
+  useEffect(() => {
+    if (!applyForcedRegionUpdate(0)) {
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(() => {
+      applyForcedRegionUpdate(Platform.OS === 'android' ? 0 : 180);
     }, Platform.OS === 'android' ? 420 : 80);
 
     return () => clearTimeout(timeoutId);
   }, [
+    applyForcedRegionUpdate,
     forceRegionUpdate,
-    mapRef,
-    region?.latitude,
-    region?.latitudeDelta,
-    region?.longitude,
-    region?.longitudeDelta,
-    resolvedRouteViewportRegion?.latitude,
-    resolvedRouteViewportRegion?.latitudeDelta,
-    resolvedRouteViewportRegion?.longitude,
-    resolvedRouteViewportRegion?.longitudeDelta,
-    resolvedViewportPadding.bottom,
-    resolvedViewportPadding.left,
-    resolvedViewportPadding.right,
-    resolvedViewportPadding.top,
-    routeViewportFitCoordinates,
-    scheduleAndroidVisibleRegionUpdate,
+    nativeMapReadyVersion,
   ]);
 
   // Keep the user avatar tied to the real map coordinate on iOS.
@@ -2234,10 +2285,15 @@ function PrototypeMapLayer({
     searchingMode,
     useSimplifiedIosMap,
   ]);
+  const shouldRenderProjectedNearbyVehicleOverlays = Boolean(
+    searchingMode &&
+      androidProjectionLayout.hasLayout &&
+      collisionSafeNearbyVehicles.length > 0 &&
+      (Platform.OS === 'android' || (Platform.OS === 'ios' && useSimplifiedIosMap))
+  );
   const projectedNearbyVehicleOverlayItems = useMemo(() => {
     if (
-      Platform.OS !== 'ios' ||
-      !useSimplifiedIosMap ||
+      !shouldRenderProjectedNearbyVehicleOverlays ||
       !searchingMode ||
       !androidProjectionLayout.hasLayout ||
       collisionSafeNearbyVehicles.length === 0
@@ -2292,7 +2348,7 @@ function PrototypeMapLayer({
     driverMarkerCampaignImageSource,
     region,
     searchingMode,
-    useSimplifiedIosMap,
+    shouldRenderProjectedNearbyVehicleOverlays,
   ]);
 
   useEffect(() => {
@@ -2344,20 +2400,7 @@ function PrototypeMapLayer({
       <View
         pointerEvents={interactionEnabled ? 'auto' : 'none'}
         style={StyleSheet.absoluteFillObject}
-        onLayout={event => {
-          onMapLayout?.(event);
-          const width = event?.nativeEvent?.layout?.width;
-          const height = event?.nativeEvent?.layout?.height;
-          if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
-            setAndroidMapLayout(previous => {
-              if (previous.width === width && previous.height === height) {
-                return previous;
-              }
-
-              return { width, height };
-            });
-          }
-        }}
+        onLayout={handleNativeMapLayout}
       >
         <MapView
           // iOS Google Maps can abort in AIRGoogleMap when React inserts/removes
@@ -2381,8 +2424,8 @@ function PrototypeMapLayer({
           initialRegion={region}
           mapType="standard"
           customMapStyle={mapStyleAppleLike}
-          onMapLoaded={onMapLoaded}
-          onMapReady={onMapReady}
+          onMapLoaded={handleNativeMapLoaded}
+          onMapReady={handleNativeMapReady}
           scrollEnabled={interactionEnabled}
           zoomEnabled={interactionEnabled}
           rotateEnabled={interactionEnabled}
@@ -2427,7 +2470,7 @@ function PrototypeMapLayer({
             />
           ) : null}
 
-          {hasRenderableRoute ? (
+          {hasRenderableRoute && !hasExplicitTrafficRouteSegments ? (
             <Polyline
               key={`route-main-${effectiveRouteMainColor}`}
               coordinates={routeRenderCoordinates}
@@ -2472,7 +2515,7 @@ function PrototypeMapLayer({
               coordinate={normalizedOriginCoordinate}
               zIndex={17}
               anchor={{ x: 0.5, y: 0.9 }}
-              tracksViewChanges={Platform.OS === 'android'}
+              tracksViewChanges={false}
               pinColor={undefined}
             >
               {Platform.OS === 'android' ? (
@@ -2489,7 +2532,7 @@ function PrototypeMapLayer({
               coordinate={normalizedDestinationCoordinate}
               zIndex={18}
               anchor={{ x: 0.5, y: destinationMarkerMode === 'avatar' ? 0.5 : 0.9 }}
-              tracksViewChanges={Platform.OS === 'android' && destinationMarkerMode !== 'avatar'}
+              tracksViewChanges={false}
               pinColor={undefined}
             >
               <View collapsable={false}>
@@ -2529,7 +2572,7 @@ function PrototypeMapLayer({
               anchor={{ x: 0.5, y: 0.5 }}
               flat={driverMarkerMode === 'car'}
               rotation={driverMarkerMode === 'car' ? displayedDriverHeading : 0}
-              tracksViewChanges={shouldRenderDriverVehicleMarkerChild}
+              tracksViewChanges={Platform.OS !== 'android' && shouldRenderDriverVehicleMarkerChild}
               pinColor={undefined}
             >
               {driverMarkerMode === 'avatar' ? (
@@ -2543,7 +2586,7 @@ function PrototypeMapLayer({
             </Marker>
           ) : null}
 
-          {!useSimplifiedIosMap && searchingMode
+          {!useSimplifiedIosMap && searchingMode && !shouldRenderProjectedNearbyVehicleOverlays
             ? collisionSafeNearbyVehicles.map((vehicle, index) => {
                 const id = String(vehicle.id || '');
                 const isOuterVehicle = id.startsWith('outer');
@@ -2677,7 +2720,7 @@ function PrototypeMapLayer({
         </View>
       ) : null}
 
-      {Platform.OS === 'ios' && projectedNearbyVehicleOverlayItems.length > 0 ? (
+      {projectedNearbyVehicleOverlayItems.length > 0 ? (
         <View pointerEvents="none" style={styles.iosNearbyVehicleOverlayLayer}>
           {projectedNearbyVehicleOverlayItems.map(item => (
             <React.Fragment key={`ios-nearby-${item.id}-${item.index}`}>
@@ -2915,40 +2958,35 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(26,51,14,0.08)'
   },
   currentLocationWrap: {
-    width: 42,
-    height: 42,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'visible'
   },
   currentLocationBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    borderWidth: 2,
-    borderColor: 'rgba(26,51,14,0.14)',
-    shadowColor: color.shadow.base,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.16,
-    shadowRadius: 9,
-    elevation: 6
+    backgroundColor: 'rgba(255, 214, 10, 0.34)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.92)'
   },
   currentLocationBadgeInner: {
-    width: 23,
-    height: 23,
-    borderRadius: 11.5,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E8F1E3'
+    backgroundColor: '#FFFFFF'
   },
   currentLocationDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#1A330E'
+    backgroundColor: '#1FA64A'
   },
   destinationMarkerWrap: {
     alignItems: 'center'

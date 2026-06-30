@@ -18,9 +18,15 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
 
+  const title = route?.params?.title || 'Pagamento não confirmado';
   const errorMessage = route?.params?.errorMessage || 'Não conseguimos confirmar o pagamento desta vez.';
-  const retryRouteName = route?.params?.retryRouteName || 'RobotaxiPrototypeDestination';
-  const retryParams = route?.params?.retryParams || {};
+  const requestedRetryRouteName = route?.params?.retryRouteName || 'RobotaxiPrototype';
+  const retryRouteName =
+    requestedRetryRouteName === 'RobotaxiPrototypeDestination'
+      ? 'RobotaxiPrototype'
+      : requestedRetryRouteName;
+  const retryParams =
+    retryRouteName === 'RobotaxiPrototype' ? {} : route?.params?.retryParams || {};
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -52,7 +58,7 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
               <Ionicons name="warning-outline" size={30} color="#FFFFFF" />
             </View>
 
-            <Text style={styles.title}>Pagamento não confirmado</Text>
+            <Text style={styles.title}>{title}</Text>
             <Text style={styles.subtitle}>{errorMessage}</Text>
 
             <PrototypePrimaryButton
@@ -67,6 +73,8 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
               icon="map-outline"
               onPress={() => navigation.navigate('RobotaxiPrototype')}
               style={styles.secondaryButton}
+              textStyle={styles.secondaryButtonText}
+              iconColor={color.text.primary}
             />
           </PrototypeCard>
         </PrototypeDismissibleSheet>
@@ -131,5 +139,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     backgroundColor: color.surface.secondary,
     borderColor: color.border.strong
+  },
+  secondaryButtonText: {
+    color: color.text.primary
   }
 });

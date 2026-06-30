@@ -78,6 +78,22 @@ function formatDurationMin(value) {
   return `${numeric} min`;
 }
 
+function asPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function firstNonEmptyText(...values) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
 function formatPaymentMethod(method) {
   const normalized = String(method || "")
     .trim()
@@ -363,6 +379,20 @@ function hasBackendFinalReceiptFinancialContract(receipt, grossAmount) {
   );
 }
 
+function normalizeReceiptIdentityVariants(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return [];
+  }
+
+  const variants = new Set([raw]);
+  if (raw.startsWith("LEAF-")) {
+    variants.add(raw.slice(5));
+  }
+
+  return Array.from(variants).filter(Boolean);
+}
+
 function collectReceiptIdentityIds(value = {}) {
   return [
     value?.id,
@@ -371,7 +401,7 @@ function collectReceiptIdentityIds(value = {}) {
     value?.tripId,
     value?.receiptId,
   ]
-    .map((item) => String(item || "").trim())
+    .flatMap(normalizeReceiptIdentityVariants)
     .filter(Boolean);
 }
 
@@ -380,15 +410,11 @@ function findBackendFinalRuntimeReceipt({ routeReceipt, routeParams, lastReceipt
     ...collectReceiptIdentityIds(routeReceipt),
     ...collectReceiptIdentityIds(routeParams),
   ]);
-  if (lookupIds.size === 0) {
-    return null;
-  }
-
   const runtimeCandidates = [lastReceipt, ...(Array.isArray(runtimeHistory) ? runtimeHistory : [])]
     .filter(Boolean);
 
-  return (
-    runtimeCandidates.find((receipt) => {
+  if (lookupIds.size > 0) {
+    const matchedReceipt = runtimeCandidates.find((receipt) => {
       const receiptIds = collectReceiptIdentityIds(receipt);
       const sameReceipt = receiptIds.some((id) => lookupIds.has(id));
       if (!sameReceipt) {
@@ -399,8 +425,25 @@ function findBackendFinalRuntimeReceipt({ routeReceipt, routeParams, lastReceipt
         receipt,
         Math.max(0, resolveTripGrossAmount(receipt)),
       );
-    }) || null
-  );
+    });
+
+    if (matchedReceipt) {
+      return matchedReceipt;
+    }
+  }
+
+  if (routeParams?.fromTrip) {
+    return (
+      runtimeCandidates.find((receipt) =>
+        hasBackendFinalReceiptFinancialContract(
+          receipt,
+          Math.max(0, resolveTripGrossAmount(receipt)),
+        ),
+      ) || null
+    );
+  }
+
+  return null;
 }
 
 function resolveReceiptParticipantId(receipt = {}, keys = []) {
@@ -657,6 +700,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
 
   const openRatingScreen = useCallback(
     (params) => {
+      terminalExitRef.current = true;
       if (typeof navigation.replace === "function") {
         navigation.replace("RobotaxiPrototypeRating", params);
         return;
@@ -1163,18 +1207,51 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       </View>
     ) : null;
 
+  const selectedDriver = asPlainObject(selected?.driver);
+  const selectedDriverVehicle = asPlainObject(selectedDriver?.vehicle);
+  const selectedVehicle = asPlainObject(selected?.vehicle);
+  const selectedDriverInfo = asPlainObject(selected?.driverInfo);
+  const selectedDriverInfoVehicle = asPlainObject(selectedDriverInfo?.vehicle);
+  const selectedDriverData = asPlainObject(selected?.driverData);
+  const selectedDriverDataVehicle = asPlainObject(selectedDriverData?.vehicle);
   const receiptPersonName = isDriverView
     ? selected?.passengerName || "Passageiro Leaf"
-    : selected?.driverName || "Motorista Leaf";
+    : firstNonEmptyText(
+        selected?.driverName,
+        selectedDriver?.name,
+        selectedDriver?.driverName,
+        selectedDriverInfo?.name,
+        selectedDriverInfo?.driverName,
+        selectedDriverData?.name,
+        selectedDriverData?.driverName,
+        "Motorista Leaf",
+      );
   const receiptVehicleModel = !isDriverView
-    ? selected?.vehicleLabel ||
-      selected?.vehicleModel ||
-      selected?.vehicle ||
-      selected?.driverVehicle ||
-      ""
+    ? firstNonEmptyText(
+        selected?.vehicleLabel,
+        selected?.vehicleModel,
+        selected?.driverVehicle,
+        selectedVehicle?.label,
+        selectedVehicle?.model,
+        selectedVehicle?.brandModel,
+        selectedDriverVehicle?.model,
+        selectedDriverVehicle?.brandModel,
+        selectedDriverInfoVehicle?.model,
+        selectedDriverDataVehicle?.model,
+      )
     : "";
   const receiptVehicleColor = !isDriverView
-    ? selected?.vehicleColor || selected?.color || selected?.carColor || ""
+    ? firstNonEmptyText(
+        selected?.vehicleColor,
+        selected?.color,
+        selected?.carColor,
+        selectedVehicle?.color,
+        selectedVehicle?.vehicleColor,
+        selectedDriverVehicle?.color,
+        selectedDriverVehicle?.vehicleColor,
+        selectedDriverInfoVehicle?.color,
+        selectedDriverDataVehicle?.color,
+      )
     : "";
   const receiptVehicleLabel = isDriverView
     ? `${passengersCount} passageiro${passengersCount > 1 ? "s" : ""}`
@@ -1182,7 +1259,18 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         .filter(Boolean)
         .join(" · ") || "Veículo não informado";
   const receiptPlateLabel = !isDriverView
-    ? selected?.vehiclePlate || selected?.plate || "Placa não informada"
+    ? firstNonEmptyText(
+        selected?.vehiclePlate,
+        selected?.plate,
+        selected?.carPlate,
+        selectedVehicle?.plate,
+        selectedVehicle?.vehiclePlate,
+        selectedDriverVehicle?.plate,
+        selectedDriverVehicle?.vehiclePlate,
+        selectedDriverInfoVehicle?.plate,
+        selectedDriverDataVehicle?.plate,
+        "Placa não informada",
+      )
     : "";
   const receiptTotalLabel = hasReceiptFinancialContract
     ? isDriverView
@@ -1499,8 +1587,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                     value: formatReceiptMoney(safeTollAmount),
                   }) : null}
                   {renderCleanValueRow({
-                    title: "Taxa operacional Leaf",
-                    subtitle: "Descontada antes do repasse",
+                    title: "Taxas Leaf",
+                    subtitle: "Operacional e processamento antes do repasse",
                     value: formatReceiptMoney(safeFeeAmount),
                     muted: true,
                   })}

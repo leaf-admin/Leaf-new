@@ -386,7 +386,7 @@ export function LeafProgressBar({ progress = 0, tone = "leaf", fillTestID }) {
 export function LeafRouteProgress({
   originLabel = "Partida",
   destinationLabel = "Chegada",
-  progress = 0.48,
+  progress = 0,
   progressKey,
   arrivalLabel,
   style,
@@ -394,7 +394,10 @@ export function LeafRouteProgress({
   fieldTestIDs = {},
 }) {
   const pulse = React.useRef(new Animated.Value(0)).current;
-  const normalizedProgress = Math.max(0.08, Math.min(0.94, Number(progress) || 0.48));
+  const numericProgress = Number(progress);
+  const normalizedProgress = Number.isFinite(numericProgress)
+    ? Math.max(0, Math.min(0.94, numericProgress))
+    : 0;
   const routeIdentity = String(progressKey || `${originLabel}|${destinationLabel}`);
   const progressAnim = React.useRef(new Animated.Value(normalizedProgress)).current;
   const previousRouteIdentityRef = React.useRef(routeIdentity);

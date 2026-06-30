@@ -5,7 +5,6 @@ import { store } from '../state/appStore';
 import { addRating } from './runtime/ratingStateBridge';
 import {
     canUseProfileBypass,
-    isSimulatorBuild,
 } from '../config/runtimeAccessPolicy';
 
 const NON_RETRYABLE_RATING_CODES = new Set([
@@ -60,10 +59,6 @@ class RatingService {
                 normalizedTripId.startsWith('trip-') ||
                 normalizedTripId.startsWith('booking-proof') ||
                 normalizedTripId.startsWith('booking-');
-
-            if (isSimulatorBuild()) {
-                return true;
-            }
 
             if (canUseProfileBypass(authProfile) && isPrototypeTrip) {
                 return true;

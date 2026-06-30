@@ -820,6 +820,69 @@ describe('prototype ride screens', () => {
     });
   });
 
+  it('renders driver offer passenger and route context from authoritative nested payload fields', () => {
+    usePrototypeRideRuntime.mockReturnValue({
+      currentCoordinate: { latitude: -22.857, longitude: -43.309 },
+      driverCoordinate: { latitude: -22.857, longitude: -43.309 },
+      driverOffers: [
+        {
+          bookingId: 'booking_nested_offer_context',
+          passenger: 'Motorista',
+          customer: { name: 'Leaf Passageira Teste' },
+          pickup: 'Local combinado',
+          pickupLocation: {
+            add: 'Av. Meriti, 9 - Vila Kosmos',
+            lat: -22.858,
+            lng: -43.309,
+          },
+          dropoff: 'Local combinado',
+          destinationLocation: {
+            add: 'Av. das Américas, 4666 - Barra da Tijuca',
+            lat: -22.999,
+            lng: -43.358,
+          },
+          fare: 54.71,
+          grossFare: 54.71,
+          estimatedDriverNetAmount: 51.31,
+          pickupEtaMin: 3,
+          tripDurationMin: 31,
+          pickupRouteCoordinates: [
+            { latitude: -22.857, longitude: -43.309 },
+            { latitude: -22.858, longitude: -43.309 },
+          ],
+          routeCoordinates: [
+            { latitude: -22.858, longitude: -43.309 },
+            { latitude: -22.925, longitude: -43.334 },
+            { latitude: -22.999, longitude: -43.358 },
+          ],
+          pricingSnapshotLocked: true,
+        },
+      ],
+      driverTripMeta: {},
+      profile: {},
+      acceptDriverOffer: jest.fn(),
+      rejectDriverOffer: jest.fn(),
+      lastError: '',
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    expect(screen.getByText('Leaf Passageira Teste')).toBeTruthy();
+    expect(screen.getByText('Av. Meriti, 9 - Vila Kosmos')).toBeTruthy();
+    expect(screen.getByText('Av. das Américas, 4666 - Barra da Tijuca')).toBeTruthy();
+    expect(screen.getByText(/3 min · (?!.*--).* até o embarque/)).toBeTruthy();
+    expect(screen.getByText(/31 min · (?!.*--).* de viagem/)).toBeTruthy();
+    expect(screen.queryByText('Motorista')).toBeNull();
+    expect(screen.queryByText('Local combinado')).toBeNull();
+  });
+
   it('keeps paid driver offers locked until explicit accept, reject, or timeout', () => {
     const rejectDriverOffer = jest.fn();
     usePrototypeRideRuntime.mockReturnValue({
@@ -2668,6 +2731,30 @@ describe('prototype ride screens', () => {
     expect(screen.queryByText('8 km até o embarque')).toBeNull();
   });
 
+  it('renders zero pickup distance without falling back to the full trip distance', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        tripDistanceKm: 8,
+        activeBooking: {
+          driverDistanceToPickupKm: 0,
+          estimatedArrivalToPickupMin: 1,
+        },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getAllByText('0 m até o embarque').length).toBeGreaterThan(0);
+    expect(screen.queryByText('8 km até o embarque')).toBeNull();
+  });
+
   it('updates passenger boarding timer copy as pickup urgency changes', () => {
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
 
@@ -2730,6 +2817,49 @@ describe('prototype ride screens', () => {
     );
   });
 
+  it('does not let the from-trip receipt beforeRemove guard cancel rating navigation', () => {
+    const dismissCompletedReceipt = jest.fn();
+    let beforeRemoveListener = null;
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({ dismissCompletedReceipt })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return jest.fn();
+      }),
+    };
+    const { getByTestId } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true } }}
+      />
+    );
+
+    fireEvent.press(getByTestId('passenger-receipt-rate-trip-button'));
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototypeRating',
+      expect.objectContaining({
+        fromReceipt: true,
+        reviewerType: 'passenger',
+        tripId: 'trip_1',
+      }),
+    );
+
+    const event = { preventDefault: jest.fn() };
+    beforeRemoveListener(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(dismissCompletedReceipt).not.toHaveBeenCalled();
+  });
+
   it('renders canonical vehicle model, color and plate on the passenger receipt', () => {
     const baseRuntime = buildReceiptRuntime();
     const receiptWithVehicle = {
@@ -2752,6 +2882,42 @@ describe('prototype ride screens', () => {
 
     expect(getByTestId('passenger-receipt-vehicle-model-color').props.children).toBe(
       'Honda City · BRANCO'
+    );
+    expect(getByTestId('passenger-receipt-vehicle-plate').props.children).toBe('RJA2D41');
+  });
+
+  it('renders nested driver vehicle identity on the passenger receipt', () => {
+    const baseRuntime = buildReceiptRuntime();
+    const receiptWithNestedDriver = {
+      ...baseRuntime.lastReceipt,
+      driverName: '',
+      vehicleLabel: '',
+      vehicleColor: '',
+      vehiclePlate: '',
+      driver: {
+        name: 'Carlos Motorista',
+        vehicle: {
+          model: 'Toyota Corolla',
+          color: 'PRETO',
+          plate: 'RJA2D41',
+        },
+      },
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        lastReceipt: receiptWithNestedDriver,
+        tripHistory: [receiptWithNestedDriver],
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId, getByText } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByText('Carlos Motorista')).toBeTruthy();
+    expect(getByTestId('passenger-receipt-vehicle-model-color').props.children).toBe(
+      'Toyota Corolla · PRETO'
     );
     expect(getByTestId('passenger-receipt-vehicle-plate').props.children).toBe('RJA2D41');
   });
@@ -3077,6 +3243,110 @@ describe('prototype ride screens', () => {
     expect(recoverCompletedReceipt).not.toHaveBeenCalled();
   });
 
+  it('matches a prefixed API receipt id to the backend-final runtime receipt', () => {
+    const recoverCompletedReceipt = jest.fn();
+    const backendFinalReceipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'booking_api_receipt_prefix_match',
+      bookingId: 'booking_api_receipt_prefix_match',
+      fare: 58.19,
+      grossAmount: 58.19,
+      value: 'R$ 58,19',
+      pickupAddress: 'Av. Meriti, 9 - Vila Kosmos',
+      destinationAddress: 'Av. das Americas, 4666 - Barra da Tijuca',
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [backendFinalReceipt],
+        lastReceipt: backendFinalReceipt,
+        recoverCompletedReceipt,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, queryByTestId, queryByText } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromTrip: true,
+            receipt: {
+              receiptId: 'LEAF-booking_api_receipt_prefix_match',
+              driverName: 'Motorista Leaf',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(getByText('R$ 58,19')).toBeTruthy();
+    expect(getByText('Av. Meriti')).toBeTruthy();
+    expect(getByText('Av. das Americas')).toBeTruthy();
+    expect(queryByTestId('receipt-recovery-state-card')).toBeNull();
+    expect(queryByText('Recibo pendente')).toBeNull();
+    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
+    expect(recoverCompletedReceipt).not.toHaveBeenCalled();
+  });
+
+  it('uses the latest backend-final runtime receipt after trip completion when route params are incomplete', () => {
+    const recoverCompletedReceipt = jest.fn();
+    const backendFinalReceipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'booking_completed_runtime_only',
+      fare: 58.19,
+      grossAmount: 58.19,
+      value: 'R$ 58,19',
+      pickupAddress: 'Av. Meriti, 9 - Vila Kosmos',
+      destinationAddress: 'Av. das Americas, 4666 - Barra da Tijuca',
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [backendFinalReceipt],
+        lastReceipt: backendFinalReceipt,
+        recoverCompletedReceipt,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, queryByTestId, queryByText } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromTrip: true,
+            receipt: {
+              driverName: 'Motorista Leaf',
+              pickupAddress: 'Avenida Meriti, 9',
+              destinationAddress: 'BarraShopping',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(getByText('R$ 58,19')).toBeTruthy();
+    expect(getByText('Av. Meriti')).toBeTruthy();
+    expect(getByText('Av. das Americas')).toBeTruthy();
+    expect(queryByTestId('receipt-recovery-state-card')).toBeNull();
+    expect(queryByText('Recibo final indisponível')).toBeNull();
+    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
+    expect(recoverCompletedReceipt).not.toHaveBeenCalled();
+  });
+
   it('does not present a zero-value receipt as final when the financial snapshot is incomplete', async () => {
     const dismissCompletedReceipt = jest.fn();
     const recoverCompletedReceipt = jest.fn(() => new Promise(() => {}));
@@ -3367,17 +3637,23 @@ describe('prototype ride screens', () => {
           address: '1 Ferry Building, San Francisco',
         },
         currentAddress: '1540 Mission St, San Francisco',
+        activeBooking: {
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+          routeDurationSecs: 1920,
+        },
         cancelRideSearch: jest.fn(),
         lastError: '',
       })
     );
 
     const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByText, getByTestId } = render(
+    const { getAllByText, getByText, getByTestId, queryByText } = render(
       <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    expect(getByText('Detalhes da corrida')).toBeTruthy();
+    expect(getByTestId('passenger-driver-search-sheet')).toBeTruthy();
+    expect(queryByText('Detalhes da corrida')).toBeNull();
     expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('00:12');
     expect(getByText('Buscando motorista')).toBeTruthy();
     expect(getByText('Buscando em 6 km de diâmetro neste momento')).toBeTruthy();
@@ -3392,11 +3668,13 @@ describe('prototype ride screens', () => {
     );
     expect(getByText('Ponto de partida')).toBeTruthy();
     expect(getByText('Destino')).toBeTruthy();
-    expect(getByText('1540 Mission St')).toBeTruthy();
-    expect(getByText('Ferry Building')).toBeTruthy();
+    expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
+    expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
+    expect(queryByText(/chegada estimada --/i)).toBeNull();
+    expect(getByText(/Ferry Building - chegada estimada \d{2}:\d{2}/)).toBeTruthy();
   });
 
-  it('renders booking finalization separately from driver search while createBooking is pending', () => {
+  it('keeps the passenger on driver search while createBooking is pending', () => {
     const cancelRideSearch = jest.fn();
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
@@ -3425,16 +3703,16 @@ describe('prototype ride screens', () => {
     );
 
     const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getAllByText, getByText, getByTestId, queryByTestId, queryByText } = render(
+    const { getByText, getByTestId, queryByTestId, queryByText } = render(
       <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    expect(getByTestId('passenger-booking-finalizing-sheet')).toBeTruthy();
-    expect(queryByTestId('passenger-driver-search-sheet')).toBeNull();
-    expect(queryByText('Buscando motorista')).toBeNull();
-    expect(getAllByText('Criando corrida').length).toBeGreaterThan(0);
-    expect(getByText('Pagamento confirmado. Estamos criando sua corrida com segurança.')).toBeTruthy();
-    expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('Criando corrida');
+    expect(queryByTestId('passenger-booking-finalizing-sheet')).toBeNull();
+    expect(getByTestId('passenger-driver-search-sheet')).toBeTruthy();
+    expect(getByText('Buscando motorista')).toBeTruthy();
+    expect(queryByText('Criando corrida')).toBeNull();
+    expect(queryByText('Pagamento confirmado. Estamos criando sua corrida com segurança.')).toBeNull();
+    expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('00:44');
 
     fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
 
@@ -3588,7 +3866,7 @@ describe('prototype ride screens', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
         bookingStatus: 'searching',
-        searchingElapsedSeconds: 180,
+        searchingElapsedSeconds: 120,
         activeBooking: { bookingId: 'booking_cancel_failed' },
         cancelRideSearch,
         lastError: '',
@@ -3618,6 +3896,95 @@ describe('prototype ride screens', () => {
     expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiMenuHelp', {
       source: 'driver_search',
       bookingId: 'booking_cancel_failed',
+    });
+  });
+
+  it('asks the passenger to continue or cancel when driver search reaches the timeout', () => {
+    const cancelRideSearch = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 180,
+        activeBooking: { bookingId: 'booking_timeout_decision' },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { getByTestId, getByText, queryByTestId, queryByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('passenger-driver-search-timeout-decision')).toBeTruthy();
+    expect(
+      getByText('Estamos quase encontrando o motorista parceiro, deseja aguardar?')
+    ).toBeTruthy();
+    expect(queryByTestId('passenger-driver-search-cancel-button')).toBeNull();
+
+    fireEvent.press(getByTestId('passenger-driver-search-timeout-continue-button'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(queryByText('Estamos quase encontrando o motorista parceiro, deseja aguardar?')).toBeNull();
+    expect(getByTestId('passenger-driver-search-cancel-button')).toBeTruthy();
+    expect(getByTestId('passenger-driver-search-support-button')).toBeTruthy();
+  });
+
+  it('cancels through the timeout decision and returns to the empty map', async () => {
+    const cancelRideSearch = jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        refundStatus: 'requested',
+        refundAmount: 44.95,
+      },
+    });
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 180,
+        activeBooking: { bookingId: 'booking_timeout_cancel' },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { getByTestId } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('passenger-driver-search-timeout-cancel-button'));
+
+    expect(cancelRideSearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_timeout_cancel',
+        source: 'search_timeout_prompt',
+        reason: 'Passageiro desistiu após o tempo de busca.',
+        suppressReason: 'passenger_search_timeout_prompt',
+        clearLastError: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          source: 'driver_search_timeout_cancelled',
+          searchCancelled: true,
+          refundRequested: true,
+        })
+      );
     });
   });
 
@@ -3677,15 +4044,15 @@ describe('prototype ride screens', () => {
     );
 
     const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByText } = render(
+    const { getAllByText } = render(
       <RobotaxiDriverSearchScreen
         navigation={navigation}
         route={{ params: { destination: 'Destino', originAddress: '' } }}
       />
     );
 
-    expect(getByText('1540 Mission St')).toBeTruthy();
-    expect(getByText('Ferry Building')).toBeTruthy();
+    expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
+    expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
   });
 
   it('forwards pickup and destination labels from payment success into the search route', async () => {
@@ -4058,8 +4425,8 @@ describe('prototype ride screens', () => {
     expect(getByText('Buscando motorista')).toBeTruthy();
     expect(getByText('sincronizando estado')).toBeTruthy();
     expect(getByText('Sincronizando...')).toBeTruthy();
-    expect(getByText('1540 Mission St')).toBeTruthy();
-    expect(getByText('Ferry Building')).toBeTruthy();
+    expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
+    expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
     expect(getAllByText('R$ 27,50').length).toBeGreaterThan(0);
     expect(() => getByText('R$ 80,00')).toThrow();
 
@@ -4214,7 +4581,7 @@ describe('prototype ride screens', () => {
     fireEvent.press(getByTestId('passenger-no-drivers-retry-button'));
 
     expect(clearFlowPreview).toHaveBeenCalled();
-    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototypeDestination');
+    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
   });
 
   it.each(['notified', 'pending_driver', 'waiting_driver'])(
@@ -4354,7 +4721,13 @@ describe('prototype ride screens', () => {
         }),
       );
       expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-      expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          resetPassengerHomeSearch: true,
+          source: 'rating_completed',
+        }),
+      );
       expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
     });
   });
@@ -4397,7 +4770,13 @@ describe('prototype ride screens', () => {
     expect(RatingService.submitRating).not.toHaveBeenCalled();
     expect(markTripRating).not.toHaveBeenCalled();
     expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({
+        resetPassengerHomeSearch: true,
+        source: 'rating_completed',
+      }),
+    );
     expect(navigation.navigate).not.toHaveBeenCalledWith(
       'RobotaxiPrototypeReceipt',
       expect.any(Object),
@@ -4504,7 +4883,13 @@ describe('prototype ride screens', () => {
         })
       );
       expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-      expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          resetPassengerHomeSearch: true,
+          source: 'rating_completed',
+        }),
+      );
       expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
     });
   });
@@ -4563,7 +4948,13 @@ describe('prototype ride screens', () => {
         })
       );
       expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-      expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          resetPassengerHomeSearch: true,
+          source: 'rating_completed',
+        }),
+      );
     });
   });
 
@@ -4607,7 +4998,13 @@ describe('prototype ride screens', () => {
     expect(RatingService.submitRating).not.toHaveBeenCalled();
     expect(markTripRating).not.toHaveBeenCalled();
     expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({
+        resetPassengerHomeSearch: true,
+        source: 'rating_completed',
+      }),
+    );
     expect(navigation.navigate).not.toHaveBeenCalledWith(
       'RobotaxiPrototypeReceipt',
       expect.any(Object)
@@ -4667,7 +5064,13 @@ describe('prototype ride screens', () => {
 
     expect(event.preventDefault).toHaveBeenCalled();
     expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({
+        resetPassengerHomeSearch: true,
+        source: 'rating_completed',
+      }),
+    );
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
@@ -4727,7 +5130,13 @@ describe('prototype ride screens', () => {
         })
       );
       expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-      expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          resetPassengerHomeSearch: true,
+          source: 'rating_completed',
+        }),
+      );
       expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
     });
   });

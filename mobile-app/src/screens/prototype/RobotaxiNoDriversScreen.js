@@ -203,7 +203,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
 
   const handleRetryDestination = () => {
     clearFlowPreview();
-    navigation.replace("RobotaxiPrototypeDestination");
+    navigation.replace("RobotaxiPrototype");
   };
 
   if (isSearchStillActive) {

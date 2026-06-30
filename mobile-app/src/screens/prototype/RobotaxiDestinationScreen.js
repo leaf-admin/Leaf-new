@@ -48,7 +48,10 @@ import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolvePassengerAutoRoute } from "./passengerFlowRouting";
-import { resolveDestinationAutomationConfig } from "./destinationAutomationConfig";
+import {
+  isTruthyRouteParam,
+  resolveDestinationAutomationConfig,
+} from "./destinationAutomationConfig";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
 import WebSocketManager from "../../services/WebSocketManager";
 import {
@@ -84,11 +87,26 @@ const QUOTE_FALLBACK_HEIGHT = 322;
 const CONFIRM_FALLBACK_HEIGHT = 392;
 const PREFERENCE_CONFIRMATION_TIMEOUT_MS = 5000;
 const PREFERENCE_CONFIRMATION_TICK_MS = 80;
+const EMPTY_CATALOG_CARS = [];
 const PASSENGER_QUOTE_VALIDITY_MS = Math.max(
   15000,
   Number.parseInt(process.env.EXPO_PUBLIC_QUOTE_VALIDITY_MS || "120000", 10) ||
     120000,
 );
+
+function isRuntimeE2ETestBuild() {
+  return typeof isE2ETestBuild === "function" && isE2ETestBuild();
+}
+
+function isRuntimeSimulatorBuild() {
+  return typeof isSimulatorBuild === "function" && isSimulatorBuild();
+}
+
+const QA_DISABLE_QUOTE_EXPIRATION =
+  (isRuntimeE2ETestBuild() || isRuntimeSimulatorBuild()) &&
+  String(process.env.EXPO_PUBLIC_QA_DISABLE_QUOTE_EXPIRATION || "true")
+    .trim()
+    .toLowerCase() !== "false";
 const PASSENGER_QUOTE_COORDINATE_PRECISION = Math.max(
   2,
   Number.parseInt(
@@ -150,6 +168,10 @@ const MAX_OPERATIONAL_ROUTE_DISTANCE_KM = Math.max(
   ) || 120,
 );
 const OUT_OF_COVERAGE_MESSAGE = "Destino fora da area de cobertura da Leaf";
+const PIX_CANCELLED_RETRY_MESSAGE =
+  "Pagamento cancelado. Gere um novo PIX para continuar.";
+const PIX_NOT_COMPLETED_RETRY_MESSAGE =
+  "Pagamento nao concluido. Gere um novo PIX para continuar.";
 const LEGACY_ROUTE_GUARD_MESSAGE_REGEX =
   /origem e destino inconsistentes para a (área|area) de opera(ç|c)ão da leaf/i;
 const REGION_UNAVAILABLE_MESSAGE_REGEX = /regi(ã|a)o indispon(i|í)vel/i;
@@ -282,7 +304,47 @@ function normalizeCoverageMessage(message) {
   if (REGION_UNAVAILABLE_MESSAGE_REGEX.test(normalized)) {
     return OUT_OF_COVERAGE_MESSAGE;
   }
+  if (/servi(c|ç)o de corridas indispon(i|í)vel/i.test(normalized)) {
+    return "Serviço de corridas indisponível.";
+  }
   return normalized;
+}
+
+function resolveAvailabilityBlockedMessage(availability) {
+  const candidates = Number(availability?.candidates);
+  const eligible = Number(availability?.eligible);
+  const rejections =
+    availability?.rejections && typeof availability.rejections === "object"
+      ? availability.rejections
+      : {};
+  const rejectionEntries = Object.entries(rejections)
+    .map(([key, value]) => [key, Number(value)])
+    .filter(([, value]) => Number.isFinite(value) && value > 0);
+
+  if (Number.isFinite(candidates) && candidates > 0) {
+    if (Number.isFinite(eligible) && eligible <= 0) {
+      const hasCategoryMismatch = Number(rejections.categoryMismatch || 0) > 0;
+      const hasOfflineOrIneligible = Number(rejections.offlineOrIneligible || 0) > 0;
+      const hasReservation = Number(rejections.paymentReserved || 0) > 0;
+      if (hasCategoryMismatch) {
+        return "Motorista online encontrado, mas não elegível para esta categoria.";
+      }
+      if (hasOfflineOrIneligible) {
+        return "Motorista encontrado, mas ainda não elegível para receber corridas.";
+      }
+      if (hasReservation) {
+        return "Motorista encontrado, mas reservado em outra solicitação.";
+      }
+      if (rejectionEntries.length) {
+        return "Motorista encontrado, mas indisponível para pagamento agora.";
+      }
+    }
+    return "Motorista encontrado, mas indisponível para esta corrida agora.";
+  }
+
+  return normalizeCoverageMessage(
+    availability?.message || "Não há motorista disponível para essa categoria.",
+  );
 }
 
 function normalizeAddressText(value) {
@@ -345,14 +407,51 @@ function calculateStraightDistanceKm(origin, destination) {
 }
 
 function normalizePreviewCoordinate(value) {
-  const latitude = Number(value?.latitude);
-  const longitude = Number(value?.longitude);
+  const latitude = Number(value?.latitude ?? value?.lat);
+  const longitude = Number(value?.longitude ?? value?.lng);
 
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     return null;
   }
 
   return { latitude, longitude };
+}
+
+function normalizeRouteCoordinatesForTransport(value = []) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(normalizePreviewCoordinate)
+    .filter(Boolean)
+    .slice(0, 800)
+    .map((coordinate) => ({
+      lat: Number(coordinate.latitude),
+      lng: Number(coordinate.longitude),
+    }));
+}
+
+function normalizeTrafficSegmentsForTransport(value = []) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .slice(0, 80)
+    .map((segment) => {
+      const coordinates = normalizeRouteCoordinatesForTransport(segment?.coordinates);
+      if (coordinates.length < 2) {
+        return null;
+      }
+
+      return {
+        level: String(segment?.level || segment?.trafficLevel || "normal").trim(),
+        color: String(segment?.color || "").trim(),
+        coordinates,
+      };
+    })
+    .filter(Boolean);
 }
 
 function buildPassengerFareQuoteRouteKey({
@@ -374,42 +473,6 @@ function buildPassengerFareQuoteRouteKey({
   ].join("|");
 }
 
-function quoteCoordinatesMatch(left, right) {
-  const leftCoordinate = normalizePreviewCoordinate(left);
-  const rightCoordinate = normalizePreviewCoordinate(right);
-
-  if (!leftCoordinate || !rightCoordinate) {
-    return false;
-  }
-
-  const tolerance = 10 ** -PASSENGER_QUOTE_COORDINATE_PRECISION;
-  return (
-    Math.abs(leftCoordinate.latitude - rightCoordinate.latitude) <= tolerance &&
-    Math.abs(leftCoordinate.longitude - rightCoordinate.longitude) <= tolerance
-  );
-}
-
-function quoteRouteSnapshotMatchesSelection({
-  quoteRouteSnapshot,
-  originCoordinate,
-  destinationCoordinate,
-  selectedPlanTitle,
-}) {
-  const snapshot = normalizeQuoteRouteSnapshot(quoteRouteSnapshot);
-  if (!snapshot) {
-    return false;
-  }
-
-  const snapshotPlanId = getPlanIdFromCarName(snapshot.carType);
-  const selectedPlanId = getPlanIdFromCarName(selectedPlanTitle);
-
-  return Boolean(
-    quoteCoordinatesMatch(snapshot.pickupLocation, originCoordinate) &&
-      quoteCoordinatesMatch(snapshot.destinationLocation, destinationCoordinate) &&
-      (!snapshotPlanId || !selectedPlanId || snapshotPlanId === selectedPlanId),
-  );
-}
-
 function normalizeLockedQuoteNumber(value, fallback = null) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue) || numericValue <= 0) {
@@ -418,13 +481,33 @@ function normalizeLockedQuoteNumber(value, fallback = null) {
   return numericValue;
 }
 
+function normalizeLockedQuoteDurationMin(...values) {
+  for (const value of values) {
+    const directValue = normalizeLockedQuoteNumber(value);
+    if (directValue) {
+      return directValue;
+    }
+  }
+  return null;
+}
+
+function normalizeLockedQuoteDurationMinFromSeconds(...values) {
+  for (const value of values) {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue) && numericValue > 0) {
+      return Math.max(1, Math.round(numericValue / 60));
+    }
+  }
+  return null;
+}
+
 function hasValidBackendQuoteLock(value) {
   const quoteLockId = String(value?.quoteLockId || "").trim();
   const expiresAt = Date.parse(String(value?.quoteLockExpiresAt || ""));
   return Boolean(
     quoteLockId &&
       Number.isFinite(expiresAt) &&
-      expiresAt > Date.now(),
+      (expiresAt > Date.now() || QA_DISABLE_QUOTE_EXPIRATION),
   );
 }
 
@@ -488,13 +571,49 @@ function normalizeInitialPricingQuote(value) {
   );
   const quoteRouteSnapshot = resolveQuoteRouteSnapshot(value) ||
     resolveQuoteRouteSnapshot(rawQuote);
+  const routeCoordinates = normalizeRouteCoordinatesForTransport(
+    value.routeCoordinates ||
+      rawQuote.routeCoordinates ||
+      quoteRouteSnapshot?.routeCoordinates ||
+      [],
+  );
+  const trafficSegments = normalizeTrafficSegmentsForTransport(
+    value.trafficSegments ||
+      rawQuote.trafficSegments ||
+      quoteRouteSnapshot?.trafficSegments ||
+      [],
+  );
+  const routePolyline =
+    String(
+      value.routePolyline ||
+        rawQuote.routePolyline ||
+        quoteRouteSnapshot?.routePolyline ||
+        "",
+    ).trim() || null;
+  const tollFee =
+    normalizeLockedQuoteNumber(
+      rawQuote.tollFee ?? value.tollFee ?? quoteRouteSnapshot?.tollFee,
+      0,
+    ) || 0;
+  const tolls = Array.isArray(rawQuote.tolls)
+    ? rawQuote.tolls
+    : Array.isArray(value.tolls)
+      ? value.tolls
+      : Array.isArray(quoteRouteSnapshot?.tolls)
+        ? quoteRouteSnapshot.tolls
+        : [];
 
   return {
     quote: {
       ...rawQuote,
       estimatedFare,
       grossEstimatedFare,
+      tollFee,
+      tolls,
+      routePolyline,
       quoteRouteSnapshot,
+      routeCoordinates,
+      trafficSegments,
     },
     carType: String(value.carType || rawQuote.carType || "").trim() || null,
     planId:
@@ -511,8 +630,13 @@ function normalizeInitialPricingQuote(value) {
     routeKey: String(value.routeKey || "").trim(),
     quoteRouteSnapshot,
     distanceKm: normalizeLockedQuoteNumber(value.distanceKm),
-    durationMin: normalizeLockedQuoteNumber(value.durationMin),
+    durationMin: normalizeLockedQuoteNumber(value.durationMin ?? value.durationMinutes),
     arrivalTime: String(value.arrivalTime || "").trim(),
+    routeCoordinates,
+    trafficSegments,
+    routePolyline,
+    tollFee,
+    tolls,
     createdAt,
     expiresAt:
       Number(value.expiresAt) ||
@@ -520,52 +644,6 @@ function normalizeInitialPricingQuote(value) {
       (Number.isFinite(quoteLockExpiresAtMs)
         ? quoteLockExpiresAtMs
         : createdAt + PASSENGER_QUOTE_VALIDITY_MS),
-  };
-}
-
-function buildPaymentQuoteLockFromInitialPricingQuote(initialPricingQuote) {
-  if (!initialPricingQuote?.quote) {
-    return null;
-  }
-
-  if (!hasValidBackendQuoteLock(initialPricingQuote)) {
-    return null;
-  }
-
-  const fare = normalizeLockedQuoteNumber(
-    initialPricingQuote.quote.estimatedFare ?? initialPricingQuote.fare,
-  );
-  if (!fare) {
-    return null;
-  }
-
-  const grossEstimatedFare =
-    normalizeLockedQuoteNumber(
-      initialPricingQuote.quote.grossEstimatedFare ??
-        initialPricingQuote.grossEstimatedFare,
-      fare,
-    ) || fare;
-
-  return {
-    fare,
-    grossEstimatedFare,
-    discountBenefit: initialPricingQuote.quote.discountBenefit || null,
-    quoteSessionId: initialPricingQuote.quoteSessionId || null,
-    quoteLockId:
-      initialPricingQuote.quoteLockId ||
-      initialPricingQuote.quote.quoteLockId ||
-      null,
-    quoteLockExpiresAt:
-      initialPricingQuote.quoteLockExpiresAt ||
-      initialPricingQuote.quote.quoteLockExpiresAt ||
-      null,
-    quoteRouteSnapshot: initialPricingQuote.quoteRouteSnapshot || null,
-    pickupLocation:
-      initialPricingQuote.quoteRouteSnapshot?.pickupLocation || null,
-    destinationLocation:
-      initialPricingQuote.quoteRouteSnapshot?.destinationLocation || null,
-    carType: initialPricingQuote.quoteRouteSnapshot?.carType || null,
-    pricingQuoteRequestKey: null,
   };
 }
 
@@ -694,9 +772,83 @@ function buildReadyPaymentQuoteLock({
       fareQuoteLock?.quoteLockExpiresAt ||
       null,
     quoteRouteSnapshot,
+    routeCoordinates: normalizeRouteCoordinatesForTransport(
+      selectedPricingQuote?.routeCoordinates ||
+        selectedPricingQuote?.quote?.routeCoordinates ||
+        fareQuoteLock?.routeCoordinates ||
+        [],
+    ),
+    trafficSegments: normalizeTrafficSegmentsForTransport(
+      selectedPricingQuote?.trafficSegments ||
+        selectedPricingQuote?.quote?.trafficSegments ||
+        fareQuoteLock?.trafficSegments ||
+        [],
+    ),
+    routePolyline:
+      String(
+        selectedPricingQuote?.routePolyline ||
+          selectedPricingQuote?.quote?.routePolyline ||
+          fareQuoteLock?.routePolyline ||
+          quoteRouteSnapshot?.routePolyline ||
+          "",
+      ).trim() || null,
+    tollFee:
+      normalizeLockedQuoteNumber(
+        selectedPricingQuote?.tollFee ??
+          selectedPricingQuote?.quote?.tollFee ??
+          fareQuoteLock?.tollFee ??
+          quoteRouteSnapshot?.tollFee,
+        0,
+      ) || 0,
+    tolls: Array.isArray(selectedPricingQuote?.tolls)
+      ? selectedPricingQuote.tolls
+      : Array.isArray(selectedPricingQuote?.quote?.tolls)
+        ? selectedPricingQuote.quote.tolls
+        : Array.isArray(fareQuoteLock?.tolls)
+          ? fareQuoteLock.tolls
+          : Array.isArray(quoteRouteSnapshot?.tolls)
+            ? quoteRouteSnapshot.tolls
+            : [],
     pickupLocation: quoteRouteSnapshot?.pickupLocation || null,
     destinationLocation: quoteRouteSnapshot?.destinationLocation || null,
     carType: quoteRouteSnapshot?.carType || selectedPlanCarType || null,
+    distanceKm: normalizeLockedQuoteNumber(
+      selectedPricingQuote?.distanceKm ??
+        selectedPricingQuote?.quote?.distanceKm ??
+        selectedPricingQuote?.routeDistanceKm ??
+        selectedPricingQuote?.quote?.routeDistanceKm ??
+        fareQuoteLock?.distanceKm ??
+        fareQuoteLock?.routeDistanceKm ??
+        quoteRouteSnapshot?.distanceKm ??
+        quoteRouteSnapshot?.routeDistanceKm,
+    ),
+    durationMin:
+      normalizeLockedQuoteDurationMin(
+        selectedPricingQuote?.durationMin,
+        selectedPricingQuote?.durationMinutes,
+        selectedPricingQuote?.quote?.durationMin,
+        selectedPricingQuote?.quote?.durationMinutes,
+        selectedPricingQuote?.tripDurationMin,
+        selectedPricingQuote?.quote?.tripDurationMin,
+        selectedPricingQuote?.estimatedTripDurationMin,
+        selectedPricingQuote?.quote?.estimatedTripDurationMin,
+        fareQuoteLock?.durationMin,
+        fareQuoteLock?.durationMinutes,
+        fareQuoteLock?.tripDurationMin,
+        quoteRouteSnapshot?.durationMin,
+        quoteRouteSnapshot?.durationMinutes,
+        quoteRouteSnapshot?.tripDurationMin,
+      ) ||
+      normalizeLockedQuoteDurationMinFromSeconds(
+        selectedPricingQuote?.routeDurationSecs,
+        selectedPricingQuote?.quote?.routeDurationSecs,
+        selectedPricingQuote?.durationSecs,
+        selectedPricingQuote?.quote?.durationSecs,
+        fareQuoteLock?.routeDurationSecs,
+        fareQuoteLock?.durationSecs,
+        quoteRouteSnapshot?.routeDurationSecs,
+        quoteRouteSnapshot?.durationSecs,
+      ),
     pricingQuoteRequestKey: selectedPricingQuoteRequestKey || null,
   };
 
@@ -872,7 +1024,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     routeParams.initialPickupAdjustedOnMap === true ||
     routeParams.initialPickupAdjustedOnMap === "true" ||
     routeParams.initialPickupAdjustedOnMap === "1";
-  const catalogCars = useSelector((state) => state?.cartypes?.cars || []);
+  const catalogCars = useSelector(
+    (state) => state?.cartypes?.cars || EMPTY_CATALOG_CARS,
+  );
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [query, setQuery] = useState("");
@@ -884,15 +1038,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const [checkingPlanAvailability, setCheckingPlanAvailability] =
     useState(false);
   const [availabilityNotice, setAvailabilityNotice] = useState("");
+  const [paymentFlowNotice, setPaymentFlowNotice] = useState("");
   const [planAvailabilityById, setPlanAvailabilityById] = useState({});
-  const [selectedPricingQuote, setSelectedPricingQuote] = useState(
-    () => initialPricingQuote?.quote || null,
-  );
+  const [selectedPricingQuote, setSelectedPricingQuote] = useState(null);
   const [pricingQuoteLoading, setPricingQuoteLoading] = useState(false);
   const [pricingQuoteError, setPricingQuoteError] = useState("");
-  const [paymentQuoteLock, setPaymentQuoteLock] = useState(() =>
-    buildPaymentQuoteLockFromInitialPricingQuote(initialPricingQuote),
-  );
+  const [paymentQuoteLock, setPaymentQuoteLock] = useState(null);
   const [submittingRide, setSubmittingRide] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(SEARCH_FALLBACK_HEIGHT);
   const [recentDestinations, setRecentDestinations] = useState([]);
@@ -925,6 +1076,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const [fareQuoteLock, setFareQuoteLock] = useState(null);
   const [preferenceModalVisible, setPreferenceModalVisible] = useState(false);
   const [preferenceProgress, setPreferenceProgress] = useState(0);
+  const [preferenceDropdownKey, setPreferenceDropdownKey] = useState(null);
   const voiceAutoStartedRef = useRef(false);
   const lastAutoRouteRef = useRef("");
   const destinationInputRef = useRef(null);
@@ -932,6 +1084,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const connectionRecoveredTimerRef = useRef(null);
   const connectionAutomationExecutionRef = useRef("");
   const connectionAutomationTimersRef = useRef([]);
+  const directPixOpenRequestedRef = useRef(false);
   const latestRidePreferencesRef = useRef(null);
   const pendingPaymentConfirmationRef = useRef(null);
   const paymentRecoveryAttemptedRef = useRef("");
@@ -944,6 +1097,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     route?.params?.autoStartVoice === "true" ||
     route?.params?.autoStartVoice === "1";
   const isExtensionFlow = route?.params?.mode === "extension";
+  const openPixOnReady = !isExtensionFlow && isTruthyRouteParam(routeParams.openPixOnReady);
+  const shouldOpenPixOnReady = Boolean(
+    openPixOnReady &&
+      startAtConfirmation &&
+      initialSelectedDestination?.coordinate &&
+      initialPricingQuote?.quote &&
+      (initialPricingQuote?.quoteLockId || initialPricingQuote?.quote?.quoteLockId),
+  );
+  const [directPixOpening, setDirectPixOpening] = useState(shouldOpenPixOnReady);
+  const [directPixReturnHomePending, setDirectPixReturnHomePending] = useState(false);
 
   useEffect(() => {
     if (resolveLeafDelasRequested(route?.params || {})) {
@@ -1028,8 +1191,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       resolveDestinationAutomationConfig(route?.params || {}, {
         isExtensionFlow,
         isDev: __DEV__,
-        isE2E: isE2ETestBuild(),
-        isSimulator: isSimulatorBuild(),
+        isE2E: isRuntimeE2ETestBuild(),
+        isSimulator: isRuntimeSimulatorBuild(),
       }),
     [isExtensionFlow, route?.params],
   );
@@ -1076,7 +1239,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       resolvePrototypeConnectionAutomationConfig(route?.params || {}, {
         activeRole: activeRole || "customer",
         isDev: __DEV__,
-        isE2E: isE2ETestBuild(),
+        isE2E: isRuntimeE2ETestBuild(),
       }),
     [activeRole, route?.params],
   );
@@ -1538,24 +1701,21 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     if (initialSelectedPlan) {
       setSelectedPlan(initialSelectedPlan);
     }
-    if (initialPricingQuote?.quote) {
-      setSelectedPricingQuote(initialPricingQuote.quote);
-      if (initialPricingQuote.routeKey) {
-        setFareQuoteLock({
-          routeKey: initialPricingQuote.routeKey,
-          quoteSessionId: initialPricingQuote.quoteSessionId,
-          quoteLockId: initialPricingQuote.quoteLockId,
-          quoteLockExpiresAt: initialPricingQuote.quoteLockExpiresAt,
-          distanceKm: initialPricingQuote.distanceKm,
-          durationMin: initialPricingQuote.durationMin,
-          arrivalTime: initialPricingQuote.arrivalTime,
-          createdAt: initialPricingQuote.createdAt,
-          expiresAt: initialPricingQuote.expiresAt,
-        });
-      }
+    if (initialPricingQuote?.routeKey) {
+      setFareQuoteLock({
+        routeKey: initialPricingQuote.routeKey,
+        quoteSessionId: initialPricingQuote.quoteSessionId,
+        quoteLockId: initialPricingQuote.quoteLockId,
+        quoteLockExpiresAt: initialPricingQuote.quoteLockExpiresAt,
+        distanceKm: initialPricingQuote.distanceKm,
+        durationMin: initialPricingQuote.durationMin,
+        arrivalTime: initialPricingQuote.arrivalTime,
+        createdAt: initialPricingQuote.createdAt,
+        expiresAt: initialPricingQuote.expiresAt,
+      });
     }
-    setStep(startAtConfirmation ? CONFIRM_STEP : QUOTE_STEP);
-    setSheetHeight(startAtConfirmation ? CONFIRM_FALLBACK_HEIGHT : QUOTE_FALLBACK_HEIGHT);
+    setStep(QUOTE_STEP);
+    setSheetHeight(QUOTE_FALLBACK_HEIGHT);
   }, [
     initialSelectedPlan,
     initialSelectedDestination,
@@ -1563,6 +1723,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     isExtensionFlow,
     resolvedPickupAddress,
     resolvedPickupCoordinate,
+    shouldOpenPixOnReady,
     startAtConfirmation,
   ]);
 
@@ -2023,6 +2184,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     planAvailabilityById?.[selectedPlanData?.id] || null;
   const selectedPlanUnavailable =
     hasCoverageBlockedPlan || selectedPlanAvailability?.available === false;
+  const destinationSurfaceNotice = availabilityNotice || paymentFlowNotice;
   const categoryOptions = useMemo(() => {
     const rawPickupEta = Number.parseInt(destinationInfo?.eta || "4", 10);
     const basePickupEta = Number.isFinite(rawPickupEta)
@@ -2111,55 +2273,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     fareQuoteRouteKey,
     selectedPlanData?.title,
   ]);
-  const initialPricingQuotePlanId = useMemo(
-    () =>
-      getPlanIdFromCarName(
-        initialPricingQuote?.planId ||
-          initialPricingQuote?.carType ||
-          initialPricingQuote?.quote?.carType ||
-          "",
-      ),
-    [
-      initialPricingQuote?.carType,
-      initialPricingQuote?.planId,
-      initialPricingQuote?.quote?.carType,
-    ],
-  );
-  const initialPricingQuoteRouteMatchesCurrentSelection = useMemo(
-    () =>
-      Boolean(
-        initialPricingQuote?.quote &&
-          (initialPricingQuote.routeKey === fareQuoteRouteKey ||
-            quoteRouteSnapshotMatchesSelection({
-              quoteRouteSnapshot:
-                initialPricingQuote.quoteRouteSnapshot ||
-                initialPricingQuote.quote?.quoteRouteSnapshot,
-              originCoordinate: resolvedPickupCoordinate,
-              destinationCoordinate,
-              selectedPlanTitle: selectedPlanData?.title,
-            })),
-      ),
-    [
-      destinationCoordinate?.latitude,
-      destinationCoordinate?.longitude,
-      fareQuoteRouteKey,
-      initialPricingQuote?.quote,
-      initialPricingQuote?.quoteRouteSnapshot,
-      initialPricingQuote?.routeKey,
-      initialPricingQuote?.quote?.quoteRouteSnapshot,
-      resolvedPickupCoordinate?.latitude,
-      resolvedPickupCoordinate?.longitude,
-      selectedPlanData?.title,
-    ],
-  );
-  const initialPricingQuoteMatchesCurrentSelection = Boolean(
-    initialPricingQuote?.quote &&
-      initialPricingQuoteRouteMatchesCurrentSelection &&
-      hasValidBackendQuoteLock(initialPricingQuote) &&
-      (!initialPricingQuotePlanId ||
-        initialPricingQuotePlanId === selectedPlanData?.id),
-  );
-
   useEffect(() => {
     if (
       (step !== QUOTE_STEP && step !== CONFIRM_STEP && step !== PICKUP_STEP) ||
@@ -2195,19 +2308,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     const cachedQuote =
       selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] ||
       null;
-    if (cachedQuote?.expiresAt > Date.now()) {
+    if (
+      cachedQuote?.quote &&
+      (cachedQuote.expiresAt > Date.now() || QA_DISABLE_QUOTE_EXPIRATION)
+    ) {
       setSelectedPricingQuote(cachedQuote.quote);
-      setPricingQuoteLoading(false);
-      setPricingQuoteError("");
-      return;
-    }
-
-    if (initialPricingQuoteMatchesCurrentSelection) {
-      selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
-        quote: initialPricingQuote.quote,
-        expiresAt: initialPricingQuote.expiresAt,
-      };
-      setSelectedPricingQuote(initialPricingQuote.quote);
       setPricingQuoteLoading(false);
       setPricingQuoteError("");
       return;
@@ -2242,7 +2347,18 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         carType: selectedPlanData.title,
         routeDistanceKm: distanceKm,
         routeDurationSecs: Math.max(60, Math.round(durationMin * 60)),
-        clientEstimatedFare: selectedPlanData.value,
+        routePolyline:
+          fareQuoteLock?.routePolyline ||
+          initialPricingQuote?.routePolyline ||
+          null,
+        requireRouteGeometry: true,
+        tollFee:
+          Number(
+            fareQuoteLock?.tollFee ??
+              initialPricingQuote?.tollFee ??
+              initialPricingQuote?.quote?.tollFee ??
+              0,
+          ) || 0,
         quoteSessionId: fareQuoteLock?.quoteSessionId,
       },
       {
@@ -2319,10 +2435,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     durationMin,
     fareQuoteLock?.expiresAt,
     fareQuoteLock?.quoteSessionId,
+    fareQuoteLock?.routePolyline,
+    fareQuoteLock?.tollFee,
     fareQuoteLockMatchesRoute,
     isExtensionFlow,
     initialPricingQuote,
-    initialPricingQuoteMatchesCurrentSelection,
+    initialPricingQuote?.quote?.tollFee,
+    initialPricingQuote?.routePolyline,
+    initialPricingQuote?.tollFee,
     resolvedPickupAddress,
     resolvedPickupCoordinate?.latitude,
     resolvedPickupCoordinate?.longitude,
@@ -2531,6 +2651,43 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     }
   }, [clearFlowPreview, isExtensionFlow]);
 
+  const returnToCleanPassengerHome = useCallback(
+    (notice = "") => {
+      const normalizedNotice = normalizeCoverageMessage(notice);
+      setPixModalVisible(false);
+      setDirectPixOpening(false);
+      setDirectPixReturnHomePending(true);
+      setPreferenceModalVisible(false);
+      setPaymentQuoteLock(null);
+      setFareQuoteLock(null);
+      setSelectedPricingQuote(null);
+      setPricingQuoteLoading(false);
+      setPricingQuoteError("");
+      setAvailabilityNotice("");
+      setPaymentFlowNotice("");
+      setPlanAvailabilityById({});
+      pendingPaymentConfirmationRef.current = null;
+      paymentRecoveryAttemptedRef.current = "";
+      directPixOpenRequestedRef.current = false;
+      qaAutoPixOpenedRef.current = false;
+      qaAutoPixConfirmedRef.current = false;
+      clearPrototypeMapRoute();
+      if (!isExtensionFlow) {
+        clearFlowPreview();
+      }
+
+      const params = normalizedNotice
+        ? {
+            passengerHomeAvailabilityNotice: normalizedNotice,
+            passengerHomeAvailabilityNoticeAt: Date.now(),
+          }
+        : {};
+
+      navigation.replace("RobotaxiPrototype", params);
+    },
+    [clearFlowPreview, isExtensionFlow, navigation],
+  );
+
   const handleBackToCategories = useCallback(() => {
     setStep(QUOTE_STEP);
     setSheetHeight(QUOTE_FALLBACK_HEIGHT);
@@ -2548,6 +2705,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
       setSelectedPlan(plan.id);
       setAvailabilityNotice("");
+      setPaymentFlowNotice("");
       setSheetHeight(QUOTE_FALLBACK_HEIGHT);
     },
     [],
@@ -2626,7 +2784,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
-      for (const plan of visiblePlans) {
+      const plansToValidate = visiblePlans.filter((plan) => plan.id === selectedPlan);
+      const fallbackPlan = plansToValidate.length > 0 ? plansToValidate : visiblePlans.slice(0, 1);
+
+      for (const plan of fallbackPlan) {
         try {
           const availability = await checkRideAvailabilityRef.current({
             destination: {
@@ -2688,7 +2849,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         });
       }
 
-      setPlanAvailabilityById(nextAvailability);
+        setPlanAvailabilityById((current) => ({
+          ...current,
+          ...nextAvailability,
+        }));
       if (coverageBlockedByAvailability) {
         setAvailabilityNotice(OUT_OF_COVERAGE_MESSAGE);
       }
@@ -2764,22 +2928,28 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [currentCoordinate, originAddress]);
 
   const handleOpenPixModal = useCallback(async () => {
+    setPaymentFlowNotice("");
+
     if (!canRequestRide) {
       Alert.alert(
         "Selecione um destino",
         "Defina um destino válido antes de solicitar.",
       );
-      return;
+      return {
+        ok: false,
+        message: "Defina um destino válido antes de solicitar.",
+      };
     }
 
     if (checkingAvailability || submittingRide || preferenceModalVisible) {
-      return;
+      return { ok: false, message: "Aguarde a validação em andamento." };
     }
 
     if (isExtensionFlow) {
       if (routeGuardBlocked) {
-        setAvailabilityNotice(routeGuardMessage || OUT_OF_COVERAGE_MESSAGE);
-        return;
+        const message = routeGuardMessage || OUT_OF_COVERAGE_MESSAGE;
+        setAvailabilityNotice(message);
+        return { ok: false, message };
       }
 
       if (
@@ -2788,11 +2958,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         !Number.isFinite(Number(selectedPlanFare)) ||
         Number(selectedPlanFare) <= 0
       ) {
-        setAvailabilityNotice(
+        const message =
           pricingQuoteError ||
-            "Aguarde a cotação da tarifa antes de solicitar a alteração.",
-        );
-        return;
+          "Aguarde a cotação da tarifa antes de solicitar a alteração.";
+        setAvailabilityNotice(message);
+        return { ok: false, message };
       }
 
       try {
@@ -2829,7 +2999,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               },
             ],
           );
-          return;
+          return { ok: true };
         }
 
         Alert.alert(
@@ -2842,15 +3012,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             },
           ],
         );
+        return { ok: true };
       } catch (error) {
-        setAvailabilityNotice(
+        const message =
           error?.message ||
-            "Não foi possível solicitar a alteração de destino agora.",
-        );
+          "Não foi possível solicitar a alteração de destino agora.";
+        setAvailabilityNotice(message);
+        return { ok: false, message };
       } finally {
         setSubmittingRide(false);
       }
-      return;
     }
 
     try {
@@ -2858,10 +3029,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       setAvailabilityNotice("");
 
       if (routeGuardBlocked) {
-        setAvailabilityNotice(
-          routeGuardMessage || OUT_OF_COVERAGE_MESSAGE,
-        );
-        return;
+        const message = routeGuardMessage || OUT_OF_COVERAGE_MESSAGE;
+        setAvailabilityNotice(message);
+        return { ok: false, message };
       }
 
       if (
@@ -2870,11 +3040,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         !Number.isFinite(Number(selectedPlanFare)) ||
         Number(selectedPlanFare) <= 0
       ) {
-        setAvailabilityNotice(
+        const message =
           pricingQuoteError ||
-            "Aguarde a cotação da tarifa antes de solicitar a corrida.",
-        );
-        return;
+          "Aguarde a cotação da tarifa antes de solicitar a corrida.";
+        setAvailabilityNotice(message);
+        return { ok: false, message };
       }
 
       const nextPaymentQuoteLock = buildReadyPaymentQuoteLock({
@@ -2889,10 +3059,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
       if (!nextPaymentQuoteLock) {
         setPaymentQuoteLock(null);
-        setAvailabilityNotice(
-          "Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.",
-        );
-        return;
+        const message =
+          "Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.";
+        setAvailabilityNotice(message);
+        return { ok: false, message };
       }
 
       const lockedPickupLocation =
@@ -2942,10 +3112,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       }
 
       if (!availability?.available) {
-        const normalizedMessage = normalizeCoverageMessage(
-          availability?.message ||
-            "Não há motorista disponível para essa categoria.",
-        );
+        const normalizedMessage = resolveAvailabilityBlockedMessage(availability);
         setAvailabilityNotice(normalizedMessage);
         setPlanAvailabilityById((current) => ({
           ...current,
@@ -2967,7 +3134,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           });
           setPlanAvailabilityById(nextAvailability);
         }
-        return;
+        return { ok: false, message: normalizedMessage };
       }
 
       setPaymentQuoteLock(nextPaymentQuoteLock);
@@ -2980,10 +3147,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         },
       }));
       setPixModalVisible(true);
+      return { ok: true };
     } catch (error) {
-      setAvailabilityNotice(
+      const message = normalizeCoverageMessage(
         error?.message || "Não foi possível validar disponibilidade agora.",
       );
+      setAvailabilityNotice(message);
+      return { ok: false, message };
     } finally {
       setCheckingAvailability(false);
     }
@@ -2996,7 +3166,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     distanceKm,
     durationMin,
     isExtensionFlow,
-    initialPricingQuoteMatchesCurrentSelection,
     navigation,
     pickupLocationPayload,
     preferenceModalVisible,
@@ -3023,13 +3192,78 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     submittingRide,
   ]);
 
-  const handleClosePixModal = useCallback(() => {
+  const handleClosePixModal = useCallback((event = null) => {
     if (submittingRide) {
       return;
     }
     setPixModalVisible(false);
+    setDirectPixOpening(false);
+
+    if (preferenceModalVisible || pendingPaymentConfirmationRef.current) {
+      return;
+    }
+
     setPaymentQuoteLock(null);
-  }, [submittingRide]);
+    setDirectPixReturnHomePending(false);
+    setStep(QUOTE_STEP);
+
+    const reason = String(event?.reason || "").trim();
+    if (reason === "generation_failed") {
+      const message =
+        normalizeCoverageMessage(event?.error) ||
+        "Pagamento não iniciado. Confira sua sessão e tente novamente.";
+      if (!isExtensionFlow) {
+        returnToCleanPassengerHome(message);
+        return;
+      }
+      setPaymentFlowNotice(message);
+      return;
+    }
+
+    if (reason === "cancelled") {
+      setPaymentFlowNotice(PIX_CANCELLED_RETRY_MESSAGE);
+      return;
+    }
+
+    if (reason === "timeout") {
+      if (!isExtensionFlow) {
+        returnToCleanPassengerHome();
+        return;
+      }
+      navigation.navigate(returnRouteName);
+      return;
+    }
+
+    setPaymentFlowNotice(PIX_NOT_COMPLETED_RETRY_MESSAGE);
+  }, [
+    isExtensionFlow,
+    navigation,
+    preferenceModalVisible,
+    returnToCleanPassengerHome,
+    returnRouteName,
+    submittingRide,
+  ]);
+
+  const handlePixPaymentExpired = useCallback(() => {
+    if (submittingRide) {
+      return;
+    }
+
+    setPixModalVisible(false);
+    setDirectPixOpening(false);
+    setDirectPixReturnHomePending(true);
+    if (!isExtensionFlow) {
+      returnToCleanPassengerHome();
+      return;
+    }
+    navigation.navigate(returnRouteName);
+  }, [
+    isExtensionFlow,
+    navigation,
+    returnToCleanPassengerHome,
+    returnRouteName,
+    submittingRide,
+  ]);
 
   useEffect(() => {
     if (!isPixModalVisible || submittingRide) {
@@ -3070,6 +3304,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       setAvailabilityNotice("");
     }
   }, [selectedPlan, selectedDestination, step]);
+
+  useEffect(() => {
+    setPaymentFlowNotice("");
+  }, [selectedPlan, selectedDestination]);
 
   useEffect(() => {
     if (isExtensionFlow || !passengerAutoRoute) {
@@ -3205,6 +3443,38 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         lockedPickupLocation?.address ||
         lockedPickupLocation?.add ||
         resolvedPickupAddress;
+      const lockedRouteDistanceKm = normalizeLockedQuoteNumber(
+        paymentQuoteLock?.distanceKm,
+        normalizeLockedQuoteNumber(runtimeTripDistanceKm, distanceKm),
+      );
+      const lockedRouteDurationMin = normalizeLockedQuoteNumber(
+        paymentQuoteLock?.durationMin ?? paymentQuoteLock?.durationMinutes,
+        normalizeLockedQuoteNumber(runtimeTripDurationMin, durationMin),
+      );
+      const lockedRouteDurationSecs = normalizeLockedQuoteNumber(
+        lockedRouteDurationMin,
+      )
+        ? Math.max(60, Math.round(Number(lockedRouteDurationMin) * 60))
+        : null;
+      const lockedRouteCoordinates = normalizeRouteCoordinatesForTransport(
+        paymentQuoteLock?.routeCoordinates ||
+          selectedPricingQuote?.routeCoordinates ||
+          selectedPricingQuote?.quote?.routeCoordinates ||
+          [],
+      );
+      const lockedTrafficSegments = normalizeTrafficSegmentsForTransport(
+        paymentQuoteLock?.trafficSegments ||
+          selectedPricingQuote?.trafficSegments ||
+          selectedPricingQuote?.quote?.trafficSegments ||
+          [],
+      );
+      const lockedTollFee =
+        normalizeLockedQuoteNumber(
+          paymentQuoteLock?.tollFee ??
+            selectedPricingQuote?.tollFee ??
+            selectedPricingQuote?.quote?.tollFee,
+          0,
+        ) || 0;
 
       if (submittingRideGuardRef.current || submittingRide) {
         return;
@@ -3259,6 +3529,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           pickupLocation: lockedPickupLocation,
           vehicle: paymentQuoteLock?.carType || selectedPlanData.title,
           fare: confirmedFare,
+          routeDistanceKm: lockedRouteDistanceKm,
+          routeDurationSecs: lockedRouteDurationSecs,
+          routeCoordinates: lockedRouteCoordinates,
+          trafficSegments: lockedTrafficSegments,
+          tollFee: lockedTollFee,
           paymentMethod: "pix",
           paymentConfirmation: effectivePaymentConfirmation,
           preferences:
@@ -3299,17 +3574,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           lastHandledPaymentChargeIdRef.current = "";
         }
         navigation.replace("RobotaxiPrototypePaymentFailed", {
+          title: confirmedChargeId
+            ? "Corrida não solicitada"
+            : "Pagamento não confirmado",
           errorMessage:
             error?.message || "Falha ao enviar a corrida para o servidor.",
-          retryRouteName: "RobotaxiPrototypeDestination",
-          retryParams: {
-            initialPickupCoordinate: lockedOriginCoordinate,
-            initialPickupAddress: lockedOriginAddress,
-            initialPickupAdjustedOnMap: pickupAdjustedOnMap,
-            initialSelectedDestination: destinationRoutePayload,
-            initialSelectedPlan: selectedPlan,
-            selectedFare: confirmedFare,
-          },
+          retryRouteName: "RobotaxiPrototype",
+          retryParams: {},
         });
       } finally {
         submittingRideGuardRef.current = false;
@@ -3318,12 +3589,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     },
     [
       canRequestRide,
+      distanceKm,
       destinationCoordinate,
       destinationInfo?.address,
       destinationInfo?.name,
       destinationRoutePayload,
+      durationMin,
       navigation,
       paymentQuoteLock?.discountBenefit,
+      paymentQuoteLock?.distanceKm,
+      paymentQuoteLock?.durationMin,
       paymentQuoteLock?.fare,
       paymentQuoteLock?.carType,
       paymentQuoteLock?.destinationLocation,
@@ -3331,6 +3606,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       paymentQuoteLock?.pickupLocation,
       paymentQuoteLock?.quoteLockId,
       paymentQuoteLock?.quoteSessionId,
+      paymentQuoteLock?.routeCoordinates,
+      paymentQuoteLock?.trafficSegments,
+      paymentQuoteLock?.tollFee,
       profileUid,
       pickupAdjustedOnMap,
       pickupLocationPayload,
@@ -3341,9 +3619,17 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       resolvedPickupCoordinate,
       routeGuardBlocked,
       routeGuardMessage,
+      runtimeTripDistanceKm,
+      runtimeTripDurationMin,
       selectedPlan,
       selectedPlanData.title,
       selectedPlanFare,
+      selectedPricingQuote?.quote?.routeCoordinates,
+      selectedPricingQuote?.quote?.trafficSegments,
+      selectedPricingQuote?.quote?.tollFee,
+      selectedPricingQuote?.routeCoordinates,
+      selectedPricingQuote?.trafficSegments,
+      selectedPricingQuote?.tollFee,
       submittingRide,
     ],
   );
@@ -3356,6 +3642,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
     pendingPaymentConfirmationRef.current = null;
     setPreferenceProgress(1);
+    setPreferenceDropdownKey(null);
     setPreferenceModalVisible(false);
     submitRideAfterPreferences(
       paymentConfirmation,
@@ -3429,6 +3716,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         canonicalPaymentConfirmation.paymentConfirmation || {};
       setPixModalVisible(false);
       setPreferenceProgress(0);
+      setPreferenceDropdownKey(null);
       setPreferenceModalVisible(true);
     },
     [
@@ -3469,6 +3757,146 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       clearInterval(timer);
     };
   }, [handleConfirmPreferencesNow, preferenceModalVisible]);
+
+  const renderPreferenceSelector = useCallback(
+    ({ type, label, selectedOption, options, onSelect, testIdPrefix }) => {
+      const open = preferenceDropdownKey === type;
+      return (
+        <View style={styles.preferenceSelectorWrap}>
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={() => setPreferenceDropdownKey(open ? null : type)}
+            style={[
+              styles.preferenceSelectorButton,
+              open && styles.preferenceSelectorButtonOpen,
+            ]}
+            testID={`passenger-${testIdPrefix}-selector`}
+            accessibilityLabel={label}
+          >
+            <View style={styles.preferenceSelectorCopy}>
+              <Text style={styles.preferenceSelectorLabel}>{label}</Text>
+              <Text style={styles.preferenceSelectorValue} numberOfLines={1}>
+                {selectedOption.label}
+              </Text>
+            </View>
+            <Ionicons
+              name={open ? "chevron-up" : "chevron-down"}
+              size={20}
+              color={leafRideColors.text}
+            />
+          </TouchableOpacity>
+
+          {open ? (
+            <View style={styles.preferenceDropdownList}>
+              {options.map((item) => {
+                const selected = item.id === selectedOption.id;
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    activeOpacity={0.88}
+                    onPress={() => {
+                      onSelect(item.id);
+                      setPreferenceDropdownKey(null);
+                    }}
+                    style={styles.preferenceDropdownRow}
+                    testID={`passenger-${testIdPrefix}-option-${item.id}`}
+                    accessibilityLabel={`${label} ${item.label}`}
+                  >
+                    <View style={styles.preferenceDropdownCopy}>
+                      <Text
+                        style={[
+                          styles.preferenceDropdownTitle,
+                          selected && styles.preferenceDropdownTitleSelected,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {item.label}
+                      </Text>
+                      <Text
+                        style={styles.preferenceDropdownHint}
+                        numberOfLines={1}
+                      >
+                        {item.description}
+                      </Text>
+                    </View>
+                    {selected ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color={leafRideColors.leaf}
+                      />
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+      );
+    },
+    [preferenceDropdownKey],
+  );
+
+  useEffect(() => {
+    directPixOpenRequestedRef.current = false;
+    setDirectPixOpening(shouldOpenPixOnReady);
+    setDirectPixReturnHomePending(false);
+  }, [routeParams.initialPricingQuote, shouldOpenPixOnReady]);
+
+  useEffect(() => {
+    if (
+      !shouldOpenPixOnReady ||
+      directPixOpenRequestedRef.current ||
+      (step !== CONFIRM_STEP && step !== QUOTE_STEP) ||
+      !canRequestRide ||
+      checkingAvailability ||
+      checkingPlanAvailability ||
+      paymentQuotePending ||
+      submittingRide
+    ) {
+      return;
+    }
+
+    directPixOpenRequestedRef.current = true;
+    setDirectPixOpening(true);
+    Promise.resolve(handleOpenPixModal())
+      .then((result) => {
+        if (result?.ok !== false) {
+          return;
+        }
+        const message =
+          normalizeCoverageMessage(result?.message) ||
+          "Não foi possível iniciar o pagamento agora.";
+        setDirectPixReturnHomePending(true);
+        returnToCleanPassengerHome(message);
+      })
+      .catch((error) => {
+        directPixOpenRequestedRef.current = false;
+        const message = normalizeCoverageMessage(
+          error?.message || "Não foi possível iniciar o pagamento agora.",
+        );
+        setDirectPixReturnHomePending(true);
+        returnToCleanPassengerHome(message);
+        console.warn(
+          "[RobotaxiDestinationScreen] openPixOnReady failed",
+          error?.message || error,
+        );
+      })
+      .finally(() => {
+        setDirectPixOpening(false);
+      });
+  }, [
+    canRequestRide,
+    checkingAvailability,
+    checkingPlanAvailability,
+    handleOpenPixModal,
+    navigation,
+    returnToCleanPassengerHome,
+    paymentQuotePending,
+    shouldOpenPixOnReady,
+    step,
+    submittingRide,
+  ]);
 
   useEffect(() => {
     if (!qaAutoSelectFirst || step !== SEARCH_STEP || qaAutoSelectStartedRef.current) {
@@ -3676,6 +4104,20 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       add: destinationInfo?.address || destinationInfo?.name || "Destino",
     });
   const lockedPaymentCarType = paymentQuoteLock?.carType || selectedPlanData.title;
+  const lockedPaymentTollFee =
+    normalizeLockedQuoteNumber(
+      paymentQuoteLock?.tollFee ??
+        selectedPricingQuote?.tollFee ??
+        selectedPricingQuote?.quote?.tollFee,
+      0,
+    ) || 0;
+  const shouldHideDestinationSheetForDirectPix = Boolean(
+    !isExtensionFlow &&
+      (isPixModalVisible ||
+        preferenceModalVisible ||
+        directPixOpening ||
+        directPixReturnHomePending),
+  );
 
   return (
     <PrototypeScreenTransition>
@@ -3701,9 +4143,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             accessibilityLabel="Marcador do ponto de embarque"
           >
             <View style={styles.pickupMapMarkerPin}>
-              <Ionicons name="location-sharp" size={28} color={leafRideColors.leaf} />
+              <View style={styles.pickupMapMarkerCore}>
+                <View style={styles.pickupMapMarkerDot} />
+              </View>
             </View>
-            <View style={styles.pickupMapMarkerStem} />
           </View>
         ) : null}
         {step === PICKUP_STEP ? (
@@ -3751,7 +4194,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 </View>
               </View>
 
-              {selectedPlanUnavailable || routeGuardBlocked || availabilityNotice ? (
+              {selectedPlanUnavailable || routeGuardBlocked || destinationSurfaceNotice ? (
                 <Text
                   style={styles.pickupFloatingNotice}
                   testID="passenger-destination-availability-notice"
@@ -3760,7 +4203,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   {routeGuardBlocked || hasCoverageBlockedPlan
                     ? OUT_OF_COVERAGE_MESSAGE
                     : normalizeCoverageMessage(
-                        availabilityNotice ||
+                        destinationSurfaceNotice ||
                           selectedPlanAvailability?.message ||
                           "Não há motorista disponível",
                       )}
@@ -3769,7 +4212,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
               {!selectedPlanUnavailable &&
               !routeGuardBlocked &&
-              !availabilityNotice &&
+              !destinationSurfaceNotice &&
               selectedDynamicNotice ? (
                 <Text
                   style={styles.pickupFloatingDynamicText}
@@ -3796,7 +4239,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   activeOpacity={0.88}
                   disabled={
                     checkingAvailability ||
-                    checkingPlanAvailability ||
                     paymentQuotePending ||
                     submittingRide ||
                     routeGuardBlocked ||
@@ -3807,7 +4249,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   style={[
                     styles.pickupFloatingPrimaryButton,
                     (checkingAvailability ||
-                      checkingPlanAvailability ||
                       paymentQuotePending ||
                       submittingRide ||
                       routeGuardBlocked ||
@@ -3819,7 +4260,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   accessibilityLabel="Confirmar ponto de embarque"
                 >
                   <Text style={styles.pickupFloatingPrimaryButtonText}>
-                    {checkingAvailability || checkingPlanAvailability
+                    {checkingAvailability
                       ? "Verificando..."
                       : paymentQuotePending
                         ? "Calculando tarifa..."
@@ -3834,7 +4275,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             </Animated.View>
           </View>
         ) : null}
-        {step !== PICKUP_STEP ? (
+        {step !== PICKUP_STEP && !shouldHideDestinationSheetForDirectPix ? (
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
           sheetStyle={[
@@ -4198,13 +4639,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                           )}
                     </Text>
                   </View>
-                ) : availabilityNotice ? (
+                ) : destinationSurfaceNotice ? (
                   <Text
                     style={styles.availabilityNotice}
                     testID="passenger-destination-availability-notice"
                     accessibilityLabel="Aviso de disponibilidade da categoria"
                   >
-                    {availabilityNotice}
+                    {destinationSurfaceNotice}
                   </Text>
                 ) : null}
                 </ScrollView>
@@ -4218,23 +4659,20 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   />
                   <LeafButton
                     label={
-                      checkingPlanAvailability
+                      checkingAvailability
                         ? "Verificando..."
-                        : checkingAvailability
-                          ? "Verificando..."
-                          : paymentQuotePending
-                            ? "Calculando tarifa..."
-                            : routeGuardBlocked ||
+                        : paymentQuotePending
+                          ? "Calculando tarifa..."
+                          : routeGuardBlocked ||
                             hasCoverageBlockedPlan ||
                             selectedPlanUnavailable
-                          ? "Indisponível"
-                        : "Confirmar"
+                            ? "Indisponível"
+                            : "Confirmar"
                     }
                     tone="primary"
                     style={styles.submitButton}
                     onPress={
                       checkingAvailability ||
-                      checkingPlanAvailability ||
                       paymentQuotePending ||
                       submittingRide ||
                       routeGuardBlocked ||
@@ -4403,7 +4841,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   </TouchableOpacity>
                 </View>
 
-                {selectedPlanUnavailable || routeGuardBlocked || availabilityNotice ? (
+                {selectedPlanUnavailable || routeGuardBlocked || destinationSurfaceNotice ? (
                   <Text
                     style={styles.availabilityNotice}
                     testID="passenger-destination-availability-notice"
@@ -4412,7 +4850,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     {routeGuardBlocked || hasCoverageBlockedPlan
                       ? OUT_OF_COVERAGE_MESSAGE
                       : normalizeCoverageMessage(
-                          availabilityNotice ||
+                          destinationSurfaceNotice ||
                             selectedPlanAvailability?.message ||
                             selectedCategoryOption?.unavailableMessage ||
                             "Categoria indisponível nesta região no momento.",
@@ -4430,15 +4868,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                             ? "Calculando tarifa..."
                             : "Tarifa indisponível"
                           : "Confirmar"
-                      : checkingPlanAvailability
-                        ? "Verificando..."
                       : checkingAvailability
                         ? "Buscando motorista..."
                       : paymentQuotePending
                         ? pricingQuoteLoading
                           ? "Calculando tarifa..."
                           : "Tarifa indisponível"
-                      : routeGuardBlocked || hasCoverageBlockedPlan || selectedPlanUnavailable
+                      : availabilityNotice ||
+                        routeGuardBlocked ||
+                        hasCoverageBlockedPlan ||
+                        selectedPlanUnavailable
                           ? "Indisponível"
                         : "Confirmar"
                   }
@@ -4446,9 +4885,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   style={styles.categoryConfirmButton}
                   onPress={
                     checkingAvailability ||
-                    checkingPlanAvailability ||
                     paymentQuotePending ||
                     submittingRide ||
+                    availabilityNotice ||
                     routeGuardBlocked ||
                     hasCoverageBlockedPlan ||
                     selectedPlanUnavailable
@@ -4558,13 +4997,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                           )}
                     </Text>
                   </View>
-                ) : availabilityNotice ? (
+                ) : destinationSurfaceNotice ? (
                   <Text
                     style={styles.availabilityNotice}
                     testID="passenger-destination-availability-notice"
                     accessibilityLabel="Aviso de disponibilidade da categoria"
                   >
-                    {availabilityNotice}
+                    {destinationSurfaceNotice}
                   </Text>
                 ) : null}
 
@@ -4585,15 +5024,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                               ? "Calculando tarifa..."
                               : "Tarifa indisponível"
                             : "Confirmar"
-                        : checkingPlanAvailability
-                          ? "Verificando categorias..."
                           : checkingAvailability
                             ? "Verificando motoristas..."
                             : paymentQuotePending
                               ? pricingQuoteLoading
                                 ? "Calculando tarifa..."
                                 : "Tarifa indisponível"
-                              : routeGuardBlocked || hasCoverageBlockedPlan
+                              : availabilityNotice ||
+                                routeGuardBlocked ||
+                                hasCoverageBlockedPlan
                                 ? "Indisponível"
                                 : selectedPlanUnavailable
                                   ? "Indisponível"
@@ -4603,9 +5042,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     style={styles.submitButton}
                     onPress={
                       checkingAvailability ||
-                      checkingPlanAvailability ||
                       paymentQuotePending ||
                       submittingRide ||
+                      availabilityNotice ||
                       routeGuardBlocked ||
                       hasCoverageBlockedPlan ||
                       selectedPlanUnavailable
@@ -4622,10 +5061,35 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         </PrototypeDismissibleSheet>
         ) : null}
 
+        {step !== PICKUP_STEP && shouldHideDestinationSheetForDirectPix && directPixOpening ? (
+          <PrototypeDismissibleSheet
+            sheetStyle={[
+              styles.sheetWrap,
+              { bottom: effectiveSheetBottomOffset },
+            ]}
+            dragEnabled={false}
+            backdropDismissEnabled={false}
+          >
+            <View
+              style={styles.directPixPreparingCard}
+              testID="passenger-destination-direct-pix-preparing"
+              accessibilityLabel="Preparando pagamento Pix"
+            >
+              <View style={styles.sheetHandle} />
+              <Text style={styles.directPixPreparingTitle}>Preparando Pix</Text>
+              <Text style={styles.directPixPreparingSubtitle}>
+                Conferindo motorista disponível e abrindo o pagamento.
+              </Text>
+            </View>
+          </PrototypeDismissibleSheet>
+        ) : null}
+
         {!isExtensionFlow ? (
           <WooviPaymentModal
             visible={isPixModalVisible}
             onClose={handleClosePixModal}
+            onPaymentAborted={handleClosePixModal}
+            onPaymentExpired={handlePixPaymentExpired}
             onPaymentConfirmed={handlePixPaymentConfirmed}
             tripData={{
               pickup: lockedPaymentPickupLocation,
@@ -4633,9 +5097,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               carType: lockedPaymentCarType,
               estimatedFare: lockedPaymentFare,
               grossEstimatedFare: lockedGrossEstimatedFare,
+              tollFee: lockedPaymentTollFee,
               preferences: ridePreferences,
             }}
-            estimates={{ estimateFare: lockedPaymentFare }}
+            estimates={{
+              estimateFare: lockedPaymentFare,
+              tollFee: lockedPaymentTollFee,
+            }}
             grossEstimatedFare={lockedGrossEstimatedFare}
             discountBenefit={lockedDiscountBenefit}
             quoteSessionId={paymentQuoteLock?.quoteSessionId || null}
@@ -4685,124 +5153,23 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 </View>
               </View>
 
-              <View style={styles.preferenceModalSection}>
-                <Text style={styles.preferenceModalSectionLabel}>
-                  Temperatura
-                </Text>
-                <View style={styles.preferenceModalOptions}>
-                  {TEMPERATURE_OPTIONS.map((item) => {
-                    const selected = item.id === selectedTemperatureOption.id;
-                    return (
-                      <TouchableOpacity
-                        key={item.id}
-                        activeOpacity={0.88}
-                        onPress={() => setTemperaturePreference(item.id)}
-                        style={[
-                          styles.preferenceModalOption,
-                          selected && styles.preferenceModalOptionSelected,
-                        ]}
-                        testID={`passenger-temperature-option-${item.id}`}
-                        accessibilityLabel={`Temperatura ${item.label}`}
-                      >
-                        <View style={styles.preferenceModalOptionHeader}>
-                          <Text
-                            style={[
-                              styles.preferenceModalOptionText,
-                              selected &&
-                                styles.preferenceModalOptionTextSelected,
-                            ]}
-                          >
-                            {item.label}
-                          </Text>
-                          <View
-                            style={[
-                              styles.preferenceModalOptionCheck,
-                              selected &&
-                                styles.preferenceModalOptionCheckSelected,
-                            ]}
-                          >
-                            {selected ? (
-                              <Ionicons
-                                name="checkmark"
-                                size={13}
-                                color="#FFFFFF"
-                              />
-                            ) : null}
-                          </View>
-                        </View>
-                        <Text
-                          style={[
-                            styles.preferenceModalOptionHint,
-                            selected && styles.preferenceModalOptionHintSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item.description}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              <View style={styles.preferenceModalSection}>
-                <Text style={styles.preferenceModalSectionLabel}>
-                  Som e conversa
-                </Text>
-                <View style={styles.preferenceModalOptions}>
-                  {SOUND_OPTIONS.map((item) => {
-                    const selected = item.id === selectedSoundOption.id;
-                    return (
-                      <TouchableOpacity
-                        key={item.id}
-                        activeOpacity={0.88}
-                        onPress={() => setSoundPreference(item.id)}
-                        style={[
-                          styles.preferenceModalOption,
-                          selected && styles.preferenceModalOptionSelected,
-                        ]}
-                        testID={`passenger-sound-option-${item.id}`}
-                        accessibilityLabel={`Som ${item.label}`}
-                      >
-                        <View style={styles.preferenceModalOptionHeader}>
-                          <Text
-                            style={[
-                              styles.preferenceModalOptionText,
-                              selected &&
-                                styles.preferenceModalOptionTextSelected,
-                            ]}
-                          >
-                            {item.label}
-                          </Text>
-                          <View
-                            style={[
-                              styles.preferenceModalOptionCheck,
-                              selected &&
-                                styles.preferenceModalOptionCheckSelected,
-                            ]}
-                          >
-                            {selected ? (
-                              <Ionicons
-                                name="checkmark"
-                                size={13}
-                                color="#FFFFFF"
-                              />
-                            ) : null}
-                          </View>
-                        </View>
-                        <Text
-                          style={[
-                            styles.preferenceModalOptionHint,
-                            selected && styles.preferenceModalOptionHintSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item.description}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+              <View style={styles.preferenceSelectors}>
+                {renderPreferenceSelector({
+                  type: "temperature",
+                  label: "Temperatura",
+                  selectedOption: selectedTemperatureOption,
+                  options: TEMPERATURE_OPTIONS,
+                  onSelect: setTemperaturePreference,
+                  testIdPrefix: "temperature",
+                })}
+                {renderPreferenceSelector({
+                  type: "sound",
+                  label: "Som e conversa",
+                  selectedOption: selectedSoundOption,
+                  options: SOUND_OPTIONS,
+                  onSelect: setSoundPreference,
+                  testIdPrefix: "sound",
+                })}
               </View>
 
               <View style={styles.preferenceModalProgressHeader}>
@@ -4875,6 +5242,33 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 30,
     elevation: 12,
+  },
+  directPixPreparingCard: {
+    marginHorizontal: 24,
+    borderRadius: 28,
+    backgroundColor: leafRideColors.sheet,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: 24,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: -12 },
+    shadowOpacity: 0.08,
+    shadowRadius: 28,
+    elevation: 12,
+  },
+  directPixPreparingTitle: {
+    marginTop: 18,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 20,
+    lineHeight: 25,
+  },
+  directPixPreparingSubtitle: {
+    marginTop: 6,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   searchHeaderRow: {
     marginTop: 14,
@@ -5055,26 +5449,28 @@ const styles = StyleSheet.create({
     elevation: 20,
   },
   pickupMapMarkerPin: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.92)",
+    backgroundColor: "rgba(255, 214, 10, 0.34)",
     borderWidth: 1,
-    borderColor: "rgba(23,74,43,0.12)",
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    elevation: 6,
+    borderColor: "rgba(255,255,255,0.92)",
   },
-  pickupMapMarkerStem: {
-    width: 2,
+  pickupMapMarkerCore: {
+    width: 20,
     height: 20,
-    marginTop: -3,
-    borderRadius: 999,
-    backgroundColor: leafRideColors.leaf,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  pickupMapMarkerDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#1FA64A",
   },
   pickupFloatingLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -5910,6 +6306,86 @@ const styles = StyleSheet.create({
     fontFamily: fonts.SemiBold,
     fontSize: 14,
     lineHeight: 18,
+  },
+  preferenceSelectors: {
+    marginTop: 18,
+    gap: 10,
+  },
+  preferenceSelectorWrap: {
+    gap: 8,
+  },
+  preferenceSelectorButton: {
+    minHeight: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E7E0D8",
+    backgroundColor: "#FBFAF7",
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  preferenceSelectorButtonOpen: {
+    borderColor: "rgba(23,74,43,0.34)",
+    backgroundColor: "#F6FAF7",
+  },
+  preferenceSelectorCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  preferenceSelectorLabel: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  preferenceSelectorValue: {
+    marginTop: 3,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  preferenceDropdownList: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E7E0D8",
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+  preferenceDropdownRow: {
+    minHeight: 58,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#EFE9E2",
+  },
+  preferenceDropdownCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  preferenceDropdownTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.Medium,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  preferenceDropdownTitleSelected: {
+    color: leafRideColors.leaf,
+    fontFamily: fonts.SemiBold,
+  },
+  preferenceDropdownHint: {
+    marginTop: 3,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
   },
   preferenceModalSection: {
     marginTop: 18,

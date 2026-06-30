@@ -11,7 +11,6 @@ import {
   LeafProgressBar,
   LeafRideSheet,
   LeafPill,
-  LeafStateHeader,
   leafButtonMetrics,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
@@ -45,6 +44,56 @@ function formatFareLabel(value) {
     return "--";
   }
   return formatCurrencyBRL(numeric);
+}
+
+function pickPositiveNumber(...values) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+  }
+  return null;
+}
+
+function pickPositiveDurationMinutes(...values) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      continue;
+    }
+    return numeric > 180 ? numeric / 60 : numeric;
+  }
+  return null;
+}
+
+function secondsToMinutes(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+  return numeric / 60;
+}
+
+function formatClockFromMinutes(minutes) {
+  const numericMinutes = Number(minutes);
+  if (!Number.isFinite(numericMinutes) || numericMinutes <= 0) {
+    return "--";
+  }
+  const arrivalDate = new Date(Date.now() + Math.round(numericMinutes) * 60 * 1000);
+  return arrivalDate.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function compactArrivalClockLabel(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const clockMatch = normalized.match(/\b\d{1,2}:\d{2}\b/);
+  return clockMatch ? clockMatch[0] : normalized;
 }
 
 function toPositiveMoney(value) {
@@ -177,6 +226,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState("");
+  const [timeoutDecisionDismissed, setTimeoutDecisionDismissed] = useState(false);
   const terminalRouteHandledRef = useRef(false);
   const protectedSearchExitRef = useRef(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
@@ -236,6 +286,13 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     () => getSearchPresentation(elapsed),
     [elapsed],
   );
+  const hasSearchReachedTimeout =
+    isCanonicalSearchActive && searchPresentation.remainingSeconds === 0;
+  const showSearchTimeoutDecision =
+    hasSearchReachedTimeout &&
+    !timeoutDecisionDismissed &&
+    !cancelPending &&
+    !cancelError;
 
   const routeOriginAddress = resolveMeaningfulAddress(
     route?.params?.originAddress,
@@ -319,21 +376,31 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     vehicle,
   ]);
   const fareLabel = formatFareLabel(protectedFareAmount);
-  const sheetTestID = isBookingFinalizing
-    ? "passenger-booking-finalizing-sheet"
-    : "passenger-driver-search-sheet";
-  const headerTitle = isBookingFinalizing
-    ? "Criando corrida"
-    : "Buscando motorista";
-  const cardTitle = isBookingFinalizing
-    ? "Solicitação em andamento"
-    : "Detalhes da corrida";
-  const progressPrimaryText = isBookingFinalizing
-    ? "Criando corrida"
-    : searchPresentation.elapsedLabel;
-  const progressMetaText = isBookingFinalizing
-    ? "Pagamento confirmado. Estamos criando sua corrida com segurança."
-    : isSearchReconciling
+  const estimatedTripDurationMin = pickPositiveDurationMinutes(
+    route?.params?.tripDurationMin,
+    route?.params?.durationMin,
+    secondsToMinutes(route?.params?.tripDurationSecs),
+    secondsToMinutes(route?.params?.durationSecs),
+    secondsToMinutes(route?.params?.routeDurationSecs),
+    activeBooking?.tripDurationMin,
+    activeBooking?.durationMin,
+    secondsToMinutes(activeBooking?.tripDurationSecs),
+    secondsToMinutes(activeBooking?.durationSecs),
+    secondsToMinutes(activeBooking?.routeDurationSecs),
+    secondsToMinutes(activeBooking?.duration),
+  );
+  const estimatedArrivalLabel =
+    compactArrivalClockLabel(
+      route?.params?.arrivalLabel ||
+        route?.params?.arrivalTime ||
+        activeBooking?.arrivalLabel ||
+        activeBooking?.arrivalTime ||
+        activeBooking?.estimatedArrivalTime,
+    ) || formatClockFromMinutes(estimatedTripDurationMin);
+  const sheetTestID = "passenger-driver-search-sheet";
+  const cardTitle = "Buscando motorista";
+  const progressPrimaryText = searchPresentation.elapsedLabel;
+  const progressMetaText = isSearchReconciling
       ? "sincronizando estado"
       : "tempo de busca";
   const searchMilestoneLabel = searchPresentation.isMaxRadius
@@ -424,24 +491,8 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       if (/pagamento|payment/i.test(lastError)) {
         replaceAfterProtectedSearch("RobotaxiPrototypePaymentFailed", {
           errorMessage: lastError,
-          retryRouteName: "RobotaxiPrototypeDestination",
-          retryParams: {
-            destination,
-            destinationAddress:
-              routeDestinationAddress || bookingDestinationAddress,
-            destinationCoordinate,
-            initialSelectedDestination:
-              route?.params?.initialSelectedDestination || {
-                name: destination,
-                address:
-                  routeDestinationAddress || bookingDestinationAddress,
-                coordinate: destinationCoordinate,
-              },
-            selectedFare: protectedFareAmount,
-            fare: protectedFareAmount,
-            originAddress: routeOriginAddress || bookingPickupAddress,
-            vehicle,
-          },
+          retryRouteName: "RobotaxiPrototype",
+          retryParams: {},
         });
         return;
       }
@@ -506,6 +557,16 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
 
   const handleProtectedDismiss = useCallback(() => {}, []);
 
+  useEffect(() => {
+    setTimeoutDecisionDismissed(false);
+  }, [resolvedActiveBookingId]);
+
+  useEffect(() => {
+    if (!hasSearchReachedTimeout) {
+      setTimeoutDecisionDismissed(false);
+    }
+  }, [hasSearchReachedTimeout]);
+
   const handleCancelSearch = async () => {
     if (!isCanonicalSearchActive || cancelPending) {
       return;
@@ -523,6 +584,42 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           completed: true,
         },
       );
+    } catch (error) {
+      setCancelError(
+        error?.message ||
+          "Não foi possível cancelar no servidor. A corrida continua ativa.",
+      );
+    } finally {
+      setCancelPending(false);
+    }
+  };
+
+  const handleContinueSearchAfterTimeout = useCallback(() => {
+    setCancelError("");
+    setTimeoutDecisionDismissed(true);
+  }, []);
+
+  const handleCancelSearchAfterTimeout = async () => {
+    if (!isCanonicalSearchActive || cancelPending) {
+      return;
+    }
+
+    setCancelPending(true);
+    setCancelError("");
+    try {
+      await cancelRideSearch({
+        ...searchCancellationContext,
+        source: "search_timeout_prompt",
+        reason: "Passageiro desistiu após o tempo de busca.",
+        suppressReason: "passenger_search_timeout_prompt",
+        clearLastError: true,
+      });
+      terminalRouteHandledRef.current = true;
+      replaceAfterProtectedSearch("RobotaxiPrototype", {
+        source: "driver_search_timeout_cancelled",
+        searchCancelled: true,
+        refundRequested: true,
+      });
     } catch (error) {
       setCancelError(
         error?.message ||
@@ -565,14 +662,6 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           backgroundColor="transparent"
           barStyle="dark-content"
         />
-        <LeafStateHeader
-          title={headerTitle}
-          subtitle="Pagamento confirmado"
-          rightLabel="Ativo"
-          rightTone="dark"
-          insetsTop={insets.top}
-        />
-
         <PrototypeDismissibleSheet
           onClose={handleProtectedDismiss}
           backdropDismissEnabled={false}
@@ -609,14 +698,19 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                 {progressMetaText}
               </Text>
 
-            <View style={styles.routeSummaryRow}>
-              <Ionicons name="location-outline" size={19} color={leafRideColors.accent} />
-              <View style={styles.routeSummaryCopy}>
-                <Text style={styles.routeSummaryTitle} numberOfLines={1}>
-                  {destinationLabel}
+            <View style={styles.routeSummaryBlock}>
+              <View style={styles.routeSummaryLine}>
+                <Ionicons name="radio-button-on" size={13} color={leafRideColors.text} />
+                <Text style={styles.routeSummaryLabel}>Partida:</Text>
+                <Text style={styles.routeSummaryValue} numberOfLines={1}>
+                  {originLabel}
                 </Text>
-                <Text style={styles.routeSummaryMeta} numberOfLines={1}>
-                  Partida: {originLabel}
+              </View>
+              <View style={styles.routeSummaryLine}>
+                <Ionicons name="ellipse" size={13} color={leafRideColors.accent} />
+                <Text style={styles.routeSummaryLabel}>Chegada:</Text>
+                <Text style={styles.routeSummaryValue} numberOfLines={1}>
+                  {destinationLabel} - chegada estimada {estimatedArrivalLabel}
                 </Text>
               </View>
             </View>
@@ -629,55 +723,89 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
               <LeafInfoRow title="Destino" />
             </View>
 
-            {cancelError || lastError ? (
-              <Text style={styles.errorText}>{cancelError || lastError}</Text>
-            ) : null}
+            {showSearchTimeoutDecision ? (
+              <View
+                style={styles.timeoutDecisionPanel}
+                testID="passenger-driver-search-timeout-decision"
+                accessibilityLabel="passenger-driver-search-timeout-decision"
+              >
+                <Text style={styles.timeoutDecisionTitle}>
+                  Estamos quase encontrando o motorista parceiro, deseja aguardar?
+                </Text>
+                <View style={styles.timeoutDecisionActions}>
+                  <LeafButton
+                    label={cancelPending ? "Cancelando..." : "Cancelar"}
+                    onPress={cancelPending ? undefined : handleCancelSearchAfterTimeout}
+                    disabled={cancelPending}
+                    tone="ghost"
+                    style={styles.timeoutDecisionButton}
+                    testID="passenger-driver-search-timeout-cancel-button"
+                    accessibilityLabel="passenger-driver-search-timeout-cancel-button"
+                  />
+                  <LeafButton
+                    label="Continuar"
+                    onPress={handleContinueSearchAfterTimeout}
+                    tone="primary"
+                    style={styles.timeoutDecisionButton}
+                    testID="passenger-driver-search-timeout-continue-button"
+                    accessibilityLabel="passenger-driver-search-timeout-continue-button"
+                  />
+                </View>
+              </View>
+            ) : (
+              <>
+                {cancelError || lastError ? (
+                  <Text style={styles.errorText}>{cancelError || lastError}</Text>
+                ) : null}
 
-            <LeafButton
-              label={
-                isSearchReconciling
-                  ? "Sincronizando..."
-                  : isBookingFinalizing
-                    ? "Criando corrida..."
-                    : cancelPending
-                    ? "Cancelando..."
-                  : "Cancelar"
-              }
-              onPress={
-                isSearchReconciling ||
-                isBookingFinalizing ||
-                cancelPending
-                  ? undefined
-                  : handleCancelSearch
-              }
-              icon={
-                isSearchReconciling ||
-                isBookingFinalizing ||
-                cancelPending
-                  ? "time-outline"
-                  : "close-circle-outline"
-              }
-              disabled={
-                isSearchReconciling ||
-                isBookingFinalizing ||
-                cancelPending
-              }
-              tone="ghost"
-              style={styles.actionButton}
-              testID="passenger-driver-search-cancel-button"
-              accessibilityLabel="passenger-driver-search-cancel-button"
-            />
-            {cancelError || searchPresentation.remainingSeconds === 0 ? (
-              <LeafButton
-                label="Falar com suporte"
-                onPress={handleOpenSupport}
-                icon="chatbubble-ellipses-outline"
-                tone="ghost"
-                style={styles.supportButton}
-                testID="passenger-driver-search-support-button"
-                accessibilityLabel="passenger-driver-search-support-button"
-              />
-            ) : null}
+                <LeafButton
+                  label={
+                    isSearchReconciling
+                      ? "Sincronizando..."
+                      : isBookingFinalizing
+                        ? "Cancelar"
+                        : cancelPending
+                        ? "Cancelando..."
+                      : "Cancelar"
+                  }
+                  onPress={
+                    isSearchReconciling ||
+                    isBookingFinalizing ||
+                    cancelPending
+                      ? undefined
+                      : handleCancelSearch
+                  }
+                  icon={
+                    isSearchReconciling ||
+                    isBookingFinalizing ||
+                    cancelPending
+                      ? "time-outline"
+                      : "close-circle-outline"
+                  }
+                  disabled={
+                    isSearchReconciling ||
+                    isBookingFinalizing ||
+                    cancelPending
+                  }
+                  tone="ghost"
+                  style={styles.actionButton}
+                  testID="passenger-driver-search-cancel-button"
+                  accessibilityLabel="passenger-driver-search-cancel-button"
+                />
+                {cancelError ||
+                (!cancelPending && searchPresentation.remainingSeconds === 0) ? (
+                  <LeafButton
+                    label="Falar com suporte"
+                    onPress={handleOpenSupport}
+                    icon="chatbubble-ellipses-outline"
+                    tone="ghost"
+                    style={styles.supportButton}
+                    testID="passenger-driver-search-support-button"
+                    accessibilityLabel="passenger-driver-search-support-button"
+                  />
+                ) : null}
+              </>
+            )}
           </LeafRideSheet>
         </PrototypeDismissibleSheet>
       </View>
@@ -745,29 +873,32 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
   },
-  routeSummaryRow: {
-    marginTop: 24,
-    minHeight: 44,
+  routeSummaryBlock: {
+    marginTop: 22,
+    gap: 10,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E7E0D8",
+  },
+  routeSummaryLine: {
+    minHeight: 24,
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
   },
-  routeSummaryCopy: {
+  routeSummaryLabel: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  routeSummaryValue: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 22,
-  },
-  routeSummaryTitle: {
     color: leafRideColors.text,
     fontFamily: fonts.SemiBold,
-    fontSize: 14,
+    fontSize: 13,
     lineHeight: 18,
-  },
-  routeSummaryMeta: {
-    marginTop: 4,
-    color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 14,
   },
   hiddenLegacyRows: {
     position: "absolute",
@@ -782,6 +913,35 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 17,
     textAlign: "center",
+  },
+  timeoutDecisionPanel: {
+    marginTop: 20,
+    paddingTop: 18,
+    paddingRight: 16,
+    paddingBottom: 16,
+    paddingLeft: 16,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: leafRideColors.line,
+    backgroundColor: leafRideColors.field,
+  },
+  timeoutDecisionTitle: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 16,
+    lineHeight: 21,
+    textAlign: "center",
+  },
+  timeoutDecisionActions: {
+    marginTop: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  timeoutDecisionButton: {
+    flex: 1,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
   },
   actionButton: {
     marginTop: 30,

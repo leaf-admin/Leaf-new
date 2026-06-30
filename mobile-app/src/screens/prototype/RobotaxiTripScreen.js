@@ -179,12 +179,14 @@ function formatCurrency(value) {
 
 function formatDistanceLabel(value) {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
+  if (!Number.isFinite(numeric) || numeric < 0) {
     return '--';
   }
 
   if (numeric < 1) {
-    const meters = Math.max(10, Math.round((numeric * 1000) / 10) * 10);
+    const meters = numeric <= 0
+      ? 0
+      : Math.max(10, Math.round((numeric * 1000) / 10) * 10);
     return `${meters} m`;
   }
 
@@ -282,6 +284,11 @@ function normalizeMapCoordinate(value) {
 function toPositiveNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function toNonNegativeNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
 }
 
 function normalizeRouteCoordinateList(value) {
@@ -813,14 +820,14 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         '',
     ).trim() || null;
   const resolvedPickupDistanceKm =
-    toPositiveNumber(route?.params?.driverDistanceToPickupKm) ??
-    toPositiveNumber(route?.params?.pickupDistanceKm) ??
-    toPositiveNumber(activeBooking?.driverDistanceToPickupKm) ??
-    toPositiveNumber(activeBooking?.pickupDistanceKm) ??
-    toPositiveNumber(activeBooking?.driverToPickupDistanceKm) ??
-    toPositiveNumber(driverActiveRide?.driverDistanceToPickupKm) ??
-    toPositiveNumber(driverActiveRide?.pickupDistanceKm) ??
-    toPositiveNumber(driverActiveRide?.driverToPickupDistanceKm) ??
+    toNonNegativeNumber(route?.params?.driverDistanceToPickupKm) ??
+    toNonNegativeNumber(route?.params?.pickupDistanceKm) ??
+    toNonNegativeNumber(activeBooking?.driverDistanceToPickupKm) ??
+    toNonNegativeNumber(activeBooking?.pickupDistanceKm) ??
+    toNonNegativeNumber(activeBooking?.driverToPickupDistanceKm) ??
+    toNonNegativeNumber(driverActiveRide?.driverDistanceToPickupKm) ??
+    toNonNegativeNumber(driverActiveRide?.pickupDistanceKm) ??
+    toNonNegativeNumber(driverActiveRide?.driverToPickupDistanceKm) ??
     toPositiveNumber(driverTripMeta?.pickupDistanceKm) ??
     null;
   const resolvedPickupEtaMin =
@@ -1128,7 +1135,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     activeBooking?.initialTripDurationMin ||
     activeBooking?.estimatedTotalDurationMin ||
     activeBooking?.totalDurationMin ||
-    route?.params?.initialTripDurationMin;
+    route?.params?.initialTripDurationMin ||
+    resolvedTripDurationMin;
   const routeStartedAt =
     activeBooking?.startedAt ||
     activeBooking?.tripStartedAt ||

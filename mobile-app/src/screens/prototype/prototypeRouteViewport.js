@@ -332,6 +332,8 @@ export function buildRouteViewportRegion({
   shortRouteMinLatitudeDelta = DEFAULT_SHORT_ROUTE_MIN_LAT_DELTA,
   minLatitudeDelta = DEFAULT_ROUTE_MIN_LAT_DELTA,
   minVisibleHeight = DEFAULT_MIN_VISIBLE_HEIGHT,
+  longRouteLatitudeDeltaMultiplier = 2.08,
+  longRouteLongitudeDeltaMultiplier = 2.18,
 } = {}) {
   const points = Array.isArray(coordinates)
     ? coordinates.filter(isFiniteRouteCoordinate)
@@ -366,8 +368,8 @@ export function buildRouteViewportRegion({
     viewportPadding,
     minVisibleHeight,
     minLatitudeDelta,
-    latitudeDeltaMultiplier: 1.65,
-    longitudeDeltaMultiplier: 1.85,
+    latitudeDeltaMultiplier: longRouteLatitudeDeltaMultiplier,
+    longitudeDeltaMultiplier: longRouteLongitudeDeltaMultiplier,
   });
 }
 

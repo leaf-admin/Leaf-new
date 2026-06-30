@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 
 export const ROUTE_PROGRESS_TICK_MS = 1000;
 
-const MIN_ROUTE_PROGRESS = 0.08;
 const MAX_ROUTE_PROGRESS = 0.94;
 const ETA_WORSENING_THRESHOLD_MS = 75 * 1000;
 const ETA_WORSENING_PERSISTENCE_MS = 10 * 1000;
@@ -16,13 +15,13 @@ function resolveStartedAtMs(startedAt) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-export function clampRouteProgress(value, fallback = 0.42) {
+export function clampRouteProgress(value, fallback = 0) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return fallback;
   }
 
-  return clamp(numeric, MIN_ROUTE_PROGRESS, MAX_ROUTE_PROGRESS);
+  return clamp(numeric, 0, MAX_ROUTE_PROGRESS);
 }
 
 export function resolveRouteProgress({
@@ -57,7 +56,7 @@ export function resolveRouteProgress({
     return clampRouteProgress(1 - remaining / directTotal);
   }
 
-  return 0.42;
+  return 0;
 }
 
 export function resolveArrivalTimestamp(minutes, nowMs = Date.now()) {

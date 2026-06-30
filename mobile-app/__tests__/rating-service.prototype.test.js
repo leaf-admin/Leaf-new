@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import RatingService from '../src/services/RatingService';
 import WebSocketManager from '../src/services/WebSocketManager';
 import { store } from '../src/state/appStore';
-import { isSimulatorBuild, canUseProfileBypass } from '../src/config/runtimeAccessPolicy';
+import { canUseProfileBypass } from '../src/config/runtimeAccessPolicy';
 
 const mockWebSocketInstance = {
   isConnected: jest.fn(() => false),
@@ -27,7 +27,6 @@ jest.mock('../src/state/appStore', () => ({
 }));
 
 jest.mock('../src/config/runtimeAccessPolicy', () => ({
-  isSimulatorBuild: jest.fn(() => false),
   canUseProfileBypass: jest.fn(() => false),
 }));
 
@@ -35,14 +34,11 @@ describe('RatingService prototype bypass', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockWebSocketInstance.isConnected.mockReturnValue(false);
-    isSimulatorBuild.mockReturnValue(false);
     canUseProfileBypass.mockReturnValue(false);
     RatingService.webSocketManager = mockWebSocketInstance;
   });
 
-  it('confirma localmente a avaliacao no simulador sem depender do websocket', async () => {
-    isSimulatorBuild.mockReturnValue(true);
-
+  it('nao usa bypass local apenas por estar no simulador', async () => {
     const result = await RatingService.submitRating({
       tripId: 'trip-passenger-proof-1',
       userId: 'prototype-user',
@@ -54,10 +50,11 @@ describe('RatingService prototype bypass', () => {
       comment: 'Tudo certo',
     });
 
-    expect(result).toEqual({ success: true, localOnly: true });
+    expect(result).toEqual({ success: true });
     expect(AsyncStorage.setItem).toHaveBeenCalled();
     expect(store.dispatch).toHaveBeenCalled();
-    expect(mockWebSocketInstance.submitRating).not.toHaveBeenCalled();
+    expect(mockWebSocketInstance.connect).toHaveBeenCalled();
+    expect(mockWebSocketInstance.submitRating).toHaveBeenCalled();
   });
 
   it('tambem usa bypass local para perfil elegivel em corrida prototype', async () => {

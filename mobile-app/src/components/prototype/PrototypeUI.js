@@ -144,6 +144,8 @@ export function PrototypePrimaryButton({
   onPress,
   icon,
   style,
+  textStyle,
+  iconColor,
   disabled = false,
   testID,
   accessibilityLabel,
@@ -170,10 +172,10 @@ export function PrototypePrimaryButton({
         <Ionicons
           name={icon}
           size={leafButtonMetrics.iconSize}
-          color={color.accent.contrast}
+          color={iconColor || color.accent.contrast}
         />
       ) : null}
-      <Text style={styles.primaryButtonText}>{label}</Text>
+      <Text style={[styles.primaryButtonText, textStyle]}>{label}</Text>
     </TouchableOpacity>
   );
 }

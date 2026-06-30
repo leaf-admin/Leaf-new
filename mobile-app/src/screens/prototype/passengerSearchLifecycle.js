@@ -47,8 +47,7 @@ export function shouldPreservePassengerSearchOnIdleSync({
 
   if (
     normalizedSyncedStatus !== "idle" ||
-    !PASSENGER_PROTECTED_PRE_ACCEPT_STATUSES.has(normalizedStatus) ||
-    isPassengerSearchExpired({ role, bookingStatus, elapsedSeconds })
+    !PASSENGER_PROTECTED_PRE_ACCEPT_STATUSES.has(normalizedStatus)
   ) {
     return false;
   }
