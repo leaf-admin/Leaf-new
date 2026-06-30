@@ -156,8 +156,8 @@ android {
         applicationId 'br.com.leaf.ride'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 120
-        versionName "1.0.3"
+        versionCode 122
+        versionName "1.0.4"
         manifestPlaceholders = [
                 expoUpdatesEnabled      : leafExpoUpdatesEnabled.toString(),
                 expoUpdatesCheckOnLaunch: leafExpoUpdatesEnabled ? 'ALWAYS' : 'NEVER',
