@@ -103,6 +103,51 @@ ensure_pods() {
   (cd "${ios_dir}" && pod install --repo-update)
 }
 
+ensure_smithy_codegen_cli_alias() {
+  local configuration="$1"
+  local products_dir="${PROJECT_DIR}/ios/build/Build/Products"
+  local smithy_package_dir="${PROJECT_DIR}/ios/build/SourcePackages/checkouts/smithy-swift"
+  local host_cli="${smithy_package_dir}/.build/release/SmithyCodegenCLI"
+  local expected_dir="${products_dir}/${configuration}"
+  local expected_cli="${expected_dir}/SmithyCodegenCLI"
+
+  if [[ ! -f "${smithy_package_dir}/Package.swift" ]]; then
+    return 1
+  fi
+
+  (cd "${smithy_package_dir}" && swift build -c release --product SmithyCodegenCLI >/dev/null)
+  if [[ ! -x "${host_cli}" ]]; then
+    return 1
+  fi
+
+  mkdir -p "${expected_dir}"
+  rm -f "${expected_cli}"
+  cp "${host_cli}" "${expected_cli}"
+  chmod +x "${expected_cli}"
+  echo "✅ SmithyCodegenCLI host preparado para SPM/AWS: ${expected_cli}"
+  return 0
+}
+
+run_xcodebuild_with_smithy_retry() {
+  local configuration="$1"
+  shift
+  local -a command=("$@")
+
+  ensure_smithy_codegen_cli_alias "${configuration}" || true
+  if "${command[@]}"; then
+    return 0
+  fi
+
+  local exit_code=$?
+  if ensure_smithy_codegen_cli_alias "${configuration}"; then
+    echo "↻ Reexecutando xcodebuild após corrigir caminho do SmithyCodegenCLI..."
+    "${command[@]}"
+    return $?
+  fi
+
+  return "${exit_code}"
+}
+
 sync_native_ios_version() {
   local info_plist_path="${PROJECT_DIR}/ios/Leaf/Info.plist"
   local expected_version
@@ -345,6 +390,7 @@ main() {
 
   mkdir -p "${PROJECT_DIR}/ios/build"
   sim_destination="$(resolve_simulator_destination)"
+  xcode_common_args=("-skipPackagePluginValidation")
   sim_extra_args=("ONLY_ACTIVE_ARCH=YES")
   if [[ "$(uname -m)" == "arm64" ]]; then
     sim_extra_args+=("EXCLUDED_ARCHS=x86_64")
@@ -356,23 +402,27 @@ main() {
       local expo_plist_path="${built_app_path}/Expo.plist"
       mkdir -p "${PROJECT_DIR}/ios/build/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/EXUpdates.bundle"
       if [[ -n "${workspace}" ]]; then
-        xcodebuild \
+        run_xcodebuild_with_smithy_retry "${IOS_SIMULATOR_CONFIGURATION}" \
+          xcodebuild \
           -workspace "${workspace}" \
           -scheme "${scheme}" \
           -configuration "${IOS_SIMULATOR_CONFIGURATION}" \
           -sdk iphonesimulator \
           -destination "${sim_destination}" \
           -derivedDataPath "${PROJECT_DIR}/ios/build" \
+          "${xcode_common_args[@]}" \
           "${sim_extra_args[@]}" \
           build
       else
-        xcodebuild \
+        run_xcodebuild_with_smithy_retry "${IOS_SIMULATOR_CONFIGURATION}" \
+          xcodebuild \
           -project "${project}" \
           -scheme "${scheme}" \
           -configuration "${IOS_SIMULATOR_CONFIGURATION}" \
           -sdk iphonesimulator \
           -destination "${sim_destination}" \
           -derivedDataPath "${PROJECT_DIR}/ios/build" \
+          "${xcode_common_args[@]}" \
           "${sim_extra_args[@]}" \
           build
       fi
@@ -415,6 +465,7 @@ main() {
           -configuration Release \
           -destination "generic/platform=iOS" \
           -archivePath "${archive_path}" \
+          "${xcode_common_args[@]}" \
           "${provisioning_flags[@]}" \
           "${archive_signing_args[@]}" \
           archive
@@ -425,6 +476,7 @@ main() {
           -configuration Release \
           -destination "generic/platform=iOS" \
           -archivePath "${archive_path}" \
+          "${xcode_common_args[@]}" \
           "${provisioning_flags[@]}" \
           "${archive_signing_args[@]}" \
           archive
