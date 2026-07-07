@@ -283,6 +283,17 @@ function hasFirebaseServiceAccountConfigured({ allowLocalDefault = false } = {})
   );
 }
 
+function hasLegacyFcmServerKeyConfigured() {
+  return Boolean(String(process.env.FCM_SERVER_KEY || '').trim());
+}
+
+function hasApnsPrivateKeyConfigured() {
+  return Boolean(
+    String(process.env.LEAF_APNS_PRIVATE_KEY || '').trim() ||
+      String(process.env.LEAF_APNS_PRIVATE_KEY_PATH || '').trim()
+  );
+}
+
 function main() {
   const envFilesLoaded = loadRuntimeEnv();
   const nodeEnv = String(process.env.NODE_ENV || 'development').toLowerCase();
@@ -297,6 +308,13 @@ function main() {
   const firebaseServiceAccountConfigured = hasFirebaseServiceAccountConfigured({
     allowLocalDefault: allowLocalFirebaseDefaults
   });
+  const legacyFcmServerKeyConfigured = hasLegacyFcmServerKeyConfigured();
+  const fcmConfigured = firebaseServiceAccountConfigured || legacyFcmServerKeyConfigured;
+  const apnsLiveActivityConfigured = Boolean(
+    String(process.env.LEAF_APNS_KEY_ID || '').trim() &&
+      String(process.env.LEAF_APNS_TEAM_ID || '').trim() &&
+      hasApnsPrivateKeyConfigured()
+  );
   const paymentProviderConfigRequired = requiresPaymentProviderConfig(runtimeRole);
   const paymentProviderSandboxRuntime =
     paymentProviderConfigRequired && (wooviEnv === 'sandbox' || wooviBaseUrlIsSandbox);
@@ -619,9 +637,22 @@ function main() {
         )
       },
       push: {
-        fcmConfigured: Boolean(String(process.env.FCM_SERVER_KEY || '').trim()),
+        fcmConfigured,
+        provider: firebaseServiceAccountConfigured
+          ? 'firebase-admin'
+          : legacyFcmServerKeyConfigured
+            ? 'legacy-fcm-server-key'
+            : null,
         allowPublicDirectFcmSend: booleanDiagnostic('ALLOW_PUBLIC_DIRECT_FCM_SEND', false),
-        demandNotificationServiceEnabled: booleanDiagnostic('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', false)
+        demandNotificationServiceEnabled: booleanDiagnostic('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', false),
+        liveActivity: {
+          apnsConfigured: apnsLiveActivityConfigured,
+          keyIdConfigured: Boolean(String(process.env.LEAF_APNS_KEY_ID || '').trim()),
+          teamIdConfigured: Boolean(String(process.env.LEAF_APNS_TEAM_ID || '').trim()),
+          privateKeyConfigured: hasApnsPrivateKeyConfigured(),
+          bundleId: presence(process.env.LEAF_APNS_BUNDLE_ID),
+          environment: String(process.env.LEAF_APNS_ENV || process.env.NODE_ENV || '').trim().toLowerCase() || 'development'
+        }
       },
       runtime: {
         runtimeRole,

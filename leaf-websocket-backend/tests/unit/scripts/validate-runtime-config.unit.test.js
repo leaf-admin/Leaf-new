@@ -612,10 +612,50 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
 
     expect(result.report.diagnostics.push).toMatchObject({
       fcmConfigured: true,
+      provider: 'legacy-fcm-server-key',
       allowPublicDirectFcmSend: { value: true, source: 'env' },
-      demandNotificationServiceEnabled: { value: true, source: 'env' }
+      demandNotificationServiceEnabled: { value: true, source: 'env' },
+      liveActivity: {
+        apnsConfigured: false,
+        keyIdConfigured: false,
+        teamIdConfigured: false,
+        privateKeyConfigured: false,
+        bundleId: '(empty)',
+        environment: 'production'
+      }
     });
     expect(result.stdout).not.toContain('fcm-key');
+  });
+
+  it('reports Firebase Admin credentials as the production FCM provider', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
+      WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
+      WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
+      FIREBASE_SERVICE_ACCOUNT_JSON: '{"project_id":"leaf-test"}',
+      LEAF_APNS_KEY_ID: 'apns-key-id',
+      LEAF_APNS_TEAM_ID: 'DTA8W5KA5D',
+      LEAF_APNS_PRIVATE_KEY_PATH: '/secure/AuthKey_6Z45T8R37W.p8',
+      LEAF_APNS_BUNDLE_ID: 'br.com.leaf.ride',
+      LEAF_APNS_ENV: 'production'
+    });
+
+    expect(result.report.diagnostics.push).toMatchObject({
+      fcmConfigured: true,
+      provider: 'firebase-admin',
+      liveActivity: {
+        apnsConfigured: true,
+        keyIdConfigured: true,
+        teamIdConfigured: true,
+        privateKeyConfigured: true,
+        bundleId: 'present',
+        environment: 'production'
+      }
+    });
+    expect(result.stdout).not.toContain('apns-key-id');
+    expect(result.stdout).not.toContain('DTA8W5KA5D');
+    expect(result.stdout).not.toContain('AuthKey_6Z45T8R37W');
   });
 
   it('allows strict biometric production when all required controls are configured', () => {

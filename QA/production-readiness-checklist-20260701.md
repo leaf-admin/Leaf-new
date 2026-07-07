@@ -48,6 +48,7 @@ Evidencia do congelamento: `QA/release-candidates/2026-07-07-rc1/manifest.md`.
 - [x] Backend unit direcionado executado se houver qualquer diff backend na RC.
 
 Evidencia do bloco 2: `QA/release-candidates/2026-07-07-rc2/block-2-validation.md`.
+Evidencia do bloco 3: `QA/release-candidates/2026-07-07-rc3/block-3-live-activities-push-validation.md`.
 
 ## P0 - Runtime, OTA E App Instalado
 
