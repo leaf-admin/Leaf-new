@@ -32,7 +32,7 @@
     "governance:check": "node scripts/validation/assert-agent-governance.cjs"
   },
   "dependencies": {
-    "axios": "^1.12.1",
+    "axios": "^1.18.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
@@ -41,6 +41,10 @@
     "ioredis": "^5.7.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1"
+  },
+  "overrides": {
+    "form-data@^4.0.0": "4.0.6",
+    "lodash": "4.18.1"
   },
   "devDependencies": {
     "expo": "^54.0.33",
