@@ -36,7 +36,7 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.106504629884-laja6e1vn4utkn93ftd99p42mu8qus9s</string>
+				<string>com.googleusercontent.apps.106504629884-v4u8nboec5c8s2ovha378g9gm8boamm6</string>
 			</array>
 		</dict>
 		<dict>
@@ -74,19 +74,31 @@
 	<key>NSCameraUsageDescription</key>
 	<string>A Leaf utiliza a câmera para tirar sua foto de perfil e verificar sua identidade.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>A Leaf utiliza sua localização em primeiro e segundo plano exclusivamente para motoristas receberem corridas, manter navegação ativa e acompanhar viagens em tempo real.</string>
+	<string>A Leaf coleta e envia sua localização precisa aos servidores da Leaf para corridas, rotas, navegação, acompanhamento em tempo real e segurança. Para motoristas online ou em corrida, isso pode acontecer mesmo quando o app estiver fechado ou não estiver em uso. A Leaf não usa sua localização para anúncios.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>A Leaf utiliza sua localização em segundo plano para permitir que motoristas recebam corridas e tenham a navegação ativa mesmo com o app minimizado, garantindo uma experiência contínua e segura.</string>
+	<string>A Leaf coleta e envia sua localização precisa em segundo plano para permitir que motoristas online recebam corridas, mantenham a navegação ativa e compartilhem a posição com o passageiro durante a viagem, mesmo quando o app estiver fechado ou não estiver em uso. A Leaf não usa sua localização para anúncios.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>A Leaf utiliza sua localização para encontrar motoristas próximos, calcular rotas e permitir o acompanhamento da corrida em tempo real, melhorando a experiência de uso e segurança.</string>
+	<string>A Leaf coleta e envia sua localização precisa aos servidores da Leaf para mostrar sua posição no mapa, definir partida, encontrar motoristas próximos, calcular rotas, estimar preço e acompanhar corridas com segurança. A Leaf não usa sua localização para anúncios.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>A Leaf utiliza sua galeria de fotos para fazer upload da sua foto de perfil e documentos de verificação.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>A Leaf converte sua fala em texto para preencher o destino com mais rapidez.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Inter_400Regular.ttf</string>
+		<string>Inter_500Medium.ttf</string>
+		<string>Inter_600SemiBold.ttf</string>
+		<string>Inter_700Bold.ttf</string>
+		<string>Inter_300Light.ttf</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
@@ -100,7 +112,7 @@
 		<string>arm64</string>
 	</array>
 	<key>UIRequiresFullScreen</key>
-	<true/>
+	<false/>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleDefault</string>
 	<key>UISupportedInterfaceOrientations</key>

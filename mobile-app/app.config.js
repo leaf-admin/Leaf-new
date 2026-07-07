@@ -348,6 +348,8 @@ module.exports = {
             "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationPortrait"],
             NSAppTransportSecurity: iosTransportSecurity,
             UIBackgroundModes: ["fetch", "location", "remote-notification"],
+            NSSupportsLiveActivities: true,
+            NSSupportsLiveActivitiesFrequentUpdates: true,
             NSMicrophoneUsageDescription: "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
             NSSpeechRecognitionUsageDescription: "A Leaf converte sua fala em texto para preencher o destino com mais rapidez."
         }
@@ -399,6 +401,7 @@ module.exports = {
         "./plugins/withNetworkSecurityConfig",
         "./plugins/withLeafAwsLiveness",
         "./plugins/withLeafFaceEmbedding",
+        "./plugins/withLeafRideLiveActivity",
         [
             "expo-notifications",
             {

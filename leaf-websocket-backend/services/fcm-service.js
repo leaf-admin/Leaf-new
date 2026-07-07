@@ -4,6 +4,7 @@ const { logger, logStructured } = require('../utils/logger');
 const path = require('path');
 const circuitBreakerService = require('./circuit-breaker-service');
 const traceContext = require('../utils/trace-context');
+const RideLiveActivityService = require('./ride-live-activity-service');
 
 class FCMService {
     constructor(redis = null) {
@@ -11,10 +12,12 @@ class FCMService {
         this.isInitialized = false;
         this.rateLimitCounts = new Map();
         this.lastResetTime = Date.now();
+        this.rideLiveActivityService = new RideLiveActivityService(redis);
     }
 
     setRedis(redis) {
         this.redis = redis;
+        this.rideLiveActivityService.setRedis(redis);
     }
 
     async getRedisClient(operation = 'unknown') {
@@ -671,8 +674,13 @@ class FCMService {
                 .filter(Boolean);
 
             if (fcmTokens.length === 0) {
+                const liveActivity = await this.rideLiveActivityService.sendRideStatusUpdate(userId, rideData);
                 logger.warn(`⚠️ [FCMService] sendRideStatusUpdate ignorado: Sem token para ${userId}`);
-                return { success: false, error: 'Token FCM não encontrado' };
+                return {
+                    success: liveActivity?.success === true,
+                    error: liveActivity?.success ? undefined : 'Token FCM não encontrado',
+                    liveActivity
+                };
             }
 
             const dataPayload = {
@@ -715,10 +723,12 @@ class FCMService {
                     }
                 }
             }
+            const liveActivity = await this.rideLiveActivityService.sendRideStatusUpdate(userId, rideData);
             logger.info(`✅ [FCMService] sendRideStatusUpdate enviado para ${userId} (Status: ${rideData.status})`);
             return {
                 success: successCount > 0,
                 count: successCount,
+                liveActivity,
                 ...(successCount > 0 ? {} : { error: 'Nenhum push FCM entregue' })
             };
 

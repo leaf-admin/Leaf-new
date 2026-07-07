@@ -130,6 +130,7 @@ const {
     ensureDriverOnlineReady
 } = require('./services/driver-dispatch-availability-service');
 const FCMService = require('./services/fcm-service');
+const RideLiveActivityService = require('./services/ride-live-activity-service');
 const { clearActiveTripForDriver, resolveActiveTripForDriver } = require('./utils/active-trip-index');
 const { assessDriverArrivalAtPickup } = require('./utils/pickup-arrival-policy');
 const { buildTripCompletedPayload } = require('./utils/trip-completion-payload');
@@ -143,6 +144,7 @@ const driverEligibilityService = require('./services/driver-eligibility-service'
 const { buildDriverVehicleIdentity } = require('./utils/driver-vehicle-identity');
 const { resolveAcceptedDriverIdentity } = require('./utils/accepted-driver-identity');
 const fcmService = new FCMService(); // Singleton local ao worker
+const rideLiveActivityService = new RideLiveActivityService(); // ActivityKit/Live Activities
 // =========================================================================================
 
 // ==================== IMPORTAÇÕES REFATORAÇÃO: COMMANDS E LISTENERS ====================
@@ -3744,6 +3746,44 @@ io.on('connection', async (socket) => {
             socket.emit('fcmTokenUnregistered', { success: true });
         } catch (error) {
             logError(error, 'Erro ao desregistrar token FCM', { service: 'unregisterFCMToken' });
+        }
+    });
+
+    socket.on('registerRideLiveActivityToken', async (data) => {
+        try {
+            const payload = data || {};
+            const { pushToken, platform } = payload;
+
+            if (!pushToken) {
+                socket.emit('rideLiveActivityTokenError', { error: 'Token Live Activity é obrigatório' });
+                return;
+            }
+
+            const isAuthenticated = Boolean(socket.userId);
+            const effectiveUserId = isAuthenticated ? socket.userId : `temp_${socket.id}`;
+            const effectiveUserType = isAuthenticated ? (socket.userType || 'customer') : 'temporary';
+            const redis = redisPool.getConnection();
+            rideLiveActivityService.setRedis(redis);
+
+            const result = await rideLiveActivityService.saveToken(effectiveUserId, effectiveUserType, {
+                ...payload,
+                platform: platform || 'ios'
+            });
+
+            if (!result.success) {
+                socket.emit('rideLiveActivityTokenError', { error: result.error || 'Falha ao registrar Live Activity' });
+                return;
+            }
+
+            socket.emit('rideLiveActivityTokenRegistered', {
+                success: true,
+                userId: effectiveUserId,
+                activityId: result.activityId,
+                bookingId: result.bookingId
+            });
+        } catch (error) {
+            logError(error, 'Erro ao registrar token Live Activity', { service: 'registerRideLiveActivityToken', userId: socket.userId || null });
+            socket.emit('rideLiveActivityTokenError', { error: 'Erro interno do servidor: ' + error.message });
         }
     });
     // ==========================================================================

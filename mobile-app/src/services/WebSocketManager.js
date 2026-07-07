@@ -5257,6 +5257,43 @@ class WebSocketManager {
     });
   }
 
+  async registerRideLiveActivityToken(tokenData) {
+    if (!this.socket?.connected) {
+      throw new Error("WebSocket não conectado");
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Register ride Live Activity token timeout"));
+      }, 10000);
+
+      const onRegistered = (data) => {
+        cleanup();
+        if (data.success) {
+          resolve(data);
+        } else {
+          reject(new Error(data.error || "Register ride Live Activity token failed"));
+        }
+      };
+
+      const onError = (error) => {
+        cleanup();
+        reject(new Error(error.error || "Register ride Live Activity token error event"));
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.socket.off("rideLiveActivityTokenRegistered", onRegistered);
+        this.socket.off("rideLiveActivityTokenError", onError);
+      };
+
+      this.socket.once("rideLiveActivityTokenRegistered", onRegistered);
+      this.socket.once("rideLiveActivityTokenError", onError);
+      this.socket.emit("registerRideLiveActivityToken", tokenData);
+    });
+  }
+
   // Enviar notificação
   async sendNotification(notificationData) {
     if (!this.socket?.connected) {

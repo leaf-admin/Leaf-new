@@ -21,16 +21,25 @@ describe('registerSocketFcmHandlers', () => {
       saveUserFCMToken: jest.fn().mockResolvedValue(true),
       removeUserFCMToken: jest.fn().mockResolvedValue(true)
     };
+    const rideLiveActivityService = {
+      setRedis: jest.fn(),
+      saveToken: jest.fn().mockResolvedValue({
+        success: true,
+        activityId: 'ride:passenger:b1',
+        bookingId: 'b1'
+      })
+    };
 
     registerSocketFcmHandlers({
       socket,
       redisPool: { getConnection: () => redis },
       fcmService,
+      rideLiveActivityService,
       logStructured: jest.fn(),
       logError: jest.fn()
     });
 
-    return { listeners, socket, redis, fcmService };
+    return { listeners, socket, redis, fcmService, rideLiveActivityService };
   }
 
   it('stores pre-auth tokens only under the socket temporary identity', async () => {
@@ -130,5 +139,36 @@ describe('registerSocketFcmHandlers', () => {
       'temp_socket-123',
       'token-4'
     );
+  });
+
+  it('stores Live Activity tokens under the authenticated socket identity', async () => {
+    const { listeners, socket, rideLiveActivityService } = buildHarness({
+      userId: 'auth-user',
+      userType: 'customer'
+    });
+
+    await listeners.registerRideLiveActivityToken({
+      userId: 'victim-user',
+      bookingId: 'b1',
+      activityId: 'ride:passenger:b1',
+      pushToken: 'activity-token',
+      platform: 'ios'
+    });
+
+    expect(rideLiveActivityService.saveToken).toHaveBeenCalledWith(
+      'auth-user',
+      'customer',
+      expect.objectContaining({
+        bookingId: 'b1',
+        activityId: 'ride:passenger:b1',
+        pushToken: 'activity-token',
+        platform: 'ios'
+      })
+    );
+    expect(socket.emit).toHaveBeenCalledWith('rideLiveActivityTokenRegistered', expect.objectContaining({
+      success: true,
+      userId: 'auth-user',
+      bookingId: 'b1'
+    }));
   });
 });

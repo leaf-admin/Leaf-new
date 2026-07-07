@@ -17,6 +17,7 @@ import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import fcmService from './FCMNotificationService';
 import { requestExpoNotificationsPermissionWithDisclosure } from './AndroidPermissionDisclosure';
+import RideLiveActivityService from './RideLiveActivityService';
 
 
 class PersistentRideNotificationService {
@@ -117,7 +118,7 @@ class PersistentRideNotificationService {
                 }
 
                 if (processedData.status === 'completed' || processedData.status === 'cancelled') {
-                    await this.dismissRideNotification();
+                    await this.dismissRideNotification(processedData);
                 } else {
                     await this.updateRideNotification(processedData);
                 }
@@ -168,6 +169,12 @@ class PersistentRideNotificationService {
 
             this.currentBookingId = bookingId;
             this.isActive = true;
+
+            const liveActivityResult = await RideLiveActivityService.startOrUpdate(rideData);
+            if (Platform.OS === 'ios' && liveActivityResult?.handled) {
+                Logger.log(`✅ [PersistentRideNotification] Live Activity atualizada: ${liveActivityResult.activityId}`);
+                return;
+            }
 
             // Gerar conteúdo da notificação baseado no status
             const { title, body } = this.generateNotificationContent({
@@ -249,6 +256,12 @@ class PersistentRideNotificationService {
                 notificationCategoryId,
                 notificationDataType
             } = rideData;
+
+            const liveActivityResult = await RideLiveActivityService.startOrUpdate(rideData);
+            if (Platform.OS === 'ios' && liveActivityResult?.handled) {
+                Logger.log(`🔄 [PersistentRideNotification] Live Activity atualizada: ${liveActivityResult.activityId}`);
+                return;
+            }
 
             const { title, body } = this.generateNotificationContent({
                 status,
@@ -406,17 +419,24 @@ class PersistentRideNotificationService {
     /**
      * Remover notificação persistente
      */
-    async dismissRideNotification() {
+    async dismissRideNotification(rideData = {}) {
         try {
+            await RideLiveActivityService.dismiss({
+                ...rideData,
+                bookingId: rideData.bookingId || this.currentBookingId,
+                status: rideData.status || 'completed',
+            });
+
             if (this.currentNotificationId) {
                 await Notifications.cancelScheduledNotificationAsync(this.currentNotificationId);
                 await Notifications.dismissNotificationAsync(this.currentNotificationId);
                 this.currentNotificationId = null;
-                this.currentBookingId = null;
-                this.isActive = false;
-                this.stopPeriodicUpdate();
                 Logger.log('✅ [PersistentRideNotification] Notificação removida');
             }
+
+            this.currentBookingId = null;
+            this.isActive = false;
+            this.stopPeriodicUpdate();
         } catch (error) {
             Logger.error('❌ [PersistentRideNotification] Erro ao remover notificação:', error);
         }
@@ -426,7 +446,7 @@ class PersistentRideNotificationService {
      * Verificar se há notificação ativa
      */
     isNotificationActive() {
-        return this.isActive && this.currentNotificationId !== null;
+        return this.isActive && (this.currentNotificationId !== null || Platform.OS === 'ios');
     }
 
     /**
