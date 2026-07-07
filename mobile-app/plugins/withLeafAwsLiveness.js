@@ -179,6 +179,12 @@ function addSwiftPackageText(pbxprojPath) {
         return `${start}${deps}\t\t\t\t${AWS_PRODUCT_ID} /* FaceLiveness */,\n${end}`;
       }
     );
+    if (!updated.includes(`${AWS_PRODUCT_ID} /* FaceLiveness */`) || !/packageProductDependencies = \([\s\S]*FaceLiveness[\s\S]*\);\n\s*productName = Leaf;/.test(updated)) {
+      updated = updated.replace(
+        /(\s*productName = Leaf;)/,
+        `\t\t\tpackageProductDependencies = (\n\t\t\t\t${AWS_PRODUCT_ID} /* FaceLiveness */,\n\t\t\t);\n$1`
+      );
+    }
 
     updated = updated.replace(
       /(\s*packageReferences = \(\n)([\s\S]*?)(\s*\);\n\s*productRefGroup = )/,
@@ -189,6 +195,12 @@ function addSwiftPackageText(pbxprojPath) {
         return `${start}${refs}\t\t\t\t${AWS_PACKAGE_ID} /* XCRemoteSwiftPackageReference "amplify-ui-swift-liveness" */,\n${end}`;
       }
     );
+    if (!/packageReferences = \([\s\S]*amplify-ui-swift-liveness[\s\S]*\);\n\s*productRefGroup = /.test(updated)) {
+      updated = updated.replace(
+        /(\s*productRefGroup = )/,
+        `\t\t\tpackageReferences = (\n\t\t\t\t${AWS_PACKAGE_ID} /* XCRemoteSwiftPackageReference "amplify-ui-swift-liveness" */,\n\t\t\t);\n$1`
+      );
+    }
 
     const packageSection = `/* Begin XCRemoteSwiftPackageReference section */
 \t\t${AWS_PACKAGE_ID} /* XCRemoteSwiftPackageReference "amplify-ui-swift-liveness" */ = {
