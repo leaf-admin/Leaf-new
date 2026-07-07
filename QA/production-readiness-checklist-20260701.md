@@ -37,15 +37,17 @@ Evidencia do congelamento: `QA/release-candidates/2026-07-07-rc1/manifest.md`.
 
 ## P0 - Baseline Tecnico Obrigatorio
 
-- [ ] `git diff --check`
-- [ ] `npm run governance:check`
-- [ ] `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`
-- [ ] `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`
-- [ ] `npm --prefix mobile-app run qa:production-guards`
-- [ ] `npm --prefix leaf-websocket-backend run config:validate`
-- [ ] `npm --prefix mobile-app run test:unit -- --runInBand leaf-native-navigation-banner.test.js leaf-native-navigation-engine.test.js driver-online-toggle.test.js`
-- [ ] `npm --prefix mobile-app run test:unit -- --runInBand prototype-ride-screens.test.js`
-- [ ] Backend unit direcionado executado se houver qualquer diff backend na RC.
+- [x] `git diff --check`
+- [x] `npm run governance:check`
+- [x] `node scripts/maintenance/security/scan-secrets.cjs --tracked-only`
+- [x] `bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh`
+- [x] `npm --prefix mobile-app run qa:production-guards`
+- [x] `npm --prefix leaf-websocket-backend run config:validate`
+- [x] `npm --prefix mobile-app run test:unit -- --runInBand leaf-native-navigation-banner.test.js leaf-native-navigation-engine.test.js driver-online-toggle.test.js`
+- [x] `npm --prefix mobile-app run test:unit -- --runInBand prototype-ride-screens.test.js`
+- [x] Backend unit direcionado executado se houver qualquer diff backend na RC.
+
+Evidencia do bloco 2: `QA/release-candidates/2026-07-07-rc2/block-2-validation.md`.
 
 ## P0 - Runtime, OTA E App Instalado
 
