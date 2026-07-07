@@ -7,6 +7,7 @@ const ANDROID_PACKAGE_PATH = path.join('app', 'src', 'main', 'java', 'br', 'com'
 const ANDROID_ASSETS_FACE_MODELS_PATH = path.join('app', 'src', 'main', 'assets', 'face_models');
 const IOS_APP_GROUP = 'Leaf';
 const IOS_FACE_MODELS_PATH = path.join(IOS_APP_GROUP, 'FaceModels');
+const FACE_MODEL_FILENAME = 'arcface_w600k_r50.onnx';
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -140,7 +141,9 @@ const withLeafFaceEmbedding = (config) => {
 
     addXcodeSource(project, 'Leaf/LeafFaceEmbeddingModule.swift', leafGroupKey, target);
     addXcodeSource(project, 'Leaf/LeafFaceEmbeddingModule.m', leafGroupKey, target);
-    addXcodeResource(project, 'Leaf/FaceModels', leafGroupKey, target);
+    if (fs.existsSync(path.join(TEMPLATES_ROOT, 'face_models', FACE_MODEL_FILENAME))) {
+      addXcodeResource(project, 'Leaf/FaceModels', leafGroupKey, target);
+    }
 
     return config;
   });
