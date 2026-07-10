@@ -192,9 +192,13 @@ const QA_SEEDED_DESTINATION = Object.freeze({
 const ROUTE_SIDE_PADDING = 72;
 const ROUTE_TOP_EXTRA_PADDING = 22;
 const ROUTE_BOTTOM_EXTRA_PADDING = 28;
-const PREBOOKING_ROUTE_TOP_EXTRA_PADDING = 14;
-const PREBOOKING_ROUTE_BOTTOM_EXTRA_PADDING = 12;
-const PREBOOKING_ROUTE_OVERLAY_BIAS_RATIO = 0.1;
+const PREBOOKING_ROUTE_SIDE_PADDING = 28;
+const PREBOOKING_ROUTE_TOP_EXTRA_PADDING = 8;
+const PREBOOKING_ROUTE_BOTTOM_EXTRA_PADDING = 6;
+const PREBOOKING_ROUTE_OVERLAY_BIAS_RATIO = 0.04;
+const PREBOOKING_ROUTE_MIN_LATITUDE_DELTA = 0.0035;
+const PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER = 1.16;
+const PREBOOKING_ROUTE_LONG_DELTA_MULTIPLIER = 1.12;
 const SEARCH_ZOOM_ANIMATION_MS = 1150;
 const SEARCH_RADIUS_MARGIN = 1.34;
 const SEARCH_INITIAL_VIEWPORT_RADIUS_KM = 0.48;
@@ -5320,7 +5324,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       mapHeight: mapHeight || windowHeight,
       activeOcclusion: routeViewportOcclusion,
       insets,
-      sidePadding: ROUTE_SIDE_PADDING,
+      sidePadding: isPreBookingRoutePreview
+        ? PREBOOKING_ROUTE_SIDE_PADDING
+        : ROUTE_SIDE_PADDING,
       topExtraPadding: isPreBookingRoutePreview
         ? PREBOOKING_ROUTE_TOP_EXTRA_PADDING
         : ROUTE_TOP_EXTRA_PADDING,
@@ -5362,6 +5368,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       insets,
       viewportPadding: homeRouteViewportPadding,
       minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
+      ...(passengerHomePreviewRouteActive
+        ? {
+            shortRouteMinLatitudeDelta: PREBOOKING_ROUTE_MIN_LATITUDE_DELTA,
+            minLatitudeDelta: PREBOOKING_ROUTE_MIN_LATITUDE_DELTA,
+            shortRouteLatitudeDeltaMultiplier:
+              PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER,
+            shortRouteLongitudeDeltaMultiplier:
+              PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER,
+            longRouteLatitudeDeltaMultiplier:
+              PREBOOKING_ROUTE_LONG_DELTA_MULTIPLIER,
+            longRouteLongitudeDeltaMultiplier:
+              PREBOOKING_ROUTE_LONG_DELTA_MULTIPLIER,
+          }
+        : {}),
     });
     return routeViewportRegion;
   }, [
@@ -5398,6 +5418,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       insets,
       viewportPadding: getRouteEdgePadding(),
       minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
+      ...(passengerHomePreviewRouteActive
+        ? {
+            shortRouteMinLatitudeDelta: PREBOOKING_ROUTE_MIN_LATITUDE_DELTA,
+            minLatitudeDelta: PREBOOKING_ROUTE_MIN_LATITUDE_DELTA,
+            shortRouteLatitudeDeltaMultiplier:
+              PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER,
+            shortRouteLongitudeDeltaMultiplier:
+              PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER,
+            longRouteLatitudeDeltaMultiplier:
+              PREBOOKING_ROUTE_LONG_DELTA_MULTIPLIER,
+            longRouteLongitudeDeltaMultiplier:
+              PREBOOKING_ROUTE_LONG_DELTA_MULTIPLIER,
+          }
+        : {}),
     });
     const edgePadding = getRouteEdgePadding();
     mapRef.current.animateCamera({ heading: 0, pitch: 0 }, { duration: animatedFit ? 220 : 0 });

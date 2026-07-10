@@ -271,7 +271,7 @@ describe('prototype route viewport', () => {
       categoryBottomOffset: 41,
     },
   ])(
-    'keeps a Rio pre-booking route above the measured category card on $deviceClass',
+    'tightly fits a Rio pre-booking route above the measured category card on $deviceClass',
     ({
       mapWidth,
       mapHeight,
@@ -287,11 +287,11 @@ describe('prototype route viewport', () => {
         mapHeight,
         activeOcclusion,
         insets,
-        sidePadding: 72,
-        topExtraPadding: 14,
-        bottomExtraPadding: 12,
+        sidePadding: 28,
+        topExtraPadding: 8,
+        bottomExtraPadding: 6,
         minVisibleHeight: 180,
-        overlayBiasRatio: 0.1,
+        overlayBiasRatio: 0.04,
       });
       const route = [
         { latitude: -22.9428, longitude: -43.3652 },
@@ -306,16 +306,43 @@ describe('prototype route viewport', () => {
         insets,
         viewportPadding,
         minVisibleHeight: 180,
+        shortRouteMinLatitudeDelta: 0.0035,
+        minLatitudeDelta: 0.0035,
+        shortRouteLatitudeDeltaMultiplier: 1.16,
+        shortRouteLongitudeDeltaMultiplier: 1.16,
+        longRouteLatitudeDeltaMultiplier: 1.12,
+        longRouteLongitudeDeltaMultiplier: 1.12,
       });
+      const frame = buildVisibleRouteViewportFrame({
+        mapWidth,
+        mapHeight,
+        activeOcclusion,
+        insets,
+        viewportPadding,
+      });
+      const projectedPoints = route.map(coordinate => ({
+        x: projectX({ coordinate, region, mapWidth }),
+        y: projectY({ coordinate, region, mapHeight }),
+      }));
+      const projectedWidth =
+        Math.max(...projectedPoints.map(point => point.x)) -
+        Math.min(...projectedPoints.map(point => point.x));
+      const projectedHeight =
+        Math.max(...projectedPoints.map(point => point.y)) -
+        Math.min(...projectedPoints.map(point => point.y));
+      const dominantAxisUtilization = Math.max(
+        projectedWidth / frame.width,
+        projectedHeight / frame.height,
+      );
 
       expect(viewportPadding.bottom).toBeGreaterThanOrEqual(activeOcclusion.bottom);
-      route.forEach(coordinate => {
-        const x = projectX({ coordinate, region, mapWidth });
-        const y = projectY({ coordinate, region, mapHeight });
-        expect(x).toBeGreaterThanOrEqual(viewportPadding.left);
-        expect(x).toBeLessThanOrEqual(mapWidth - viewportPadding.right);
-        expect(y).toBeGreaterThanOrEqual(viewportPadding.top);
-        expect(y).toBeLessThanOrEqual(mapHeight - viewportPadding.bottom);
+      expect(dominantAxisUtilization).toBeGreaterThanOrEqual(0.84);
+      expect(dominantAxisUtilization).toBeLessThanOrEqual(0.94);
+      projectedPoints.forEach(({ x, y }) => {
+        expect(x).toBeGreaterThanOrEqual(frame.left);
+        expect(x).toBeLessThanOrEqual(frame.right);
+        expect(y).toBeGreaterThanOrEqual(frame.top);
+        expect(y).toBeLessThanOrEqual(frame.bottom);
       });
     },
   );
