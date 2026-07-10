@@ -271,7 +271,8 @@ function resolveGeofenceRegionDiagnostic() {
 function resolveLaunchControlDiagnostic() {
   const launchProfile = resolveLaunchProfile();
   const geofenceValidation = launchProfile === 'geofence_validation';
-  const pilotControlled = ['pilot_controlled', 'geofence_validation'].includes(launchProfile) || boolEnv('LEAF_PILOT_CONTROLLED', false);
+  const rideFlowValidation = launchProfile === 'ride_flow_validation';
+  const pilotControlled = ['pilot_controlled', 'geofence_validation', 'ride_flow_validation'].includes(launchProfile) || boolEnv('LEAF_PILOT_CONTROLLED', false);
   const passengerCohortSize = parseAllowlist(
     process.env.PILOT_ALLOWED_PASSENGER_IDS || process.env.LEAF_PILOT_ALLOWED_PASSENGER_IDS
   ).size;
@@ -283,6 +284,7 @@ function resolveLaunchControlDiagnostic() {
     launchProfile,
     pilotControlled,
     geofenceValidation,
+    rideFlowValidation,
     broadLaunchApproved: boolEnv('LEAF_BROAD_LAUNCH_APPROVED', false),
     passengerCohortSize,
     driverCohortSize,
@@ -528,6 +530,23 @@ function main() {
       }
       if (launchControlDiagnostic.acceptNewBookings.value) {
         blockers.push('LEAF_ACCEPT_NEW_BOOKINGS=true bloqueado no perfil geofence_validation');
+      }
+    }
+    if (launchControlDiagnostic.rideFlowValidation) {
+      if (!boolEnv('LEAF_RIDE_FLOW_VALIDATION_ACK', false)) {
+        blockers.push('LEAF_RIDE_FLOW_VALIDATION_ACK=true obrigatório no perfil ride_flow_validation');
+      }
+      if (launchControlDiagnostic.passengerCohortSize !== 1) {
+        blockers.push('ride_flow_validation exige exatamente 1 passageiro na allowlist');
+      }
+      if (launchControlDiagnostic.driverCohortSize !== 1) {
+        blockers.push('ride_flow_validation exige exatamente 1 motorista na allowlist');
+      }
+      if (!launchControlDiagnostic.acceptNewPix.value) {
+        blockers.push('LEAF_ACCEPT_NEW_PIX=true obrigatório no perfil ride_flow_validation');
+      }
+      if (!launchControlDiagnostic.acceptNewBookings.value) {
+        blockers.push('LEAF_ACCEPT_NEW_BOOKINGS=true obrigatório no perfil ride_flow_validation');
       }
     }
     if (boolEnv('BYPASS_GEOFENCE')) {

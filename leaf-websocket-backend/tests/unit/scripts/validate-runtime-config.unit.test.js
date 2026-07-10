@@ -137,6 +137,58 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     ]));
   });
 
+  it('allows ride flow validation before KYC only for an acknowledged 1+1 cohort', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'ride_flow_validation',
+      LEAF_RIDE_FLOW_VALIDATION_ACK: 'true',
+      PILOT_ALLOWED_PASSENGER_IDS: 'passenger-1',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1',
+      LEAF_ACCEPT_NEW_PIX: 'true',
+      LEAF_ACCEPT_NEW_BOOKINGS: 'true',
+      LEAF_RUNTIME_POLICY_VERSION: 'ride-flow-validation-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REQUIRE_DESTINATION_INSIDE_REGION: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.summary.blockers).toEqual([]);
+    expect(result.report.summary.warnings).toContain(
+      'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.'
+    );
+    expect(result.report.diagnostics.launchControl).toEqual(expect.objectContaining({
+      launchProfile: 'ride_flow_validation',
+      pilotControlled: true,
+      rideFlowValidation: true,
+      acceptNewPix: expect.objectContaining({ value: true }),
+      acceptNewBookings: expect.objectContaining({ value: true })
+    }));
+  });
+
+  it('blocks ride flow validation without acknowledgment or an exact 1+1 cohort', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'ride_flow_validation',
+      PILOT_ALLOWED_PASSENGER_IDS: 'passenger-1,passenger-2',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1',
+      LEAF_ACCEPT_NEW_PIX: 'true',
+      LEAF_ACCEPT_NEW_BOOKINGS: 'true',
+      LEAF_RUNTIME_POLICY_VERSION: 'ride-flow-validation-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'LEAF_RIDE_FLOW_VALIDATION_ACK=true obrigatório no perfil ride_flow_validation',
+      'ride_flow_validation exige exatamente 1 passageiro na allowlist'
+    ]));
+  });
+
   it('allows production deploy with the bundled Woovi webhook public-key verifier', () => {
     const result = runValidator(baseProdEnv);
 

@@ -118,10 +118,12 @@ describe("PassengerHomeOverlay", () => {
   });
 
   it("keeps the category decision focused on price and arrival, with route detail progressive", () => {
-    const { getByText, queryByTestId, queryByText } = render(
+    const onPickupPress = jest.fn();
+    const { getByText, getByTestId, queryByTestId, queryByText } = render(
       <PassengerHomeOverlay
         pickupAddress="Carioca Shopping"
         destinationLabel="Mercadão de Madureira"
+        onPickupPress={onPickupPress}
         categoryVisible
         categoryOptions={[
           {
@@ -145,6 +147,8 @@ describe("PassengerHomeOverlay", () => {
     expect(getByText("R$ 18,55")).toBeTruthy();
     expect(getByText("Chegada estimada")).toBeTruthy();
     expect(getByText("15:30")).toBeTruthy();
+    fireEvent.press(getByTestId("passenger-home-pickup-input"));
+    expect(onPickupPress).not.toHaveBeenCalled();
     expect(queryByText("27 min")).toBeNull();
     expect(queryByText("16,4 km")).toBeNull();
     expect(queryByTestId("passenger-home-traffic-status")).toBeNull();

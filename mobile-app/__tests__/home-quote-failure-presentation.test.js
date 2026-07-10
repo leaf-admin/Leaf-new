@@ -41,6 +41,16 @@ describe('home quote failure presentation', () => {
     });
   });
 
+  it('preserves the pickup coverage reason after the message is stored in state', () => {
+    expect(
+      resolveHomeQuoteFailurePresentation('Sua origem está fora da área da Leaf.'),
+    ).toEqual({
+      kind: 'coverage',
+      message: 'Sua origem está fora da área da Leaf.',
+      actionLabel: 'Origem fora da área',
+    });
+  });
+
   it('keeps non-coverage quote failures generic', () => {
     expect(
       resolveHomeQuoteFailurePresentation(new Error('Serviço temporariamente indisponível')),

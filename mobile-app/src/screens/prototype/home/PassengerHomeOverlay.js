@@ -931,13 +931,11 @@ function PassengerHomeOverlay({
               <View style={styles.categoryTripSummary}>
                 <Text style={styles.categoryTripSummaryTitle}>Sua viagem</Text>
                 <View style={styles.categoryTripSummaryBox}>
-                  <TouchableOpacity
-                    activeOpacity={0.82}
+                  <View
                     style={styles.categoryTripSummaryField}
-                    onPress={onPickupPress}
                     testID="passenger-home-pickup-input"
-                    accessibilityRole="button"
-                    accessibilityLabel={`De: ${resolvedPickupLabel}`}
+                    accessibilityRole="text"
+                    accessibilityLabel={`Origem: ${resolvedPickupLabel}. Para alterar, volte à etapa inicial.`}
                   >
                     <Text style={styles.categoryRouteSummaryLabel} numberOfLines={1}>
                       Local de partida
@@ -948,7 +946,7 @@ function PassengerHomeOverlay({
                     {pickupAddress ? (
                       <Text style={styles.hiddenPickupAddress}>{pickupAddress}</Text>
                     ) : null}
-                  </TouchableOpacity>
+                  </View>
                   <View style={styles.categoryTripSummaryDivider} />
                   <TouchableOpacity
                     activeOpacity={0.82}

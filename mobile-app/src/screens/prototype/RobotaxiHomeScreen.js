@@ -2204,7 +2204,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           quoteUnavailable: Boolean(homeBackendQuoteError),
           backendFare,
           localFare,
-          allowLocalEstimateWhilePending: true,
+          allowLocalEstimateWhilePending: false,
         });
         return {
           id,

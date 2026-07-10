@@ -57,7 +57,8 @@ export function resolveHomeQuoteFailurePresentation(error) {
   const rawMessage = normalizeText(
     payloads.find(payload => payload?.message)?.message ||
       layers.find(layer => layer?.rawMessage)?.rawMessage ||
-      layers.find(layer => layer?.message)?.message,
+      layers.find(layer => layer?.message)?.message ||
+      layers.find(layer => typeof layer === 'string'),
   );
   const coverageKind = resolveCoverageKind(code, rawMessage);
 

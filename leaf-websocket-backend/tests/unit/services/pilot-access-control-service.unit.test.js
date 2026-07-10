@@ -65,6 +65,22 @@ describe('pilot-access-control-service', () => {
       .toEqual(expect.objectContaining({ allowed: false, code: 'NEW_BOOKINGS_PAUSED' }));
   });
 
+  it('keeps ride flow validation restricted to the configured cohort', () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'ride_flow_validation';
+    process.env.LEAF_PILOT_CONTROLLED = 'false';
+    const { evaluatePilotAccess, getPublicPilotAccessSnapshot } = require('../../../services/pilot-access-control-service');
+
+    expect(getPublicPilotAccessSnapshot()).toEqual(expect.objectContaining({
+      pilotControlled: true,
+      acceptNewPix: true,
+      acceptNewBookings: true
+    }));
+    expect(evaluatePilotAccess({ userId: 'passenger-1', role: 'passenger', operation: 'payment' }))
+      .toEqual(expect.objectContaining({ allowed: true }));
+    expect(evaluatePilotAccess({ userId: 'passenger-outside', role: 'passenger', operation: 'payment' }))
+      .toEqual(expect.objectContaining({ allowed: false, code: 'PILOT_COHORT_ACCESS_DENIED' }));
+  });
+
   it('does not restrict normal launch profiles', () => {
     process.env.LEAF_LAUNCH_PROFILE = 'full';
     delete process.env.PILOT_ALLOWED_PASSENGER_IDS;

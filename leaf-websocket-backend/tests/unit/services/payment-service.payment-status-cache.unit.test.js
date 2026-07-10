@@ -303,6 +303,42 @@ describe('PaymentService payment status cache', () => {
     );
   });
 
+  it('blocks a production payment profile before provider calls in ride flow validation', async () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'ride_flow_validation';
+    const service = new PaymentService();
+    jest.spyOn(service.paymentRuntimeProfileService, 'resolveProfile').mockResolvedValue({
+      profileId: 'env-default',
+      environment: 'production',
+      scope: 'global',
+      source: 'env',
+      testUserSandbox: false,
+      provider: 'woovi',
+      wooviConfig: {
+        apiToken: 'must-not-be-used',
+        environment: 'production',
+        baseUrl: 'https://api.woovi.com/api/v1'
+      }
+    });
+
+    const result = await service.processAdvancePayment({
+      passengerId: 'passenger_1',
+      amount: 1506,
+      rideId: 'temp_ride_validation_production_blocked',
+      rideDetails: { origin: 'Origem', destination: 'Destino' },
+      passengerName: 'Passageiro',
+      passengerEmail: 'passenger@leaf.app.br'
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'RIDE_FLOW_VALIDATION_SANDBOX_PROFILE_REQUIRED',
+      providerEnvironment: 'production',
+      paymentProfileId: 'env-default'
+    });
+    expect(mockCreateCharge).not.toHaveBeenCalled();
+    expect(mockCreateChargeWithSplit).not.toHaveBeenCalled();
+  });
+
   it('routes allowlisted canary passengers through the sandbox Woovi profile without a mobile rebuild', async () => {
     process.env.WOOVI_ENVIRONMENT = 'production';
     process.env.WOOVI_API_TOKEN = 'production-token';

@@ -33,12 +33,16 @@ function resolveLaunchProfile() {
     return 'pilot_controlled';
   }
 
+  if (['ride_flow_validation', 'ride_validation', 'flow_validation'].includes(normalized)) {
+    return 'ride_flow_validation';
+  }
+
   return normalized || 'full';
 }
 
 function isPilotControlledLaunch() {
   return (
-    resolveLaunchProfile() === 'pilot_controlled' ||
+    ['pilot_controlled', 'geofence_validation', 'ride_flow_validation'].includes(resolveLaunchProfile()) ||
     expoExtra().pilotControlled === true ||
     normalizeFlag(process.env.EXPO_PUBLIC_PILOT_CONTROLLED, false)
   );

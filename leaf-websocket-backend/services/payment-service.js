@@ -14,6 +14,9 @@ const paymentRuntimeProfileService = require('./payment-runtime-profile-service'
 const { logStructured, logError } = require('../utils/logger');
 const traceContext = require('../utils/trace-context');
 const redisPool = require('../utils/redis-pool');
+const {
+  evaluateRideFlowValidationPaymentProfile
+} = require('./ride-flow-validation-guard');
 
 function isRefundedPaymentStatus(status) {
   const normalized = String(status || '').trim().toUpperCase();
@@ -1297,6 +1300,26 @@ class PaymentService {
         paymentProfileSource: paymentProfile.source,
         paymentProfileReason: paymentProfile.reason
       });
+
+      const rideFlowValidationGuard = evaluateRideFlowValidationPaymentProfile(paymentProfile);
+      if (!rideFlowValidationGuard.allowed) {
+        logStructured('warn', 'Pagamento bloqueado pelo perfil de validação de corrida', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          passengerId: paymentData.passengerId,
+          providerEnvironment: paymentProfile.environment,
+          paymentProfileId: paymentProfile.profileId,
+          code: rideFlowValidationGuard.code
+        });
+        return {
+          success: false,
+          error: rideFlowValidationGuard.message,
+          code: rideFlowValidationGuard.code,
+          provider: paymentProfile.provider,
+          providerEnvironment: paymentProfile.environment,
+          paymentProfileId: paymentProfile.profileId
+        };
+      }
 
       if (!paymentProfile.wooviConfig?.apiToken) {
         return {

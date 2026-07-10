@@ -81,6 +81,10 @@ const resolveLaunchProfile = () => {
         return 'pilot_controlled';
     }
 
+    if (['ride_flow_validation', 'ride_validation', 'flow_validation'].includes(normalized)) {
+        return 'ride_flow_validation';
+    }
+
     return normalized || 'full';
 };
 const launchProfile = resolveLaunchProfile();
@@ -139,7 +143,7 @@ const expoUpdatesConfig = disableUpdatesForLocalSimulator || !otaUpdatesEnabled
             : undefined,
     };
 const pilotControlled =
-    launchProfile === 'pilot_controlled' ||
+    ['pilot_controlled', 'geofence_validation', 'ride_flow_validation'].includes(launchProfile) ||
     normalizeFlag(firstDefined(process.env.EXPO_PUBLIC_PILOT_CONTROLLED, process.env.LEAF_PILOT_CONTROLLED), false);
 const resolvePilotFeature = (publicKey, privateKey, enabledOutsidePilot = true) => {
     const fallback = pilotControlled ? false : enabledOutsidePilot;

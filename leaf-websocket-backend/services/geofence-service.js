@@ -163,7 +163,7 @@ const isPilotControlledLaunch = () => {
     const launchProfile = String(process.env.LEAF_LAUNCH_PROFILE || '').trim().toLowerCase();
     return (
         isTruthy(process.env.LEAF_PILOT_CONTROLLED) ||
-        ['pilot', 'pilot_controlled', 'controlled_pilot', 'geofence_validation'].includes(launchProfile)
+        ['pilot', 'pilot_controlled', 'controlled_pilot', 'geofence_validation', 'ride_flow_validation'].includes(launchProfile)
     );
 };
 

@@ -14,6 +14,9 @@ const {
     getOperationsPolicyRadiusKm
 } = require('../utils/dispatch-config');
 const { normalizeOperationalCarType } = require('../utils/operational-car-type');
+const {
+    evaluateRideFlowValidationPaymentBinding
+} = require('../services/ride-flow-validation-guard');
 
 function normalizeText(value) {
     return String(value || '').trim();
@@ -1126,6 +1129,19 @@ function registerSocketCreateBookingHandler({
                         return;
                     }
                     paymentIntentBinding = paymentIntentValidation.binding || {};
+                    const rideFlowValidationGuard = evaluateRideFlowValidationPaymentBinding(
+                        paymentIntentBinding
+                    );
+                    if (!rideFlowValidationGuard.allowed) {
+                        socket.emit('bookingError', {
+                            error: 'Pagamento sandbox obrigatório',
+                            message: rideFlowValidationGuard.message,
+                            code: rideFlowValidationGuard.code,
+                            retryAfterSec: 0
+                        });
+                        recordFailure('active_guard', rideFlowValidationGuard.code);
+                        return;
+                    }
                     if (
                         (!Number.isFinite(resolvedPaymentAmountInCents) || resolvedPaymentAmountInCents <= 0) &&
                         Number.isFinite(paymentIntentBinding.payableAmountInCents) &&

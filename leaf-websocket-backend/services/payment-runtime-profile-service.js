@@ -276,6 +276,7 @@ class PaymentRuntimeProfileService {
       expiresAtIso: toIso(selected.expiresAtIso || selected.expiresAt),
       startsAtIso: toIso(selected.startsAtIso || selected.startsAt),
       priority: Number(selected.priority || 0),
+      testUserSandbox: selected.testUserSandbox === true,
       wooviConfig
     };
   }
