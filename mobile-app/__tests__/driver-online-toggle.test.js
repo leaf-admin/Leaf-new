@@ -98,6 +98,7 @@ jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
     PASSENGER_HOME_CARD_METRICS: {
       horizontalInset: 24,
       bottomOffset: 16,
+      categoryBottomOffset: 41,
       height: 142,
       borderRadius: 28,
     },

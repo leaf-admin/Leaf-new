@@ -5,6 +5,7 @@ import {
   resolveNavigationCameraPitch,
   resolveNavigationCameraZoom,
   resolveCurrentNavigationStepIndex,
+  shouldRevealNavigationRoute,
 } from '../src/services/LeafNativeNavigationEngine';
 
 const routeCoordinates = [
@@ -217,11 +218,52 @@ describe('LeafNativeNavigationEngine', () => {
       totalDurationMinutes: 3,
     });
 
-    expect(stoppedState.cameraZoom).toBe(17.8);
+    expect(stoppedState.cameraZoom).toBeGreaterThan(fastState.cameraZoom);
+    expect(stoppedState.cameraZoom).toBeGreaterThan(16);
     expect(stoppedState.cameraPitch).toBe(42);
     expect(fastState.currentSpeedKmh).toBe(72);
-    expect(fastState.cameraZoom).toBe(15);
+    expect(fastState.cameraZoom).toBeGreaterThanOrEqual(15);
     expect(fastState.cameraPitch).toBe(55);
+  });
+
+  it('zooms in progressively as the remaining route becomes shorter', () => {
+    const farZoom = resolveNavigationCameraZoom(30, 5000, 5000);
+    const middleZoom = resolveNavigationCameraZoom(30, 1500, 5000);
+    const nearZoom = resolveNavigationCameraZoom(30, 250, 5000);
+    const arrivalZoom = resolveNavigationCameraZoom(30, 40, 5000);
+
+    expect(middleZoom).toBeGreaterThan(farZoom);
+    expect(nearZoom).toBeGreaterThan(middleZoom);
+    expect(arrivalZoom).toBeGreaterThan(nearZoom);
+  });
+
+  it('reveals each new pickup or destination route exactly once per navigation phase', () => {
+    const pickupKey = 'booking_nav_reveal:pickup:accepted';
+    const destinationKey = 'booking_nav_reveal:destination:started';
+
+    expect(shouldRevealNavigationRoute({
+      navigationKey: pickupKey,
+      status: 'accepted',
+      routeCoordinates,
+    })).toBe(true);
+    expect(shouldRevealNavigationRoute({
+      lastRevealedNavigationKey: pickupKey,
+      navigationKey: pickupKey,
+      status: 'accepted',
+      routeCoordinates,
+    })).toBe(false);
+    expect(shouldRevealNavigationRoute({
+      lastRevealedNavigationKey: pickupKey,
+      navigationKey: destinationKey,
+      status: 'started',
+      routeCoordinates,
+    })).toBe(true);
+    expect(shouldRevealNavigationRoute({
+      lastRevealedNavigationKey: pickupKey,
+      navigationKey: destinationKey,
+      status: 'arrived',
+      routeCoordinates,
+    })).toBe(false);
   });
 
   it('uses step geometry for off-route checks when polyline coordinates are unavailable', () => {

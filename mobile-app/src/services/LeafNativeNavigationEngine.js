@@ -6,6 +6,10 @@ export const NAVIGATION_CAMERA_ANCHOR_Y = 0.68;
 export const NAVIGATION_CAMERA_ANIMATION_MS = 800;
 export const NAVIGATION_CAMERA_MOVING_PITCH = 55;
 export const NAVIGATION_CAMERA_IDLE_PITCH = 42;
+const NAVIGATION_CAMERA_MIN_ROUTE_ZOOM = 15.2;
+const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 18.2;
+const NAVIGATION_CAMERA_NEAR_TARGET_METERS = 60;
+const NAVIGATION_CAMERA_MIN_ROUTE_REFERENCE_METERS = 1200;
 
 function toFiniteNumber(value) {
   const numeric = Number(value);
@@ -70,19 +74,98 @@ function normalizeNavigationSpeedKmh({
   return 0;
 }
 
-export function resolveNavigationCameraZoom(speedKmh = 0) {
+function resolveNavigationSpeedZoomOutPenalty(speedKmh = 0) {
   const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
 
   if (normalizedSpeed <= 20) {
-    return 17.8;
+    return 0;
   }
   if (normalizedSpeed <= 40) {
-    return 17;
+    return 0.25;
   }
   if (normalizedSpeed <= 70) {
-    return 16;
+    return 0.55;
   }
-  return 15;
+  return 0.8;
+}
+
+export function resolveNavigationCameraZoom(
+  speedKmh = 0,
+  remainingDistanceMeters = null,
+  totalDistanceMeters = null,
+) {
+  const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
+  const hasRemainingDistance =
+    remainingDistanceMeters !== null &&
+    remainingDistanceMeters !== undefined &&
+    remainingDistanceMeters !== '';
+  const remainingMeters = Number(remainingDistanceMeters);
+
+  if (!hasRemainingDistance || !Number.isFinite(remainingMeters) || remainingMeters < 0) {
+    if (normalizedSpeed <= 20) {
+      return 17.8;
+    }
+    if (normalizedSpeed <= 40) {
+      return 17;
+    }
+    if (normalizedSpeed <= 70) {
+      return 16;
+    }
+    return 15;
+  }
+
+  const totalMeters = Number(totalDistanceMeters);
+  const routeReferenceMeters = Math.max(
+    NAVIGATION_CAMERA_MIN_ROUTE_REFERENCE_METERS,
+    remainingMeters,
+    Number.isFinite(totalMeters) && totalMeters > 0 ? totalMeters : 0,
+  );
+  const clampedRemainingMeters = Math.max(
+    NAVIGATION_CAMERA_NEAR_TARGET_METERS,
+    Math.min(routeReferenceMeters, remainingMeters),
+  );
+  const logarithmicRange = Math.log(
+    routeReferenceMeters / NAVIGATION_CAMERA_NEAR_TARGET_METERS,
+  );
+  const routeProgress = logarithmicRange > 0
+    ? 1 - (
+        Math.log(clampedRemainingMeters / NAVIGATION_CAMERA_NEAR_TARGET_METERS) /
+        logarithmicRange
+      )
+    : 1;
+  const distanceZoom =
+    NAVIGATION_CAMERA_MIN_ROUTE_ZOOM +
+    (NAVIGATION_CAMERA_MAX_ROUTE_ZOOM - NAVIGATION_CAMERA_MIN_ROUTE_ZOOM) *
+      Math.max(0, Math.min(1, routeProgress));
+  const speedAdjustedZoom =
+    distanceZoom - resolveNavigationSpeedZoomOutPenalty(normalizedSpeed);
+
+  return Number(
+    Math.max(
+      15,
+      Math.min(NAVIGATION_CAMERA_MAX_ROUTE_ZOOM, speedAdjustedZoom),
+    ).toFixed(2),
+  );
+}
+
+export function shouldRevealNavigationRoute({
+  lastRevealedNavigationKey = '',
+  navigationKey = '',
+  status = '',
+  routeCoordinates = [],
+} = {}) {
+  const normalizedKey = String(navigationKey || '').trim();
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  const validRouteCoordinateCount = Array.isArray(routeCoordinates)
+    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean).length
+    : 0;
+
+  return Boolean(
+    normalizedKey &&
+      normalizedKey !== String(lastRevealedNavigationKey || '').trim() &&
+      ['accepted', 'started'].includes(normalizedStatus) &&
+      validRouteCoordinateCount >= 2
+  );
 }
 
 export function resolveNavigationCameraPitch(speedKmh = 0) {
@@ -914,11 +997,16 @@ export function buildLeafNativeNavigationState({
     maneuverDistanceTargetKind: upcomingTarget.distanceTargetKind,
     maneuverDistanceTargetLabel: upcomingTarget.distanceTargetLabel,
     remainingDistanceMeters: remainingMeters,
+    totalDistanceMeters: baselineMeters,
     remainingDistanceLabel: formatDistanceLabel(remainingMeters),
     remainingDurationMinutes,
     etaLabel: formatEtaLabel(remainingDurationMinutes),
     cameraHeadingDegrees,
-    cameraZoom: resolveNavigationCameraZoom(normalizedSpeedKmh),
+    cameraZoom: resolveNavigationCameraZoom(
+      normalizedSpeedKmh,
+      remainingMeters,
+      baselineMeters,
+    ),
     cameraPitch: resolveNavigationCameraPitch(normalizedSpeedKmh),
     cameraAnchorY: NAVIGATION_CAMERA_ANCHOR_Y,
     cameraAnimationDurationMs: NAVIGATION_CAMERA_ANIMATION_MS,
@@ -938,6 +1026,7 @@ export default {
   calculateNavigationDistanceMeters,
   resolveNavigationCameraPitch,
   resolveNavigationCameraZoom,
+  shouldRevealNavigationRoute,
   normalizeNavigationCoordinate,
   normalizeNavigationSteps,
   resolveCurrentNavigationStepIndex,

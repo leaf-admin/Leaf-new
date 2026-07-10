@@ -90,6 +90,7 @@ import {
   NAVIGATION_CAMERA_ANIMATION_MS,
   resolveNavigationCameraPitch,
   resolveNavigationCameraZoom,
+  shouldRevealNavigationRoute,
 } from '../../services/LeafNativeNavigationEngine';
 import {
   buildPrototypeConnectionIndicatorModel,
@@ -208,6 +209,7 @@ const HOME_AUTOMATION_POLL_MS = 350;
 const HOME_AUTOMATION_WATCHDOG_MS = 250;
 const LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS = 800;
 const LEAF_NATIVE_NAV_MANUAL_PAN_PAUSE_MS = 8000;
+const LEAF_NATIVE_NAV_ROUTE_REVEAL_MS = 1600;
 const LEAF_NATIVE_NAV_CAMERA_MIN_LOOKAHEAD_KM = 0.045;
 const LEAF_NATIVE_NAV_CAMERA_MAX_LOOKAHEAD_KM = 0.28;
 const MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
@@ -1526,6 +1528,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const lastRouteLayoutKeyRef = useRef('');
   const lastNativeNavigationCameraAtRef = useRef(0);
   const lastNativeNavigationHeadingRef = useRef(null);
+  const lastNativeNavigationRouteRevealKeyRef = useRef('');
+  const nativeNavigationRouteRevealTimerRef = useRef(null);
   const lastManualMapPanAtRef = useRef(0);
   const wasSearchingRef = useRef(false);
   const lastSearchRadiusRef = useRef(null);
@@ -1547,6 +1551,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   );
   const [connectionIndicatorArmed, setConnectionIndicatorArmed] = useState(false);
   const [hiddenNativeNavigationKey, setHiddenNativeNavigationKey] = useState('');
+  const [nativeNavigationRouteRevealKey, setNativeNavigationRouteRevealKey] =
+    useState('');
   const [liveDriverAutomationCommand, setLiveDriverAutomationCommand] = useState(
     () => latestPrototypeHomeAutomationPayload.driverAutomationCommand
   );
@@ -5661,12 +5667,92 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     lastNativeNavigationHeadingRef.current = null;
   }, [leafNativeNavigationKey]);
 
+  useEffect(() => () => {
+    if (nativeNavigationRouteRevealTimerRef.current) {
+      clearTimeout(nativeNavigationRouteRevealTimerRef.current);
+      nativeNavigationRouteRevealTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const navigationRouteCoordinates = Array.isArray(
+      driverTripAssistNativeNavigation?.routeCoordinates,
+    )
+      ? driverTripAssistNativeNavigation.routeCoordinates
+      : [];
+    const shouldRevealRoute = shouldRevealNavigationRoute({
+      lastRevealedNavigationKey:
+        lastNativeNavigationRouteRevealKeyRef.current,
+      navigationKey: leafNativeNavigationKey,
+      status: driverTripAssistNativeNavigation?.status,
+      routeCoordinates: navigationRouteCoordinates,
+    });
+
+    if (
+      !shouldRevealRoute ||
+      !showLeafNativeNavigation ||
+      !mapRef.current ||
+      !homeMapInteractiveReady ||
+      isSearchingMode ||
+      shouldFreezeBackgroundMapCamera
+    ) {
+      return;
+    }
+
+    lastNativeNavigationRouteRevealKeyRef.current = leafNativeNavigationKey;
+    lastNativeNavigationCameraAtRef.current = Date.now();
+    setNativeNavigationRouteRevealKey(leafNativeNavigationKey);
+    if (nativeNavigationRouteRevealTimerRef.current) {
+      clearTimeout(nativeNavigationRouteRevealTimerRef.current);
+    }
+
+    focusRoute(
+      {
+        ...activeRoute,
+        coordinates: navigationRouteCoordinates,
+        destination:
+          driverTripAssistNativeNavigation?.targetCoordinate ||
+          activeRoute?.destination ||
+          null,
+      },
+      true,
+    );
+    appendPrototypeRuntimeDebugStep('leaf_native_camera_route_reveal', {
+      key: leafNativeNavigationKey,
+      phase: driverTripAssistNativeNavigation?.phase || null,
+      status: driverTripAssistNativeNavigation?.status || null,
+      routePointCount: navigationRouteCoordinates.length,
+      revealMs: LEAF_NATIVE_NAV_ROUTE_REVEAL_MS,
+    });
+
+    nativeNavigationRouteRevealTimerRef.current = setTimeout(() => {
+      setNativeNavigationRouteRevealKey(previousKey => (
+        previousKey === leafNativeNavigationKey ? '' : previousKey
+      ));
+      lastNativeNavigationCameraAtRef.current = 0;
+      nativeNavigationRouteRevealTimerRef.current = null;
+    }, LEAF_NATIVE_NAV_ROUTE_REVEAL_MS);
+  }, [
+    activeRoute,
+    driverTripAssistNativeNavigation?.phase,
+    driverTripAssistNativeNavigation?.routeCoordinates,
+    driverTripAssistNativeNavigation?.status,
+    driverTripAssistNativeNavigation?.targetCoordinate,
+    focusRoute,
+    homeMapInteractiveReady,
+    isSearchingMode,
+    leafNativeNavigationKey,
+    shouldFreezeBackgroundMapCamera,
+    showLeafNativeNavigation,
+  ]);
+
   useEffect(() => {
     if (
       !showLeafNativeNavigation ||
       !mapRef.current ||
       !homeMapInteractiveReady ||
       !activeDriverNavigationCoordinate ||
+      nativeNavigationRouteRevealKey === leafNativeNavigationKey ||
       isSearchingMode ||
       shouldFreezeBackgroundMapCamera
     ) {
@@ -5691,7 +5777,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const navigationSpeedKmh = Number(driverTripAssistNativeNavigation?.currentSpeedKmh);
     const resolvedCameraZoom = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraZoom))
       ? Number(driverTripAssistNativeNavigation.cameraZoom)
-      : resolveNavigationCameraZoom(navigationSpeedKmh);
+      : resolveNavigationCameraZoom(
+          navigationSpeedKmh,
+          driverTripAssistNativeNavigation?.remainingDistanceMeters,
+          driverTripAssistNativeNavigation?.totalDistanceMeters,
+        );
     const resolvedCameraPitch = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraPitch))
       ? Number(driverTripAssistNativeNavigation.cameraPitch)
       : resolveNavigationCameraPitch(navigationSpeedKmh);
@@ -5757,11 +5847,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverTripAssistNativeNavigation?.cameraPitch,
     driverTripAssistNativeNavigation?.cameraZoom,
     driverTripAssistNativeNavigation?.currentSpeedKmh,
+    driverTripAssistNativeNavigation?.remainingDistanceMeters,
+    driverTripAssistNativeNavigation?.totalDistanceMeters,
     homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationCameraHeading,
     leafNativeNavigationKey,
     mapHeight,
+    nativeNavigationRouteRevealKey,
     shouldFreezeBackgroundMapCamera,
     showLeafNativeNavigation,
   ]);
