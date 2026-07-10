@@ -16,6 +16,11 @@ jest.mock('../../../services/health-check-service', () => ({
 }));
 
 jest.mock('../../../utils/logger', () => ({
+  logger: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn()
+  },
   logStructured: jest.fn(),
   logError: jest.fn()
 }));
@@ -73,6 +78,56 @@ describe('health runtime flags route', () => {
     );
     expect(response.body.realSandbox.ready).toBe(true);
     expect(response.body.realSandbox.blockers).toEqual([]);
+  });
+
+  it('fails production readiness when gateway role dependencies are incomplete', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.RUNTIME_ROLE = 'gateway';
+    process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
+    process.env.PILOT_ALLOWED_PASSENGER_IDS = 'passenger-1';
+    process.env.PILOT_ALLOWED_DRIVER_IDS = 'driver-1';
+    const geofenceService = require('../../../services/geofence-service');
+    const previousRegion = geofenceService.allowedRegion;
+    const previousRegionSource = geofenceService.regionSource;
+    geofenceService.allowedRegion = null;
+    geofenceService.regionSource = 'none';
+    delete process.env.WOOVI_API_TOKEN;
+    delete process.env.LEAF_PIX_KEY;
+    delete process.env.KYC_PRODUCTION_BIOMETRICS_ENABLED;
+
+    const response = await request(createApp()).get('/health/readiness');
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      status: 'not-ready',
+      runtimeRole: 'gateway',
+      enforced: true,
+      ready: false
+    });
+    expect(response.body.failedDependencies).toEqual(expect.arrayContaining([
+      'paymentProviderConfigured',
+      'kycStrict',
+      'geofenceAvailable'
+    ]));
+
+    geofenceService.allowedRegion = previousRegion;
+    geofenceService.regionSource = previousRegionSource;
+  });
+
+  it('keeps non-production readiness scoped to live quick health', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.RUNTIME_ROLE = 'gateway';
+    delete process.env.WOOVI_API_TOKEN;
+    delete process.env.GOOGLE_MAPS_API_KEY;
+
+    const response = await request(createApp()).get('/health/readiness');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      status: 'ready',
+      enforced: false,
+      ready: true
+    });
   });
 
   it('reports runtime role and app version in runtime section', async () => {

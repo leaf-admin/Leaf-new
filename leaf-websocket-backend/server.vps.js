@@ -266,6 +266,7 @@ const authTokenVerifyInFlight = new Map();
 const integratedKYCService = new IntegratedKYCService();
 const paymentServiceSingleton = new PaymentService();
 const paymentDispatchService = require('./services/payment-dispatch-service');
+const { evaluatePilotAccess } = require('./services/pilot-access-control-service');
 const {
     getRideLifecycleFeatureFlags,
     isRideExtensionFlowEnabled,
@@ -3675,9 +3676,19 @@ io.on('connection', async (socket) => {
     // REGISTRAR IMEDIATAMENTE PARA NÃO PERDER EVENTOS DO CLIENTE
     socket.on('registerFCMToken', async (data) => {
         try {
-            logStructured('info', `Token FCM registrado`, { service: 'registerFCMToken', userId: data.userId, userType: data.userType, platform: data.platform });
-
-            const { userId, userType, fcmToken, platform, timestamp } = data;
+            const payload = data || {};
+            const { fcmToken, platform, deviceId } = payload;
+            const isAuthenticated = Boolean(socket.userId);
+            const effectiveUserId = isAuthenticated ? socket.userId : `temp_${socket.id}`;
+            const effectiveUserType = isAuthenticated ? (socket.userType || 'customer') : 'temporary';
+            logStructured('info', 'Token FCM registrado', {
+                service: 'registerFCMToken',
+                socketId: socket.id,
+                authenticated: isAuthenticated,
+                userId: isAuthenticated ? socket.userId : null,
+                userType: isAuthenticated ? socket.userType : null,
+                platform
+            });
 
             if (!fcmToken) {
                 logStructured('error', `Token FCM não fornecido`, { service: 'registerFCMToken' });
@@ -3685,30 +3696,19 @@ io.on('connection', async (socket) => {
                 return;
             }
 
-            const effectiveUserId = userId || `temp_${socket.id}`;
-            const effectiveUserType = userType || 'customer';
-
-            if (!userId) {
-                logStructured('warn', `Token FCM registrado sem userId, usando temporário`, { service: 'registerFCMToken', effectiveUserId });
-            }
-
             const redis = redisPool.getConnection();
+            const legacyKey = isAuthenticated && effectiveUserType === 'driver'
+                ? `driver:${effectiveUserId}`
+                : `user:${effectiveUserId}`;
 
-            if (effectiveUserType === 'driver') {
-                await redis.hset(`driver:${effectiveUserId}`, {
-                    fcmToken: fcmToken,
-                    fcmTokenUpdated: new Date().toISOString(),
-                    fcmPlatform: platform || 'unknown',
-                    isTemporary: (!userId).toString()
-                });
-            } else {
-                await redis.hset(`user:${effectiveUserId}`, {
-                    fcmToken: fcmToken,
-                    fcmTokenUpdated: new Date().toISOString(),
-                    fcmPlatform: platform || 'unknown',
-                    isTemporary: (!userId).toString()
-                });
-            }
+            await redis.hset(legacyKey, {
+                fcmToken,
+                fcmTokenUpdated: new Date().toISOString(),
+                fcmPlatform: platform || 'unknown',
+                fcmDeviceId: String(deviceId || '').trim(),
+                isTemporary: (!isAuthenticated).toString(),
+                socketId: socket.id
+            });
 
             try {
                 if (!fcmService.isServiceAvailable()) {
@@ -3719,8 +3719,11 @@ io.on('connection', async (socket) => {
 
                 const saved = await fcmService.saveUserFCMToken(effectiveUserId, effectiveUserType, fcmToken, {
                     platform,
-                    isTemporary: !userId,
-                    socketId: socket.id
+                    deviceId: String(deviceId || '').trim() || null,
+                    isTemporary: !isAuthenticated,
+                    socketId: socket.id,
+                    authenticated: isAuthenticated,
+                    authenticatedAt: isAuthenticated ? new Date().toISOString() : null
                 });
             } catch (fcmError) {
                 logStructured('error', 'Erro ao salvar token no FCMService', { service: 'websocket', operation: 'registerFCMToken', error: fcmError.message });
@@ -3732,18 +3735,22 @@ io.on('connection', async (socket) => {
                 message: 'Token FCM registrado com sucesso'
             });
         } catch (error) {
-            logError(error, 'Erro ao registrar token FCM', { service: 'registerFCMToken', userId: data.userId });
+            logError(error, 'Erro ao registrar token FCM', { service: 'registerFCMToken', userId: socket.userId || null });
             socket.emit('fcmTokenError', { error: 'Erro interno do servidor: ' + error.message });
         }
     });
 
     socket.on('unregisterFCMToken', async (data) => {
         try {
-            const { userId, fcmToken } = data;
-            if (!userId || !fcmToken) return;
-            const redis = redisPool.getConnection();
-            await fcmService.removeUserFCMToken(userId, fcmToken);
-            socket.emit('fcmTokenUnregistered', { success: true });
+            const payload = data || {};
+            const { fcmToken } = payload;
+            if (!fcmToken) {
+                socket.emit('fcmTokenError', { error: 'Token FCM não fornecido' });
+                return;
+            }
+            const effectiveUserId = socket.userId || `temp_${socket.id}`;
+            await fcmService.removeUserFCMToken(effectiveUserId, fcmToken);
+            socket.emit('fcmTokenUnregistered', { success: true, userId: effectiveUserId });
         } catch (error) {
             logError(error, 'Erro ao desregistrar token FCM', { service: 'unregisterFCMToken' });
         }
@@ -4775,6 +4782,26 @@ io.on('connection', async (socket) => {
                     // ✅ NOVO: Rate Limiting
                     const userId = socket.userId || data.customerId || socket.id;
                     const metadata = getSocketMetadata(socket);
+                    const pilotAccess = evaluatePilotAccess({
+                        userId,
+                        role: 'passenger',
+                        operation: 'booking'
+                    });
+                    if (!pilotAccess.allowed) {
+                        emitBookingError({
+                            error: pilotAccess.message,
+                            message: pilotAccess.message,
+                            code: pilotAccess.code,
+                            retryable: pilotAccess.retryable === true
+                        }, pilotAccess.code);
+                        logStructured('warn', 'createBooking bloqueado pelo controle do piloto', {
+                            userId,
+                            eventType: 'createBooking',
+                            code: pilotAccess.code
+                        });
+                        return;
+                    }
+
                     const rateLimitCheck = await rateLimiterService.checkRateLimit(userId, 'createBooking', {
                         ip: metadata.ip
                     });
@@ -9893,6 +9920,28 @@ io.on('connection', async (socket) => {
             // ✅ FASE 0: Verificar se motorista está bloqueado por KYC
             const newIsOnline = isOnline !== undefined ? isOnline : (status === 'online' || status === 'available');
             if (newIsOnline) {
+                const pilotAccess = evaluatePilotAccess({
+                    userId: driverId,
+                    role: 'driver',
+                    operation: 'driver_online'
+                });
+                if (!pilotAccess.allowed) {
+                    logStructured('warn', 'Motorista fora do cohort tentou ficar online no piloto', {
+                        service: 'websocket',
+                        operation: 'setDriverStatus',
+                        driverId,
+                        code: pilotAccess.code,
+                        socketId: socket.id
+                    });
+                    emitDriverStatusError({
+                        error: pilotAccess.message,
+                        reason: pilotAccess.message,
+                        code: pilotAccess.code,
+                        retryable: pilotAccess.retryable === true
+                    }, pilotAccess.code);
+                    return;
+                }
+
                 try {
                     const kycDriverStatusService = require('./services/kyc-driver-status-service');
                     const canWork = await kycDriverStatusService.canDriverWork(driverId);

@@ -29,7 +29,7 @@ function resolveLaunchProfile() {
 
 function isPilotControlledLaunch() {
   return (
-    resolveLaunchProfile() === 'pilot_controlled' ||
+    ['pilot_controlled', 'geofence_validation'].includes(resolveLaunchProfile()) ||
     normalizeFlag(firstDefined(process.env.LEAF_PILOT_CONTROLLED, process.env.EXPO_PUBLIC_PILOT_CONTROLLED), false)
   );
 }
@@ -80,5 +80,6 @@ module.exports = {
   getPilotLaunchFlags,
   isPilotControlledLaunch,
   isLaunchFeatureEnabled,
-  buildLaunchFeatureDisabledPayload
+  buildLaunchFeatureDisabledPayload,
+  resolveLaunchProfile
 };

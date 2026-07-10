@@ -1,6 +1,11 @@
 const winston = require('winston');
 const path = require('path');
 const traceContext = require('./trace-context');
+const {
+  redactSensitiveText,
+  redactSensitiveValue,
+  redactLogInfoInPlace
+} = require('./log-redaction');
 
 // Configuração de cores para diferentes níveis
 const colors = {
@@ -20,6 +25,8 @@ const logFormat = winston.format.combine(
   }),
   winston.format.errors({ stack: true }),
   winston.format((info) => {
+    redactLogInfoInPlace(info);
+
     // Adicionar traceId automaticamente se não estiver presente
     if (!info.traceId) {
       const currentTraceId = traceContext.getCurrentTraceId();
@@ -177,49 +184,49 @@ const securityLogger = winston.createLogger({
 
 // Funções de logging específicas
 const logWebSocket = (level, message, meta = {}) => {
-  websocketLogger.log(level, message, {
+  websocketLogger.log(level, redactSensitiveText(message), redactSensitiveValue({
     service: 'websocket',
     ...meta
-  });
+  }));
 };
 
 const logRedis = (level, message, meta = {}) => {
   const traceId = traceContext.getCurrentTraceId();
-  redisLogger.log(level, message, {
+  redisLogger.log(level, redactSensitiveText(message), redactSensitiveValue({
     service: 'redis',
     traceId,
     ...meta
-  });
+  }));
 };
 
 const logSecurity = (level, message, meta = {}) => {
-  securityLogger.log(level, message, {
+  securityLogger.log(level, redactSensitiveText(message), redactSensitiveValue({
     service: 'security',
     ...meta
-  });
+  }));
 };
 
 // Função para log de performance (com traceId e latency)
 const logPerformance = (operation, duration, meta = {}) => {
   const traceId = traceContext.getCurrentTraceId();
-  logger.info(`Performance: ${operation}`, {
+  logger.info(redactSensitiveText(`Performance: ${operation}`), redactSensitiveValue({
     duration: `${duration}ms`,
     latency_ms: duration,
     operation,
     traceId,
     ...meta
-  });
+  }));
 };
 
 // Função para log de erro com contexto
 const logError = (error, context = {}) => {
   const traceId = traceContext.getCurrentTraceId();
-  logger.error(error.message, {
+  logger.error(redactSensitiveText(error.message), redactSensitiveValue({
     stack: error.stack,
     context,
     traceId,
     timestamp: new Date().toISOString()
-  });
+  }));
 };
 
 // Função para log estruturado (padrão Uber/99)
@@ -232,42 +239,42 @@ const logStructured = (level, message, meta = {}) => {
     ...meta
   };
   
-  logger.log(level, message, structuredMeta);
+  logger.log(level, redactSensitiveText(message), redactSensitiveValue(structuredMeta));
 };
 
 // Função para log de command
 const logCommand = (commandName, success, latency, meta = {}) => {
   const traceId = traceContext.getCurrentTraceId();
-  logger.info(`Command: ${commandName}`, {
+  logger.info(redactSensitiveText(`Command: ${commandName}`), redactSensitiveValue({
     command: commandName,
     success: success,
     latency_ms: latency,
     traceId,
     ...meta
-  });
+  }));
 };
 
 // Função para log de event
 const logEvent = (eventType, action, meta = {}) => {
   const traceId = traceContext.getCurrentTraceId();
-  logger.info(`Event: ${eventType} - ${action}`, {
+  logger.info(redactSensitiveText(`Event: ${eventType} - ${action}`), redactSensitiveValue({
     eventType,
     action,
     traceId,
     ...meta
-  });
+  }));
 };
 
 // Função para log de listener
 const logListener = (listenerName, result, latency, meta = {}) => {
   const traceId = traceContext.getCurrentTraceId();
-  logger.info(`Listener: ${listenerName}`, {
+  logger.info(redactSensitiveText(`Listener: ${listenerName}`), redactSensitiveValue({
     listener: listenerName,
     success: result !== false,
     latency_ms: latency,
     traceId,
     ...meta
-  });
+  }));
 };
 
 module.exports = {
@@ -284,4 +291,4 @@ module.exports = {
   logCommand,
   logEvent,
   logListener
-}; 
+};

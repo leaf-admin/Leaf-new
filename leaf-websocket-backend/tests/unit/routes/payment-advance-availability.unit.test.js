@@ -1,4 +1,10 @@
 process.env.JWT_SECRET = 'test-secret';
+const originalPilotEnv = {
+  LEAF_LAUNCH_PROFILE: process.env.LEAF_LAUNCH_PROFILE,
+  LEAF_PILOT_CONTROLLED: process.env.LEAF_PILOT_CONTROLLED,
+  PILOT_ALLOWED_PASSENGER_IDS: process.env.PILOT_ALLOWED_PASSENGER_IDS,
+  LEAF_ACCEPT_NEW_PIX: process.env.LEAF_ACCEPT_NEW_PIX
+};
 
 jest.unmock('express');
 
@@ -121,6 +127,10 @@ function buildAvailableDriver(overrides = {}) {
 
 describe('payment advance availability guard', () => {
   beforeEach(() => {
+    process.env.LEAF_LAUNCH_PROFILE = 'full';
+    delete process.env.LEAF_PILOT_CONTROLLED;
+    delete process.env.PILOT_ALLOWED_PASSENGER_IDS;
+    delete process.env.LEAF_ACCEPT_NEW_PIX;
     mockVerifyIdToken.mockReset();
     mockProcessAdvancePayment.mockReset();
     mockHasPaymentEligibleDriver.mockReset();
@@ -143,6 +153,54 @@ describe('payment advance availability guard', () => {
       uid: 'passenger-1',
       phone_number: '+5521102938475'
     });
+  });
+
+  afterAll(() => {
+    Object.entries(originalPilotEnv).forEach(([key, value]) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    });
+  });
+
+  it('blocks Pix before availability/provider calls when passenger is outside the pilot cohort', async () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
+    process.env.PILOT_ALLOWED_PASSENGER_IDS = 'passenger-allowed';
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .set('Authorization', 'Bearer passenger-token')
+      .send(validPaymentPayload);
+
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'PILOT_COHORT_ACCESS_DENIED',
+      retryable: false
+    });
+    expect(mockHasPaymentEligibleDriver).not.toHaveBeenCalled();
+    expect(mockProcessAdvancePayment).not.toHaveBeenCalled();
+  });
+
+  it('stops new Pix with the payment kill switch before provider calls', async () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
+    process.env.PILOT_ALLOWED_PASSENGER_IDS = 'passenger-1';
+    process.env.LEAF_ACCEPT_NEW_PIX = 'false';
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .set('Authorization', 'Bearer passenger-token')
+      .send(validPaymentPayload);
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'NEW_PIX_PAUSED',
+      retryable: true
+    });
+    expect(mockHasPaymentEligibleDriver).not.toHaveBeenCalled();
+    expect(mockProcessAdvancePayment).not.toHaveBeenCalled();
   });
 
   it('blocks Pix creation when no eligible driver is available', async () => {

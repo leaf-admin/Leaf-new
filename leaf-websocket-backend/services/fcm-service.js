@@ -1,10 +1,18 @@
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 const Redis = require('ioredis');
 const { logger, logStructured } = require('../utils/logger');
 const path = require('path');
 const circuitBreakerService = require('./circuit-breaker-service');
 const traceContext = require('../utils/trace-context');
 const RideLiveActivityService = require('./ride-live-activity-service');
+const { metrics } = require('../utils/prometheus-metrics');
+
+function fingerprintToken(value) {
+    const token = String(value || '').trim();
+    if (!token) return null;
+    return crypto.createHash('sha256').update(token).digest('hex').slice(0, 12);
+}
 
 class FCMService {
     constructor(redis = null) {
@@ -206,7 +214,12 @@ class FCMService {
                         activeTokens.push(tokenData);
                     }
                 } catch (parseError) {
-                    logger.warn(`Erro ao fazer parse do token ${token}:`, parseError);
+                    logStructured('warn', 'Erro ao fazer parse de token FCM', {
+                        service: 'fcm',
+                        operation: 'getUserFCMTokens',
+                        tokenFingerprint: fingerprintToken(token),
+                        error: parseError.message
+                    });
                 }
             }
 
@@ -313,6 +326,7 @@ class FCMService {
     async sendNotificationToUser(userId, notification) {
         try {
             if (!this.isServiceAvailable()) {
+                metrics.recordOperationalEvent?.('fcm', 'send', 'service_unavailable');
                 logStructured('warn', 'FCM Service não disponível', {
                     service: 'fcm',
                     operation: 'sendNotificationToUser',
@@ -323,6 +337,7 @@ class FCMService {
 
             // Verificar rate limiting
             if (!this.checkRateLimit(userId)) {
+                metrics.recordOperationalEvent?.('fcm', 'send', 'rate_limited');
                 logStructured('warn', 'Rate limit excedido', {
                     service: 'fcm',
                     operation: 'sendNotificationToUser',
@@ -335,6 +350,7 @@ class FCMService {
             const userTokens = await this.resolveUserTokens(userId);
 
             if (userTokens.length === 0) {
+                metrics.recordOperationalEvent?.('fcm', 'send', 'no_token');
                 logStructured('warn', 'Usuário não possui tokens FCM ativos', {
                     service: 'fcm',
                     operation: 'sendNotificationToUser',
@@ -349,7 +365,7 @@ class FCMService {
                 try {
                     const result = await this.sendToToken(tokenData.fcmToken, notification);
                     results.push({
-                        token: tokenData.fcmToken,
+                        tokenFingerprint: fingerprintToken(tokenData.fcmToken),
                         success: result.success,
                         messageId: result.messageId,
                         error: result.error
@@ -362,7 +378,7 @@ class FCMService {
                         error: error.message
                     });
                     results.push({
-                        token: tokenData.fcmToken,
+                        tokenFingerprint: fingerprintToken(tokenData.fcmToken),
                         success: false,
                         error: error.message
                     });
@@ -370,6 +386,11 @@ class FCMService {
             }
 
             const successCount = results.filter(r => r.success).length;
+            metrics.recordOperationalEvent?.(
+                'fcm',
+                'send',
+                successCount > 0 ? 'success' : 'failure'
+            );
             logStructured('info', 'Notificação enviada para usuário', {
                 service: 'fcm',
                 operation: 'sendNotificationToUser',
@@ -389,6 +410,7 @@ class FCMService {
             };
 
         } catch (error) {
+            metrics.recordOperationalEvent?.('fcm', 'send', 'exception');
             logStructured('error', 'Erro ao enviar notificação para usuário', {
                 service: 'fcm',
                 operation: 'sendNotificationToUser',
@@ -494,7 +516,12 @@ class FCMService {
                 }
             );
 
-            logger.info(`✅ Notificação enviada para token ${fcmToken}: ${response}`);
+            logStructured('info', 'Notificação FCM enviada', {
+                service: 'fcm',
+                operation: 'sendToToken',
+                tokenFingerprint: fingerprintToken(fcmToken),
+                messageId: response
+            });
 
             return {
                 success: true,
@@ -502,7 +529,13 @@ class FCMService {
             };
 
         } catch (error) {
-            logger.error(`❌ Erro ao enviar notificação para token ${fcmToken}:`, error);
+            logStructured('error', 'Erro ao enviar notificação FCM', {
+                service: 'fcm',
+                operation: 'sendToToken',
+                tokenFingerprint: fingerprintToken(fcmToken),
+                error: error.message,
+                errorCode: error.code || null
+            });
 
             // Se o token for inválido, removê-lo
             if (error.code === 'messaging/invalid-registration-token' ||
@@ -596,7 +629,12 @@ class FCMService {
                 }
             );
 
-            logger.info(`✅ Notificação interativa enviada para token ${fcmToken}: ${response}`);
+            logStructured('info', 'Notificação FCM interativa enviada', {
+                service: 'fcm',
+                operation: 'sendInteractiveNotification',
+                tokenFingerprint: fingerprintToken(fcmToken),
+                messageId: response
+            });
 
             return {
                 success: true,
@@ -604,7 +642,13 @@ class FCMService {
             };
 
         } catch (error) {
-            logger.error(`❌ Erro ao enviar notificação interativa para token ${fcmToken}:`, error);
+            logStructured('error', 'Erro ao enviar notificação FCM interativa', {
+                service: 'fcm',
+                operation: 'sendInteractiveNotification',
+                tokenFingerprint: fingerprintToken(fcmToken),
+                error: error.message,
+                errorCode: error.code || null
+            });
 
             if (error.code === 'messaging/invalid-registration-token' ||
                 error.code === 'messaging/registration-token-not-registered') {
@@ -717,7 +761,13 @@ class FCMService {
                     );
                     successCount++;
                 } catch (err) {
-                    logger.warn(`⚠️ Erro push silencioso fcm=${fcmToken.slice(0, 10)}...: ${err.message}`);
+                    logStructured('warn', 'Erro ao enviar push silencioso FCM', {
+                        service: 'fcm',
+                        operation: 'sendRideStatusUpdate',
+                        tokenFingerprint: fingerprintToken(fcmToken),
+                        error: err.message,
+                        errorCode: err.code || null
+                    });
                     if (err.code === 'messaging/invalid-registration-token' || err.code === 'messaging/registration-token-not-registered') {
                         await this.removeInvalidToken(fcmToken);
                     }

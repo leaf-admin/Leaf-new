@@ -80,10 +80,10 @@ module.exports = {
   // Força testes sequenciais para evitar conflitos
   maxConcurrency: 1,
 
-  // Detecta vazamentos de memória (desabilitado para desenvolvimento)
-  detectOpenHandles: false,
+  // Integração é gate de release: recursos abertos devem falhar/ser reportados.
+  detectOpenHandles: true,
   detectLeaks: false,
 
-  // Força coleta de lixo entre testes
-  forceExit: true
+  // Nunca mascarar sockets/timers abertos no gate integral.
+  forceExit: false
 };

@@ -69,7 +69,7 @@ describe('kyc biometric production policy', () => {
     expect(result.code).toBe('KYC_AWS_LIVENESS_ONLY_DISABLED');
   });
 
-  test('allows trusted mobile embedding comparison in strict biometric production', () => {
+  test('blocks mobile device embedding until the native model/runtime is homologated', () => {
     const policy = resolveBiometricPolicy({
       NODE_ENV: 'production',
       KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true'
@@ -84,6 +84,23 @@ describe('kyc biometric production policy', () => {
       policy,
       embeddingVerification: { success: true }
     });
+
+    expect(result.allowed).toBe(false);
+    expect(result.code).toBe('KYC_MOBILE_DEVICE_EMBEDDING_DISABLED');
+  });
+
+  test('allows a trusted backend face comparison in strict biometric production', () => {
+    const policy = resolveBiometricPolicy({
+      NODE_ENV: 'production',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true'
+    });
+
+    const result = evaluateDeviceVerificationTrust({
+      mode: 'biometric-face-service',
+      provider: 'biometric-face-service',
+      isMatch: true,
+      comparisonProvider: 'biometric-face-service'
+    }, { policy });
 
     expect(result.allowed).toBe(true);
   });
@@ -100,7 +117,24 @@ describe('kyc biometric production policy', () => {
       'KYC_AWS_LIVENESS_ASSUME_ROLE_ARN obrigatório para emitir credenciais temporárias AWS.',
       'BIOMETRIC_FACE_SERVICE_URL obrigatório para comparação biométrica.',
       'BIOMETRIC_FACE_SERVICE_API_KEY obrigatório para comparação biométrica.',
-      'ENABLE_CNH_FACE_BIOMETRICS=true obrigatório para gerar embedding da CNH.'
+      'ENABLE_CNH_FACE_BIOMETRICS=true obrigatório para gerar embedding da CNH.',
+      'MOBILE_FACE_EMBEDDING_ENABLED=false obrigatório até homologação do modelo/runtime nativo.'
     ]));
+  });
+
+  test('blocks a controlled pilot while production biometrics are disabled', () => {
+    const result = evaluateProductionReadiness({
+      NODE_ENV: 'production',
+      LEAF_LAUNCH_PROFILE: 'pilot_controlled',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false'
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      enabled: false
+    });
+    expect(result.blockers).toContain(
+      'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.'
+    );
   });
 });

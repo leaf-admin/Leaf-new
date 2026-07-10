@@ -21,12 +21,14 @@ const {
   validateQuoteLockPayload
 } = require('../services/quote-lock-service');
 const { logStructured, logError } = require('../utils/logger');
+const { metrics } = require('../utils/prometheus-metrics');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
 const {
   isLaunchFeatureEnabled,
   buildLaunchFeatureDisabledPayload
 } = require('../utils/pilot-launch-flags');
+const { evaluatePilotAccess } = require('../services/pilot-access-control-service');
 const router = express.Router();
 
 const paymentService = new PaymentService();
@@ -823,6 +825,27 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       });
     }
 
+    const pilotAccess = evaluatePilotAccess({
+      userId: passengerId,
+      role: 'passenger',
+      operation: 'payment'
+    });
+    if (!pilotAccess.allowed) {
+      metrics.recordOperationalEvent?.('payment', 'pix_create', pilotAccess.code);
+      logStructured('warn', 'payment/advance bloqueado pelo controle do piloto', {
+        service: 'payment-routes',
+        passengerId,
+        rideId: rideId || paymentSessionId || null,
+        code: pilotAccess.code
+      });
+      return res.status(pilotAccess.retryable ? 503 : 403).json({
+        success: false,
+        code: pilotAccess.code,
+        retryable: pilotAccess.retryable === true,
+        error: pilotAccess.message
+      });
+    }
+
     const availabilityInput = buildPaymentAvailabilityInput({
       pickupLocation,
       destinationLocation,
@@ -1044,6 +1067,7 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
     const result = await paymentService.processAdvancePayment(paymentData);
 
     if (result.success) {
+      metrics.recordOperationalEvent?.('payment', 'pix_create', 'success');
       const chargeId =
         result.chargeId ||
         result?.charge?.id ||
@@ -1072,6 +1096,7 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       });
     } else {
       const failureCode = result.code || 'PAYMENT_ADVANCE_FAILED';
+      metrics.recordOperationalEvent?.('payment', 'pix_create', 'failure');
       const statusCode = resolveAdvancePaymentFailureStatus(failureCode);
       logStructured(statusCode >= 500 ? 'error' : 'warn', 'payment/advance recusado pelo serviço de pagamento', {
         service: 'payment-routes',
@@ -1096,6 +1121,7 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
     }
 
   } catch (error) {
+    metrics.recordOperationalEvent?.('payment', 'pix_create', 'exception');
     logError(error, '❌ Erro na rota de pagamento antecipado:', { service: 'payment-routes' });
     res.status(500).json({
       success: false,

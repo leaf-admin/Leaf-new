@@ -9,16 +9,15 @@ jest.mock('../../../utils/logger', () => ({
   logError: jest.fn()
 }));
 
-const ENV_KEYS = [
-  'NODE_ENV',
-  'WOOVI_ENVIRONMENT',
-  'WOOVI_API_TOKEN',
-  'WOOVI_SANDBOX_API_TOKEN',
-  'PAYMENT_SANDBOX_USER_IDS',
-  'PAYMENT_SANDBOX_PHONE_NUMBERS',
-  'PAYMENT_SANDBOX_EXPIRES_AT',
-  'PAYMENT_ALLOW_GLOBAL_SANDBOX_PROFILE'
-];
+const TEST_ENV_PREFIXES = ['WOOVI_', 'PAYMENT_SANDBOX_'];
+
+function clearPaymentRuntimeEnvironment() {
+  for (const key of Object.keys(process.env)) {
+    if (key === 'NODE_ENV' || TEST_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      delete process.env[key];
+    }
+  }
+}
 
 describe('PaymentRuntimeProfileService', () => {
   const originalEnv = process.env;
@@ -26,7 +25,7 @@ describe('PaymentRuntimeProfileService', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env = { ...originalEnv };
-    for (const key of ENV_KEYS) delete process.env[key];
+    clearPaymentRuntimeEnvironment();
   });
 
   afterAll(() => {

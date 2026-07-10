@@ -36,9 +36,54 @@ const DESTINATION = {
   lng: Number(process.env.TEST_DEST_LNG || -43.1825),
   address: process.env.TEST_DEST_ADDRESS || 'Lapa - Rio de Janeiro'
 };
+const DRIVER_START = {
+  // About 2 km south of pickup. This keeps the visual smoke meaningful without
+  // widening the production dispatch radius or changing matching policy.
+  lat: Number(process.env.TEST_DRIVER_START_LAT || PICKUP.lat - 0.018),
+  lng: Number(process.env.TEST_DRIVER_START_LNG || PICKUP.lng + 0.001),
+};
+const DRIVER_PAYMENT_PRESENCE = {
+  lat: PICKUP.lat + 0.0002,
+  lng: PICKUP.lng + 0.0002,
+};
+const VISUAL_SEARCH_HOLD_MS = parseVisualHoldMs(process.env.QA_VISUAL_SEARCH_HOLD_MS);
+const VISUAL_PICKUP_HOLD_MS = parseVisualHoldMs(process.env.QA_VISUAL_PICKUP_HOLD_MS);
+const VISUAL_TRIP_START_HOLD_MS = parseVisualHoldMs(process.env.QA_VISUAL_TRIP_START_HOLD_MS);
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function assert(condition, message) { if (!condition) throw new Error(message); }
+function parseVisualHoldMs(value) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? Math.min(Math.max(0, Math.round(parsed)), 90000) : 0;
+}
+function interpolateCoordinate(start, end, ratio) {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  return {
+    lat: start.lat + (end.lat - start.lat) * safeRatio,
+    lng: start.lng + (end.lng - start.lng) * safeRatio,
+  };
+}
+function calculateHeadingDegrees(start, end) {
+  const toRadians = (value) => (Number(value) * Math.PI) / 180;
+  const toDegrees = (value) => (Number(value) * 180) / Math.PI;
+  const startLat = toRadians(start.lat);
+  const endLat = toRadians(end.lat);
+  const deltaLng = toRadians(end.lng - start.lng);
+  const y = Math.sin(deltaLng) * Math.cos(endLat);
+  const x = Math.cos(startLat) * Math.sin(endLat) -
+    Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLng);
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360;
+}
+function calculateDistanceMeters(start, end) {
+  const toRadians = (value) => (Number(value) * Math.PI) / 180;
+  const deltaLat = toRadians(end.lat - start.lat);
+  const deltaLng = toRadians(end.lng - start.lng);
+  const startLat = toRadians(start.lat);
+  const endLat = toRadians(end.lat);
+  const haversine = Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(startLat) * Math.cos(endLat) * Math.sin(deltaLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
 function nowIso() { return new Date().toISOString(); }
 function buildReportPath() { return path.join(__dirname, '..', '..', 'reports', `normal-ride-smoke-vps-${Date.now()}.json`); }
 function writeReport(report, reportPath) { fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`); }
@@ -82,13 +127,16 @@ function onceStatusAck(driverClient, payload, timeoutMs = 12000) {
     driverClient.socket.emit('setDriverStatus', payload);
   });
 }
-async function ensureDriverOnline(driverClient) {
+async function ensureDriverOnline(driverClient, coordinate = DRIVER_PAYMENT_PRESENCE) {
+  const onlineCoordinate = coordinate && Number.isFinite(Number(coordinate.lat)) && Number.isFinite(Number(coordinate.lng))
+    ? coordinate
+    : DRIVER_PAYMENT_PRESENCE;
   for (let attempt = 1; attempt <= ONLINE_MAX_ATTEMPTS; attempt += 1) {
     const ack = await onceStatusAck(driverClient, {
       status: 'online',
       isOnline: true,
-      lat: PICKUP.lat + (attempt * 0.00001),
-      lng: PICKUP.lng + (attempt * 0.00001),
+      lat: onlineCoordinate.lat + (attempt * 0.00001),
+      lng: onlineCoordinate.lng + (attempt * 0.00001),
       heading: (Date.now() / 100) % 360,
       speed: 0
     });
@@ -97,11 +145,11 @@ async function ensureDriverOnline(driverClient) {
     const retryAfter = Number(ack.error?.retryAfterSec || 1);
     if (code === 'LOCATION_REQUIRED' || code === 'ONLINE_NOT_READY') {
       driverClient.socket.emit('updateLocation', {
-        lat: PICKUP.lat + 0.0002,
-        lng: PICKUP.lng + 0.0002,
+        lat: onlineCoordinate.lat,
+        lng: onlineCoordinate.lng,
         tripStatus: 'idle',
         isInTrip: false,
-        seq: Date.now() % 100000
+        seq: Date.now()
       });
       await sleep(Math.max(700, retryAfter * 1000));
       continue;
@@ -127,7 +175,15 @@ function createBookingWithTimeout(passengerClient, payload, timeoutMs = 60000) {
     };
     const errorHandler = (error) => {
       cleanup();
-      reject(new Error(error?.error || error?.message || 'create_booking_error'));
+      const detail = error && typeof error === 'object'
+        ? JSON.stringify({
+          error: error.error || null,
+          message: error.message || null,
+          code: error.code || null,
+          details: error.details || null
+        })
+        : '';
+      reject(new Error(detail || 'create_booking_error'));
     };
     timeout = setTimeout(() => {
       cleanup();
@@ -226,6 +282,9 @@ async function cleanupPreExistingActiveRide(passengerClient, driverClient) {
   const hasAnyActiveRide = Boolean(summary.passengerBefore?.hasActiveRide || summary.driverBefore?.hasActiveRide);
 
   if (candidateBookingId && hasAnyActiveRide) {
+    const activeSnapshot = summary.driverBefore?.bookingId ? summary.driverBefore : summary.passengerBefore;
+    const activeStatus = String(activeSnapshot?.status || '').toUpperCase();
+    const isInProgress = ['IN_PROGRESS', 'STARTED', 'ON_TRIP'].includes(activeStatus);
     try {
       const result = await passengerClient.cancelRide(candidateBookingId, 'pre_smoke_cleanup');
       summary.cleanup = { by: 'passenger', bookingId: candidateBookingId, result };
@@ -236,12 +295,56 @@ async function cleanupPreExistingActiveRide(passengerClient, driverClient) {
         summary.cleanup = { by: 'driver', bookingId: candidateBookingId, result };
         await sleep(600);
       } catch (driverCancelError) {
-        summary.cleanup = {
-          by: 'none',
-          bookingId: candidateBookingId,
-          passengerError: passengerCancelError?.message || 'passenger_cancel_failed',
-          driverError: driverCancelError?.message || 'driver_cancel_failed'
-        };
+        if (isInProgress) {
+          try {
+            const destination = activeSnapshot?.destinationLocation || DESTINATION;
+            const result = await emitAndWait(driverClient, {
+              emitEvent: 'completeTrip',
+              emitPayload: {
+                bookingId: candidateBookingId,
+                endLocation: {
+                  lat: Number(destination.lat || DESTINATION.lat),
+                  lng: Number(destination.lng || DESTINATION.lng)
+                },
+                fare: Number(activeSnapshot?.estimatedFare || 0),
+                distance: Number(activeSnapshot?.routeDistanceKm || 1.31),
+                duration: Number(activeSnapshot?.routeDurationSecs || 168)
+              },
+              successEvent: 'tripCompleted',
+              errorEvent: 'tripCompleteError',
+              timeoutMs: 30000,
+              predicate: (payload) => String(payload?.bookingId || payload?.rideId || '') === String(candidateBookingId),
+              errorPredicate: (payload = {}) => {
+                const eventBookingId = String(payload?.bookingId || payload?.rideId || '');
+                if (!eventBookingId) return true;
+                return eventBookingId === String(candidateBookingId);
+              }
+            });
+            summary.cleanup = {
+              by: 'driver_complete_trip',
+              bookingId: candidateBookingId,
+              result,
+              passengerCancelError: passengerCancelError?.message || 'passenger_cancel_failed',
+              driverCancelError: driverCancelError?.message || 'driver_cancel_failed'
+            };
+            await sleep(600);
+          } catch (completeError) {
+            summary.cleanup = {
+              by: 'none',
+              bookingId: candidateBookingId,
+              passengerError: passengerCancelError?.message || 'passenger_cancel_failed',
+              driverError: driverCancelError?.message || 'driver_cancel_failed',
+              completeError: completeError?.message || 'driver_complete_failed'
+            };
+          }
+        } else {
+          summary.cleanup = {
+            by: 'none',
+            bookingId: candidateBookingId,
+            passengerError: passengerCancelError?.message || 'passenger_cancel_failed',
+            driverError: driverCancelError?.message || 'driver_cancel_failed'
+          };
+        }
       }
     }
   }
@@ -251,14 +354,68 @@ async function cleanupPreExistingActiveRide(passengerClient, driverClient) {
 
   return summary;
 }
-async function createPaymentAdvance(amountInCents = 2750) {
+
+function reaisToCents(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed * 100)) : 0;
+}
+
+async function createBackendQuote() {
+  const quoteSessionId = `smoke_quote_${Date.now()}`;
+  const quote = await postJson(`${API_BASE_URL}/api/pricing/quote`, {
+    passengerId: PASSENGER_UID,
+    quoteSessionId,
+    pickupLocation: PICKUP,
+    destinationLocation: DESTINATION,
+    carType: TEST_CAR_TYPE,
+    routeCoordinates: [
+      { lat: PICKUP.lat, lng: PICKUP.lng },
+      { lat: DESTINATION.lat, lng: DESTINATION.lng }
+    ]
+  }, 20000, {
+    'x-leaf-quote-session-id': quoteSessionId
+  });
+
+  assert(quote.ok, `pricing_quote_failed:${quote?.data?.message || quote.status}`);
+  assert(quote.data?.quoteLockId, 'pricing_quote_missing_quote_lock');
+
+  const amountInCents = reaisToCents(
+    quote.data.passengerPayableFare ??
+    quote.data.estimatedFare ??
+    quote.data.grossEstimatedFare
+  );
+  assert(amountInCents > 0, 'pricing_quote_invalid_amount');
+
+  return {
+    ...quote.data,
+    quoteSessionId: quote.data.quoteSessionId || quoteSessionId,
+    amountInCents
+  };
+}
+
+async function createPaymentAdvance(quote) {
   const rideId = `ride_normal_${Date.now()}`;
   const passengerIdToken = await getIdTokenForUid(PASSENGER_UID);
   const paymentAdvance = await postJson(`${API_BASE_URL}/api/payment/advance`, {
     passengerId: PASSENGER_UID,
-    amount: amountInCents,
+    amount: quote.amountInCents,
     rideId,
-    rideDetails: { origin: PICKUP.address, destination: DESTINATION.address },
+    quoteSessionId: quote.quoteSessionId,
+    quoteLockId: quote.quoteLockId,
+    pickupLocation: PICKUP,
+    destinationLocation: DESTINATION,
+    carType: quote.carType || TEST_CAR_TYPE,
+    rideDetails: {
+      origin: PICKUP.address,
+      destination: DESTINATION.address,
+      pickupLocation: PICKUP,
+      destinationLocation: DESTINATION,
+      carType: quote.carType || TEST_CAR_TYPE,
+      routeDistanceKm: quote.routeDistanceKm,
+      routeDurationSecs: quote.routeDurationSecs,
+      quoteSessionId: quote.quoteSessionId,
+      quoteLockId: quote.quoteLockId
+    },
     passengerName: 'Leaf Passageiro Teste',
     passengerEmail: 'qa@leaf.local'
   }, 20000, {
@@ -267,9 +424,33 @@ async function createPaymentAdvance(amountInCents = 2750) {
   const chargeId = String(paymentAdvance?.data?.chargeId || '').trim();
   assert(paymentAdvance.ok, `payment_advance_failed:${paymentAdvance?.data?.message || paymentAdvance.status}`);
   assert(chargeId, 'payment_advance_missing_charge');
-  return { rideId, chargeId, amountInCents };
+  return {
+    rideId,
+    chargeId,
+    paymentIntentId: paymentAdvance?.data?.paymentIntentId || null,
+    amountInCents: quote.amountInCents,
+    quote
+  };
 }
-async function confirmAdvancePaymentByWebhook({ rideId, chargeId, amountInCents, passengerId = PASSENGER_UID }) {
+async function confirmAdvancePaymentByWebhook({
+  rideId,
+  chargeId,
+  paymentIntentId = null,
+  amountInCents,
+  passengerId = PASSENGER_UID
+}) {
+  if (String(process.env.CONFIRM_SANDBOX_PAYMENT_VIA_APP || '').toLowerCase() === 'true') {
+    const passengerIdToken = await getIdTokenForUid(passengerId);
+    const response = await postJson(`${API_BASE_URL}/api/woovi/test-confirm-sandbox-payment-app`, {
+      passengerId,
+      paymentIntentId
+    }, 30000, {
+      authorization: `Bearer ${passengerIdToken}`
+    });
+    assert(response.ok, `sandbox_app_payment_confirm_failed:${response?.data?.code || response?.data?.error || response.status}`);
+    return response;
+  }
+
   if (String(process.env.CANARY_DIRECT_PAYMENT_CONFIRMATION || '').toLowerCase() === 'true') {
     const PaymentService = require('../../services/payment-service');
     const paymentService = new PaymentService();
@@ -375,7 +556,16 @@ async function main() {
       baseUrl: API_BASE_URL,
       passengerUid: PASSENGER_UID,
       driverUid: DRIVER_UID,
-      reportPath
+      reportPath,
+      visualWindows: {
+        searchMs: VISUAL_SEARCH_HOLD_MS,
+        pickupMs: VISUAL_PICKUP_HOLD_MS,
+        tripStartMs: VISUAL_TRIP_START_HOLD_MS,
+      },
+      driverStart: {
+        ...DRIVER_START,
+        straightLineDistanceMeters: Math.round(calculateDistanceMeters(DRIVER_START, PICKUP)),
+      },
     },
     flow: {},
     status: 'running'
@@ -384,6 +574,34 @@ async function main() {
   const passenger = new WebSocketTestClient(WS_URL, { transports: ['websocket'], timeout: 30000, reconnection: false });
   const driver = new WebSocketTestClient(WS_URL, { transports: ['websocket'], timeout: 30000, reconnection: false });
   let heartbeatTimer = null;
+  let reportedDriverCoordinate = { ...DRIVER_PAYMENT_PRESENCE };
+  let reportedDriverHeading = calculateHeadingDegrees(DRIVER_PAYMENT_PRESENCE, PICKUP);
+
+  const emitDriverLocation = ({
+    coordinate = reportedDriverCoordinate,
+    tripStatus = 'idle',
+    isInTrip = false,
+    speed = 0,
+  } = {}) => {
+    const nextCoordinate = {
+      lat: Number(coordinate.lat),
+      lng: Number(coordinate.lng),
+    };
+    if (!Number.isFinite(nextCoordinate.lat) || !Number.isFinite(nextCoordinate.lng)) {
+      throw new Error('invalid_driver_location');
+    }
+    reportedDriverHeading = calculateHeadingDegrees(reportedDriverCoordinate, nextCoordinate);
+    reportedDriverCoordinate = nextCoordinate;
+    driver.socket.emit('updateLocation', {
+      lat: nextCoordinate.lat,
+      lng: nextCoordinate.lng,
+      heading: reportedDriverHeading,
+      speed,
+      tripStatus,
+      isInTrip,
+      seq: Date.now(),
+    });
+  };
 
   try {
     await passenger.connect();
@@ -405,52 +623,60 @@ async function main() {
     report.meta.driverOnline = online;
 
     const sendDriverIdleLocation = () => {
-      driver.socket.emit('updateLocation', {
-        lat: PICKUP.lat + 0.0002,
-        lng: PICKUP.lng + 0.0002,
-        tripStatus: 'idle',
-        isInTrip: false,
-        seq: Date.now() % 100000
-      });
+      emitDriverLocation({ coordinate: reportedDriverCoordinate, tripStatus: 'idle' });
     };
 
     sendDriverIdleLocation();
     heartbeatTimer = setInterval(sendDriverIdleLocation, 1200);
     await sleep(1000);
 
-    const payment = await createPaymentAdvance(2750);
+    const quote = await createBackendQuote();
+    report.flow.quote = quote;
+
+    const payment = await createPaymentAdvance(quote);
+    report.flow.payment = payment;
     await confirmAdvancePaymentByWebhook(payment);
+
+    // Payment availability must be checked against a genuinely available
+    // driver. Only after that guard passes do we reposition the test driver to
+    // the 2 km navigation starting point used by this visual scenario.
+    emitDriverLocation({ coordinate: DRIVER_START, tripStatus: 'idle' });
+    await sleep(900);
 
     const booking = await createBookingWithTimeout(passenger, {
       customerId: PASSENGER_UID,
       pickupLocation: PICKUP,
       destinationLocation: DESTINATION,
-      estimatedFare: 27.5,
-      carType: TEST_CAR_TYPE,
-      selectedVehicle: TEST_CAR_TYPE,
+      estimatedFare: payment.amountInCents / 100,
+      carType: 'Leaf Plus',
+      selectedVehicle: 'Leaf Plus',
       paymentMethod: 'pix',
       paymentStatus: 'confirmed',
       paymentData: {
         chargeId: payment.chargeId,
         rideId: payment.rideId,
-        amountInCents: payment.amountInCents
+        amountInCents: payment.amountInCents,
+        quoteSessionId: quote.quoteSessionId,
+        quoteLockId: quote.quoteLockId
       },
+      quoteSessionId: quote.quoteSessionId,
+      quoteLockId: quote.quoteLockId,
+      routeDistanceKm: quote.routeDistanceKm,
+      routeDurationSecs: quote.routeDurationSecs,
       idempotencyKey: `normal_ride_${Date.now()}`
     });
     assert(booking?.bookingId, 'booking_id_missing');
     report.flow.booking = booking;
 
-    const paymentConfirmed = await passenger.confirmPayment({
-      bookingId: booking.bookingId,
-      paymentMethod: 'pix',
-      paymentId: payment.chargeId,
-      chargeId: payment.chargeId,
-      rideId: payment.rideId,
-      amount: 27.5
-    });
-    report.flow.paymentConfirmed = paymentConfirmed;
+    report.flow.paymentConfirmed = {
+      skipped: true,
+      reason: 'booking_is_created_after_authoritative_advance_payment'
+    };
 
     const newRideRequest = await driver.waitForEvent('newRideRequest', 45000, (payload) => (payload?.bookingId || payload?.rideId) === booking.bookingId);
+    if (VISUAL_SEARCH_HOLD_MS > 0) {
+      await sleep(VISUAL_SEARCH_HOLD_MS);
+    }
     const accepted = await emitAndWait(driver, {
       emitEvent: 'acceptRide',
       emitPayload: { bookingId: booking.bookingId },
@@ -466,8 +692,25 @@ async function main() {
     });
     await passenger.waitForEvent('rideAccepted', 15000, (payload) => (payload?.bookingId || payload?.rideId) === booking.bookingId);
 
-    driver.socket.emit('updateLocation', { lat: PICKUP.lat, lng: PICKUP.lng, tripStatus: 'accepted', isInTrip: false, seq: Date.now() % 100000 });
-    await sleep(250);
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    const pickupApproach = [0.18, 0.44, 0.72, 1].map((ratio) =>
+      interpolateCoordinate(DRIVER_START, PICKUP, ratio),
+    );
+    const pickupStepHoldMs = Math.max(
+      250,
+      Math.round(VISUAL_PICKUP_HOLD_MS / pickupApproach.length),
+    );
+    for (const coordinate of pickupApproach) {
+      emitDriverLocation({
+        coordinate,
+        tripStatus: 'accepted',
+        speed: VISUAL_PICKUP_HOLD_MS > 0 ? 8 : 0,
+      });
+      await sleep(pickupStepHoldMs);
+    }
     const arrived = await emitAndWait(driver, {
       emitEvent: 'notificationAction',
       emitPayload: { action: 'arrived_at_pickup', bookingId: booking.bookingId, location: { lat: PICKUP.lat, lng: PICKUP.lng } },
@@ -498,15 +741,39 @@ async function main() {
     });
     const passengerStarted = await passenger.waitForEvent('tripStarted', 15000, (payload) => (payload?.bookingId || payload?.rideId) === booking.bookingId);
 
+    if (VISUAL_TRIP_START_HOLD_MS > 0) {
+      await sleep(VISUAL_TRIP_START_HOLD_MS);
+    }
+    const tripNavigationPreview = [0.12, 0.28].map((ratio) =>
+      interpolateCoordinate(PICKUP, DESTINATION, ratio),
+    );
+    for (const coordinate of tripNavigationPreview) {
+      reportedDriverHeading = calculateHeadingDegrees(reportedDriverCoordinate, coordinate);
+      reportedDriverCoordinate = coordinate;
+      driver.socket.emit('updateTripLocation', {
+        bookingId: booking.bookingId,
+        lat: coordinate.lat,
+        lng: coordinate.lng,
+        heading: reportedDriverHeading,
+        speed: 10,
+      });
+      await sleep(Math.max(250, Math.round(VISUAL_TRIP_START_HOLD_MS / Math.max(1, tripNavigationPreview.length))));
+    }
+
+    const lockedFare = payment.amountInCents / 100;
+    const completionDistanceKm = Number(quote.routeDistanceKm || 0) > 0 ? Number(quote.routeDistanceKm) : 1.31;
+    const completionDurationSecs = Number(quote.routeDurationSecs || 0) > 0 ? Number(quote.routeDurationSecs) : 168;
+    const completionPayload = {
+      bookingId: booking.bookingId,
+      endLocation: { lat: DESTINATION.lat, lng: DESTINATION.lng },
+      fare: lockedFare,
+      distance: completionDistanceKm,
+      duration: completionDurationSecs
+    };
+
     const completed = await emitAndWait(driver, {
       emitEvent: 'completeTrip',
-      emitPayload: {
-        bookingId: booking.bookingId,
-        endLocation: { lat: DESTINATION.lat, lng: DESTINATION.lng },
-        fare: 27.5,
-        distance: 6200,
-        duration: 900
-      },
+      emitPayload: completionPayload,
       successEvent: 'tripCompleted',
       errorEvent: 'tripCompleteError',
       timeoutMs: 30000,
@@ -532,6 +799,7 @@ async function main() {
       arrived,
       started,
       passengerStarted,
+      completionPayload,
       completed,
       passengerCompleted,
       ratingResult

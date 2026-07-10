@@ -312,7 +312,9 @@ router.post('/pricing/quote', async (req, res) => {
     if (!geofenceValidation.valid) {
       metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
       return res.status(422).json({
-        error: 'route_out_of_coverage',
+        error: geofenceValidation.code || 'route_out_of_coverage',
+        code: geofenceValidation.code || 'ROUTE_OUT_OF_COVERAGE',
+        retryable: geofenceValidation.retryable === true,
         message: geofenceValidation.error || 'Origem ou destino fora da área de operação da Leaf.'
       });
     }

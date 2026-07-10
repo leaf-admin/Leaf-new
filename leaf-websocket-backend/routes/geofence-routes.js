@@ -110,13 +110,24 @@ function applyGeofenceAdminConfig(configToApply) {
 
 function buildGeofenceResponse(config) {
     const currentRegion = geofenceService.getCurrentRegion() || [];
+    const operationalStatus = geofenceService.getOperationalStatus();
 
     return {
         version: Number(config?.version || 1),
         enabled: geofenceService.isEnabled(),
         active: geofenceService.isActive(),
         bypassEnabled: geofenceService.isBypassEnabled(),
-        regionPoints: Array.isArray(currentRegion) ? currentRegion.length : 0,
+        available: operationalStatus.available,
+        configured: operationalStatus.configured,
+        failClosed: operationalStatus.failClosed,
+        statusCode: operationalStatus.code,
+        regionSource: operationalStatus.regionSource,
+        regionVersion: operationalStatus.regionVersion,
+        regionUpdatedAt: operationalStatus.regionUpdatedAt,
+        regionName: operationalStatus.regionName,
+        regionPolygons: operationalStatus.regionPolygons,
+        regionPoints: operationalStatus.regionPoints,
+        destinationInsideRegionRequired: operationalStatus.destinationInsideRegionRequired,
         region: currentRegion,
         updatedAt: config?.updatedAt || null,
         updatedBy: config?.updatedBy || null
@@ -404,12 +415,28 @@ router.get('/check', (req, res) => {
             });
         }
 
-        // ✅ Manter consistência com a validação usada no createBooking.
+        // Manter consistência com quote/createBooking. Em produção/piloto,
+        // configuração ausente ou desabilitada deve falhar fechada.
         if (!geofenceService.isActive()) {
             return res.json({
                 success: true,
                 isAllowed: true,
-                reason: 'Geofence desativado (sem região configurada)',
+                code: 'GEOFENCE_NOT_ENFORCED',
+                reason: 'Geofence não aplicado neste ambiente',
+                coordinates: { lat: latitude, lng: longitude }
+            });
+        }
+
+        const operationalStatus = geofenceService.getOperationalStatus();
+        if (!operationalStatus.available) {
+            return res.status(503).json({
+                success: false,
+                isAllowed: false,
+                code: operationalStatus.code,
+                retryable: true,
+                reason: operationalStatus.code === 'GEOFENCE_DISABLED'
+                    ? 'Região de operação temporariamente indisponível'
+                    : 'Região de operação não configurada',
                 coordinates: { lat: latitude, lng: longitude }
             });
         }
@@ -419,6 +446,7 @@ router.get('/check', (req, res) => {
         res.json({
             success: true,
             isAllowed,
+            code: isAllowed ? 'GEOFENCE_ALLOWED' : 'GEOFENCE_OUTSIDE_REGION',
             reason: isAllowed ? 'Dentro da área de operação' : 'Fora da área de operação permitida',
             coordinates: { lat: latitude, lng: longitude }
         });

@@ -12,6 +12,7 @@ function runValidator(extraEnv = {}) {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       ENV_FILE: absentEnvFile,
+      LEAF_BROAD_LAUNCH_APPROVED: 'true',
       ...extraEnv
     },
     encoding: 'utf8'
@@ -34,6 +35,107 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
     LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval'
   };
+
+  it('blocks a full production profile without formal broad-launch approval', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'Produção exige perfil pilot_controlled ou LEAF_BROAD_LAUNCH_APPROVED=true após o GO formal'
+    );
+  });
+
+  it('blocks a pilot without cohorts, polygon, runtime version and strict KYC', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'pilot_controlled',
+      GEOFENCE_REGION_FILE: 'config/geofence-does-not-exist.json'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'PILOT_ALLOWED_PASSENGER_IDS deve conter o cohort autorizado do piloto',
+      'PILOT_ALLOWED_DRIVER_IDS deve conter o cohort autorizado do piloto',
+      'GEOFENCE_REGION ausente ou inválido: o piloto exige polígono operacional aprovado',
+      'LEAF_RUNTIME_POLICY_VERSION obrigatório no perfil piloto',
+      'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.'
+    ]));
+  });
+
+  it('recognizes the versioned Rio pilot GeoJSON as a valid multi-polygon', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_LAUNCH_PROFILE: 'full',
+      GEOFENCE_REGION_FILE: 'config/geofence.json'
+    });
+
+    expect(result.report.diagnostics.launchControl.geofenceRegion).toEqual(
+      expect.objectContaining({
+        configured: true,
+        valid: true,
+        source: 'file',
+        version: 'rio-zona-sul-centro-lapa-v1',
+        polygons: 22,
+        points: 4337
+      })
+    );
+  });
+
+  it('allows geofence validation before KYC only when Pix and booking intake are paused', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'geofence_validation',
+      LEAF_PILOT_CONTROLLED: 'false',
+      PILOT_ALLOWED_PASSENGER_IDS: 'passenger-1',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1',
+      LEAF_ACCEPT_NEW_PIX: 'false',
+      LEAF_ACCEPT_NEW_BOOKINGS: 'false',
+      LEAF_RUNTIME_POLICY_VERSION: 'geofence-validation-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REQUIRE_DESTINATION_INSIDE_REGION: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.summary.blockers).toEqual([]);
+    expect(result.report.summary.warnings).toContain(
+      'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.'
+    );
+    expect(result.report.diagnostics.launchControl).toEqual(expect.objectContaining({
+      launchProfile: 'geofence_validation',
+      pilotControlled: true,
+      geofenceValidation: true,
+      acceptNewPix: expect.objectContaining({ value: false }),
+      acceptNewBookings: expect.objectContaining({ value: false })
+    }));
+  });
+
+  it('blocks geofence validation when Pix or booking intake is enabled', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'geofence_validation',
+      PILOT_ALLOWED_PASSENGER_IDS: 'passenger-1',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1',
+      LEAF_ACCEPT_NEW_PIX: 'true',
+      LEAF_ACCEPT_NEW_BOOKINGS: 'true',
+      LEAF_RUNTIME_POLICY_VERSION: 'geofence-validation-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'LEAF_ACCEPT_NEW_PIX=true bloqueado no perfil geofence_validation',
+      'LEAF_ACCEPT_NEW_BOOKINGS=true bloqueado no perfil geofence_validation'
+    ]));
+  });
 
   it('allows production deploy with the bundled Woovi webhook public-key verifier', () => {
     const result = runValidator(baseProdEnv);
@@ -454,7 +556,8 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       'KYC_AWS_LIVENESS_ASSUME_ROLE_ARN obrigatório para emitir credenciais temporárias AWS.',
       'BIOMETRIC_FACE_SERVICE_URL obrigatório para comparação biométrica.',
       'BIOMETRIC_FACE_SERVICE_API_KEY obrigatório para comparação biométrica.',
-      'ENABLE_CNH_FACE_BIOMETRICS=true obrigatório para gerar embedding da CNH.'
+      'ENABLE_CNH_FACE_BIOMETRICS=true obrigatório para gerar embedding da CNH.',
+      'MOBILE_FACE_EMBEDDING_ENABLED=false obrigatório até homologação do modelo/runtime nativo.'
     ]));
     expect(result.report.diagnostics.biometricReadiness).toMatchObject({
       ok: false,
@@ -670,6 +773,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       BIOMETRIC_FACE_SERVICE_URL: 'https://face.leaf.internal',
       BIOMETRIC_FACE_SERVICE_API_KEY: 'face-key',
       ENABLE_CNH_FACE_BIOMETRICS: 'true',
+      MOBILE_FACE_EMBEDDING_ENABLED: 'false',
       KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
       KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false',
       KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false'

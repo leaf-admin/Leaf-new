@@ -24,6 +24,8 @@ const {
   getOperationsPolicyRadiusKm,
   getPaymentAvailabilityRadiusKm
 } = require('../../utils/dispatch-config');
+const { resolveLaunchProfile } = require('../../utils/pilot-launch-flags');
+const { parseAllowlist } = require('../../services/pilot-access-control-service');
 
 const REQUIRED_BASE = [
   'NODE_ENV'
@@ -204,6 +206,94 @@ function numberMatches(value, expected) {
   return Math.abs(Number(value) - Number(expected)) < 0.000001;
 }
 
+function collectGeofenceRings(value) {
+  if (!value) return [];
+  if (value.type === 'FeatureCollection') {
+    return (value.features || []).flatMap((feature) => collectGeofenceRings(feature));
+  }
+  if (value.type === 'Feature') return collectGeofenceRings(value.geometry);
+  if (value.type === 'Polygon') return value.coordinates?.[0] ? [value.coordinates[0]] : [];
+  if (value.type === 'MultiPolygon') {
+    return (value.coordinates || []).map((polygon) => polygon?.[0]).filter(Boolean);
+  }
+  if (!Array.isArray(value) || value.length === 0) return [];
+  if (Array.isArray(value[0]) && Number.isFinite(Number(value[0][0]))) return [value];
+  return value;
+}
+
+function resolveGeofenceRegionDiagnostic() {
+  const raw = String(process.env.GEOFENCE_REGION || '').trim();
+  const configuredFile = String(process.env.GEOFENCE_REGION_FILE || '').trim();
+  const defaultFile = path.resolve(__dirname, '../../config/geofence.json');
+  const filePath = configuredFile
+    ? path.resolve(__dirname, '../..', configuredFile)
+    : defaultFile;
+
+  try {
+    const parsed = raw
+      ? JSON.parse(raw)
+      : (fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null);
+    if (!parsed) {
+      return { configured: false, valid: false, polygons: 0, points: 0, source: 'none' };
+    }
+
+    const rings = collectGeofenceRings(parsed);
+    const valid = rings.length > 0 && rings.every((ring) => {
+      if (!Array.isArray(ring) || ring.length < 3) return false;
+      return ring.every((point) => {
+        const lng = Array.isArray(point) ? Number(point[0]) : Number(point?.lng);
+        const lat = Array.isArray(point) ? Number(point[1]) : Number(point?.lat);
+        return Number.isFinite(lng) && Number.isFinite(lat) && lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
+      });
+    });
+    const metadata = parsed.metadata || parsed.features?.[0]?.properties || parsed.properties || {};
+    return {
+      configured: true,
+      valid,
+      polygons: rings.length,
+      points: rings.reduce((total, ring) => total + ring.length, 0),
+      source: raw ? 'env' : 'file',
+      file: raw ? null : path.relative(path.resolve(__dirname, '../..'), filePath),
+      version: metadata.policyId || metadata.version || null,
+      updatedAt: metadata.generatedAt || metadata.updatedAt || null
+    };
+  } catch (_error) {
+    return {
+      configured: Boolean(raw || configuredFile),
+      valid: false,
+      polygons: 0,
+      points: 0,
+      source: raw ? 'env' : (configuredFile ? 'file' : 'none')
+    };
+  }
+}
+
+function resolveLaunchControlDiagnostic() {
+  const launchProfile = resolveLaunchProfile();
+  const geofenceValidation = launchProfile === 'geofence_validation';
+  const pilotControlled = ['pilot_controlled', 'geofence_validation'].includes(launchProfile) || boolEnv('LEAF_PILOT_CONTROLLED', false);
+  const passengerCohortSize = parseAllowlist(
+    process.env.PILOT_ALLOWED_PASSENGER_IDS || process.env.LEAF_PILOT_ALLOWED_PASSENGER_IDS
+  ).size;
+  const driverCohortSize = parseAllowlist(
+    process.env.PILOT_ALLOWED_DRIVER_IDS || process.env.LEAF_PILOT_ALLOWED_DRIVER_IDS
+  ).size;
+
+  return {
+    launchProfile,
+    pilotControlled,
+    geofenceValidation,
+    broadLaunchApproved: boolEnv('LEAF_BROAD_LAUNCH_APPROVED', false),
+    passengerCohortSize,
+    driverCohortSize,
+    acceptNewPix: booleanDiagnostic('LEAF_ACCEPT_NEW_PIX', true),
+    acceptNewBookings: booleanDiagnostic('LEAF_ACCEPT_NEW_BOOKINGS', true),
+    geofenceFailClosed: booleanDiagnostic('GEOFENCE_FAIL_CLOSED', true),
+    geofenceRegion: resolveGeofenceRegionDiagnostic(),
+    runtimePolicyVersionConfigured: presence(process.env.LEAF_RUNTIME_POLICY_VERSION)
+  };
+}
+
 function resolveDriverSearchRadiusPolicy() {
   const dispatchMaxRadiusKm = getDriverSearchMaxRadiusKm();
   const paymentAvailabilityRadiusKm = getPaymentAvailabilityRadiusKm();
@@ -320,6 +410,7 @@ function main() {
     paymentProviderConfigRequired && (wooviEnv === 'sandbox' || wooviBaseUrlIsSandbox);
   const financialPolicyApproval = resolveFinancialPolicyApproval();
   const driverSearchRadiusPolicy = resolveDriverSearchRadiusPolicy();
+  const launchControlDiagnostic = resolveLaunchControlDiagnostic();
 
   const missingCommon = checkRequired([
     ...REQUIRED_BASE,
@@ -410,6 +501,34 @@ function main() {
 
     if (boolEnv('APP_REVIEW')) {
       blockers.push('APP_REVIEW=true não pode ir para produção pública normal');
+    }
+    if (!launchControlDiagnostic.pilotControlled && !launchControlDiagnostic.broadLaunchApproved) {
+      blockers.push('Produção exige perfil pilot_controlled ou LEAF_BROAD_LAUNCH_APPROVED=true após o GO formal');
+    }
+    if (launchControlDiagnostic.pilotControlled) {
+      if (launchControlDiagnostic.passengerCohortSize < 1) {
+        blockers.push('PILOT_ALLOWED_PASSENGER_IDS deve conter o cohort autorizado do piloto');
+      }
+      if (launchControlDiagnostic.driverCohortSize < 1) {
+        blockers.push('PILOT_ALLOWED_DRIVER_IDS deve conter o cohort autorizado do piloto');
+      }
+      if (!launchControlDiagnostic.geofenceFailClosed.value) {
+        blockers.push('GEOFENCE_FAIL_CLOSED=false bloqueado no perfil piloto');
+      }
+      if (!launchControlDiagnostic.geofenceRegion.valid) {
+        blockers.push('GEOFENCE_REGION ausente ou inválido: o piloto exige polígono operacional aprovado');
+      }
+      if (launchControlDiagnostic.runtimePolicyVersionConfigured === '(empty)') {
+        blockers.push('LEAF_RUNTIME_POLICY_VERSION obrigatório no perfil piloto');
+      }
+    }
+    if (launchControlDiagnostic.geofenceValidation) {
+      if (launchControlDiagnostic.acceptNewPix.value) {
+        blockers.push('LEAF_ACCEPT_NEW_PIX=true bloqueado no perfil geofence_validation');
+      }
+      if (launchControlDiagnostic.acceptNewBookings.value) {
+        blockers.push('LEAF_ACCEPT_NEW_BOOKINGS=true bloqueado no perfil geofence_validation');
+      }
     }
     if (boolEnv('BYPASS_GEOFENCE')) {
       blockers.push('BYPASS_GEOFENCE=true bloqueado em produção');
@@ -666,6 +785,7 @@ function main() {
           expected: nodeEnv === 'production' && runtimeRole === 'gateway'
         }
       },
+      launchControl: launchControlDiagnostic,
       financialPolicy: financialPolicyApproval,
       authOtp: {
         ...authOtpDiagnostics

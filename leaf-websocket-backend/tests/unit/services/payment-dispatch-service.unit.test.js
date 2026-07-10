@@ -43,6 +43,7 @@ function createRedis() {
     }),
     get: jest.fn(async (key) => mockRedisState.strings.get(key) || null),
     hlen: jest.fn(async (key) => Object.keys(mockRedisState.hashes.get(key) || {}).length),
+    hget: jest.fn(async (key, field) => mockRedisState.hashes.get(key)?.[field] || null),
     hgetall: jest.fn(async (key) => mockRedisState.hashes.get(key) || {}),
     multi: jest.fn(() => {
       const ops = [];
@@ -99,6 +100,7 @@ jest.mock('../../../utils/logger', () => ({
 
 jest.mock('../../../services/gradual-radius-expander', () => jest.fn());
 
+const GradualRadiusExpander = require('../../../services/gradual-radius-expander');
 const {
   materializePaymentForBooking,
   triggerDispatchAfterPayment
@@ -109,6 +111,10 @@ describe('payment-dispatch-service', () => {
     mockDocs.clear();
     mockRedisState.hashes.clear();
     mockRedisState.strings.clear();
+    GradualRadiusExpander.mockClear();
+    GradualRadiusExpander.mockImplementation(() => ({
+      startGradualSearch: jest.fn(async () => undefined)
+    }));
   });
 
   it('materializes a confirmed temp ride payment onto the canonical booking id', async () => {
@@ -238,5 +244,52 @@ describe('payment-dispatch-service', () => {
     expect(mockRedisState.hashes.get('booking:booking_missing_reservation')).toMatchObject({
       paymentDispatchBlockedReason: 'PAYMENT_DRIVER_RESERVATION_MISSING'
     });
+  });
+
+  it('does not trigger a second driver search when payment dispatch is already active', async () => {
+    const startGradualSearch = jest.fn(async () => undefined);
+    GradualRadiusExpander.mockImplementation(() => ({ startGradualSearch }));
+    mockRedisState.hashes.set('booking:booking_dispatch_once', {
+      bookingId: 'booking_dispatch_once',
+      customerId: 'passenger_1',
+      state: 'PENDING',
+      paymentStatus: 'in_holding',
+      paymentLedgerStatus: 'posted',
+      pickupLocation: JSON.stringify({ lat: -22.853586, lng: -43.318168 })
+    });
+
+    const first = await triggerDispatchAfterPayment({
+      bookingId: 'booking_dispatch_once',
+      io: {},
+      pickupLocation: { lat: -22.853586, lng: -43.318168 },
+      source: 'unit_test',
+      force: false,
+      maxAttempts: 1
+    });
+
+    mockRedisState.hashes.set('booking_search:booking_dispatch_once', {
+      state: 'SEARCHING'
+    });
+
+    const second = await triggerDispatchAfterPayment({
+      bookingId: 'booking_dispatch_once',
+      io: {},
+      pickupLocation: { lat: -22.853586, lng: -43.318168 },
+      source: 'unit_test_replay',
+      force: false,
+      maxAttempts: 1
+    });
+
+    expect(first).toMatchObject({
+      success: true,
+      skipped: false,
+      bookingId: 'booking_dispatch_once'
+    });
+    expect(second).toMatchObject({
+      success: true,
+      skipped: true,
+      reason: 'SEARCH_ALREADY_ACTIVE'
+    });
+    expect(startGradualSearch).toHaveBeenCalledTimes(1);
   });
 });

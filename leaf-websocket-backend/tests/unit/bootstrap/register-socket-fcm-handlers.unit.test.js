@@ -84,12 +84,14 @@ describe('registerSocketFcmHandlers', () => {
       userId: 'victim-user',
       userType: 'customer',
       fcmToken: 'token-2',
-      platform: 'android'
+      platform: 'android',
+      deviceId: 'android-device-1'
     });
 
     expect(redis.hset).toHaveBeenCalledWith('driver:auth-user', expect.objectContaining({
       fcmToken: 'token-2',
       fcmPlatform: 'android',
+      fcmDeviceId: 'android-device-1',
       isTemporary: 'false',
       socketId: 'socket-123'
     }));
@@ -99,6 +101,7 @@ describe('registerSocketFcmHandlers', () => {
       'token-2',
       expect.objectContaining({
         isTemporary: false,
+        deviceId: 'android-device-1',
         socketId: 'socket-123',
         authenticated: true
       })

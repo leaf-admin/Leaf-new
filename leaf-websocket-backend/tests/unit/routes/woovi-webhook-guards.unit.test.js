@@ -50,6 +50,8 @@ jest.mock('firebase-admin', () => ({
   }
 }));
 
+delete process.env.WOOVI_SANDBOX_TEST_PAYMENT_URL;
+
 const wooviRoutes = require('../../../routes/woovi');
 const {
   verifyWooviWebhookSignature,
@@ -170,6 +172,7 @@ describe('woovi webhook guards', () => {
     delete process.env.WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED;
     delete process.env.WOOVI_ENVIRONMENT;
     delete process.env.WOOVI_BASE_URL;
+    delete process.env.WOOVI_SANDBOX_TEST_PAYMENT_URL;
     delete process.env.WOOVI_SANDBOX_TEST_APP_ID;
     delete process.env.WOOVI_SANDBOX_TEST_AUTHORIZATION_APP_ID;
     delete process.env.OPENPIX_SANDBOX_TEST_APP_ID;

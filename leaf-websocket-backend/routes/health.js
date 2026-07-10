@@ -9,6 +9,7 @@ const router = express.Router();
 const healthCheckService = require('../services/health-check-service');
 const { logStructured, logError } = require('../utils/logger');
 const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
+const { getPublicPilotAccessSnapshot } = require('../services/pilot-access-control-service');
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
 const FALSY_VALUES = new Set(['0', 'false', 'no', 'off', 'nao', 'não']);
 
@@ -98,6 +99,59 @@ function buildSocketSection() {
     configured: presence('REDIS_HOST') || presence('REDIS_URL'),
     redisAdapterEnabled: envBool('ENABLE_SOCKETIO_REDIS_ADAPTER', false),
     redisAdapterRequired: envBool('REQUIRE_SOCKETIO_REDIS_ADAPTER', false)
+  };
+}
+
+function buildRoleReadiness(health) {
+  const runtimeRole = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+  const enforceRoleReadiness =
+    String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production' ||
+    envBool('HEALTH_ENFORCE_ROLE_READINESS', false);
+  const firebase = buildFirebaseSection();
+  const push = buildPushSection();
+  const kyc = buildKycSection();
+  const maps = buildMapsSection();
+  const socket = buildSocketSection();
+  const pilotAccess = getPublicPilotAccessSnapshot();
+  const paymentRole = ['gateway', 'billing', 'payment', 'payments'].includes(runtimeRole);
+  const realtimeRole = ['gateway', 'realtime', 'socket', 'sideeffects', 'worker', 'workers'].includes(runtimeRole);
+  const dependencies = {
+    quickHealth: health?.status === 'healthy',
+    redisConfigured: !realtimeRole || socket.configured,
+    firebaseConfigured: !realtimeRole || firebase.configured,
+    paymentProviderConfigured: !paymentRole || (
+      presence('WOOVI_API_TOKEN') &&
+      presence('WOOVI_BASE_URL') &&
+      presence('LEAF_PIX_KEY')
+    ),
+    mapsConfigured: runtimeRole !== 'gateway' || maps.backendOnly,
+    fcmConfigured: runtimeRole !== 'gateway' || push.fcmConfigured,
+    kycStrict: runtimeRole !== 'gateway' || (
+      kyc.productionBiometricsEnabled &&
+      kyc.awsLivenessConfigured &&
+      kyc.faceServiceConfigured &&
+      kyc.requireTrustedBiometricMatch &&
+      !envBool('MOBILE_FACE_EMBEDDING_ENABLED', true)
+    ),
+    pilotPassengerCohortConfigured: !pilotAccess.pilotControlled || pilotAccess.passengerCohortConfigured,
+    pilotDriverCohortConfigured: !pilotAccess.pilotControlled || pilotAccess.driverCohortConfigured
+  };
+
+  if (pilotAccess.pilotControlled) {
+    const geofenceService = require('../services/geofence-service');
+    dependencies.geofenceAvailable = geofenceService.getOperationalStatus().available;
+  }
+
+  const failedDependencies = Object.entries(dependencies)
+    .filter(([, ready]) => ready !== true)
+    .map(([name]) => name);
+
+  return {
+    runtimeRole,
+    enforced: enforceRoleReadiness,
+    ready: health?.status === 'healthy' && (!enforceRoleReadiness || failedDependencies.length === 0),
+    dependencies,
+    failedDependencies
   };
 }
 
@@ -241,17 +295,20 @@ router.get('/health/quick', async (req, res) => {
 router.get('/health/readiness', async (req, res) => {
   try {
     const health = await healthCheckService.quickCheck();
-    
-    if (health.status === 'healthy') {
+    const roleReadiness = buildRoleReadiness(health);
+
+    if (roleReadiness.ready) {
       res.status(200).json({
         status: 'ready',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        ...roleReadiness
       });
     } else {
       res.status(503).json({
         status: 'not-ready',
         timestamp: new Date().toISOString(),
-        reason: 'Critical services are not healthy'
+        reason: 'Critical services or runtime-role dependencies are not ready',
+        ...roleReadiness
       });
     }
   } catch (error) {

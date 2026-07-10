@@ -20,6 +20,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$BACKEND_DIR/.." && pwd)"
 
 CONTABO_HOST="${CONTABO_HOST:-${VPS_HOST:-}}"
 CONTABO_KEY="${CONTABO_KEY:-${VPS_KEY:-$HOME/.ssh/leaf_contabo_20260412_ed25519}}"
@@ -40,6 +41,12 @@ REMOTE_OPS_COMPOSE="docker-compose.ops-workers.yml"
 
 if [[ "$CONFIRM_PRODUCTION_DEPLOY" != "true" ]]; then
   echo "[deploy][error] Set CONFIRM_PRODUCTION_DEPLOY=true to authorize the production rollout." >&2
+  exit 2
+fi
+
+if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+  echo "[deploy][error] Production deploy bloqueado: worktree contém alterações não commitadas." >&2
+  echo "[deploy][error] Crie a RC em um commit imutável e execute novamente." >&2
   exit 2
 fi
 

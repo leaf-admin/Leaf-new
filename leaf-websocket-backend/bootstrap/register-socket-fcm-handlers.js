@@ -17,7 +17,7 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, rideLiveActi
                 platform: payload.platform
             });
 
-            const { fcmToken, platform } = payload;
+            const { fcmToken, platform, deviceId } = payload;
 
             if (!fcmToken) {
                 logStructured('error', `Token FCM não fornecido`, { service: 'registerFCMToken' });
@@ -38,6 +38,7 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, rideLiveActi
                 fcmToken: fcmToken,
                 fcmTokenUpdated: new Date().toISOString(),
                 fcmPlatform: platform || 'unknown',
+                fcmDeviceId: String(deviceId || '').trim(),
                 isTemporary: (!isAuthenticated).toString(),
                 socketId: socket.id
             });
@@ -51,6 +52,7 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, rideLiveActi
 
                 await fcmService.saveUserFCMToken(effectiveUserId, effectiveUserType, fcmToken, {
                     platform,
+                    deviceId: String(deviceId || '').trim() || null,
                     isTemporary: !isAuthenticated,
                     socketId: socket.id,
                     authenticated: isAuthenticated,

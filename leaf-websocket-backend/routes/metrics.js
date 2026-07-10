@@ -2046,6 +2046,13 @@ router.post('/api/reports/generate', authenticateSupport, requireSupportRoles(RE
     if (format === 'pdf') {
       result = await reportService.generatePDFReport(data, template);
     } else if (format === 'excel' || format === 'xlsx') {
+      if (!reportService.isExcelExportEnabled()) {
+        return res.status(503).json({
+          success: false,
+          code: 'XLSX_EXPORT_DISABLED_SECURITY',
+          error: 'Exportação XLSX temporariamente indisponível. Use PDF.'
+        });
+      }
       result = await reportService.generateExcelReport(data, template);
     } else {
       return res.status(400).json({
@@ -2097,8 +2104,21 @@ router.get('/api/reports/generate/:reportId', authenticateSupport, requireSuppor
     let result;
     if (format === 'pdf') {
       result = await reportService.generatePDFReport(reportData, 'default');
-    } else {
+    } else if (format === 'excel' || format === 'xlsx') {
+      if (!reportService.isExcelExportEnabled()) {
+        return res.status(503).json({
+          success: false,
+          code: 'XLSX_EXPORT_DISABLED_SECURITY',
+          error: 'Exportação XLSX temporariamente indisponível. Use PDF.'
+        });
+      }
       result = await reportService.generateExcelReport(reportData, 'default');
+    } else {
+      return res.status(400).json({
+        success: false,
+        code: 'REPORT_FORMAT_INVALID',
+        error: 'Formato inválido. Use "pdf".'
+      });
     }
 
     res.setHeader('Content-Type', format === 'pdf'

@@ -1,6 +1,5 @@
 const AWS_LIVENESS_PROVIDER = 'aws_rekognition_face_liveness';
 const DEFAULT_TRUSTED_MATCH_PROVIDERS = Object.freeze([
-  'mobile_face_embedding',
   'biometric-face-service',
   'leaf_face_compare_service'
 ]);
@@ -45,6 +44,9 @@ function resolveBiometricPolicy(env = process.env) {
     allowAwsLivenessOnlyMatch: productionRuntime
       ? false
       : readBooleanLike(env.KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH, !strictDefault),
+    allowMobileDeviceEmbedding: productionRuntime
+      ? false
+      : readBooleanLike(env.MOBILE_FACE_EMBEDDING_ENABLED, !strictDefault),
     trustedMatchProviders: readList(
       env.KYC_TRUSTED_BIOMETRIC_MATCH_PROVIDERS,
       DEFAULT_TRUSTED_MATCH_PROVIDERS
@@ -78,9 +80,14 @@ function evaluateDeviceVerificationTrust(payload = {}, options = {}) {
   const embeddingVerification = options.embeddingVerification || null;
   const mode = getVerificationMode(payload);
   const isLegacySignature = mode === 'device_signature_v1';
+  const isMobileDeviceEmbedding = Boolean(
+    embeddingVerification ||
+    mode === 'device_embedding_v1' ||
+    mode.startsWith('mobile_arcface') ||
+    getVerificationProvider(payload) === 'mobile_face_embedding'
+  );
   const awsOnly = isAwsLivenessPayload(payload) && !embeddingVerification;
-  const trustedProvider = Boolean(embeddingVerification)
-    || isTrustedMatchProvider(payload, policy.trustedMatchProviders);
+  const trustedProvider = isTrustedMatchProvider(payload, policy.trustedMatchProviders);
 
   if (isLegacySignature && !policy.allowLegacyDeviceSignature) {
     return {
@@ -96,6 +103,15 @@ function evaluateDeviceVerificationTrust(payload = {}, options = {}) {
       allowed: false,
       code: 'KYC_AWS_LIVENESS_ONLY_DISABLED',
       message: 'Liveness AWS sem comparação biométrica não é suficiente neste runtime.',
+      policy
+    };
+  }
+
+  if (isMobileDeviceEmbedding && !policy.allowMobileDeviceEmbedding) {
+    return {
+      allowed: false,
+      code: 'KYC_MOBILE_DEVICE_EMBEDDING_DISABLED',
+      message: 'Embedding facial do dispositivo não está homologado para este runtime.',
       policy
     };
   }
@@ -121,11 +137,20 @@ function evaluateProductionReadiness(env = process.env) {
   const blockers = [];
   const warnings = [];
   const enabled = policy.productionBiometricsEnabled;
+  const launchProfile = String(env.LEAF_LAUNCH_PROFILE || '').trim().toLowerCase();
+  const pilotControlled =
+    readBooleanLike(env.LEAF_PILOT_CONTROLLED, false) ||
+    ['pilot', 'pilot_controlled', 'controlled_pilot'].includes(launchProfile);
 
   if (!enabled) {
-    warnings.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.');
+    const message = 'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.';
+    if (policy.productionRuntime && pilotControlled) {
+      blockers.push(message);
+    } else {
+      warnings.push(message);
+    }
     return {
-      ok: true,
+      ok: blockers.length === 0,
       enabled,
       policy,
       blockers,
@@ -148,6 +173,9 @@ function evaluateProductionReadiness(env = process.env) {
   if (!readBooleanLike(env.ENABLE_CNH_FACE_BIOMETRICS, false)) {
     blockers.push('ENABLE_CNH_FACE_BIOMETRICS=true obrigatório para gerar embedding da CNH.');
   }
+  if (readBooleanLike(env.MOBILE_FACE_EMBEDDING_ENABLED, true)) {
+    blockers.push('MOBILE_FACE_EMBEDDING_ENABLED=false obrigatório até homologação do modelo/runtime nativo.');
+  }
   if (readBooleanLike(env.MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK, true)) {
     warnings.push('MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK=true: permitido apenas como legado; produção deve preferir /verify-driver/server-side-selfie.');
   }
@@ -159,6 +187,9 @@ function evaluateProductionReadiness(env = process.env) {
   }
   if (policy.allowAwsLivenessOnlyMatch) {
     blockers.push('KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH=false obrigatório para produção biométrica.');
+  }
+  if (policy.allowMobileDeviceEmbedding) {
+    blockers.push('Embedding facial local/do dispositivo deve permanecer desabilitado em produção.');
   }
 
   const approveThreshold = Number(env.BIOMETRIC_FACE_APPROVE_THRESHOLD || 0.61);

@@ -6,6 +6,8 @@ const {
     getDriverOnlineDailyPolicy
 } = require('../services/driver-online-time-policy-service');
 const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
+const { getPublicPilotAccessSnapshot } = require('../services/pilot-access-control-service');
+const geofenceService = require('../services/geofence-service');
 const h3VisualPolicyService = require('../services/h3-visual-policy-service');
 const { resolvePricingModelMode } = require('../services/pricing');
 const router = express.Router();
@@ -137,7 +139,8 @@ function buildBiometricRuntime() {
         awsLivenessEnabled: envBool('KYC_AWS_LIVENESS_ENABLED', false) || envBool('AWS_LIVENESS_ENABLED', false),
         faceCompareEnabled: presence('BIOMETRIC_FACE_SERVICE_URL'),
         cnhFaceBiometricsEnabled: envBool('ENABLE_CNH_FACE_BIOMETRICS', false),
-        requireTrustedBiometricMatch: envBool('KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH', false)
+        requireTrustedBiometricMatch: envBool('KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH', false),
+        mobileDeviceEmbeddingEnabled: envBool('MOBILE_FACE_EMBEDDING_ENABLED', true)
     };
 }
 
@@ -263,6 +266,10 @@ router.get('/runtime-config', async (req, res) => {
             },
             biometricRuntime: buildBiometricRuntime(),
             featureGates: getPilotLaunchFlags(),
+            launchControl: {
+                ...getPublicPilotAccessSnapshot(),
+                geofence: geofenceService.getOperationalStatus()
+            },
             mapsRoutingPolicy: {
                 ...buildMapsRoutingPolicy(),
                 h3VisualPolicy
