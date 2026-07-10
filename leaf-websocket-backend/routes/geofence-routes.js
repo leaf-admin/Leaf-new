@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const geofenceService = require('../services/geofence-service');
 const { logStructured, logError } = require('../utils/logger');
+const { isPilotControlledLaunch } = require('../utils/pilot-launch-flags');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 let firebaseConfig = null;
@@ -87,6 +88,18 @@ function normalizeGeofenceAdminConfig(rawConfig) {
 function applyGeofenceAdminConfig(configToApply) {
     const config = normalizeGeofenceAdminConfig(configToApply);
 
+    // The versioned polygon deployed with the RC is the production contract
+    // during controlled launches. A stale mutable admin record must never
+    // disable it or replace it with a legacy region during bootstrap.
+    if (isPilotControlledLaunch()) {
+        geofenceService.setEnabled(true);
+        return {
+            ...config,
+            enabled: true,
+            region: geofenceService.getCurrentRegion() || []
+        };
+    }
+
     if (Array.isArray(config.region) && config.region.length > 0) {
         const updated = geofenceService.updateRegion(config.region);
         if (!updated) {
@@ -128,6 +141,8 @@ function buildGeofenceResponse(config) {
         regionPolygons: operationalStatus.regionPolygons,
         regionPoints: operationalStatus.regionPoints,
         destinationInsideRegionRequired: operationalStatus.destinationInsideRegionRequired,
+        policyLocked: isPilotControlledLaunch(),
+        policyLockCode: isPilotControlledLaunch() ? 'GEOFENCE_POLICY_LOCKED' : null,
         region: currentRegion,
         updatedAt: config?.updatedAt || null,
         updatedBy: config?.updatedBy || null
@@ -530,6 +545,15 @@ router.get('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), async (re
  */
 router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
     try {
+        if (isPilotControlledLaunch()) {
+            return res.status(409).json({
+                success: false,
+                code: 'GEOFENCE_POLICY_LOCKED',
+                message: 'O polígono versionado da RC está bloqueado durante o piloto controlado.',
+                geofence: buildGeofenceResponse(await loadGeofenceAdminConfig().then(({ config }) => config))
+            });
+        }
+
         const { enabled, region } = req.body || {};
         const hasEnabled = typeof enabled === 'boolean';
         const hasRegion = region !== undefined;
