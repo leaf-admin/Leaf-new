@@ -1375,7 +1375,9 @@ function PassengerHomeOverlay({
             ]}
             testID="passenger-home-category-confirm"
             accessibilityRole="button"
-            accessibilityLabel="Confirmar categoria"
+            accessibilityLabel={
+              categoryConfirmDisabled ? categoryConfirmLabel : "Confirmar categoria"
+            }
           >
             <Text style={styles.categoryConfirmText}>{categoryConfirmLabel}</Text>
           </TouchableOpacity>

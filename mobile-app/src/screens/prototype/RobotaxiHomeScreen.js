@@ -106,6 +106,7 @@ import {
 } from '../../services/runtime/locationRouteBridge';
 import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteService';
 import Logger from '../../utils/Logger';
+import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePresentation';
 
 const { color } = robotaxiPrototypeTokens;
 const HOME_CARD_BOTTOM_OFFSET = 16;
@@ -2058,10 +2059,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       })
       .catch((error) => {
         if (!cancelled && error?.name !== 'AbortError') {
+          const failurePresentation = resolveHomeQuoteFailurePresentation(error);
           setHomeBackendQuotesByCategory({});
-          setHomeBackendQuoteError(
-            error?.message || 'Não foi possível calcular a tarifa agora.',
-          );
+          setHomeBackendQuoteError(failurePresentation.message);
         }
       })
       .finally(() => {
@@ -2098,6 +2098,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const selectedHomeBackendQuoteReady = Boolean(
     homeCanonicalRouteReady &&
       isHomeBackendQuoteRecordFresh(homeBackendQuote, homeBackendQuoteKey),
+  );
+  const homeBackendQuoteFailurePresentation = useMemo(
+    () => resolveHomeQuoteFailurePresentation(homeBackendQuoteError),
+    [homeBackendQuoteError],
   );
   const selectedHomeBackendQuoteExpired = Boolean(
     homeBackendQuote?.quote &&
@@ -8123,7 +8127,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 : selectedHomeDriverUnavailable
                   ? 'Sem motorista disponível'
                 : homeBackendQuoteError && !selectedHomeBackendQuoteReady
-                  ? 'Tarifa indisponível'
+                  ? homeBackendQuoteFailurePresentation.actionLabel
                   : 'Confirmar'
             }
             tariffStatusLabel={passengerHomeTrafficStatusLabel}

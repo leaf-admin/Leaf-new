@@ -174,6 +174,10 @@ describe("PassengerHomeOverlay", () => {
     );
 
     expect(getByTestId("passenger-home-category-confirm")).toBeDisabled();
+    expect(getByTestId("passenger-home-category-confirm")).toHaveProp(
+      "accessibilityLabel",
+      "Sem motorista disponível",
+    );
     expect(getByText("Sem motorista disponível")).toBeTruthy();
     expect(queryByText("Não foi possível validar motoristas agora.")).toBeNull();
   });
