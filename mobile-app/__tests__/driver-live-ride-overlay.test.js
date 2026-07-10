@@ -18,11 +18,13 @@ jest.mock("../src/components/prototype/PrototypeUI", () => {
 
   return {
     PrototypeCard: ({ children, ...props }) => <View {...props}>{children}</View>,
-    PrototypePrimaryButton: ({ label, onPress, disabled, accessibilityLabel }) => (
+    PrototypePrimaryButton: ({ label, onPress, disabled, accessibilityLabel, testID }) => (
       <TouchableOpacity
         onPress={onPress}
         disabled={disabled}
         accessibilityLabel={accessibilityLabel}
+        accessibilityState={{ disabled }}
+        testID={testID}
       >
         <Text>{label}</Text>
       </TouchableOpacity>
@@ -59,6 +61,44 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.getByText("16 km")).toBeTruthy();
     expect(screen.getByText("31 min")).toBeTruthy();
     expect(screen.queryByText("Local combinado")).toBeNull();
+  });
+
+  it("renders the authoritative offer countdown and blocks expired actions", () => {
+    const acceptDriverOffer = jest.fn();
+    const rejectDriverOffer = jest.fn();
+    const screen = render(
+      <DriverLiveRideOverlay
+        driverOffers={[
+          {
+            bookingId: "booking_expired_offer",
+            passenger: "Passageira Leaf",
+            pickup: "Av. Meriti, 9",
+            dropoff: "Av. das Américas, 4666",
+            estimatedDriverNetAmount: 50.91,
+            fare: 54.71,
+            pricingSnapshotLocked: true,
+            expiresAt: new Date(Date.now() - 1000).toISOString(),
+          },
+        ]}
+        acceptDriverOffer={acceptDriverOffer}
+        rejectDriverOffer={rejectDriverOffer}
+      />,
+    );
+
+    expect(screen.getByTestId("driver-live-offer-response-timer")).toBeTruthy();
+    expect(screen.getByText("00:00 para responder")).toBeTruthy();
+    expect(
+      screen.getByTestId("driver-live-offer-accept-button").props
+        .accessibilityState.disabled,
+    ).toBe(true);
+    expect(
+      screen.getByLabelText("driver-live-offer-reject-button").props
+        .accessibilityState.disabled,
+    ).toBe(true);
+    fireEvent.press(screen.getByTestId("driver-live-offer-accept-button"));
+    fireEvent.press(screen.getByLabelText("driver-live-offer-reject-button"));
+    expect(acceptDriverOffer).not.toHaveBeenCalled();
+    expect(rejectDriverOffer).not.toHaveBeenCalled();
   });
 
   it("renders an accepted active ride without requiring driverTripMeta", () => {

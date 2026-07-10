@@ -1107,7 +1107,13 @@ class DriverNotificationDispatcher {
                     ? Math.max(1, Math.round(routeDurationSecsFromBooking / 60))
                     : null;
 
-            // 3. Preparar dados da notificação
+            // 3. Preparar dados da notificação. O mesmo instante autoritativo
+            // alimenta payload e persistência para não criar deadlines divergentes.
+            const notificationTimestampMs = Date.now();
+            const notificationTimestamp = new Date(notificationTimestampMs).toISOString();
+            const notificationExpiresAt = new Date(
+                notificationTimestampMs + responseTimeoutSeconds * 1000
+            ).toISOString();
             const notificationData = {
                 rideId: bookingId,
                 bookingId: bookingId,
@@ -1141,7 +1147,9 @@ class DriverNotificationDispatcher {
                     }
                     : {}),
                 timeout: responseTimeoutSeconds,
-                timestamp: new Date().toISOString()
+                expiresInSec: responseTimeoutSeconds,
+                expiresAt: notificationExpiresAt,
+                timestamp: notificationTimestamp
             };
 
             const estimatedFare = Number(
@@ -1204,9 +1212,9 @@ class DriverNotificationDispatcher {
             ) {
                 writePipeline.hset(`booking:${bookingId}`, {
                     notifiedDriverId: driverId,
-                    notifiedAt: new Date().toISOString(),
+                    notifiedAt: notificationTimestamp,
                     awaitingResponseDriverId: driverId,
-                    awaitingResponseAt: new Date().toISOString(),
+                    awaitingResponseAt: notificationTimestamp,
                     awaitingResponsePreviousState: resumeState
                 });
                 logger.info(
@@ -1520,6 +1528,8 @@ class DriverNotificationDispatcher {
                     currentState === RideStateManager.STATES.AWAITING_RESPONSE
                 ) {
 
+                    const timeoutAt = new Date().toISOString();
+
                     // ✅ Limpar corrida ativa na tela do motorista (timeout)
                     await this.redis.del(`driver_active_notification:${driverId}`);
                     await clearOfferReservation(this.redis, bookingId, driverId).catch(() => null);
@@ -1545,15 +1555,15 @@ class DriverNotificationDispatcher {
                             resumeState,
                             {
                                 timeoutDriverId: driverId,
-                                timeoutAt: new Date().toISOString()
+                                timeoutAt
                             }
                         );
                     }
 
                     await this.redis.hset(`booking:${bookingId}`, {
                         timeoutDriverId: driverId,
-                        timeoutAt: new Date().toISOString(),
-                        awaitingResponseResolvedAt: new Date().toISOString()
+                        timeoutAt,
+                        awaitingResponseResolvedAt: timeoutAt
                     });
                     await this.redis.hdel(
                         bookingKey,
@@ -1570,9 +1580,20 @@ class DriverNotificationDispatcher {
                         {
                             bookingId,
                             driverId,
-                            timeoutAt: new Date().toISOString()
+                            timeoutAt
                         }
                     );
+
+                    if (this.io) {
+                        this.io.to(`driver_${driverId}`).emit('clearRideRequest', {
+                            bookingId,
+                            rideId: bookingId,
+                            code: 'DRIVER_RESPONSE_TIMEOUT',
+                            reason: 'offer_timeout',
+                            message: 'O tempo para responder terminou.',
+                            timeoutAt
+                        });
+                    }
                 } else {
                     // Estado já mudou (corrida aceita, cancelada, etc.)
                     logger.debug(`ℹ️ [Dispatcher] Timeout para driver ${driverId} (booking: ${bookingId}), mas estado já é ${currentState}`);

@@ -28,6 +28,7 @@ import {
   getDriverOfferPayoutLabel,
   selectDisplayableDriverOffer,
 } from "../driverOfferPricingSnapshot";
+import { useDriverOfferCountdown } from "../driverOfferCountdown";
 import { normalizeRuntimeRideStatus } from "../rideLifecycleContract";
 
 const { color } = robotaxiPrototypeTokens;
@@ -355,13 +356,15 @@ function DriverLiveRideOverlay({
   const offer = useMemo(() => resolveOffer(driverOffers), [driverOffers]);
   const hasActiveRide = Boolean(activeRide);
   const hasOffer = Boolean(!hasActiveRide && (offer?.bookingId || offer?.id));
+  const offerCountdown = useDriverOfferCountdown(hasOffer ? offer : null);
+  const offerExpired = Boolean(hasOffer && offerCountdown.expired);
   const tripPhase = useMemo(
     () => resolveTripPhase(activeRide, bookingStatus),
     [activeRide, bookingStatus],
   );
 
   const handleAcceptOffer = useCallback(async () => {
-    if (!offer || busyAction) {
+    if (!offer || busyAction || offerExpired) {
       return;
     }
 
@@ -379,10 +382,10 @@ function DriverLiveRideOverlay({
     } finally {
       setBusyAction("");
     }
-  }, [acceptDriverOffer, busyAction, offer]);
+  }, [acceptDriverOffer, busyAction, offer, offerExpired]);
 
   const handleRejectOffer = useCallback(async () => {
-    if (!offer || busyAction) {
+    if (!offer || busyAction || offerExpired) {
       return;
     }
 
@@ -397,7 +400,7 @@ function DriverLiveRideOverlay({
     } finally {
       setBusyAction("");
     }
-  }, [busyAction, offer, rejectDriverOffer]);
+  }, [busyAction, offer, offerExpired, rejectDriverOffer]);
 
   const handleTripPrimaryAction = useCallback(async () => {
     if (!activeRide || busyAction) {
@@ -1329,6 +1332,17 @@ function DriverLiveRideOverlay({
                 </View>
               </View>
 
+              <View
+                style={styles.offerResponseTimer}
+                testID="driver-live-offer-response-timer"
+                accessibilityLabel={`${offerCountdown.label} para responder`}
+              >
+                <Ionicons name="time-outline" size={15} color="#365A6D" />
+                <Text style={styles.offerResponseTimerText} numberOfLines={1}>
+                  {offerCountdown.label} para responder
+                </Text>
+              </View>
+
               <View style={styles.offerMetaStrip}>
                 <View style={styles.offerMetaItem}>
                   <Text style={styles.offerMetaLabel}>Embarque</Text>
@@ -1460,13 +1474,17 @@ function DriverLiveRideOverlay({
                 accessibilityLabel={
                   busyAction === "accept" ? "Aceitando..." : "Aceitar corrida"
                 }
+                disabled={Boolean(busyAction) || offerExpired}
                 onPress={handleAcceptOffer}
               />
 
               <TouchableOpacity
                 activeOpacity={0.78}
                 onPress={handleRejectOffer}
-                disabled={busyAction === "accept" || busyAction === "reject"}
+                disabled={Boolean(busyAction) || offerExpired}
+                accessibilityState={{
+                  disabled: Boolean(busyAction) || offerExpired,
+                }}
                 style={styles.declineTextButton}
                 testID="driver-live-offer-reject-button"
                 accessibilityLabel="driver-live-offer-reject-button"
@@ -1906,6 +1924,23 @@ const styles = StyleSheet.create({
     fontFamily: fonts.SemiBold,
     fontSize: 17,
     color: "#1A330E",
+  },
+  offerResponseTimer: {
+    alignSelf: "flex-start",
+    marginTop: 12,
+    minHeight: 30,
+    borderRadius: 15,
+    paddingHorizontal: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#EEF3EA",
+  },
+  offerResponseTimerText: {
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#365A6D",
   },
   offerMetaStrip: {
     marginTop: 14,

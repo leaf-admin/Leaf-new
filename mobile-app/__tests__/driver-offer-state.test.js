@@ -1,6 +1,33 @@
-import { dismissDriverOfferRuntimeState } from "../src/screens/prototype/driverOfferState";
+import {
+  dismissDriverOfferRuntimeState,
+  resolveDriverOfferClearPresentation,
+} from "../src/screens/prototype/driverOfferState";
 
 describe("driverOfferState", () => {
+  it("distinguishes an authoritative offer timeout from passenger cancellation", () => {
+    expect(
+      resolveDriverOfferClearPresentation({
+        code: "DRIVER_RESPONSE_TIMEOUT",
+        reason: "offer_timeout",
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        isOfferTimeout: true,
+        suppressReason: "offer_timeout",
+        transientType: "offer_expired",
+        title: "Oferta expirada",
+      }),
+    );
+    expect(resolveDriverOfferClearPresentation({})).toEqual(
+      expect.objectContaining({
+        isOfferTimeout: false,
+        suppressReason: "clear_ride_request",
+        transientType: "rider_cancelled_before_accept",
+        title: "Corrida cancelada pelo passageiro",
+      }),
+    );
+  });
+
   it("dismisses a single pending offer and returns the driver to idle", () => {
     const result = dismissDriverOfferRuntimeState(
       {

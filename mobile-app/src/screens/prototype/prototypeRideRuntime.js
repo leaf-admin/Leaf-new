@@ -64,7 +64,14 @@ import {
   mergeDriverOfferEntry as mergeDriverOfferEntryWithLockedPricing,
   mergeDriverOffers as mergeDriverOffersWithLockedPricing,
 } from "./driverOfferPricingSnapshot";
-import { dismissDriverOfferRuntimeState } from "./driverOfferState";
+import {
+  dismissDriverOfferRuntimeState,
+  resolveDriverOfferClearPresentation,
+} from "./driverOfferState";
+import {
+  resolveDriverOfferDeadlineMs,
+  toDriverOfferIsoTimestamp,
+} from "./driverOfferCountdown";
 import {
   formatCurrencyBRL,
   resolveTripTollAmountOrNull,
@@ -3917,6 +3924,8 @@ export function normalizeCompletedTripDriverNetAmount({
 function buildDriverOffer({
   bookingId,
   destination,
+  expiresAt,
+  expiresInSec,
   fare,
   etaMinutes,
   pickupAddress,
@@ -3929,6 +3938,8 @@ function buildDriverOffer({
   tripDistanceKm,
   tripDurationMin,
   routeCoordinates,
+  timestamp,
+  timeout,
   trafficSegments,
 }) {
   const destinationName = sanitizeText(destination?.name, "Destino");
@@ -3941,6 +3952,8 @@ function buildDriverOffer({
       ? Math.max(2, Math.round(etaMinutes))
       : 6;
   const payoutValue = Number.isFinite(Number(fare)) ? Number(fare) : 0;
+  const normalizedExpiresAt = toDriverOfferIsoTimestamp(expiresAt);
+  const normalizedTimestamp = toDriverOfferIsoTimestamp(timestamp);
 
   return {
     id: bookingId || `driver-offer-${Date.now()}`,
@@ -3954,6 +3967,14 @@ function buildDriverOffer({
     payout: formatCurrencyBR(payoutValue),
     fare: payoutValue,
     grossFare: payoutValue,
+    ...(normalizedExpiresAt ? { expiresAt: normalizedExpiresAt } : {}),
+    ...(toPositiveRuntimeNumber(expiresInSec) !== null
+      ? { expiresInSec: toPositiveRuntimeNumber(expiresInSec) }
+      : {}),
+    ...(normalizedTimestamp ? { timestamp: normalizedTimestamp } : {}),
+    ...(toPositiveRuntimeNumber(timeout) !== null
+      ? { timeout: toPositiveRuntimeNumber(timeout) }
+      : {}),
     preferences:
       preferences && typeof preferences === "object" ? { ...preferences } : {},
     ...(toPositiveRuntimeNumber(pickupDistanceKm) !== null
@@ -9250,9 +9271,27 @@ function attachSocketListeners() {
         payload?.route?.trafficSegments ||
         [],
     );
+    const offerTimeoutSeconds = toPositiveRuntimeNumber(
+      payload?.expiresInSec ??
+        payload?.expiresInSeconds ??
+        payload?.timeout ??
+        payload?.responseTimeoutSeconds,
+    );
+    const offerTimestamp =
+      payload?.timestamp || payload?.notifiedAt || payload?.offeredAt || null;
+    const offerDeadlineMs = resolveDriverOfferDeadlineMs(
+      {
+        ...payload,
+        expiresInSec: offerTimeoutSeconds,
+        timestamp: offerTimestamp,
+      },
+      Date.now(),
+    );
     const createdOffer = buildDriverOffer({
       bookingId,
       destination,
+      expiresAt: offerDeadlineMs,
+      expiresInSec: offerTimeoutSeconds,
       fare: Number.isFinite(estimatedFare) ? estimatedFare : 0,
       etaMinutes: Number(
         payload?.estimatedArrivalToPickupMin ??
@@ -9285,6 +9324,8 @@ function attachSocketListeners() {
       tripDistanceKm,
       tripDurationMin,
       routeCoordinates: tripRouteCoordinates,
+      timestamp: offerTimestamp,
+      timeout: offerTimeoutSeconds,
       trafficSegments: tripTrafficSegments,
     });
     const pickupCoordinate =
@@ -11045,10 +11086,12 @@ function attachSocketListeners() {
       return;
     }
 
-    const message =
-      payload?.message || "Corrida cancelada pelo passageiro";
+    const clearPresentation = resolveDriverOfferClearPresentation(payload);
     if (clearedBookingId) {
-      suppressBookingEvents(clearedBookingId, "clear_ride_request");
+      suppressBookingEvents(
+        clearedBookingId,
+        clearPresentation.suppressReason,
+      );
     }
 
     setRuntimeState((previous) => {
@@ -11073,16 +11116,17 @@ function attachSocketListeners() {
     });
 
     showDriverTransientCard({
-      type: "rider_cancelled_before_accept",
+      type: clearPresentation.transientType,
       bookingId: clearedBookingId || null,
-      title: "Corrida cancelada pelo passageiro",
-      message:
-        "Essa solicitação foi cancelada antes do seu aceite. Você já voltou para o mapa.",
+      title: clearPresentation.title,
+      message: clearPresentation.transientMessage,
     });
     appendRuntimeNotification(
       createRuntimeNotification({
-        title: "Corrida cancelada",
-        message,
+        title: clearPresentation.isOfferTimeout
+          ? "Oferta expirada"
+          : "Corrida cancelada",
+        message: clearPresentation.message,
         kind: "warning",
         scope: "driver",
       }),

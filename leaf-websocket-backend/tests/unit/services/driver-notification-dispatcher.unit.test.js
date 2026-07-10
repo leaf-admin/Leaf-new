@@ -196,6 +196,27 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     );
   });
 
+  it('authoritatively clears the driver card when the response timeout expires', async () => {
+    const emit = jest.fn();
+    const to = jest.fn(() => ({ emit }));
+    dispatcher = new DriverNotificationDispatcher(redis, { to });
+
+    dispatcher.scheduleDriverTimeout('driver_1', 'booking_123', 1);
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(to).toHaveBeenCalledWith('driver_driver_1');
+    expect(emit).toHaveBeenCalledWith(
+      'clearRideRequest',
+      expect.objectContaining({
+        bookingId: 'booking_123',
+        rideId: 'booking_123',
+        code: 'DRIVER_RESPONSE_TIMEOUT',
+        reason: 'offer_timeout',
+        timeoutAt: new Date(nowMs + 1000).toISOString()
+      })
+    );
+  });
+
   it('does not release the lock when it belongs to another booking', async () => {
     driverLockManager.getLockedBooking.mockResolvedValue('booking_other');
 
@@ -433,6 +454,10 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
         estimatedTripDistanceKm: 27.1,
         estimatedTripDurationMin: 32,
         driverDistanceToPickupKm: 0.2,
+        timeout: 20,
+        expiresInSec: 20,
+        timestamp: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + 20000).toISOString(),
       })
     );
   });

@@ -9,6 +9,18 @@ describe('production compose launch-control contract', () => {
   const workerStart = composeSource.indexOf('  sideeffects-worker:');
   const workerEnd = composeSource.indexOf('  # ===== BILLING WORKER =====', workerStart);
   const workerSource = composeSource.slice(workerStart, workerEnd);
+  const gatewayScaleSource = fs.readFileSync(
+    path.resolve(__dirname, '../../../docker-compose.gateway-scale.yml'),
+    'utf8',
+  );
+  const realtimeSecondarySource = fs.readFileSync(
+    path.resolve(__dirname, '../../../docker-compose.realtime-secondary.yml'),
+    'utf8',
+  );
+  const rideFlowProfileSource = fs.readFileSync(
+    path.resolve(__dirname, '../../../config/ride-flow-validation.env.example'),
+    'utf8',
+  );
 
   it('propagates the no-intake pilot policy to the side-effects worker preflight', () => {
     expect(workerStart).toBeGreaterThan(-1);
@@ -28,5 +40,21 @@ describe('production compose launch-control contract', () => {
     ]) {
       expect(workerSource).toContain(`- ${key}=\${${key}`);
     }
+  });
+
+  it('propagates the physical offer timeout only through dispatch gateways', () => {
+    expect(composeSource).toContain(
+      '- SMOKE_DRIVER_RESPONSE_TIMEOUT_SECONDS=${SMOKE_DRIVER_RESPONSE_TIMEOUT_SECONDS:-21600}',
+    );
+    expect(
+      gatewayScaleSource.match(/- SMOKE_DRIVER_RESPONSE_TIMEOUT_SECONDS=/g),
+    ).toHaveLength(2);
+    expect(realtimeSecondarySource).toContain(
+      '- SMOKE_DRIVER_RESPONSE_TIMEOUT_SECONDS=${SMOKE_DRIVER_RESPONSE_TIMEOUT_SECONDS:-21600}',
+    );
+    expect(rideFlowProfileSource).toContain(
+      'SMOKE_DRIVER_RESPONSE_TIMEOUT_SECONDS=20',
+    );
+    expect(workerSource).not.toContain('SMOKE_DRIVER_RESPONSE_TIMEOUT_SECONDS');
   });
 });

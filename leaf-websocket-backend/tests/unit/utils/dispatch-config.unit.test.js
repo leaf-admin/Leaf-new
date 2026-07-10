@@ -127,6 +127,16 @@ describe('dispatch-config', () => {
     })).toBe(21600);
   });
 
+  it('uses the physical 20 second override for sandbox offers when configured', () => {
+    process.env.SMOKE_DRIVER_RESPONSE_TIMEOUT_SECONDS = '20';
+
+    const { getDriverResponseTimeoutSeconds } = require('../../../utils/dispatch-config');
+
+    expect(getDriverResponseTimeoutSeconds({
+      paymentProviderEnvironment: 'sandbox',
+    })).toBe(20);
+  });
+
   it('uses the approved 5km geographic radius as the canonical driver search maximum', () => {
     delete process.env.MATCH_MAX_RADIUS_KM;
     delete process.env.PAYMENT_AVAILABILITY_RADIUS_KM;

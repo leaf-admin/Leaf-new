@@ -13,6 +13,35 @@ function hasRemainingOffers(driverOffers = []) {
     : false;
 }
 
+export function resolveDriverOfferClearPresentation(payload = {}) {
+  const clearReason = String(payload?.reason || payload?.code || "")
+    .trim()
+    .toLowerCase();
+  const isOfferTimeout =
+    clearReason === "offer_timeout" ||
+    clearReason === "driver_response_timeout";
+
+  return isOfferTimeout
+    ? {
+        isOfferTimeout: true,
+        suppressReason: "offer_timeout",
+        message: payload?.message || "O tempo para responder terminou.",
+        transientType: "offer_expired",
+        title: "Oferta expirada",
+        transientMessage:
+          "O tempo de resposta terminou. Você já voltou para o mapa.",
+      }
+    : {
+        isOfferTimeout: false,
+        suppressReason: "clear_ride_request",
+        message: payload?.message || "Corrida cancelada pelo passageiro",
+        transientType: "rider_cancelled_before_accept",
+        title: "Corrida cancelada pelo passageiro",
+        transientMessage:
+          "Essa solicitação foi cancelada antes do seu aceite. Você já voltou para o mapa.",
+      };
+}
+
 export function dismissDriverOfferRuntimeState(previous = {}, bookingIdInput = "") {
   const bookingId = String(bookingIdInput || "").trim();
   if (!bookingId) {
@@ -81,4 +110,3 @@ export function dismissDriverOfferRuntimeState(previous = {}, bookingIdInput = "
     clearedActiveRide,
   };
 }
-

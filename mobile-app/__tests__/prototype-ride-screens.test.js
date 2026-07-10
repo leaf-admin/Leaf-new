@@ -927,6 +927,52 @@ describe('prototype ride screens', () => {
     expect(rejectDriverOffer).not.toHaveBeenCalled();
   });
 
+  it('shows 00:00 and blocks driver offer actions after the authoritative deadline', () => {
+    const acceptDriverOffer = jest.fn();
+    const rejectDriverOffer = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      driverOffers: [
+        {
+          bookingId: 'booking_expired_offer',
+          pickupAddress: 'Rua A, 10',
+          dropoffAddress: 'Aeroporto Santos Dumont',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          pricingSnapshotLocked: true,
+          expiresAt: new Date(Date.now() - 1000).toISOString(),
+        },
+      ],
+      acceptDriverOffer,
+      rejectDriverOffer,
+      lastError: '',
+    });
+
+    const screen = render(
+      <RobotaxiDriverOfferScreen
+        navigation={{
+          navigate: jest.fn(),
+          canGoBack: jest.fn(() => true),
+          goBack: jest.fn(),
+        }}
+        route={{ params: {} }}
+      />,
+    );
+
+    expect(screen.getByText('00:00 para responder')).toBeTruthy();
+    expect(
+      screen.getByTestId('driver-offer-screen-accept-button').props
+        .accessibilityState.disabled,
+    ).toBe(true);
+    expect(
+      screen.getByTestId('driver-offer-screen-reject-button').props
+        .accessibilityState.disabled,
+    ).toBe(true);
+    fireEvent.press(screen.getByTestId('driver-offer-screen-accept-button'));
+    fireEvent.press(screen.getByTestId('driver-offer-screen-reject-button'));
+    expect(acceptDriverOffer).not.toHaveBeenCalled();
+    expect(rejectDriverOffer).not.toHaveBeenCalled();
+  });
+
   it('blocks navigator removal while a paid driver offer is pending', () => {
     let beforeRemoveListener = null;
     const unsubscribe = jest.fn();

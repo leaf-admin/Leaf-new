@@ -31,6 +31,7 @@ import {
 } from "./rideCardContract";
 import useCampaignAssetOverride from "../../hooks/useCampaignAssetOverride";
 import { resolvePrototypeMapPresentation } from "./prototypeMapPresentation";
+import { useDriverOfferCountdown } from "./driverOfferCountdown";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
@@ -141,20 +142,6 @@ function formatDistanceKmValue(valueKm) {
 
   const digits = numeric >= 10 ? 0 : 1;
   return `${numeric.toFixed(digits).replace(".", ",")} km`;
-}
-
-function formatCountdown(value) {
-  const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric >= 0) {
-    return `${Math.round(numeric)}s`;
-  }
-
-  const normalized = String(value || "").trim();
-  if (!normalized) {
-    return "18s";
-  }
-
-  return normalized.endsWith("s") ? normalized : `${normalized}s`;
 }
 
 function resolveRidePreferenceItems(source = {}) {
@@ -387,7 +374,13 @@ function buildDriverOfferFromRouteParams(params = {}) {
     pickupEtaMin: toRouteNumber(params.pickupEtaMin, undefined),
     tripDurationMin: toRouteNumber(params.tripDurationMin, undefined),
     passengerRating: toRouteNumber(params.passengerRating, undefined),
-    expiresInSec: toRouteNumber(params.expiresInSec, 18),
+    expiresInSec: toRouteNumber(
+      params.expiresInSec ?? params.expiresInSeconds ?? params.timeout,
+      18,
+    ),
+    expiresAt: params.expiresAt || params.offerExpiresAt || null,
+    timestamp: params.timestamp || params.notifiedAt || null,
+    timeout: toRouteNumber(params.timeout, undefined),
     paymentMethod: String(params.paymentMethod || "pix").trim(),
     pricingSnapshotLocked: String(params.pricingSnapshotLocked || "true") !== "false",
   };
@@ -575,11 +568,8 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     "Passageiro Leaf",
   );
   const passengerInitial = passengerName.charAt(0).toUpperCase() || "P";
-  const countdownLabel = formatCountdown(
-    request?.expiresInSec ||
-      request?.expiresInSeconds ||
-      route?.params?.expiresInSec,
-  );
+  const offerCountdown = useDriverOfferCountdown(request);
+  const offerExpired = Boolean(hasRequest && offerCountdown.expired);
   const grossFareLabel = formatCurrency(
     request?.grossFare ||
       request?.totalAmount ||
@@ -900,7 +890,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   }, []);
 
   const handleAccept = useCallback(async () => {
-    if (!hasRequest || !request) {
+    if (!hasRequest || !request || offerExpired) {
       return;
     }
 
@@ -932,10 +922,10 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     } finally {
       setBusyAction("");
     }
-  }, [acceptDriverOffer, hasRequest, navigation, request]);
+  }, [acceptDriverOffer, hasRequest, navigation, offerExpired, request]);
 
   const handleReject = useCallback(async () => {
-    if (!hasRequest || !request) {
+    if (!hasRequest || !request || offerExpired) {
       return;
     }
 
@@ -952,7 +942,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     } finally {
       setBusyAction("");
     }
-  }, [hasRequest, navigation, rejectDriverOffer, request]);
+  }, [hasRequest, navigation, offerExpired, rejectDriverOffer, request]);
   const offerMapPresentation = useMemo(
     () => resolvePrototypeMapPresentation({ role: "driver", status: "offered" }),
     [],
@@ -1025,7 +1015,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                       numberOfLines={1}
                       testID={DRIVER_OFFER_FIELD_TEST_IDS.response_timer}
                     >
-                      {countdownLabel} para responder
+                      {offerCountdown.label} para responder
                     </Text>
                   </View>
                   <View
@@ -1153,7 +1143,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                   <LeafButton
                     label={busyAction === "reject" ? "Recusando..." : "Recusar"}
                     tone="ghost"
-                    disabled={Boolean(busyAction)}
+                    disabled={Boolean(busyAction) || offerExpired}
                     onPress={handleReject}
                     style={styles.rejectButton}
                     testID={DRIVER_OFFER_FIELD_TEST_IDS.reject_action}
@@ -1166,7 +1156,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                         : "Aceitar corrida"
                     }
                     tone="primary"
-                    disabled={Boolean(busyAction)}
+                    disabled={Boolean(busyAction) || offerExpired}
                     onPress={handleAccept}
                     style={styles.acceptButton}
                     testID={DRIVER_OFFER_FIELD_TEST_IDS.accept_action}
