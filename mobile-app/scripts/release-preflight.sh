@@ -11,6 +11,11 @@ APP_CONFIG="${ROOT_DIR}/app.config.js"
 
 FAIL=0
 
+if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+  echo "[release-preflight][fail] release bloqueado: worktree contém alterações não commitadas" >&2
+  exit 2
+fi
+
 fail() {
   echo "[release-preflight][fail] $1" >&2
   FAIL=1

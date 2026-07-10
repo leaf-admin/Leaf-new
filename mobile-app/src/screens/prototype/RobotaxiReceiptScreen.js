@@ -13,7 +13,6 @@ import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { StackActions, useIsFocused } from "@react-navigation/native";
 import { fonts } from "../../theme/runtimeTokens";
-import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import {
   PrototypeCard,
@@ -535,6 +534,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
+  const [receiptOptionsVisible, setReceiptOptionsVisible] = useState(false);
   const [receiptRecoveryState, setReceiptRecoveryState] = useState("idle");
   const runtimeHistory = Array.isArray(tripHistory) ? tripHistory : [];
   const routeReceipt =
@@ -1483,9 +1483,6 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <View style={styles.receiptCleanPill}>
                   <Text style={styles.receiptCleanPillText}>{receiptPaymentPill}</Text>
                 </View>
-                {!isDriverView ? (
-                  <SecurePaymentBadge style={styles.receiptSecurePaymentBadge} color="#6E7D72" />
-                ) : null}
               </View>
             </View>
 
@@ -1565,11 +1562,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               </View>
               <View style={styles.receiptCleanMetricCell}>
                 <Text style={styles.receiptCleanMetricValue}>
-                  {formatReceiptMoney(safeTollAmount > 0 ? safeTollAmount : safeFeeAmount)}
+                  {formatReceiptMoney(safeTollAmount)}
                 </Text>
-                <Text style={styles.receiptCleanMetricLabel}>
-                  {safeTollAmount > 0 ? "pedágio" : "taxa Leaf"}
-                </Text>
+                <Text style={styles.receiptCleanMetricLabel}>pedágio</Text>
               </View>
             </View>
 
@@ -1581,11 +1576,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                     subtitle: "Total pago pelo passageiro",
                     value: totalAmountLabel,
                   })}
-                  {safeTollAmount > 0 ? renderCleanValueRow({
+                  {renderCleanValueRow({
                     title: "Pedágio",
                     subtitle: "Repassado integralmente",
                     value: formatReceiptMoney(safeTollAmount),
-                  }) : null}
+                  })}
                   {renderCleanValueRow({
                     title: "Taxas Leaf",
                     subtitle: "Operacional e processamento antes do repasse",
@@ -1607,11 +1602,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                     subtitle: "Trajeto e serviço",
                     value: formatReceiptMoney(passengerRideSubtotal),
                   })}
-                  {safeTollAmount > 0 ? renderCleanValueRow({
+                  {renderCleanValueRow({
                     title: "Pedágio",
                     subtitle: "Incluso no total pago",
                     value: formatReceiptMoney(safeTollAmount),
-                  }) : null}
+                  })}
                   {renderCleanValueRow({
                     title: "Taxa Leaf",
                     subtitle: "Inclusa no total pago",
@@ -1640,24 +1635,18 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
             <View style={styles.receiptCleanActions}>
               {!isDriverView ? (
                 <TouchableOpacity
-                  style={styles.receiptCleanSecondaryButton}
+                  style={styles.receiptCleanMoreOptionsButton}
                   activeOpacity={0.86}
                   accessible
                   accessibilityRole="button"
-                  accessibilityLabel="passenger-receipt-report-issue-button"
-                  testID="passenger-receipt-report-issue-button"
-                  onPress={() =>
-                    navigation.navigate("RobotaxiPrototypeSupport", {
-                      fromReceipt: true,
-                      initialTopicId: "billing",
-                      receipt: selected,
-                      bookingId: selected?.bookingId || selected?.id,
-                      source: "receipt",
-                      bookingStatus: "completed",
-                    })
-                  }
+                  accessibilityLabel="passenger-receipt-more-options-button"
+                  accessibilityState={{ expanded: receiptOptionsVisible }}
+                  testID="passenger-receipt-more-options-button"
+                  onPress={() => setReceiptOptionsVisible((visible) => !visible)}
                 >
-                  <Text style={styles.receiptCleanSecondaryButtonText}>Ajuda</Text>
+                  <Text style={styles.receiptCleanMoreOptionsText}>
+                    {receiptOptionsVisible ? "Ocultar opções" : "Mais opções"}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
 
@@ -1680,6 +1669,29 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <Text style={styles.receiptCleanPrimaryButtonText}>{ratingButtonLabel}</Text>
               </TouchableOpacity>
             </View>
+
+            {!isDriverView && receiptOptionsVisible ? (
+              <TouchableOpacity
+                style={styles.receiptCleanSecondaryButton}
+                activeOpacity={0.86}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel="passenger-receipt-report-issue-button"
+                testID="passenger-receipt-report-issue-button"
+                onPress={() =>
+                  navigation.navigate("RobotaxiPrototypeSupport", {
+                    fromReceipt: true,
+                    initialTopicId: "billing",
+                    receipt: selected,
+                    bookingId: selected?.bookingId || selected?.id,
+                    source: "receipt",
+                    bookingStatus: "completed",
+                  })
+                }
+              >
+                <Text style={styles.receiptCleanSecondaryButtonText}>Reportar problema</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </ScrollView>
       </View>
@@ -3120,7 +3132,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     marginTop: 24,
-    paddingBottom: 25,
+    paddingBottom: 12,
+  },
+  receiptCleanMoreOptionsButton: {
+    minWidth: 100,
+    minHeight: leafButtonMetrics.height,
+    paddingHorizontal: 12,
+    borderRadius: leafButtonMetrics.radius,
+    borderWidth: 1,
+    borderColor: "#E9E2D8",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  receiptCleanMoreOptionsText: {
+    color: "#1A330E",
+    fontFamily: fonts.SemiBold,
+    fontSize: 12.5,
+    lineHeight: 17,
   },
   receiptCleanSecondaryButton: {
     width: 100,

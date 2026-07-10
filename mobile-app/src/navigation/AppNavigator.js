@@ -320,6 +320,16 @@ const legacyDriverTripsScreenParams = {
 
 function normalizeLeafAppLinkPath(path) {
   const normalizedPath = String(path || '').replace(/^\/+/, '');
+  const normalizedPathname = normalizedPath.split('?')[0];
+
+  // These two routes resolve to the retired standalone booking/payment
+  // surfaces. Keep old links safe, but send them to the current home flow.
+  if (
+    normalizedPathname === 'robotaxi/booking' ||
+    normalizedPathname === 'robotaxi/payment'
+  ) {
+    return 'robotaxi/home';
+  }
 
   if (normalizedPath === 'viagem') {
     return 'robotaxi/trip/public';

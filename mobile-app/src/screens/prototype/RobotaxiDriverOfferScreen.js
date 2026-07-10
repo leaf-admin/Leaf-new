@@ -3,7 +3,6 @@ import { Alert, StatusBar, StyleSheet, Text, View, useWindowDimensions } from "r
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fonts } from "../../theme/runtimeTokens";
-import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
@@ -31,6 +30,7 @@ import {
   defineRideCardRenderedFields,
 } from "./rideCardContract";
 import useCampaignAssetOverride from "../../hooks/useCampaignAssetOverride";
+import { resolvePrototypeMapPresentation } from "./prototypeMapPresentation";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
@@ -745,9 +745,27 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       windowHeight,
     ],
   );
+  const offerViewportCoordinates = useMemo(
+    () => (
+      offerRouteCoordinates.length >= 2
+        ? [
+            ...offerRouteCoordinates,
+            offerOriginCoordinate,
+            offerMapOriginCoordinate,
+            offerMapDestinationCoordinate,
+          ]
+        : []
+    ),
+    [
+      offerMapDestinationCoordinate,
+      offerMapOriginCoordinate,
+      offerOriginCoordinate,
+      offerRouteCoordinates,
+    ],
+  );
   const offerVisibleRouteRegion = useMemo(
     () => buildRouteViewportRegion({
-      coordinates: offerRouteCoordinates,
+      coordinates: offerViewportCoordinates,
       mapWidth: mapWidth || windowWidth,
       mapHeight: mapHeight || windowHeight,
       activeOcclusion: offerMapOcclusion,
@@ -760,7 +778,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       mapHeight,
       mapWidth,
       offerMapOcclusion,
-      offerRouteCoordinates,
+      offerViewportCoordinates,
       offerViewportPadding,
       windowHeight,
       windowWidth,
@@ -935,6 +953,10 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       setBusyAction("");
     }
   }, [hasRequest, navigation, rejectDriverOffer, request]);
+  const offerMapPresentation = useMemo(
+    () => resolvePrototypeMapPresentation({ role: "driver", status: "offered" }),
+    [],
+  );
 
   return (
     <PrototypeScreenTransition>
@@ -965,10 +987,11 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
           viewportPadding={offerViewportPadding}
           routeViewportRegion={offerVisibleRouteRegion}
           onMapLayout={handleMapLayout}
-          interactionEnabled={false}
+          interactionEnabled={offerMapPresentation.interactionEnabled}
           hideRouteEndpointMarkers
           hideUserMarker
-          animateRoute
+          animateRoute={offerMapPresentation.animateRoute}
+          manualCameraHoldMs={offerMapPresentation.manualCameraHoldMs}
           driverMarkerMode="car"
           driverVehicleColor={offerVehicleColor}
           driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
@@ -1105,7 +1128,6 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                   <Text style={styles.confirmedText} numberOfLines={1}>
                     PIX confirmado
                   </Text>
-                  <SecurePaymentBadge style={styles.confirmedSecurePaymentBadge} />
                 </View>
 
                 {ridePreferenceItems.length > 0 ? (

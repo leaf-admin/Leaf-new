@@ -1432,11 +1432,11 @@ function scenarioRoute(name) {
   if (name === 'passenger-home' || name === 'driver-home') {
     return 'leafapp://robotaxi/home';
   }
-  if (name === 'passenger-booking') {
-    return `leafapp://robotaxi/booking?${passengerQuoteParams()}`;
-  }
-  if (name === 'passenger-payment') {
-    return `leafapp://robotaxi/payment?${passengerQuoteParams()}`;
+  if (name === 'passenger-booking' || name === 'passenger-payment') {
+    // Booking/payment deep links still resolve to standalone legacy surfaces.
+    // QA must start from the current home runtime and reach the next surface
+    // through the canonical interaction, never through those stale routes.
+    return 'leafapp://robotaxi/home';
   }
   if (
     name === 'passenger-searching' ||
@@ -1447,8 +1447,9 @@ function scenarioRoute(name) {
     name === 'passenger-arrived' ||
     name === 'passenger-started'
   ) {
-    const status = name.replace('passenger-', '');
-    return `leafapp://robotaxi/trip?${passengerTripParams(status)}`;
+    // Passenger lifecycle state is rendered by the current home runtime.
+    // Opening robotaxi/trip would bypass it for the standalone legacy screen.
+    return 'leafapp://robotaxi/home';
   }
   if (name === 'driver-offer') {
     return `leafapp://robotaxi/driver/offer?${driverTripParams('searching', 'booking-proof-offer-1', { expiresInSec: 18 })}&qaKeepVisible=1`;

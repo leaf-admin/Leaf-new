@@ -6,6 +6,7 @@ import { Alert } from 'react-native';
 
 import WooviPaymentModal from '../src/components/payment/WooviPaymentModal';
 import WooviService from '../src/services/WooviService';
+import Logger from '../src/utils/Logger';
 import {
   buildRidePaymentContextKey,
   getOrCreateRidePaymentSession,
@@ -20,6 +21,7 @@ jest.mock('../src/utils/Logger', () => ({
   log: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
+  debug: jest.fn(),
 }));
 
 jest.mock('expo-clipboard', () => ({
@@ -266,7 +268,7 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     expect(WooviService.processAdvancePayment).toHaveBeenCalledTimes(1);
   });
 
-	  it('waits for backend payment confirmation before advancing the ride flow', async () => {
+  it('waits for backend payment confirmation before advancing the ride flow', async () => {
     WooviService.simulateTestWebhook.mockResolvedValue({
       success: true,
       message: 'Webhook de teste processado com sucesso',
@@ -365,6 +367,51 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     });
 
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('keeps status polling failures silent while payment remains pending', async () => {
+    WooviService.getPaymentStatus.mockRejectedValue(new Error('status unavailable'));
+
+    render(
+      <WooviPaymentModal
+        visible
+        onClose={jest.fn()}
+        onPaymentConfirmed={jest.fn()}
+        tripData={{
+          pickup: { add: 'Origem' },
+          drop: { add: 'Destino' },
+          carType: 'Leaf Plus',
+          estimatedFare: 13.42,
+        }}
+        estimates={{ estimateFare: 13.42 }}
+        passengerId="passenger_1"
+        passengerName="Passageira Leaf"
+        passengerEmail="passageira@leaf.app.br"
+        prefilledPaymentData={{
+          chargeId: 'charge_polling_unavailable',
+          paymentIntentId: 'intent_polling_unavailable',
+          rideId: 'temp_ride_polling_unavailable',
+          amount: 13.42,
+          amountInCents: 1342,
+          qrCodeText: 'pix-code',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(WooviService.getPaymentStatus).toHaveBeenCalledWith(
+        'charge_polling_unavailable',
+      );
+    });
+
+    expect(Logger.error).not.toHaveBeenCalled();
+    expect(Logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining('Verificação silenciosa indisponível'),
+      expect.objectContaining({
+        chargeId: 'charge_polling_unavailable',
+        paymentStatus: 'pending',
+      }),
+    );
   });
 
   it('retries transient Pix creation failures with the same payment session', async () => {

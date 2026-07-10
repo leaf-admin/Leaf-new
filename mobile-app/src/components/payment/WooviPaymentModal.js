@@ -1293,10 +1293,12 @@ export default function WooviPaymentModal({
             
         } catch (error) {
             const serverResponse = error?.response?.data;
-            Logger.error('❌ Erro ao verificar pagamento:', serverResponse || error);
-            Logger.log('🔍 [Woovi] Referências usadas:', {
+            Logger.debug('ℹ️ [WooviPaymentModal] Verificação silenciosa indisponível:', {
+                error: serverResponse || error?.message || error,
                 chargeId: activePaymentData?.chargeId,
                 rideId: activePaymentData?.rideId,
+                lifecycleActive: visibleRef.current,
+                paymentStatus: paymentStatusRef.current,
             });
             // Não mostrar erro para o usuário (verificação silenciosa)
         } finally {
@@ -1689,20 +1691,15 @@ export default function WooviPaymentModal({
                     Escaneie o QR Code ou copie o código PIX abaixo.
                 </Text>
 
-                <TouchableOpacity
+                <View
                     style={styles.pixCopyField}
-                    onPress={copyPixCode}
-                    activeOpacity={0.86}
-                    testID="payment-modal-copy-pix-button"
-                    accessibilityLabel="payment-modal-copy-pix-button"
+                    testID="payment-modal-pix-code"
+                    accessibilityLabel="Código PIX pronto para copiar"
                 >
                     <Text style={styles.pixCodeText} numberOfLines={1}>
                         {getPixSnippet()}
                     </Text>
-                    <Text style={styles.pixCopyText}>
-                        Copiar
-                    </Text>
-                </TouchableOpacity>
+                </View>
 
                 <View style={styles.actionButtons}>
                     <TouchableOpacity
@@ -2076,14 +2073,6 @@ const styles = StyleSheet.create({
         flex: 1,
         marginRight: 12,
     },
-    pixCopyText: {
-        color: PIX_SURFACE.leaf,
-        fontFamily: fonts.Medium,
-        fontSize: 12,
-        lineHeight: 19,
-        textAlign: 'right',
-    },
-
     countdownContainer: {
         alignItems: 'center',
         marginTop: 8,

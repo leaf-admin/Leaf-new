@@ -44,6 +44,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
+  const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
   const reason =
     route?.params?.reason || "Ainda não encontramos um motorista disponível perto de você.";
@@ -262,7 +263,27 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
               accessibilityLabel="passenger-no-drivers-retry-button"
             />
 
-            <View style={styles.rowButtons}>
+            <TouchableOpacity
+              style={styles.moreOptionsButton}
+              activeOpacity={0.86}
+              onPress={() => setSecondaryActionsVisible((visible) => !visible)}
+              testID="passenger-no-drivers-more-options-button"
+              accessibilityLabel="passenger-no-drivers-more-options-button"
+              accessibilityRole="button"
+              accessibilityState={{ expanded: secondaryActionsVisible }}
+            >
+              <Text style={styles.moreOptionsButtonText}>
+                {secondaryActionsVisible ? "Ocultar opções" : "Mais opções"}
+              </Text>
+              <Ionicons
+                name={secondaryActionsVisible ? "chevron-up" : "chevron-down"}
+                size={16}
+                color={color.text.secondary}
+              />
+            </TouchableOpacity>
+
+            {secondaryActionsVisible ? (
+              <View style={styles.rowButtons}>
               <TouchableOpacity
                 style={styles.secondaryButton}
                 activeOpacity={0.86}
@@ -292,7 +313,8 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
                 />
                 <Text style={styles.secondaryButtonText}>Voltar ao mapa</Text>
               </TouchableOpacity>
-            </View>
+              </View>
+            ) : null}
           </PrototypeCard>
         </PrototypeDismissibleSheet>
       </View>
@@ -369,6 +391,21 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     marginTop: 12,
+  },
+  moreOptionsButton: {
+    minHeight: 38,
+    marginTop: 4,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  moreOptionsButtonText: {
+    color: color.text.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
   },
   rowButtons: {
     marginTop: 8,

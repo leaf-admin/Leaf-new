@@ -52,7 +52,15 @@ function expectPrototypeMapLayerContract(source, {
   if (interactionEnabled === true) {
     expect(source).toMatch(/\n\s+interactionEnabled\n/);
   } else if (interactionEnabled) {
-    expect(source).toContain(`interactionEnabled={${interactionEnabled}}`);
+    const normalizeJsxWhitespace = value => value
+      .replace(/\s+/g, ' ')
+      .replace(/\{\s+/g, '{')
+      .replace(/\s+\}/g, '}');
+    const normalizedSource = normalizeJsxWhitespace(source);
+    const normalizedContract = normalizeJsxWhitespace(
+      `interactionEnabled={${interactionEnabled}}`,
+    );
+    expect(normalizedSource).toContain(normalizedContract);
   }
 }
 
@@ -66,7 +74,7 @@ describe('active route viewport contract', () => {
     expectPrototypeMapLayerContract(source, {
       viewportPadding: 'tripMapViewportPadding',
       routeViewportRegion: 'tripVisibleRouteRegion',
-      interactionEnabled: true,
+      interactionEnabled: 'tripMapPresentation.interactionEnabled',
     });
   });
 
@@ -79,7 +87,8 @@ describe('active route viewport contract', () => {
     expectPrototypeMapLayerContract(source, {
       viewportPadding: 'driverTripViewportPadding',
       routeViewportRegion: 'driverTripVisibleRouteRegion',
-      interactionEnabled: 'isLifecycleNavigationLocked',
+      interactionEnabled:
+        'isLifecycleNavigationLocked && driverTripMapPresentation.interactionEnabled',
     });
   });
 
@@ -92,7 +101,7 @@ describe('active route viewport contract', () => {
     expectPrototypeMapLayerContract(source, {
       viewportPadding: 'offerViewportPadding',
       routeViewportRegion: 'offerVisibleRouteRegion',
-      interactionEnabled: 'false',
+      interactionEnabled: 'offerMapPresentation.interactionEnabled',
     });
   });
 

@@ -73,6 +73,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>A Leaf utiliza a câmera para tirar sua foto de perfil e verificar sua identidade.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>A Leaf usa a rede local apenas em builds de desenvolvimento para carregar o app pelo Metro durante testes.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>A Leaf coleta e envia sua localização precisa aos servidores da Leaf para corridas, rotas, navegação, acompanhamento em tempo real e segurança. Para motoristas online ou em corrida, isso pode acontecer mesmo quando o app estiver fechado ou não estiver em uso. A Leaf não usa sua localização para anúncios.</string>
 	<key>NSLocationAlwaysUsageDescription</key>

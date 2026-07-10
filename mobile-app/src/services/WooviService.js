@@ -216,7 +216,8 @@ class WooviService {
             const response = await this.backendApi.get(`/api/payment/status/${chargeId}`);
             return response.data;
         } catch (error) {
-            Logger.error('Erro ao verificar status do pagamento:', error);
+            // Status polling is best-effort; callers decide whether a failure is terminal.
+            Logger.debug('Status do pagamento temporariamente indisponível:', error?.message || error);
             throw error;
         }
     }

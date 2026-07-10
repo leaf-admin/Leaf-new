@@ -782,6 +782,9 @@ describe('WebSocketManager auth QA bypass', () => {
 
   it('exposes and clears the latest authenticated payload for runtime rehydration', () => {
     const manager = WebSocketManager.getInstance();
+    const syncSpy = jest
+      .spyOn(manager, 'syncActiveRideWithAck')
+      .mockResolvedValue({ success: true, hasActiveRide: false });
     manager.socket = {
       connected: true,
       id: 'socket-driver',
@@ -814,6 +817,8 @@ describe('WebSocketManager auth QA bypass', () => {
       },
     });
 
+    expect(syncSpy).toHaveBeenCalled();
+
     expect(manager.getConnectionStatus()).toEqual(
       expect.objectContaining({
         authenticated: true,
@@ -830,6 +835,8 @@ describe('WebSocketManager auth QA bypass', () => {
         }),
       }),
     );
+
+    syncSpy.mockRestore();
 
     const disconnectRegistration = manager.socket.on.mock.calls.find(
       ([eventName]) => eventName === 'disconnect',

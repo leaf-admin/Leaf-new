@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { StatusBar, StyleSheet, Text, View } from "react-native";
+import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
@@ -26,7 +26,7 @@ import {
 } from "./passengerFlowRouting";
 
 const SHEET_BOTTOM_OFFSET = 0;
-const FALLBACK_CARD_HEIGHT = 302;
+const FALLBACK_CARD_HEIGHT = 258;
 
 function compactPlaceLabel(value, fallback) {
   const normalized = String(value || "").trim();
@@ -227,6 +227,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState("");
   const [timeoutDecisionDismissed, setTimeoutDecisionDismissed] = useState(false);
+  const [tripDetailsVisible, setTripDetailsVisible] = useState(false);
   const terminalRouteHandledRef = useRef(false);
   const protectedSearchExitRef = useRef(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
@@ -698,22 +699,45 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                 {progressMetaText}
               </Text>
 
-            <View style={styles.routeSummaryBlock}>
-              <View style={styles.routeSummaryLine}>
-                <Ionicons name="radio-button-on" size={13} color={leafRideColors.text} />
-                <Text style={styles.routeSummaryLabel}>Partida:</Text>
-                <Text style={styles.routeSummaryValue} numberOfLines={1}>
-                  {originLabel}
-                </Text>
+            <TouchableOpacity
+              activeOpacity={0.78}
+              onPress={() => setTripDetailsVisible((current) => !current)}
+              style={styles.tripDetailsToggle}
+              testID="passenger-driver-search-details-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={
+                tripDetailsVisible ? "Ocultar detalhes da viagem" : "Ver detalhes da viagem"
+              }
+              accessibilityState={{ expanded: tripDetailsVisible }}
+            >
+              <Text style={styles.tripDetailsToggleText}>
+                {tripDetailsVisible ? "Ocultar detalhes da viagem" : "Ver detalhes da viagem"}
+              </Text>
+              <Ionicons
+                name={tripDetailsVisible ? "chevron-up" : "chevron-down"}
+                size={15}
+                color={leafRideColors.secondary}
+              />
+            </TouchableOpacity>
+
+            {tripDetailsVisible ? (
+              <View style={styles.routeSummaryBlock} testID="passenger-driver-search-route-details">
+                <View style={styles.routeSummaryLine}>
+                  <Ionicons name="radio-button-on" size={13} color={leafRideColors.text} />
+                  <Text style={styles.routeSummaryLabel}>Partida:</Text>
+                  <Text style={styles.routeSummaryValue} numberOfLines={1}>
+                    {originLabel}
+                  </Text>
+                </View>
+                <View style={styles.routeSummaryLine}>
+                  <Ionicons name="ellipse" size={13} color={leafRideColors.accent} />
+                  <Text style={styles.routeSummaryLabel}>Chegada:</Text>
+                  <Text style={styles.routeSummaryValue} numberOfLines={1}>
+                    {destinationLabel} - chegada estimada {estimatedArrivalLabel}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.routeSummaryLine}>
-                <Ionicons name="ellipse" size={13} color={leafRideColors.accent} />
-                <Text style={styles.routeSummaryLabel}>Chegada:</Text>
-                <Text style={styles.routeSummaryValue} numberOfLines={1}>
-                  {destinationLabel} - chegada estimada {estimatedArrivalLabel}
-                </Text>
-              </View>
-            </View>
+            ) : null}
 
             <View style={styles.hiddenLegacyRows}>
               <Text>Busca ativa</Text>
@@ -873,8 +897,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
   },
+  tripDetailsToggle: {
+    alignSelf: "flex-start",
+    marginTop: 14,
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  tripDetailsToggleText: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 12,
+    lineHeight: 16,
+  },
   routeSummaryBlock: {
-    marginTop: 22,
+    marginTop: 8,
     gap: 10,
     paddingTop: 14,
     borderTopWidth: StyleSheet.hairlineWidth,

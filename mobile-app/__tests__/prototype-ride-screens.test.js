@@ -1218,6 +1218,7 @@ describe('prototype ride screens', () => {
       <RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />
     );
 
+    fireEvent.press(screen.getByTestId('passenger-trip-accepted-more-options-button'));
     fireEvent.press(screen.getAllByTestId('passenger-trip-cancel-button')[0]);
 
     expect(navigation.navigate).toHaveBeenCalledWith(
@@ -2098,10 +2099,14 @@ describe('prototype ride screens', () => {
     expect(screen.getByText('Rua A, 10')).toBeTruthy();
     expect(screen.getByText('Aeroporto Santos Dumont')).toBeTruthy();
     expect(screen.getByLabelText('Mensagem')).toBeTruthy();
-    expect(screen.getByLabelText('Ligar')).toBeTruthy();
-    expect(screen.getByText('Compartilhar')).toBeTruthy();
-    expect(screen.getByLabelText('Cancelar corrida')).toBeTruthy();
-    expect(screen.queryByText('Cancelar corrida')).toBeNull();
+    expect(screen.getByLabelText('Mais opções')).toBeTruthy();
+    expect(screen.queryByLabelText('Ligar')).toBeNull();
+    expect(screen.queryByLabelText('Cancelar corrida')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('passenger-trip-accepted-more-options-button'));
+    expect(screen.getByLabelText('passenger-trip-collapse-button')).toBeTruthy();
+    expect(screen.getByText('Compartilhar viagem')).toBeTruthy();
+    expect(screen.getByText('Cancelar corrida')).toBeTruthy();
   });
 
   it.each(['accepted', 'arrived', 'started', 'operational_interrupted', 'searching_replacement'])(
@@ -2629,7 +2634,7 @@ describe('prototype ride screens', () => {
     });
   });
 
-  it('keeps the started passenger trip compact with visible route progress and icon-only actions', () => {
+  it('keeps the started passenger trip compact with route progress and progressive trip options', () => {
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
 
     const navigation = {
@@ -2650,9 +2655,10 @@ describe('prototype ride screens', () => {
     expect(screen.getByTestId('passenger-trip-route-progress')).toBeTruthy();
     expect(screen.getByTestId('passenger-trip-started-action-dock')).toBeTruthy();
     expect(screen.getByLabelText('Chat')).toBeTruthy();
-    expect(screen.getByLabelText('Compartilhar')).toBeTruthy();
-    expect(screen.getByLabelText('Alterar destino')).toBeTruthy();
-    expect(screen.getByLabelText('Encerrar agora')).toBeTruthy();
+    expect(screen.getByLabelText('Mais opções')).toBeTruthy();
+    expect(screen.queryByLabelText('Compartilhar')).toBeNull();
+    expect(screen.queryByLabelText('Alterar destino')).toBeNull();
+    expect(screen.queryByLabelText('Encerrar agora')).toBeNull();
     expect(screen.queryByLabelText('passenger-trip-collapse-button')).toBeNull();
     expect(screen.getByLabelText('passenger-trip-screen')).toBeTruthy();
     expect(screen.queryByText('Chat')).toBeNull();
@@ -2670,6 +2676,12 @@ describe('prototype ride screens', () => {
         bookingStatus: 'started',
       })
     );
+
+    fireEvent.press(screen.getByTestId('passenger-trip-more-actions-button'));
+    expect(screen.getByLabelText('passenger-trip-collapse-button')).toBeTruthy();
+    expect(screen.getByLabelText('Compartilhar')).toBeTruthy();
+    expect(screen.getByLabelText('Alterar destino')).toBeTruthy();
+    expect(screen.getByLabelText('Encerrar agora')).toBeTruthy();
   });
 
   it('hydrates accepted passenger vehicle and pickup ETA from active ride aliases', () => {
@@ -2942,6 +2954,31 @@ describe('prototype ride screens', () => {
     expect(getByText('Avaliar viagem')).toBeTruthy();
     expect(queryByText('Valor recebido')).toBeNull();
     expect(queryByTestId('driver-receipt-rate-passenger-button')).toBeNull();
+  });
+
+  it('shows an explicit zero toll from the backend-final passenger receipt', () => {
+    const receipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      tollFee: 0,
+      fareBreakdown: {
+        tollFee: 8.95,
+      },
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        lastReceipt: receipt,
+        tripHistory: [receipt],
+      }),
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getAllByText, queryByText } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getAllByText('Pedágio').length).toBeGreaterThan(0);
+    expect(getAllByText('R$ 0,00').length).toBeGreaterThan(0);
+    expect(queryByText('R$ 8,95')).toBeNull();
   });
 
   it('keeps passenger rating available when the completed receipt is missing driverId but runtime still has it', () => {
@@ -3488,6 +3525,7 @@ describe('prototype ride screens', () => {
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
 
+    fireEvent.press(getByTestId('passenger-receipt-more-options-button'));
     fireEvent.press(getByTestId('passenger-receipt-report-issue-button'));
 
     expect(navigation.navigate).toHaveBeenCalledWith(
@@ -3669,8 +3707,12 @@ describe('prototype ride screens', () => {
     expect(getByText('Ponto de partida')).toBeTruthy();
     expect(getByText('Destino')).toBeTruthy();
     expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
-    expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
     expect(queryByText(/chegada estimada --/i)).toBeNull();
+    expect(queryByText(/Ferry Building - chegada estimada \d{2}:\d{2}/)).toBeNull();
+
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
+    expect(getByTestId('passenger-driver-search-route-details')).toBeTruthy();
+    expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
     expect(getByText(/Ferry Building - chegada estimada \d{2}:\d{2}/)).toBeTruthy();
   });
 
@@ -4044,7 +4086,7 @@ describe('prototype ride screens', () => {
     );
 
     const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getAllByText } = render(
+    const { getAllByText, getByTestId } = render(
       <RobotaxiDriverSearchScreen
         navigation={navigation}
         route={{ params: { destination: 'Destino', originAddress: '' } }}
@@ -4052,6 +4094,7 @@ describe('prototype ride screens', () => {
     );
 
     expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
     expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
   });
 
@@ -4426,6 +4469,7 @@ describe('prototype ride screens', () => {
     expect(getByText('sincronizando estado')).toBeTruthy();
     expect(getByText('Sincronizando...')).toBeTruthy();
     expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
     expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
     expect(getAllByText('R$ 27,50').length).toBeGreaterThan(0);
     expect(() => getByText('R$ 80,00')).toThrow();
@@ -4553,6 +4597,7 @@ describe('prototype ride screens', () => {
       />
     );
 
+    fireEvent.press(getByTestId('passenger-no-drivers-more-options-button'));
     fireEvent.press(getByTestId('passenger-no-drivers-back-to-map-button'));
 
     expect(clearFlowPreview).toHaveBeenCalled();

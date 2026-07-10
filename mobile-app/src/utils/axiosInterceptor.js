@@ -302,11 +302,11 @@ export function createAxiosInstance(config = {}) {
 
             // Tratamento de erros de rede
             if (error.code === 'ECONNABORTED') {
-                Logger.error('⏱️ [Axios] Timeout na requisição');
+                Logger.warn('⏱️ [Axios] Timeout na requisição');
                 error.code = error.code || 'ECONNABORTED';
                 error.message = 'Tempo de espera esgotado. Tente novamente.';
             } else if (error.message === 'Network Error') {
-                Logger.error('🌐 [Axios] Erro de rede');
+                Logger.warn('🌐 [Axios] Erro de rede');
                 error.code = error.code || 'NETWORK_ERROR';
                 error.message = 'Erro de conexão. Verifique sua internet.';
             } else if (error.response) {

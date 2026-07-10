@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import Svg, { Path } from "react-native-svg";
 import { fonts } from "../../../theme/runtimeTokens";
 import LeafCampaignCarousel from "../../../components/campaigns/LeafCampaignCarousel";
 import { leafButtonMetrics } from "../../../components/prototype/LeafRideUI";
@@ -26,6 +27,7 @@ const CARD_BORDER = "#ECE5DC";
 const TEXT_PRIMARY = "#171412";
 const TEXT_MUTED = "#827B73";
 const HOME_CARD_HEIGHT = 142;
+const HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT = 146;
 const HOME_SEARCH_ACTIVE_CARD_HEIGHT = 92;
 const HOME_CARD_HORIZONTAL_INSET = 24;
 const HOME_CARD_RADIUS = 28;
@@ -34,7 +36,7 @@ const HOME_CARD_PADDING_TOP = 22;
 const HOME_CARD_PADDING_BOTTOM = 18;
 const HOME_STACK_GAP = 18;
 const HOME_PROMO_CARD_HEIGHT = 188;
-const HOME_CATEGORY_CARD_HEIGHT = 312;
+const HOME_CATEGORY_CARD_HEIGHT = 244;
 const HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT = 344;
 const HOME_SEARCH_DROPDOWN_MIN_HEIGHT = 72;
 const HOME_SEARCH_DROPDOWN_MAX_HEIGHT = 168;
@@ -44,6 +46,7 @@ const HOME_SEARCH_DROPDOWN_TOP_GAP = 10;
 const HOME_STACK_HEIGHT = HOME_CARD_HEIGHT + HOME_STACK_GAP + HOME_PROMO_CARD_HEIGHT;
 const HOME_SEARCH_KEYBOARD_CLEARANCE = 52;
 const EARTH_RADIUS_METERS = 6371000;
+const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
 const LEAF_WELCOME_RIO_BANNER_IMAGE_URL =
   "https://storage.googleapis.com/leaf-reactnative.firebasestorage.app/campaign-center/assets/asset_mpgam7le_f7f03d20_leaf-welcome-rio-1035x564.webp?GoogleAccessId=firebase-adminsdk-fbsvc%40leaf-reactnative.iam.gserviceaccount.com&Expires=2051222400&Signature=pgIHEiHVb5lkRxw9ca%2F9PR8jeIUe2kA03Tou08WveLCBJ%2B5wTYiDFpCW9v%2FXXMCCNUuPpNXVF7ZpHD9tK43x%2B71JC6u4Khq7hSQu9Nvkl3GIuWheGcO4K901olK9OgQJDw6HN4VmsWvvod%2BiE9pu%2B2%2BodJbth3FHwW5nieThVZtdW0QovD9E1SKsjWfpDnIWTw6STwC0fca33awqvQ7eO4tMwc8KQGrQswZIR2GGHChTgFApcKs7oArhjRk6jrlfua0B%2BYVFgr%2FJXXFoMUouY%2BUYuyoSQmqGeKQqItTdYjg2Utcm81bonilMyJ8%2B%2FGSi%2FpNBetSRasPoLPc2T%2F8MxA%3D%3D";
 const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
@@ -92,6 +95,39 @@ function isRecentSearchResult(item) {
     sourceType.includes("recent") ||
     sourceType.includes("history")
   );
+}
+
+function resolveSearchResultIconName(item = {}) {
+  if (isRecentSearchResult(item)) {
+    return "time-outline";
+  }
+
+  const text = [
+    item?.name,
+    item?.mainText,
+    item?.address,
+    item?.description,
+    item?.type,
+    item?.sourceType,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (/shopping|mall|loja|mercado|supermercado|market/.test(text)) {
+    return "storefront-outline";
+  }
+  if (/hospital|clinica|clínica|saude|saúde|medical/.test(text)) {
+    return "medical-outline";
+  }
+  if (/aeroporto|airport|terminal|rodoviaria|rodoviária|estacao|estação/.test(text)) {
+    return "navigate-outline";
+  }
+  if (/restaurante|restaurant|bar|cafe|café|padaria/.test(text)) {
+    return "restaurant-outline";
+  }
+  if (/hotel|pousada/.test(text)) {
+    return "bed-outline";
+  }
+
+  return "search-outline";
 }
 
 function normalizeSearchResultText(value = "") {
@@ -293,6 +329,50 @@ function formatCurrencyBRL(value) {
   }
 
   return `R$ ${amount.toFixed(2).replace(".", ",")}`;
+}
+
+function formatCategoryDurationLabel(category = {}) {
+  const durationMin = Number(
+    category?.durationMin ??
+      category?.durationMinutes ??
+      category?.fareBreakdown?.durationMin ??
+      category?.fareBreakdown?.pricingPayload?.durationMin ??
+      category?.fareBreakdown?.pricingPayload?.duration_min_traffic,
+  );
+
+  return Number.isFinite(durationMin) && durationMin > 0
+    ? `${Math.max(1, Math.round(durationMin))} min`
+    : "--";
+}
+
+function formatCategoryDistanceLabel(category = {}) {
+  const distanceKm = Number(
+    category?.distanceKm ??
+      category?.fareBreakdown?.distanceKm ??
+      category?.fareBreakdown?.pricingPayload?.routeDistanceKm ??
+      category?.fareBreakdown?.pricingPayload?.distance_km,
+  );
+
+  return Number.isFinite(distanceKm) && distanceKm > 0
+    ? `${distanceKm.toFixed(1).replace(".", ",")} km`
+    : "--";
+}
+
+function CategoryChevron({ direction = "right" }) {
+  const path = direction === "left" ? "M14.5 5L8 12l6.5 7" : "M9.5 5l6.5 7-6.5 7";
+
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" accessibilityElementsHidden>
+      <Path
+        d={path}
+        fill="none"
+        stroke={TEXT_MUTED}
+        strokeWidth={1.05}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
 }
 
 function pickFirstFiniteMoney(...values) {
@@ -523,12 +603,10 @@ function PassengerHomeOverlay({
   selectedCategoryId = "plus",
   onCategorySelect,
   onCategoryConfirm,
-  categoryNotice = "",
   categoryConfirmDisabled = false,
   categoryConfirmSoftDisabled = false,
   categoryConfirmLabel = "Confirmar",
-  tariffStatusLabel = "Tarifa normal",
-  tariffHigh = false,
+  showCampaignCard = false,
 }) {
   const safeBottom = Math.max(0, Number(insetsBottom) || 0);
   const { height: windowHeight } = useWindowDimensions();
@@ -577,6 +655,22 @@ function PassengerHomeOverlay({
     visibleCategoryOptions.find((item) => item?.id === selectedCategoryId) ||
     visibleCategoryOptions[0] ||
     null;
+  const selectedCategoryIndex = selectedCategory
+    ? Math.max(
+        0,
+        visibleCategoryOptions.findIndex((item) => item?.id === selectedCategory?.id),
+      )
+    : 0;
+  const categoryMetricDurationLabel = formatCategoryDurationLabel(selectedCategory);
+  const categoryMetricDistanceLabel = formatCategoryDistanceLabel(selectedCategory);
+  const categoryArrivalProof = selectedCategory?.arrivalLabel || categoryMetricDurationLabel;
+  const categoryRouteDetail = [
+    categoryMetricDurationLabel !== "--" ? categoryMetricDurationLabel : "",
+    categoryMetricDistanceLabel !== "--" ? categoryMetricDistanceLabel : "",
+  ].filter(Boolean).join(" · ");
+  const categorySlideProgress = React.useRef(new Animated.Value(0)).current;
+  const categorySlideDirectionRef = React.useRef(1);
+  const previousSelectedCategoryIdRef = React.useRef(selectedCategory?.id || "");
   const shouldShowCategoryCard =
     categoryVisible && !destinationSearchActive && Boolean(selectedCategory);
   const fareBreakdownRows = buildFareBreakdownRows(selectedCategory);
@@ -596,16 +690,24 @@ function PassengerHomeOverlay({
               HOME_SEARCH_DROPDOWN_VERTICAL_PADDING,
       )
     : 0;
-  const searchCardBaseHeight = activeSearchKind
-    ? HOME_SEARCH_ACTIVE_CARD_HEIGHT
-    : HOME_CARD_HEIGHT;
+  const searchCardBaseHeight = shouldShowCategoryCard
+    ? HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT
+    : activeSearchKind
+      ? HOME_SEARCH_ACTIVE_CARD_HEIGHT
+      : HOME_CARD_HEIGHT;
   const activeSearchCardHeight = activeSearchKind && shouldShowSearchDropdown
     ? searchCardBaseHeight + HOME_SEARCH_DROPDOWN_TOP_GAP + searchDropdownHeight
     : searchCardBaseHeight;
   const lowerPanelHeight = shouldShowCategoryCard
     ? categoryCardHeight
-    : HOME_PROMO_CARD_HEIGHT;
-  const activeStackGap = shouldShowCategoryCard ? 16 : HOME_STACK_GAP;
+    : showCampaignCard
+      ? HOME_PROMO_CARD_HEIGHT
+      : 0;
+  const activeStackGap = shouldShowCategoryCard
+    ? 0
+    : showCampaignCard
+      ? HOME_STACK_GAP
+      : 0;
   const stackHeight = activeSearchKind
     ? activeSearchCardHeight
     : activeSearchCardHeight + activeStackGap + lowerPanelHeight;
@@ -616,6 +718,7 @@ function PassengerHomeOverlay({
   const effectiveKeyboardHeight = activeSearchKind
     ? Math.max(keyboardHeight, androidKeyboardFallbackHeight)
     : keyboardHeight;
+  const restingBottomOffset = shouldShowCategoryCard ? 41 : HOME_CARD_BOTTOM_OFFSET;
 
   React.useEffect(() => {
     if (!shouldShowCategoryCard) {
@@ -628,6 +731,34 @@ function PassengerHomeOverlay({
     setFareBreakdownVisible(false);
     setPickupAdjustmentInfoVisible(false);
   }, [selectedCategory?.id, selectedCategory?.priceLabel]);
+
+  React.useEffect(() => {
+    const previousCategoryId = previousSelectedCategoryIdRef.current;
+    const nextCategoryId = selectedCategory?.id || "";
+
+    if (!nextCategoryId || previousCategoryId === nextCategoryId) {
+      previousSelectedCategoryIdRef.current = nextCategoryId;
+      return undefined;
+    }
+
+    previousSelectedCategoryIdRef.current = nextCategoryId;
+
+    if (IS_TEST_ENV) {
+      categorySlideProgress.setValue(0);
+      return undefined;
+    }
+
+    categorySlideProgress.setValue(categorySlideDirectionRef.current);
+    const animation = Animated.timing(categorySlideProgress, {
+      toValue: 0,
+      duration: 230,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+
+    animation.start();
+    return () => animation.stop();
+  }, [categorySlideProgress, selectedCategory?.id]);
 
   React.useEffect(() => {
     if (!fareBreakdownVisible) {
@@ -705,6 +836,45 @@ function PassengerHomeOverlay({
     submitDestinationSearch(event?.nativeEvent?.text);
   }, [submitDestinationSearch]);
 
+  const selectCategoryByOffset = React.useCallback((offset) => {
+    if (visibleCategoryOptions.length <= 0) {
+      return;
+    }
+
+    const normalizedOffset = offset >= 0 ? 1 : -1;
+    const nextIndex =
+      (selectedCategoryIndex + normalizedOffset + visibleCategoryOptions.length) %
+      visibleCategoryOptions.length;
+    const nextCategoryId = visibleCategoryOptions[nextIndex]?.id;
+
+    if (!nextCategoryId || nextCategoryId === selectedCategory?.id) {
+      return;
+    }
+
+    categorySlideDirectionRef.current = normalizedOffset;
+    onCategorySelect?.(nextCategoryId);
+  }, [
+    onCategorySelect,
+    selectedCategory?.id,
+    selectedCategoryIndex,
+    visibleCategoryOptions,
+  ]);
+
+  const categorySlideStyle = {
+    opacity: categorySlideProgress.interpolate({
+      inputRange: [-1, 0, 1],
+      outputRange: [0.72, 1, 0.72],
+    }),
+    transform: [
+      {
+        translateX: categorySlideProgress.interpolate({
+          inputRange: [-1, 0, 1],
+          outputRange: [-22, 0, 22],
+        }),
+      },
+    ],
+  };
+
   return (
     <Animated.View
       onLayout={onCardLayout}
@@ -717,7 +887,7 @@ function PassengerHomeOverlay({
                 safeBottom + HOME_CARD_BOTTOM_OFFSET,
                 effectiveKeyboardHeight - safeBottom + HOME_SEARCH_KEYBOARD_CLEARANCE,
               )
-            : safeBottom + HOME_CARD_BOTTOM_OFFSET,
+            : safeBottom + restingBottomOffset,
         },
         {
           opacity: entrance.interpolate({
@@ -750,22 +920,56 @@ function PassengerHomeOverlay({
             style={[
               styles.searchCardMain,
               activeSearchKind && styles.searchCardMainSingleField,
+              shouldShowCategoryCard && styles.searchCardMainCategoryRouteSummary,
             ]}
           >
-            {shouldShowBothFields ? (
-              <View pointerEvents="none" style={styles.routeRail}>
-                <View style={styles.originDot} />
-                <View style={styles.routeStem} />
-                <View style={styles.destinationDot} />
+            {shouldShowCategoryCard ? (
+              <View style={styles.categoryTripSummary}>
+                <Text style={styles.categoryTripSummaryTitle}>Sua viagem</Text>
+                <View style={styles.categoryTripSummaryBox}>
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={styles.categoryTripSummaryField}
+                    onPress={onPickupPress}
+                    testID="passenger-home-pickup-input"
+                    accessibilityRole="button"
+                    accessibilityLabel={`De: ${resolvedPickupLabel}`}
+                  >
+                    <Text style={styles.categoryRouteSummaryLabel} numberOfLines={1}>
+                      Local de partida
+                    </Text>
+                    <Text style={styles.categoryRouteSummaryValue} numberOfLines={1}>
+                      {resolvedPickupLabel}
+                    </Text>
+                    {pickupAddress ? (
+                      <Text style={styles.hiddenPickupAddress}>{pickupAddress}</Text>
+                    ) : null}
+                  </TouchableOpacity>
+                  <View style={styles.categoryTripSummaryDivider} />
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={styles.categoryTripSummaryField}
+                    onPress={onDestinationPress}
+                    testID="passenger-home-destination-input"
+                    accessibilityRole="button"
+                    accessibilityLabel="Escolher destino da viagem"
+                  >
+                    <Text style={styles.categoryRouteSummaryLabel} numberOfLines={1}>
+                      Local de destino
+                    </Text>
+                    <Text style={styles.categoryRouteSummaryValue} numberOfLines={1}>
+                      {destinationLabel}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            ) : null}
-
-            <View
-              style={[
-                styles.copyColumn,
-                !shouldShowBothFields && styles.copyColumnSingleField,
-              ]}
-            >
+            ) : (
+              <View
+                style={[
+                  styles.copyColumn,
+                  !shouldShowBothFields && styles.copyColumnSingleField,
+                ]}
+              >
               {shouldShowPickupField ? (
                 <TouchableOpacity
                   activeOpacity={pickupSearchActive ? 1 : 0.88}
@@ -776,8 +980,10 @@ function PassengerHomeOverlay({
                   accessible={!pickupSearchActive}
                   accessibilityLabel="Alterar local de partida"
                 >
-                  <Text style={styles.label}>Partida</Text>
-                  {pickupSearchActive ? (
+	                  {pickupSearchActive ? (
+	                    <Text style={styles.label}>Partida</Text>
+	                  ) : null}
+	                  {pickupSearchActive ? (
                     <View style={styles.inlineSearchRow}>
                       <TextInput
                         ref={inputRef}
@@ -816,11 +1022,12 @@ function PassengerHomeOverlay({
                         <Ionicons name="close" size={17} color={TEXT_PRIMARY} />
                       </TouchableOpacity>
                     </View>
-                  ) : (
-                    <Text style={styles.pickupText} numberOfLines={1}>
-                      {resolvedPickupLabel}
-                    </Text>
-                  )}
+	                  ) : (
+	                    <Text style={styles.pickupText} numberOfLines={1}>
+	                      <Text style={styles.pickupPrefix}>De: </Text>
+	                      <Text style={styles.pickupLocationText}>{resolvedPickupLabel}</Text>
+	                    </Text>
+	                  )}
                   {pickupAddress ? (
                     <Text style={styles.hiddenPickupAddress}>{pickupAddress}</Text>
                   ) : null}
@@ -839,44 +1046,54 @@ function PassengerHomeOverlay({
                   accessible={!destinationSearchActive}
                   accessibilityLabel="Escolher destino da viagem"
                 >
-                  <View style={styles.destinationCopy}>
-                    <Text style={styles.destinationLabel}>Destino</Text>
-                    {destinationSearchActive ? (
-                      <TextInput
-                        ref={inputRef}
-                        value={destinationSearchQuery}
-                        onChangeText={onDestinationSearchChange}
-                        placeholder=""
-                        placeholderTextColor={TEXT_MUTED}
-                        autoCorrect={false}
-                        autoFocus={destinationSearchActive}
-                        blurOnSubmit={false}
-                        returnKeyType="search"
-                        submitBehavior="submit"
-                        onSubmitEditing={handleDestinationSubmit}
-                        style={styles.destinationSearchInput}
-                        testID="passenger-home-destination-search-input"
-                        accessibilityLabel="Buscar destino"
-                      />
-                    ) : (
-                      <Text style={styles.destinationText} numberOfLines={1}>
-                        {destinationLabel}
-                      </Text>
-                    )}
-                  </View>
-                  {destinationSearchActive ? (
-                    <View style={styles.destinationSearchActions}>
-                      <TouchableOpacity
-                        activeOpacity={0.84}
-                        onPress={() => submitDestinationSearch()}
-                        style={styles.destinationSearchSubmitButton}
-                        testID="passenger-home-destination-search-submit"
-                        accessibilityRole="button"
-                        accessibilityLabel="Buscar destino digitado"
-                      >
-                        <Ionicons name="search" size={16} color={LEAF_GREEN} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
+	                  <View
+	                    style={[
+	                      styles.destinationCopy,
+	                      destinationSearchActive && styles.destinationCopySearchActive,
+	                    ]}
+	                  >
+	                    {destinationSearchActive ? (
+	                      <>
+	                        <Ionicons
+	                          name="search-outline"
+	                          size={21}
+	                          color={TEXT_MUTED}
+	                          style={styles.destinationSearchLeadingIcon}
+	                        />
+	                        <TextInput
+	                          ref={inputRef}
+	                          value={destinationSearchQuery}
+	                          onChangeText={onDestinationSearchChange}
+	                          placeholder=""
+	                          placeholderTextColor={TEXT_MUTED}
+	                          autoCorrect={false}
+	                          autoFocus={destinationSearchActive}
+	                          blurOnSubmit={false}
+	                          returnKeyType="search"
+	                          submitBehavior="submit"
+	                          onSubmitEditing={handleDestinationSubmit}
+	                          style={styles.destinationSearchInput}
+	                          testID="passenger-home-destination-search-input"
+	                          accessibilityLabel="Buscar destino"
+	                        />
+	                      </>
+	                    ) : (
+	                      <View style={styles.destinationPromptRow}>
+	                        <Ionicons
+	                          name="search-outline"
+	                          size={21}
+	                          color={TEXT_MUTED}
+	                          style={styles.destinationPromptIcon}
+	                        />
+	                        <Text style={styles.destinationText} numberOfLines={1}>
+	                          {destinationLabel}
+	                        </Text>
+	                      </View>
+	                    )}
+	                  </View>
+	                  {destinationSearchActive ? (
+	                    <View style={styles.destinationSearchActions}>
+	                      <TouchableOpacity
                         activeOpacity={0.84}
                         onPress={onDestinationSearchClose}
                         style={styles.destinationSearchCloseButton}
@@ -887,18 +1104,11 @@ function PassengerHomeOverlay({
                         <Ionicons name="close" size={17} color={TEXT_PRIMARY} />
                       </TouchableOpacity>
                     </View>
-                  ) : (
-                    <View
-                      style={styles.destinationActionButton}
-                      accessibilityElementsHidden
-                      importantForAccessibility="no"
-                    >
-                      <Ionicons name="arrow-forward" size={18} color={LEAF_GREEN} />
-                    </View>
-                  )}
+	                  ) : null}
                 </TouchableOpacity>
               ) : null}
-            </View>
+              </View>
+            )}
           </View>
 
           {shouldShowDestinationField ? (
@@ -927,10 +1137,9 @@ function PassengerHomeOverlay({
                 </View>
               ) : activeResultCount > 0 ? (
                 <>
-                  {activeResults.map((item, index) => {
-                    const recentResult = isRecentSearchResult(item);
-                    const display = resolveSearchResultDisplay(
-                      item,
+	                  {activeResults.map((item, index) => {
+	                    const display = resolveSearchResultDisplay(
+	                      item,
                       pickupSearchActive ? "Partida" : "Destino",
                     );
                     const distanceLabel = formatResultDistanceLabel(
@@ -956,12 +1165,12 @@ function PassengerHomeOverlay({
                         accessibilityLabel={`Resultado de ${pickupSearchActive ? "partida" : "destino"} ${index + 1}: ${display.title}`}
                         accessibilityHint={display.address || `Seleciona este ${pickupSearchActive ? "local de partida" : "destino"}`}
                       >
-                        <Ionicons
-                          name={recentResult ? "time-outline" : "location-outline"}
-                          size={16}
-                          color={TEXT_MUTED}
-                          style={styles.destinationResultClockIcon}
-                        />
+	                        <Ionicons
+	                          name={resolveSearchResultIconName(item)}
+	                          size={20}
+	                          color={TEXT_MUTED}
+	                          style={styles.destinationResultClockIcon}
+	                        />
                         <View style={styles.destinationResultCopyPlain}>
                           <View style={styles.destinationResultTitleRow}>
                             <Text
@@ -1016,17 +1225,17 @@ function PassengerHomeOverlay({
             </View>
           ) : null}
         </View>
-      {activeSearchKind ? null : shouldShowCategoryCard ? (
+	      {activeSearchKind ? null : shouldShowCategoryCard ? (
         <View
           style={[
             styles.categoryCard,
+            styles.categoryCardConnected,
             styles.promoCardInStack,
             { height: categoryCardHeight },
           ]}
           testID="passenger-home-category-card"
           accessibilityLabel="Escolha a categoria da corrida"
         >
-          <View style={styles.categoryHandle} />
           {pickupQaCoordinateLabel ? (
             <Text
               style={styles.hiddenPickupAddress}
@@ -1037,117 +1246,68 @@ function PassengerHomeOverlay({
             </Text>
           ) : null}
           {fareBreakdownVisible ? null : (
-            <>
-              <Text style={styles.categoryEyebrow}>Escolha a categoria</Text>
-              <View style={styles.categoryTabs}>
-                {visibleCategoryOptions.map((item) => {
-                  const selected = item?.id === selectedCategory?.id;
-                  return (
-                    <TouchableOpacity
-                      key={item?.id}
-                      activeOpacity={0.84}
-                      onPress={() => onCategorySelect?.(item?.id)}
-                      style={[styles.categoryTab, selected && styles.categoryTabActive]}
-                      testID={`passenger-home-category-${item?.id}`}
-                      accessibilityRole="tab"
-                      accessibilityState={{ selected }}
-                    >
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          styles.categoryTabText,
-                          selected && styles.categoryTabTextActive,
-                        ]}
-                      >
-                        {item?.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </>
-          )}
-
-          <View
-            style={[
-              styles.categorySummaryRow,
-              fareBreakdownVisible && styles.categorySummaryRowBreakdown,
-            ]}
-          >
-            <View style={styles.categorySummaryCopy}>
-              <View style={styles.categorySummaryTitleRow}>
-                <Text style={styles.categorySummaryTitle} numberOfLines={1}>
-                  {selectedCategory?.label || "Plus"}
-                </Text>
-                <View
-                  style={[
-                    styles.categoryTariffPill,
-                    tariffHigh && styles.categoryTariffPillHigh,
-                  ]}
-                  testID="passenger-home-traffic-status"
-                  accessibilityLabel={`Status da tarifa: ${tariffStatusLabel}`}
+            <View style={styles.categoryPickerSurface}>
+              <View style={styles.categorySectionHairline} />
+              <View style={styles.categoryPickerHeader}>
+                <TouchableOpacity
+                  activeOpacity={0.74}
+                  onPress={() => selectCategoryByOffset(-1)}
+                  style={styles.categoryArrowButton}
+                  testID="passenger-home-category-prev"
+                  accessibilityRole="button"
+                  accessibilityLabel="Categoria anterior"
                 >
-                  <Text
-                    style={[
-                      styles.categoryTariffPillText,
-                      tariffHigh && styles.categoryTariffPillTextHigh,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {tariffStatusLabel}
+                  <CategoryChevron direction="left" />
+                </TouchableOpacity>
+                <Animated.View style={[styles.categoryPickerCopy, categorySlideStyle]}>
+                  <Text style={styles.categoryPickerTitle} numberOfLines={1}>
+                    {selectedCategory?.label || "Plus"}
                   </Text>
-                </View>
+                  <Text style={styles.categoryPickerSubtitle} numberOfLines={1}>
+                    {selectedCategory?.description || "Confortável e acessível"}
+                  </Text>
+                </Animated.View>
+                <TouchableOpacity
+                  activeOpacity={0.74}
+                  onPress={() => selectCategoryByOffset(1)}
+                  style={styles.categoryArrowButton}
+                  testID="passenger-home-category-next"
+                  accessibilityRole="button"
+                  accessibilityLabel="Próxima categoria"
+                >
+                  <CategoryChevron />
+                </TouchableOpacity>
               </View>
-              <Text style={styles.categorySummarySubtitle} numberOfLines={1}>
-                {selectedCategory?.description || "Confortável e acessível"}
-              </Text>
+              <Animated.View style={[styles.categoryPricePanel, categorySlideStyle]}>
+                <TouchableOpacity
+                  activeOpacity={canShowFareBreakdown ? 0.82 : 1}
+                  disabled={!canShowFareBreakdown}
+                  onPress={() => setFareBreakdownVisible((current) => !current)}
+                  style={styles.categoryPriceWrap}
+                  testID="passenger-home-fare-breakdown-trigger"
+                  accessibilityRole="button"
+                  accessibilityLabel="Ver composição do valor da corrida"
+                  accessibilityState={{ expanded: fareBreakdownVisible }}
+                >
+                  <Text style={styles.categoryPrice} numberOfLines={1}>
+                    {selectedCategory?.priceLabel || "--"}
+                  </Text>
+                  <View style={styles.categoryPriceCaptionRow}>
+                    <Text style={styles.categoryPriceCaption}>valor da corrida</Text>
+                    {canShowFareBreakdown ? (
+                      <Ionicons name="chevron-down" size={11} color={TEXT_MUTED} />
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              </Animated.View>
+              <Animated.View style={[styles.categoryArrivalProof, categorySlideStyle]}>
+                <Text style={styles.categoryArrivalProofLabel}>Chegada estimada</Text>
+                <Text style={styles.categoryArrivalProofValue} numberOfLines={1}>
+                  {categoryArrivalProof || "--"}
+                </Text>
+              </Animated.View>
             </View>
-            <TouchableOpacity
-              activeOpacity={canShowFareBreakdown ? 0.82 : 1}
-              disabled={!canShowFareBreakdown}
-              onPress={() => setFareBreakdownVisible((current) => !current)}
-              style={styles.categoryPriceWrap}
-              testID="passenger-home-fare-breakdown-trigger"
-              accessibilityRole="button"
-              accessibilityLabel="Ver composição do valor da corrida"
-              accessibilityState={{ expanded: fareBreakdownVisible }}
-            >
-              <Text style={styles.categoryPrice} numberOfLines={1}>
-                {selectedCategory?.priceLabel || "--"}
-              </Text>
-              <View style={styles.categoryPriceCaptionRow}>
-                <Text style={styles.categoryPriceCaption}>valor da corrida</Text>
-                {canShowFareBreakdown ? (
-                  <Ionicons
-                    name={fareBreakdownVisible ? "chevron-up" : "chevron-down"}
-                    size={11}
-                    color={TEXT_MUTED}
-                  />
-                ) : null}
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          <View
-            style={[
-              styles.categoryMetaRow,
-              fareBreakdownVisible && styles.categoryMetaRowBreakdown,
-            ]}
-          >
-            <View style={styles.categoryEtaItem}>
-              <Text style={styles.categoryMetaLabel}>Embarque</Text>
-              <Text style={styles.categoryMetaValue}>
-                {selectedCategory?.pickupEtaLabel || "--"}
-              </Text>
-            </View>
-            <View style={styles.categoryMetaDivider} />
-            <View style={styles.categoryEtaItem}>
-              <Text style={styles.categoryMetaLabel}>Chegada</Text>
-              <Text style={styles.categoryMetaValue}>
-                {selectedCategory?.arrivalLabel || "--"}
-              </Text>
-            </View>
-          </View>
+          )}
 
           {fareBreakdownVisible ? (
             <View
@@ -1195,17 +1355,12 @@ function PassengerHomeOverlay({
                   {selectedCategory?.priceLabel || "--"}
                 </Text>
               </View>
+              {categoryRouteDetail ? (
+                <Text style={styles.fareBreakdownRouteDetail}>
+                  Rota estimada: {categoryRouteDetail}
+                </Text>
+              ) : null}
             </View>
-          ) : null}
-
-          {categoryNotice ? (
-            <Text
-              style={styles.categoryNotice}
-              testID="passenger-home-category-availability-notice"
-              accessibilityLabel="Aviso de disponibilidade da categoria"
-            >
-              {categoryNotice}
-            </Text>
           ) : null}
 
           <TouchableOpacity
@@ -1248,20 +1403,20 @@ function PassengerHomeOverlay({
             </TouchableOpacity>
           </Modal>
         </View>
-      ) : (
-        <LeafCampaignCarousel
-          userId={userId}
-          role="customer"
-          surface="passenger_home"
+	      ) : showCampaignCard ? (
+	        <LeafCampaignCarousel
+	          userId={userId}
+	          role="customer"
+	          surface="passenger_home"
           placement="below_search_card"
           limit={3}
           height={HOME_PROMO_CARD_HEIGHT}
           borderRadius={HOME_CARD_RADIUS}
           fallbackCampaigns={PASSENGER_HOME_FALLBACK_CAMPAIGNS}
-          style={styles.promoCardInStack}
-          testID="passenger-home-promo-carousel"
-        />
-      )}
+	          style={styles.promoCardInStack}
+	          testID="passenger-home-promo-carousel"
+	        />
+	      ) : null}
     </Animated.View>
   );
 }
@@ -1362,10 +1517,14 @@ const styles = StyleSheet.create({
     bottom: HOME_PROMO_CARD_HEIGHT + HOME_STACK_GAP,
   },
   searchCardReviewMode: {
-    borderColor: "rgba(236,229,220,0.72)",
-    backgroundColor: "rgba(255,255,255,0.94)",
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
+    borderRadius: 14,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderColor: "transparent",
+    backgroundColor: "rgba(255,255,255,0.97)",
+    paddingTop: 12,
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
   },
   promoCard: {
     position: "absolute",
@@ -1405,6 +1564,46 @@ const styles = StyleSheet.create({
     minHeight: HOME_SEARCH_ACTIVE_CARD_HEIGHT - HOME_CARD_PADDING_TOP - HOME_CARD_PADDING_BOTTOM,
     alignItems: "center",
   },
+  searchCardMainCategoryRouteSummary: {
+    minHeight: HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT - HOME_CARD_PADDING_TOP - HOME_CARD_PADDING_BOTTOM,
+    alignItems: "stretch",
+  },
+  categoryTripSummary: { flex: 1, minWidth: 0 },
+  categoryTripSummaryTitle: {
+    color: TEXT_PRIMARY,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 7,
+  },
+  categoryTripSummaryBox: {
+    minHeight: 88,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(23,20,18,0.07)",
+    backgroundColor: "rgba(23,20,18,0.04)",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  categoryTripSummaryField: { minHeight: 31, justifyContent: "center" },
+  categoryTripSummaryDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(23,20,18,0.075)",
+    marginVertical: 6,
+  },
+  categoryRouteSummaryLabel: {
+    color: "rgba(23,20,18,0.50)",
+    fontFamily: fonts.Light,
+    fontSize: 10.5,
+    lineHeight: 13,
+  },
+  categoryRouteSummaryValue: {
+    marginTop: 1,
+    color: TEXT_PRIMARY,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 17,
+  },
   routeRail: {
     width: 13,
     paddingTop: 8,
@@ -1433,7 +1632,7 @@ const styles = StyleSheet.create({
   copyColumn: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 15,
+    marginLeft: 0,
   },
   copyColumnSingleField: {
     marginLeft: 0,
@@ -1444,16 +1643,23 @@ const styles = StyleSheet.create({
   },
   label: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Medium,
+    fontFamily: fonts.Light,
     fontSize: 11,
     lineHeight: 15,
   },
   pickupText: {
-    marginTop: 2,
-    color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
+    color: TEXT_MUTED,
+    fontFamily: fonts.Regular,
     fontSize: 14,
-    lineHeight: 18,
+    lineHeight: 19,
+  },
+  pickupPrefix: {
+    color: TEXT_MUTED,
+    fontFamily: fonts.Light,
+  },
+  pickupLocationText: {
+    color: TEXT_MUTED,
+    fontFamily: fonts.Regular,
   },
   inlineSearchRow: {
     marginTop: 1,
@@ -1514,6 +1720,10 @@ const styles = StyleSheet.create({
     minWidth: 0,
     paddingRight: 12,
   },
+  destinationCopySearchActive: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   destinationLabel: {
     color: LEAF_GREEN,
     fontFamily: fonts.SemiBold,
@@ -1521,11 +1731,19 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   destinationText: {
-    marginTop: 2,
-    color: LEAF_GREEN,
-    fontFamily: fonts.SemiBold,
+    color: TEXT_PRIMARY,
+    fontFamily: fonts.Regular,
     fontSize: 17,
     lineHeight: 22,
+  },
+  destinationPromptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  destinationPromptIcon: {
+    width: 24,
+    marginRight: 8,
+    textAlign: "center",
   },
   destinationActionButton: {
     width: 34,
@@ -1540,15 +1758,18 @@ const styles = StyleSheet.create({
   destinationSearchInput: {
     flex: 1,
     minWidth: 0,
-    marginTop: 1,
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
+    fontFamily: fonts.Regular,
     fontSize: 16,
     lineHeight: 21,
     paddingVertical: 0,
   },
+  destinationSearchLeadingIcon: {
+    width: 24,
+    marginRight: 8,
+    textAlign: "center",
+  },
   destinationSearchActions: {
-    marginTop: 7,
     marginLeft: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -1597,7 +1818,7 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   destinationResultClockIcon: {
-    width: 18,
+    width: 24,
     textAlign: "center",
   },
   destinationResultTitleRow: {
@@ -1623,10 +1844,10 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   destinationResultDistance: {
-    color: TEXT_PRIMARY,
+    color: TEXT_MUTED,
     fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 20,
     textAlign: "right",
   },
   destinationResultAddress: {
@@ -1658,16 +1879,16 @@ const styles = StyleSheet.create({
   },
   dropdownInline: {
     marginTop: HOME_SEARCH_DROPDOWN_TOP_GAP,
-    marginLeft: 28,
+    marginLeft: 0,
     paddingTop: 2,
     paddingBottom: 4,
     overflow: "hidden",
   },
   categoryCard: {
     position: "absolute",
-    borderRadius: HOME_CARD_RADIUS,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(23,20,18,0.045)",
     backgroundColor: CARD_SURFACE,
     paddingHorizontal: 20,
     paddingTop: 12,
@@ -1677,6 +1898,42 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 16,
     elevation: Platform.OS === "android" ? 0 : 10,
+  },
+  categoryCardConnected: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderTopWidth: 0,
+    paddingTop: 0,
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+  },
+  categorySectionHairline: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(23,20,18,0.10)",
+    marginHorizontal: -20,
+    marginBottom: 12,
+  },
+  categoryPickerSurface: { minWidth: 0 },
+  categoryPickerHeader: { minHeight: 48, flexDirection: "row", alignItems: "center" },
+  categoryArrowButton: { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
+  categoryPickerCopy: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "center",
+    paddingHorizontal: 6,
+  },
+  categoryPickerTitle: {
+    color: TEXT_PRIMARY,
+    fontFamily: fonts.Regular,
+    fontSize: 24,
+    lineHeight: 30,
+  },
+  categoryPickerSubtitle: {
+    marginTop: 1,
+    color: TEXT_MUTED,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 15,
   },
   categoryHandle: {
     alignSelf: "center",
@@ -1787,22 +2044,23 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   categoryPriceWrap: {
-    alignItems: "flex-end",
-    minWidth: 82,
+    alignItems: "center",
+    minWidth: 0,
   },
   categoryPrice: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
-    fontSize: 14,
-    lineHeight: 18,
-    textAlign: "right",
+    fontFamily: fonts.Regular,
+    fontSize: 28,
+    lineHeight: 34,
+    textAlign: "center",
   },
   categoryPriceCaption: {
     color: TEXT_MUTED,
     fontFamily: fonts.Regular,
-    fontSize: 9.5,
-    lineHeight: 12,
+    fontSize: 10.5,
+    lineHeight: 13,
   },
+  categoryPricePanel: { marginTop: 8, alignItems: "center" },
   categoryMetaRow: {
     marginTop: 10,
     flexDirection: "row",
@@ -1823,21 +2081,41 @@ const styles = StyleSheet.create({
   },
   categoryMetaDivider: {
     width: StyleSheet.hairlineWidth,
-    height: 28,
-    marginHorizontal: 16,
-    backgroundColor: "rgba(23,20,18,0.13)",
+    height: 30,
+    marginHorizontal: 10,
+    backgroundColor: "rgba(23,20,18,0.10)",
   },
   categoryMetaLabel: {
     color: TEXT_MUTED,
     fontFamily: fonts.Regular,
-    fontSize: 10.5,
-    lineHeight: 13,
+    fontSize: 10,
+    lineHeight: 12,
   },
   categoryMetaValue: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 16,
+    fontFamily: fonts.Regular,
+    fontSize: 13.5,
+    lineHeight: 17,
+  },
+  categoryArrivalProof: {
+    marginTop: 14,
+    minHeight: 30,
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "center",
+    gap: 6,
+  },
+  categoryArrivalProofLabel: {
+    color: TEXT_MUTED,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  categoryArrivalProofValue: {
+    color: TEXT_PRIMARY,
+    fontFamily: fonts.Medium,
+    fontSize: 13.5,
+    lineHeight: 17,
   },
   categoryLeafDelasPill: {
     alignSelf: "flex-start",
@@ -1873,9 +2151,9 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   categoryConfirmButton: {
-    marginTop: 12,
+    marginTop: 18,
     minHeight: leafButtonMetrics.height,
-    borderRadius: leafButtonMetrics.radius,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: TEXT_PRIMARY,
@@ -1896,7 +2174,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "center",
     gap: 3,
   },
   fareBreakdownPanel: {
@@ -1976,6 +2254,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
     textAlign: "right",
+  },
+  fareBreakdownRouteDetail: {
+    marginTop: 4,
+    color: TEXT_MUTED,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+    textAlign: "center",
   },
   pickupAdjustmentModalBackdrop: {
     flex: 1,

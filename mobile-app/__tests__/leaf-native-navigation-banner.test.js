@@ -26,11 +26,13 @@ describe('LeafNativeNavigationBanner', () => {
 
   it('shows the active instruction, route summary and hide action', () => {
     const onHide = jest.fn();
+    const onOpenNavigation = jest.fn();
     const { getByLabelText, getByTestId, getByText } = render(
       <LeafNativeNavigationBanner
         routeKey="home"
         insetsTop={24}
         navigationModel={baseNavigationModel}
+        onOpenNavigation={onOpenNavigation}
         onHide={onHide}
       />,
     );
@@ -40,11 +42,15 @@ describe('LeafNativeNavigationBanner', () => {
     expect(getByText('180 m até a próxima curva')).toBeTruthy();
     expect(getByText('2 km')).toBeTruthy();
     expect(getByText('7 min')).toBeTruthy();
+    expect(getByText('Navegar')).toBeTruthy();
     expect(usePrototypeMapOcclusion).toHaveBeenCalledWith(
       expect.objectContaining({
         occludedTop: 156,
       }),
     );
+
+    fireEvent.press(getByLabelText('Navegar com Waze ou Google Maps'));
+    expect(onOpenNavigation).toHaveBeenCalledTimes(1);
 
     fireEvent.press(getByLabelText('Ocultar navegação LEAF'));
 
@@ -83,8 +89,8 @@ describe('LeafNativeNavigationBanner', () => {
     expect(getByTestId('leaf-native-turn-left-glyph')).toBeTruthy();
   });
 
-  it('switches copy when the driver is off-route', () => {
-    const { getByText } = render(
+  it('does not surface the off-route banner in the current UI', () => {
+    const { queryByTestId, queryByText } = render(
       <LeafNativeNavigationBanner
         routeKey="home"
         navigationModel={{
@@ -95,8 +101,9 @@ describe('LeafNativeNavigationBanner', () => {
       />,
     );
 
-    expect(getByText('Fora da rota')).toBeTruthy();
-    expect(getByText('Fora da rota. Volte para o traçado no mapa.')).toBeTruthy();
+    expect(queryByTestId('leaf-native-navigation-banner')).toBeNull();
+    expect(queryByText('Fora da rota')).toBeNull();
+    expect(queryByText('Fora da rota. Volte para o traçado no mapa.')).toBeNull();
   });
 
   it('does not render when navigation is hidden', () => {

@@ -321,6 +321,21 @@ describe('driver online toggle', () => {
     });
   });
 
+  it('keeps a precomputed fare visible while a selected category quote refreshes', () => {
+    expect(
+      resolveHomeCategoryFarePresentation({
+        isSelectedCategory: true,
+        quotePending: true,
+        backendFare: null,
+        localFare: 83.42,
+        allowLocalEstimateWhilePending: true,
+      }),
+    ).toEqual({
+      fare: 83.42,
+      priceLabel: 'R$ 83,42',
+    });
+  });
+
   it('does not show a local fare while the selected backend quote is required', () => {
     expect(
       resolveHomeCategoryFarePresentation({

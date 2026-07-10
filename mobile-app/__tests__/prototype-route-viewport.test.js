@@ -331,6 +331,35 @@ describe('prototype route viewport', () => {
     });
   });
 
+  it('keeps route endpoints and the live vehicle together in the exposed frame', () => {
+    const mapWidth = 390;
+    const mapHeight = 844;
+    const viewportPadding = { top: 132, right: 48, bottom: 470, left: 48 };
+    const routeAndVehicle = [
+      { latitude: -22.97104, longitude: -43.18349 },
+      { latitude: -22.9694, longitude: -43.1812 },
+      { latitude: -22.967311, longitude: -43.178954 },
+    ];
+    const region = buildRouteViewportRegion({
+      coordinates: routeAndVehicle,
+      mapWidth,
+      mapHeight,
+      activeOcclusion: { top: 0, bottom: 452 },
+      insets: { top: 24, bottom: 16 },
+      viewportPadding,
+      minVisibleHeight: 220,
+    });
+
+    routeAndVehicle.forEach(coordinate => {
+      const x = projectX({ coordinate, region, mapWidth });
+      const y = projectY({ coordinate, region, mapHeight });
+      expect(x).toBeGreaterThanOrEqual(viewportPadding.left);
+      expect(x).toBeLessThanOrEqual(mapWidth - viewportPadding.right);
+      expect(y).toBeGreaterThanOrEqual(viewportPadding.top);
+      expect(y).toBeLessThanOrEqual(mapHeight - viewportPadding.bottom);
+    });
+  });
+
   it('keeps route vertices inside the visible map when a top overlay and bottomsheet are both active', () => {
     const mapWidth = 390;
     const mapHeight = 844;

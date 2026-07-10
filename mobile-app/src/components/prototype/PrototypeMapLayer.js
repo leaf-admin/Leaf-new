@@ -229,6 +229,26 @@ export function resolveVehicleColorToken(...values) {
   return null;
 }
 
+export function resolveScreenRelativeVehicleHeading(vehicleHeading, mapCameraHeading = 0) {
+  if (vehicleHeading === null || vehicleHeading === undefined || vehicleHeading === '') {
+    return 0;
+  }
+
+  const normalizedVehicleHeading = normalizeHeadingDegrees(vehicleHeading);
+  const normalizedMapCameraHeading = normalizeHeadingDegrees(mapCameraHeading);
+
+  if (normalizedVehicleHeading === null) {
+    return 0;
+  }
+
+  // Projected vehicle overlays live in screen coordinates, unlike a native
+  // flat marker. When navigation rotates the map to keep the route upright,
+  // compensate for that camera bearing so the vehicle keeps facing its route.
+  return normalizeHeadingDegrees(
+    normalizedVehicleHeading - (normalizedMapCameraHeading ?? 0),
+  ) ?? 0;
+}
+
 function resolveVehicleMarkerBodyColor(token) {
   return DRIVER_MARKER_BODY_COLORS[token] || DRIVER_MARKER_BODY_COLORS.black;
 }
@@ -1234,7 +1254,9 @@ function PrototypeMapLayer({
   destinationMarkerLetter = 'P',
   viewportPadding = null,
   routeViewportRegion = null,
-  forceRegionUpdate = false
+  forceRegionUpdate = false,
+  manualCameraHoldMs = 0,
+  mapCameraHeading = 0,
 }) {
   const mapProvider =
     Platform.OS === 'ios' || Platform.OS === 'android'
@@ -1267,6 +1289,9 @@ function PrototypeMapLayer({
     ? ZERO_VIEWPORT_PADDING
     : resolvedViewportPadding;
   const markerCoordinate = userCoordinate || region;
+  const normalizedManualCameraHoldMs = Math.max(0, Number(manualCameraHoldMs) || 0);
+  const manualCameraHoldUntilRef = useRef(0);
+  const manualCameraResumeTimeoutRef = useRef(null);
   const normalizedDriverCoordinate = useMemo(
     () => normalizeMapCoordinate(driverCoordinate),
     [
@@ -1290,6 +1315,10 @@ function PrototypeMapLayer({
       driverCoordinate?.heading,
       driverHeading,
     ],
+  );
+  const normalizedMapCameraHeading = useMemo(
+    () => normalizeHeadingDegrees(mapCameraHeading) ?? 0,
+    [mapCameraHeading],
   );
   const hasDriverCoordinate = Boolean(normalizedDriverCoordinate);
   const hasSearchCenter =
@@ -1474,6 +1503,10 @@ function PrototypeMapLayer({
     normalizeHeadingDegrees(smoothedDriverHeading) ??
     normalizedDriverHeading ??
     normalizedUserHeading;
+  const displayedDriverScreenHeading = resolveScreenRelativeVehicleHeading(
+    displayedDriverHeading,
+    normalizedMapCameraHeading,
+  );
   const driverMarkerCampaignImageSource = useMemo(
     () => resolveRemoteMarkerImageSource(driverMarkerAssetUrl),
     [driverMarkerAssetUrl],
@@ -1864,6 +1897,10 @@ function PrototypeMapLayer({
       return false;
     }
 
+    if (Date.now() < manualCameraHoldUntilRef.current) {
+      return false;
+    }
+
     scheduleAndroidVisibleRegionUpdate(targetViewportRegion);
 
     if (
@@ -1941,6 +1978,28 @@ function PrototypeMapLayer({
       });
     }
   }, [markNativeMapReady, onMapLayout]);
+
+  const handleMapPanDrag = useCallback((event) => {
+    if (normalizedManualCameraHoldMs > 0) {
+      manualCameraHoldUntilRef.current = Date.now() + normalizedManualCameraHoldMs;
+      if (manualCameraResumeTimeoutRef.current) {
+        clearTimeout(manualCameraResumeTimeoutRef.current);
+      }
+      // A manual pan must feel respected, but it cannot permanently hide the
+      // route behind a card. Re-frame the latest route once the hold expires.
+      manualCameraResumeTimeoutRef.current = setTimeout(() => {
+        manualCameraResumeTimeoutRef.current = null;
+        applyForcedRegionUpdate(Platform.OS === 'android' ? 0 : 180);
+      }, normalizedManualCameraHoldMs + 20);
+    }
+    onMapPanDrag?.(event);
+  }, [applyForcedRegionUpdate, normalizedManualCameraHoldMs, onMapPanDrag]);
+
+  useEffect(() => () => {
+    if (manualCameraResumeTimeoutRef.current) {
+      clearTimeout(manualCameraResumeTimeoutRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (!applyForcedRegionUpdate(0)) {
@@ -2419,7 +2478,7 @@ function PrototypeMapLayer({
               onRegionChangeComplete(nextRegion);
             }
           }}
-          onPanDrag={interactionEnabled ? onMapPanDrag : undefined}
+          onPanDrag={interactionEnabled ? handleMapPanDrag : undefined}
           provider={mapProvider}
           initialRegion={region}
           mapType="standard"
@@ -2681,7 +2740,7 @@ function PrototypeMapLayer({
         <ProjectedVehicleOverlay
           pointX={projectedDriverVehicleOverlayPoint.x}
           pointY={projectedDriverVehicleOverlayPoint.y}
-          heading={displayedDriverHeading}
+          heading={displayedDriverScreenHeading}
           source={driverVehicleMarkerImageSource}
           colorToken={driverVehicleMarkerColorToken}
         />
@@ -2786,7 +2845,7 @@ function PrototypeMapLayer({
           <ProjectedVehicleOverlay
             pointX={projectedUserOverlayPoint.x}
             pointY={projectedUserOverlayPoint.y}
-            heading={displayedDriverHeading}
+            heading={displayedDriverScreenHeading}
             source={driverVehicleMarkerImageSource}
             colorToken={driverVehicleMarkerColorToken}
           />

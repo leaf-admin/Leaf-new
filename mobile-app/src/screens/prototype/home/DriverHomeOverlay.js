@@ -428,6 +428,14 @@ function DriverHomeOverlay({
   );
   const onlineStartedAtRef = useRef(null);
   const hasDriverWorkInProgress = isDriverWorkLocked(driverWorkInProgress);
+  const shouldShowWelcomePromo = !hasDriverWorkInProgress &&
+    !hasDriverOnlineActivityForCurrentDay({
+      driverOnline,
+      driverOnlineStartedAt,
+      driverOnlineDaily,
+      nowMs: onlineClockTick,
+    }) &&
+    Number(ridesCount || 0) <= 0;
   const earningsAnimation = useRef(
     new Animated.Value(parseMoneyLabel(formattedDriverEarnings)),
   ).current;
@@ -946,18 +954,20 @@ function DriverHomeOverlay({
           </View>
         </View>
 
-        <LeafCampaignCarousel
-          userId={driverId}
-          role="driver"
-          surface="driver_home"
-          placement="below_home_card"
-          limit={3}
-          height={DRIVER_HOME_PROMO_CARD_HEIGHT}
-          borderRadius={DRIVER_HOME_CARD_RADIUS}
-          fallbackCampaigns={DRIVER_HOME_FALLBACK_CAMPAIGNS}
-          style={styles.driverPromoCard}
-          testID="driver-home-promo-carousel"
-        />
+        {shouldShowWelcomePromo ? (
+          <LeafCampaignCarousel
+            userId={driverId}
+            role="driver"
+            surface="driver_home"
+            placement="below_home_card"
+            limit={3}
+            height={DRIVER_HOME_PROMO_CARD_HEIGHT}
+            borderRadius={DRIVER_HOME_CARD_RADIUS}
+            fallbackCampaigns={DRIVER_HOME_FALLBACK_CAMPAIGNS}
+            style={styles.driverPromoCard}
+            testID="driver-home-promo-carousel"
+          />
+        ) : null}
       </View>
 
       <Modal

@@ -101,9 +101,9 @@ describe("PassengerHomeOverlay", () => {
     });
   });
 
-  it("submits typed destination text from the visible search action", () => {
+  it("does not render a duplicated destination search action inside the input", () => {
     const onDestinationResultPress = jest.fn();
-    const { getByTestId } = render(
+    const { queryByTestId, queryByText } = render(
       <PassengerHomeOverlay
         destinationSearchActive
         destinationSearchQuery="Barra Shopping"
@@ -112,16 +112,13 @@ describe("PassengerHomeOverlay", () => {
       />
     );
 
-    fireEvent.press(getByTestId("passenger-home-destination-search-submit"));
-
-    expect(onDestinationResultPress).toHaveBeenCalledWith({
-      name: "Barra Shopping",
-      address: "Barra Shopping",
-    });
+    expect(queryByTestId("passenger-home-destination-search-submit")).toBeNull();
+    expect(queryByText("Destino")).toBeNull();
+    expect(onDestinationResultPress).not.toHaveBeenCalled();
   });
 
-  it("exposes the traffic status in the category card", () => {
-    const { getByTestId } = render(
+  it("keeps the category decision focused on price and arrival, with route detail progressive", () => {
+    const { getByText, queryByTestId, queryByText } = render(
       <PassengerHomeOverlay
         pickupAddress="Carioca Shopping"
         destinationLabel="Mercadão de Madureira"
@@ -132,23 +129,29 @@ describe("PassengerHomeOverlay", () => {
             label: "Plus",
             description: "Confortável e acessível",
             priceLabel: "R$ 18,55",
+            durationMin: 27,
+            distanceKm: 16.4,
             pickupEtaLabel: "4 min",
             arrivalLabel: "15:30",
           },
         ]}
         selectedCategoryId="plus"
-        tariffStatusLabel="Trânsito intenso"
-        tariffHigh
       />
     );
 
-    expect(getByTestId("passenger-home-traffic-status")).toHaveTextContent(
-      "Trânsito intenso"
-    );
+    expect(getByText("Sua viagem")).toBeTruthy();
+    expect(getByText("Local de partida")).toBeTruthy();
+    expect(getByText("Local de destino")).toBeTruthy();
+    expect(getByText("R$ 18,55")).toBeTruthy();
+    expect(getByText("Chegada estimada")).toBeTruthy();
+    expect(getByText("15:30")).toBeTruthy();
+    expect(queryByText("27 min")).toBeNull();
+    expect(queryByText("16,4 km")).toBeNull();
+    expect(queryByTestId("passenger-home-traffic-status")).toBeNull();
   });
 
-  it("shows unavailable driver state in the pickup ETA slot", () => {
-    const { getByTestId, getByText } = render(
+  it("shows unavailable driver state only in the primary action", () => {
+    const { getByTestId, getByText, queryByText } = render(
       <PassengerHomeOverlay
         pickupAddress="R. Alecrim, 497"
         destinationLabel="BarraShopping"
@@ -164,18 +167,39 @@ describe("PassengerHomeOverlay", () => {
           },
         ]}
         selectedCategoryId="plus"
-        tariffStatusLabel="Tarifa moderada"
+        categoryNotice="Não foi possível validar motoristas agora."
         categoryConfirmDisabled
         categoryConfirmLabel="Sem motorista disponível"
       />
     );
 
-    expect(getByTestId("passenger-home-traffic-status")).toHaveTextContent(
-      "Tarifa moderada"
-    );
-    expect(getByText("Sem motorista")).toBeTruthy();
     expect(getByTestId("passenger-home-category-confirm")).toBeDisabled();
     expect(getByText("Sem motorista disponível")).toBeTruthy();
+    expect(queryByText("Não foi possível validar motoristas agora.")).toBeNull();
+  });
+
+  it("rolls category selection infinitely with side arrows", () => {
+    const onCategorySelect = jest.fn();
+    const { getByTestId } = render(
+      <PassengerHomeOverlay
+        pickupAddress="Carioca Shopping"
+        destinationLabel="BarraShopping"
+        categoryVisible
+        categoryOptions={[
+          { id: "plus", label: "Plus", priceLabel: "R$ 18,55" },
+          { id: "elite", label: "Elite", priceLabel: "R$ 28,10" },
+          { id: "moto", label: "Moto", priceLabel: "R$ 12,30" },
+        ]}
+        selectedCategoryId="plus"
+        onCategorySelect={onCategorySelect}
+      />
+    );
+
+    fireEvent.press(getByTestId("passenger-home-category-next"));
+    expect(onCategorySelect).toHaveBeenCalledWith("elite");
+
+    fireEvent.press(getByTestId("passenger-home-category-prev"));
+    expect(onCategorySelect).toHaveBeenCalledWith("moto");
   });
 
   it("opens the fare breakdown from the category price", () => {
@@ -232,7 +256,8 @@ describe("PassengerHomeOverlay", () => {
     expect(getByText("Adicional de embarque")).toBeTruthy();
     expect(getByText("Pedágio")).toBeTruthy();
     expect(getByText("Total")).toBeTruthy();
-    expect(getAllByText("R$ 60,43")).toHaveLength(2);
+    expect(getAllByText("R$ 60,43")).toHaveLength(1);
+    expect(getByText("Rota estimada: 31 min · 17,0 km")).toBeTruthy();
 
     fireEvent.press(getByTestId("passenger-home-pickup-adjustment-info"));
 

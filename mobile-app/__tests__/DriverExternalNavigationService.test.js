@@ -16,7 +16,9 @@ jest.mock("react-native", () => ({
 
 const {
   ActionSheetIOS,
+  Alert,
   Linking,
+  Platform,
 } = require("react-native");
 
 const {
@@ -26,6 +28,7 @@ const {
 describe("DriverExternalNavigationService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    Platform.OS = "ios";
   });
 
   it("offers Apple Maps on iOS and opens the native Apple Maps URL", async () => {
@@ -101,6 +104,33 @@ describe("DriverExternalNavigationService", () => {
 
     expect(Linking.openURL).toHaveBeenCalledWith(
       "https://waze.com/ul?ll=37.7954,-122.3936&navigate=yes",
+    );
+  });
+
+  it("offers Google Maps and Waze on Android without Apple Maps", async () => {
+    Platform.OS = "android";
+    Alert.alert.mockImplementation((_title, _message, actions) => {
+      expect(actions.map(action => action.text)).toEqual([
+        "Cancelar",
+        "Google Maps",
+        "Waze",
+      ]);
+      actions[1].onPress();
+    });
+    Linking.canOpenURL.mockResolvedValue(true);
+    Linking.openURL.mockResolvedValue(true);
+
+    await expect(
+      openDriverExternalNavigation({
+        coordinate: { latitude: -22.98, longitude: -43.36 },
+        destinationLabel: "Destino",
+        phase: "destination",
+      }),
+    ).resolves.toBe("google_maps");
+
+    expect(ActionSheetIOS.showActionSheetWithOptions).not.toHaveBeenCalled();
+    expect(Linking.openURL).toHaveBeenCalledWith(
+      "comgooglemaps://?daddr=-22.98,-43.36&directionsmode=driving",
     );
   });
 });

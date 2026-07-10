@@ -350,6 +350,7 @@ module.exports = {
             UIBackgroundModes: ["fetch", "location", "remote-notification"],
             NSSupportsLiveActivities: true,
             NSSupportsLiveActivitiesFrequentUpdates: true,
+            NSLocalNetworkUsageDescription: "A Leaf usa a rede local apenas em builds de desenvolvimento para carregar o app pelo Metro durante testes.",
             NSMicrophoneUsageDescription: "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
             NSSpeechRecognitionUsageDescription: "A Leaf converte sua fala em texto para preencher o destino com mais rapidez."
         }

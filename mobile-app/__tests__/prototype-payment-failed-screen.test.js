@@ -2,7 +2,6 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 
 import RobotaxiPaymentFailedScreen from '../src/screens/prototype/RobotaxiPaymentFailedScreen';
-import robotaxiPrototypeTokens from '../src/components/design-system/robotaxiPrototypeTokens';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: jest.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
@@ -64,7 +63,7 @@ jest.mock('../src/components/prototype/PrototypeUI', () => {
 });
 
 describe('RobotaxiPaymentFailedScreen', () => {
-  it('keeps retry and map actions visible and gives the secondary button dark contrast', () => {
+  it('keeps retry as the single explicit recovery decision', () => {
     const navigation = {
       navigate: jest.fn(),
       replace: jest.fn(),
@@ -98,22 +97,6 @@ describe('RobotaxiPaymentFailedScreen', () => {
       {},
     );
 
-    fireEvent.press(screen.getByTestId('payment-failed-button-Voltar ao mapa'));
-    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
-
-    expect(
-      screen.getByTestId('payment-failed-button-label-Voltar ao mapa').props.style,
-    ).toEqual(
-      expect.objectContaining({
-        color: robotaxiPrototypeTokens.color.text.primary,
-      }),
-    );
-    expect(
-      screen.getByTestId('payment-failed-icon-Voltar ao mapa').props.style,
-    ).toEqual(
-      expect.objectContaining({
-        color: robotaxiPrototypeTokens.color.text.primary,
-      }),
-    );
+    expect(screen.queryByTestId('payment-failed-button-Voltar ao mapa')).toBeNull();
   });
 });

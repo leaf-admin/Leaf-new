@@ -68,14 +68,6 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
               style={styles.primaryButton}
             />
 
-            <PrototypePrimaryButton
-              label="Voltar ao mapa"
-              icon="map-outline"
-              onPress={() => navigation.navigate('RobotaxiPrototype')}
-              style={styles.secondaryButton}
-              textStyle={styles.secondaryButtonText}
-              iconColor={color.text.primary}
-            />
           </PrototypeCard>
         </PrototypeDismissibleSheet>
       </View>
@@ -134,13 +126,5 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     marginTop: 12
-  },
-  secondaryButton: {
-    marginTop: 8,
-    backgroundColor: color.surface.secondary,
-    borderColor: color.border.strong
-  },
-  secondaryButtonText: {
-    color: color.text.primary
   }
 });

@@ -44,6 +44,7 @@ import {
   normalizeRuntimeRideStatus,
 } from "./rideLifecycleContract";
 import { getRideLifecycleOrder } from "./rideLifecycleStateGuard";
+import { resolvePrototypeMapPresentation } from "./prototypeMapPresentation";
 import { openDriverExternalNavigation } from "../../services/DriverExternalNavigationService";
 
 const SHEET_BOTTOM_OFFSET = 0;
@@ -891,6 +892,10 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     isOperationalHoldSurface ||
     isProtectedStatusWithoutRideIdentity;
   const isCompactTripSurface = isActiveTripSurface && !detailsExpanded;
+  const driverTripMapPresentation = useMemo(
+    () => resolvePrototypeMapPresentation({ role: "driver", status: normalizedBookingStatus }),
+    [normalizedBookingStatus],
+  );
   const driverSupportContext = useMemo(() => {
     const bookingId = String(
       request?.bookingId ||
@@ -1376,9 +1381,27 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       windowHeight,
     ],
   );
+  const driverTripViewportCoordinates = useMemo(
+    () => (
+      driverTripRouteCoordinates.length >= 2
+        ? [
+            ...driverTripRouteCoordinates,
+            driverMapCoordinate,
+            pickupCoordinate,
+            dropoffCoordinate,
+          ]
+        : []
+    ),
+    [
+      driverMapCoordinate,
+      driverTripRouteCoordinates,
+      dropoffCoordinate,
+      pickupCoordinate,
+    ],
+  );
   const driverTripVisibleRouteRegion = useMemo(
     () => buildRouteViewportRegion({
-      coordinates: driverTripRouteCoordinates,
+      coordinates: driverTripViewportCoordinates,
       mapWidth: mapWidth || windowWidth,
       mapHeight: mapHeight || windowHeight,
       activeOcclusion: driverTripMapOcclusion,
@@ -1388,7 +1411,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     }),
     [
       driverTripMapOcclusion,
-      driverTripRouteCoordinates,
+      driverTripViewportCoordinates,
       driverTripViewportPadding,
       insets,
       mapHeight,
@@ -2515,10 +2538,13 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           viewportPadding={driverTripViewportPadding}
           routeViewportRegion={driverTripVisibleRouteRegion}
           onMapLayout={handleMapLayout}
-          interactionEnabled={isLifecycleNavigationLocked}
+          interactionEnabled={
+            isLifecycleNavigationLocked && driverTripMapPresentation.interactionEnabled
+          }
           hideRouteEndpointMarkers
           hideUserMarker
-          animateRoute
+          animateRoute={driverTripMapPresentation.animateRoute}
+          manualCameraHoldMs={driverTripMapPresentation.manualCameraHoldMs}
           driverMarkerMode="car"
           driverMarkerLetter="M"
           destinationMarkerMode={normalizedBookingStatus === "started" ? "place" : "avatar"}

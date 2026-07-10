@@ -372,7 +372,7 @@ class FCMNotificationService {
 
             if (savedToken) {
                 this.fcmToken = savedToken;
-                Logger.log('📱 Token FCM recuperado do cache:', savedToken);
+                Logger.log('📱 Token FCM recuperado do cache.');
             }
 
             // Obter novo token
@@ -381,7 +381,7 @@ class FCMNotificationService {
             if (token) {
                 this.fcmToken = token;
                 await AsyncStorage.setItem('fcmToken', token);
-                Logger.log('🆕 Novo token FCM obtido:', token);
+                Logger.log('🆕 Novo token FCM obtido.');
 
                 // Registrar no backend em background. Push não deve segurar o bootstrap do app.
                 this.scheduleTokenBackendUpdate(token);
@@ -452,7 +452,7 @@ class FCMNotificationService {
                 return;
             }
 
-            Logger.log('📤 Enviando token FCM para backend:', token);
+            Logger.log('📤 Enviando token FCM para backend.');
 
             // Obter userId do Redux store ou TestUserService
             const userState = store.getState().auth;
@@ -512,7 +512,7 @@ class FCMNotificationService {
                     this.ensureWebSocketConnectListener(wsManager);
                 }
             } catch (wsError) {
-                Logger.error('❌ Erro ao registrar token FCM via WebSocket:', wsError);
+                Logger.warn('⚠️ Erro ao registrar token FCM via WebSocket; app seguirá com retry pendente:', wsError?.message || wsError);
                 // Salvar token pendente apenas se token válido
                 if (token) {
                     this.pendingTokenRegistration = { token, userId, userType };
@@ -1031,7 +1031,7 @@ class FCMNotificationService {
                     const newToken = await messaging().getToken();
 
                     if (newToken && newToken !== this.fcmToken) {
-                        Logger.log('🆕 Novo token FCM detectado:', newToken);
+                        Logger.log('🆕 Novo token FCM detectado.');
                         this.fcmToken = newToken;
                         await AsyncStorage.setItem('fcmToken', newToken);
                         await this.scheduleTokenBackendUpdate(newToken);

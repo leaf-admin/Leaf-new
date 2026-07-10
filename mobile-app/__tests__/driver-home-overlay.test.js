@@ -188,6 +188,36 @@ describe("DriverHomeOverlay", () => {
     expect(queryByText("Central de segurança")).toBeNull();
   });
 
+  it("shows the welcome campaign only before the driver's first activity of the day", () => {
+    const firstSession = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline
+        driverActivationResolved
+        ridesCount={0}
+        onToggleOnline={() => {}}
+        onOpenActivation={() => {}}
+      />,
+    );
+
+    expect(firstSession.getByTestId("driver-home-promo-carousel")).toBeTruthy();
+
+    const activeDay = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline
+        driverActivationResolved
+        ridesCount={1}
+        onToggleOnline={() => {}}
+        onOpenActivation={() => {}}
+      />,
+    );
+
+    expect(activeDay.queryByTestId("driver-home-promo-carousel")).toBeNull();
+  });
+
   it("shows cumulative daily online time without warning before 10h", () => {
     jest.spyOn(Date, "now").mockReturnValue(100_000_000);
 

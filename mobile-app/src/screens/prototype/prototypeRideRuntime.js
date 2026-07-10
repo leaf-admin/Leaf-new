@@ -65,7 +65,10 @@ import {
   mergeDriverOffers as mergeDriverOffersWithLockedPricing,
 } from "./driverOfferPricingSnapshot";
 import { dismissDriverOfferRuntimeState } from "./driverOfferState";
-import { formatCurrencyBRL, resolveTripTollAmount } from "./tripFinancialSummary";
+import {
+  formatCurrencyBRL,
+  resolveTripTollAmountOrNull,
+} from "./tripFinancialSummary";
 import { SEARCH_TOTAL_DURATION_SECONDS } from "./searchPresentation";
 import {
   isPassengerSearchExpired,
@@ -3582,6 +3585,55 @@ function normalizeDestinationItem(item) {
   };
 }
 
+function isGenericRuntimeDestinationCandidate(item = {}) {
+  const name = sanitizeText(item?.name || item?.mainText, "").toLowerCase();
+  const address = sanitizeText(item?.address || item?.secondaryText, "").toLowerCase();
+  const description = sanitizeText(item?.description, "").toLowerCase();
+  const haystack = [name, address, description].filter(Boolean).join(" ");
+
+  if (!haystack) {
+    return true;
+  }
+
+  if (
+    /\b\d{1,6}\b/.test(haystack) ||
+    /\b(rua|r\.|avenida|av\.|estrada|rodovia|rod\.|travessa|tv\.|praça|pça\.|shopping|mall|hospital|cl[ií]nica|hotel|aeroporto|airport|terminal|est[aá]dio|faculdade|universidade)\b/.test(haystack)
+  ) {
+    return false;
+  }
+
+  const genericNames = new Set([
+    "barra",
+    "barra de guaratiba",
+    "barra da tijuca",
+    "barra mansa",
+    "rio de janeiro",
+    "jacarepaguá",
+    "jacarepagua",
+    "taquara",
+    "recreio dos bandeirantes",
+    "madureira",
+    "copacabana",
+    "ipanema",
+    "botafogo",
+  ]);
+
+  if (genericNames.has(name)) {
+    return true;
+  }
+
+  if (/^barra\b/.test(name)) {
+    return true;
+  }
+
+  const onlyCityOrRegionContext =
+    /^(rio de janeiro|rj|brasil|brazil)$/.test(address) ||
+    /^(rio de janeiro|rj),\s*(brasil|brazil)$/.test(address) ||
+    /,\s*(rio de janeiro|rj|brasil|brazil)\s*$/.test(description);
+
+  return Boolean(onlyCityOrRegionContext && name.split(/\s+/).length <= 4);
+}
+
 function buildDriverDestinationModeState(input = {}) {
   const source = input && typeof input === "object" ? input : {};
   const rawDestination =
@@ -6804,11 +6856,14 @@ export function resolveCompletedTripFinancialSnapshot(
       : driverNetAmount !== null
         ? roundCurrencyValue(Math.max(0, finalFare - driverNetAmount))
         : null;
-  const tollFee =
-    resolveTripTollAmount(payload) ||
-    resolveTripTollAmount(payloadFeeBreakdown) ||
-    resolveTripTollAmount(lockedRideSnapshot) ||
-    resolveTripTollAmount(lockedFeeBreakdown);
+  const payloadTollFee = resolveTripTollAmountOrNull(payload);
+  const tollFee = payloadHasBackendFinalFinancialSnapshot
+    ? payloadTollFee ?? 0
+    : payloadTollFee ??
+      resolveTripTollAmountOrNull(payloadFeeBreakdown) ??
+      resolveTripTollAmountOrNull(lockedRideSnapshot) ??
+      resolveTripTollAmountOrNull(lockedFeeBreakdown) ??
+      0;
   const baseFare = roundCurrencyValue(finalFare * 0.55);
   const variableFare = roundCurrencyValue(Math.max(0, finalFare - baseFare));
   const hasPayloadSnapshot = payloadHasBackendFinalFinancialSnapshot;
@@ -6821,7 +6876,7 @@ export function resolveCompletedTripFinancialSnapshot(
     ...(paymentIntermediationFee !== null
       ? { paymentIntermediationFee }
       : {}),
-    ...(tollFee > 0 ? { tollFee } : {}),
+    ...(hasPayloadSnapshot || tollFee > 0 ? { tollFee } : {}),
     ...(totalFees !== null ? { totalFees } : {}),
     ...(driverNetAmount !== null ? { driverNetAmount } : {}),
     financialSnapshotSource: hasPayloadSnapshot
@@ -13730,6 +13785,7 @@ async function findDestinations(query, options = {}) {
   if (cachedResults && cachedResults.length > 0) {
     return cachedResults
       .slice()
+      .filter((item) => !isGenericRuntimeDestinationCandidate(item))
       .sort((first, second) => (
         scoreRuntimeDestinationResult(first, location) -
         scoreRuntimeDestinationResult(second, location)
@@ -13804,7 +13860,7 @@ async function findDestinations(query, options = {}) {
           : null,
       searchSessionToken: item?.place_id ? sessionToken : null,
     });
-  }).sort((first, second) => (
+  }).filter((item) => !isGenericRuntimeDestinationCandidate(item)).sort((first, second) => (
     scoreRuntimeDestinationResult(first, location) -
     scoreRuntimeDestinationResult(second, location)
   ));

@@ -27,6 +27,7 @@ import { useLiveRouteTiming } from './liveRouteTiming';
 import { formatCurrencyBRL } from './tripFinancialSummary';
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from './robotaxiPrototypeData';
 import { normalizePassengerBookingStatus } from './passengerFlowRouting';
+import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
 import {
   buildRouteViewportRegion,
   buildVisibleRouteEdgePadding,
@@ -1075,10 +1076,18 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       tripRouteCoordinates,
     ]
   );
+  const tripViewportCoordinates = useMemo(
+    () => (
+      tripRouteCoordinates.length >= 2
+        ? [...tripRouteCoordinates, ...mapFocusPoints]
+        : []
+    ),
+    [mapFocusPoints, tripRouteCoordinates],
+  );
   const tripVisibleRouteRegion = useMemo(
     () =>
       buildRouteViewportRegion({
-        coordinates: tripRouteCoordinates,
+        coordinates: tripViewportCoordinates,
         mapWidth: mapWidth || windowWidth,
         mapHeight: mapHeight || windowHeight,
         activeOcclusion: tripMapActiveOcclusion,
@@ -1092,7 +1101,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       mapWidth,
       tripMapActiveOcclusion,
       tripMapViewportPadding,
-      tripRouteCoordinates,
+      tripViewportCoordinates,
       windowHeight,
       windowWidth,
     ],
@@ -1345,6 +1354,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const isLifecycleNavigationLocked = PROTECTED_PASSENGER_TRIP_STATUSES.has(
     normalizedStatus,
   );
+  const tripMapPresentation = useMemo(
+    () => resolvePrototypeMapPresentation({ role: 'passenger', status: normalizedStatus }),
+    [normalizedStatus],
+  );
 
   const handleDismiss = () => {
     if (isLifecycleNavigationLocked) {
@@ -1522,18 +1535,17 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     });
   }, [activeBookingId, destination, driverName, navigation, resolvedTripArrivalText, vehicleModel, vehiclePlate]);
 
-	  const handleCallDriver = useCallback(() => {
-    Alert.alert(
-      'Ligação pelo app',
-      'A chamada direta ainda depende do telefone mascarado do motorista. Use a mensagem ou o suporte por enquanto.',
-    );
-  }, []);
+  const renderCompactMoreOptionsButton = (testID) => (
+    <IconActionButton
+      icon="ellipsis-horizontal"
+      label="Mais opções"
+      onPress={() => setIsTripExpanded(true)}
+      style={styles.passengerSecondaryActionButton}
+      testID={testID}
+    />
+  );
 
-  const handlePassengerOnWay = useCallback(() => {
-    Alert.alert('Aviso registrado', 'Avise o motorista pelo chat se precisar de mais alguns instantes.');
-  }, []);
-
-  const renderStartedActionDock = (style) => (
+  const renderStartedActionDock = (style, { compact = false } = {}) => (
     <View
       style={[styles.startedActionDock, style]}
       testID="passenger-trip-started-action-dock"
@@ -1554,29 +1566,41 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         style={styles.startedDockAction}
         testID="passenger-trip-message-button"
       />
-      <IconActionButton
-        icon="share-social-outline"
-        label="Compartilhar"
-        onPress={handleShareTrip}
-        style={styles.startedDockAction}
-        testID={passengerCardFieldTestIDs.share_trip_action}
-      />
-      <IconActionButton
-        icon="navigate-outline"
-        label="Alterar destino"
-        onPress={handleOpenExtensionFlow}
-        style={styles.startedDockAction}
-        testID="passenger-trip-change-destination-button"
-      />
-      <IconActionButton
-        icon="flag-outline"
-        label={isBusy ? 'Encerrando...' : 'Encerrar agora'}
-        tone="danger"
-        onPress={handleEndTripEarly}
-        disabled={isBusy}
-        style={styles.startedDockAction}
-        testID="passenger-trip-end-early-button"
-      />
+      {compact ? (
+        <IconActionButton
+          icon="ellipsis-horizontal"
+          label="Mais opções"
+          onPress={() => setIsTripExpanded(true)}
+          style={styles.startedDockAction}
+          testID="passenger-trip-more-actions-button"
+        />
+      ) : (
+        <>
+          <IconActionButton
+            icon="share-social-outline"
+            label="Compartilhar"
+            onPress={handleShareTrip}
+            style={styles.startedDockAction}
+            testID={passengerCardFieldTestIDs.share_trip_action}
+          />
+          <IconActionButton
+            icon="navigate-outline"
+            label="Alterar destino"
+            onPress={handleOpenExtensionFlow}
+            style={styles.startedDockAction}
+            testID="passenger-trip-change-destination-button"
+          />
+          <IconActionButton
+            icon="flag-outline"
+            label={isBusy ? 'Encerrando...' : 'Encerrar agora'}
+            tone="danger"
+            onPress={handleEndTripEarly}
+            disabled={isBusy}
+            style={styles.startedDockAction}
+            testID="passenger-trip-end-early-button"
+          />
+        </>
+      )}
     </View>
   );
 
@@ -1736,7 +1760,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           >
             {vehicleColorLabel}
           </Text>
-          {renderStartedActionDock(styles.startedActionDockCompact)}
+          {renderStartedActionDock(styles.startedActionDockCompact, { compact: true })}
         </>
       ) : isArrived ? (
         <>
@@ -1787,35 +1811,13 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             testID={passengerCardFieldTestIDs.contact_actions}
           >
             <IconActionButton
-              icon="call-outline"
-              label="Ligar"
-              onPress={handleCallDriver}
-              style={styles.passengerSecondaryActionButton}
-              testID="passenger-trip-call-button"
-            />
-            <IconActionButton
               icon="chatbubble-ellipses-outline"
               label="Mensagem"
               onPress={handleOpenPassengerChat}
               style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-message-button"
             />
-            <IconActionButton
-              icon="close-outline"
-              label="Cancelar corrida"
-              tone="danger"
-              onPress={handleOpenPassengerCancellation}
-              style={styles.passengerSecondaryActionButton}
-              testID="passenger-trip-cancel-button"
-            />
-          </View>
-          <View style={styles.passengerPrimaryActionRow}>
-            <LeafButton
-              label="Estou indo"
-              tone="primary"
-              onPress={handlePassengerOnWay}
-              style={styles.arrivedPrimary}
-            />
+            {renderCompactMoreOptionsButton('passenger-trip-arrived-more-options-button')}
           </View>
         </>
       ) : (
@@ -1889,37 +1891,13 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             testID={passengerCardFieldTestIDs.contact_actions}
           >
             <IconActionButton
-              icon="call-outline"
-              label="Ligar"
-              onPress={handleCallDriver}
-              style={styles.passengerSecondaryActionButton}
-              testID="passenger-trip-call-button"
-            />
-            <IconActionButton
               icon="chatbubble-ellipses-outline"
               label="Mensagem"
               onPress={handleOpenPassengerChat}
               style={styles.passengerSecondaryActionButton}
               testID="passenger-trip-message-button"
             />
-            <IconActionButton
-              icon="close-outline"
-              label="Cancelar corrida"
-              tone="danger"
-              onPress={handleOpenPassengerCancellation}
-              style={styles.passengerSecondaryActionButton}
-              testID="passenger-trip-cancel-button"
-            />
-          </View>
-          <View style={styles.passengerPrimaryActionRow}>
-            <LeafButton
-              label="Compartilhar"
-              tone="primary"
-              onPress={handleShareTrip}
-              style={styles.acceptedPrimary}
-              testID="passenger-trip-share-button"
-              accessibilityLabel="passenger-trip-share-button"
-            />
+            {renderCompactMoreOptionsButton('passenger-trip-accepted-more-options-button')}
           </View>
         </>
       )}
@@ -1949,11 +1927,12 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           destinationAddress={destinationAddress}
           originLabel="Partida"
           originAddress={currentAddress || 'Sua localização atual'}
-          interactionEnabled
+          interactionEnabled={tripMapPresentation.interactionEnabled}
           viewportPadding={tripMapViewportPadding}
           routeViewportRegion={tripVisibleRouteRegion}
           onMapLayout={handleMapLayout}
-          animateRoute
+          animateRoute={tripMapPresentation.animateRoute}
+          manualCameraHoldMs={tripMapPresentation.manualCameraHoldMs}
           hideRouteEndpointMarkers
           driverMarkerMode="car"
           driverVehicleColor={vehicleColorLabel}
@@ -2281,33 +2260,45 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             ) : null}
 
             {!isStarted ? (
-              <View style={styles.actionsRow}>
-                <TouchableOpacity
-                  style={styles.secondaryAction}
-                  activeOpacity={0.86}
-	                  onPress={handleOpenPassengerChat}
-                >
-                  <Ionicons
-                    name="chatbubble-ellipses-outline"
-                    size={leafButtonMetrics.iconSize}
-                    color={color.text.primary}
-                  />
-                  <Text style={styles.secondaryActionText}>Chat</Text>
-                </TouchableOpacity>
+              <>
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity
+                    style={styles.secondaryAction}
+                    activeOpacity={0.86}
+                    onPress={handleOpenPassengerChat}
+                  >
+                    <Ionicons
+                      name="chatbubble-ellipses-outline"
+                      size={leafButtonMetrics.iconSize}
+                      color={color.text.primary}
+                    />
+                    <Text style={styles.secondaryActionText}>Chat</Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity
-	                  style={styles.secondaryAction}
-	                  activeOpacity={0.86}
-	                  onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
-	                >
-                  <Ionicons
-                    name="shield-checkmark-outline"
-                    size={leafButtonMetrics.iconSize}
-                    color={color.text.primary}
+                  <TouchableOpacity
+                    style={styles.secondaryAction}
+                    activeOpacity={0.86}
+                    onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
+                  >
+                    <Ionicons
+                      name="shield-checkmark-outline"
+                      size={leafButtonMetrics.iconSize}
+                      color={color.text.primary}
+                    />
+                    <Text style={styles.secondaryActionText}>Suporte</Text>
+                  </TouchableOpacity>
+                </View>
+                {isAccepted ? (
+                  <LeafButton
+                    label="Compartilhar viagem"
+                    tone="ghost"
+                    onPress={handleShareTrip}
+                    style={styles.expandedShareAction}
+                    testID="passenger-trip-share-button"
+                    accessibilityLabel="passenger-trip-share-button"
                   />
-                  <Text style={styles.secondaryActionText}>Suporte</Text>
-                </TouchableOpacity>
-              </View>
+                ) : null}
+              </>
             ) : null}
 
             {isStarted ? (
@@ -2704,6 +2695,12 @@ const styles = StyleSheet.create({
   passengerPrimaryActionRow: {
     marginTop: 10
   },
+  expandedShareAction: {
+    marginTop: 10,
+    width: '100%',
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
+  },
   startedActionDock: {
     minHeight: leafButtonMetrics.height + 8,
     flexDirection: 'row',
@@ -2730,11 +2727,6 @@ const styles = StyleSheet.create({
     width: 78
   },
   acceptedPrimary: {
-    width: '100%',
-    minHeight: leafButtonMetrics.height,
-    borderRadius: leafButtonMetrics.radius
-  },
-  arrivedPrimary: {
     width: '100%',
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius

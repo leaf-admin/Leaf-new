@@ -288,6 +288,37 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(snapshot.totalFees).toBeCloseTo(1.49, 2);
   });
 
+  it('keeps backend-final zero toll instead of a stale locked estimate', () => {
+    const snapshot = resolveCompletedTripFinancialSnapshot(
+      {
+        bookingId: 'booking_zero_toll',
+        grossAmount: 34.66,
+        tollFee: 0,
+        operationalFee: 1.49,
+        paymentIntermediationFee: 0.5,
+        totalFees: 1.99,
+        driverNetAmount: 32.67,
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+      },
+      {
+        selectedFare: 34.66,
+        driverActiveRide: {
+          grossAmount: 34.66,
+          tollFee: 8.95,
+          pricingSnapshotLocked: true,
+        },
+      },
+    );
+
+    expect(snapshot.tollFee).toBe(0);
+    expect(snapshot.finalFare).toBeCloseTo(34.66, 2);
+    expect(snapshot.totalFees).toBeCloseTo(1.99, 2);
+    expect(snapshot.driverNetAmount).toBeCloseTo(32.67, 2);
+    expect(snapshot.authoritativeSnapshot).toBe(true);
+    expect(snapshot.financialSnapshotSource).toBe('backend_final');
+  });
+
   it('falls back to the preserved driver payout when a local locked snapshot carries placeholder zeros', () => {
     const snapshot = resolveCompletedTripFinancialSnapshot(
       { fare: 78.73 },
