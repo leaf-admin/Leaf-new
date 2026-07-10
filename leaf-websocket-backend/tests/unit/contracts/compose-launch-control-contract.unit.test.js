@@ -16,6 +16,7 @@ describe('production compose launch-control contract', () => {
 
     for (const key of [
       'LEAF_LAUNCH_PROFILE',
+      'LEAF_RIDE_FLOW_VALIDATION_ACK',
       'PILOT_ALLOWED_PASSENGER_IDS',
       'PILOT_ALLOWED_DRIVER_IDS',
       'PILOT_REGION_IDS',

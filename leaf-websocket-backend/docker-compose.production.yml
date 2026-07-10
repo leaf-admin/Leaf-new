@@ -290,6 +290,7 @@ services:
       # Launch control (must match the gateways so the worker preflight cannot
       # start under a broader policy than the active runtime).
       - LEAF_LAUNCH_PROFILE=${LEAF_LAUNCH_PROFILE:-full}
+      - LEAF_RIDE_FLOW_VALIDATION_ACK=${LEAF_RIDE_FLOW_VALIDATION_ACK:-false}
       - LEAF_PILOT_CONTROLLED=${LEAF_PILOT_CONTROLLED:-false}
       - PILOT_ALLOWED_PASSENGER_IDS=${PILOT_ALLOWED_PASSENGER_IDS:-}
       - PILOT_ALLOWED_DRIVER_IDS=${PILOT_ALLOWED_DRIVER_IDS:-}
