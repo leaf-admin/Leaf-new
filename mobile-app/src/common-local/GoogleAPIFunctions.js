@@ -89,6 +89,30 @@ const sanitizeLocalPlaceCacheEntry = (entry = null) => {
     return sanitized;
 };
 
+const isBroadAreaAutocompleteCacheEntry = (entry = null) => {
+    const types = Array.isArray(entry?.types)
+        ? entry.types
+            .map((type) => String(type || '').trim().toLowerCase())
+            .filter(Boolean)
+        : [];
+
+    if (types.length === 0) {
+        return false;
+    }
+
+    return types.every((type) => (
+        type === 'political' ||
+        type === 'geocode' ||
+        type === 'locality' ||
+        type === 'neighborhood' ||
+        type === 'colloquial_area' ||
+        type === 'country' ||
+        type === 'sublocality' ||
+        type.startsWith('sublocality_level_') ||
+        type.startsWith('administrative_area_level_')
+    ));
+};
+
 const buildBackendRideTelemetryPayload = (telemetryContext = null, fallbackSurface = 'mobile_google_functions') => {
     if (!telemetryContext || typeof telemetryContext !== 'object') {
         return null;
@@ -119,7 +143,16 @@ const getFromLocalCache = async (query) => {
     try {
         const cacheKey = getLocalCacheKey(query);
         const cached = await AsyncStorage.getItem(cacheKey);
-        return cached ? sanitizeLocalPlaceCacheEntry(JSON.parse(cached)) : null;
+        const entry = cached
+            ? sanitizeLocalPlaceCacheEntry(JSON.parse(cached))
+            : null;
+        if (isBroadAreaAutocompleteCacheEntry(entry)) {
+            Logger.log(
+                '↩️ [PlacesCache] Cache local amplo ignorado; buscando destinos específicos.',
+            );
+            return null;
+        }
+        return entry;
     } catch (error) {
         Logger.log('⚠️ [PlacesCache] Erro ao ler cache local:', error.message);
         return null;

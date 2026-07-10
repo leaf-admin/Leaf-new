@@ -190,6 +190,50 @@ describe('GoogleAPIFunctions address search', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('refreshes a repeated query when the singleton local cache only describes a broad area', async () => {
+    AsyncStorage.getItem.mockResolvedValue(JSON.stringify({
+      place_id: 'copacabana-region',
+      description: 'Copacabana, Rio de Janeiro - RJ, Brasil',
+      structured_formatting: {
+        main_text: 'Copacabana',
+        secondary_text: 'Rio de Janeiro - RJ, Brasil',
+      },
+      types: ['sublocality_level_1', 'sublocality', 'political'],
+    }));
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'success',
+        cached: true,
+        predictions: [
+          {
+            place_id: 'copacabana-palace',
+            description: 'Copacabana Palace, Av. Atlântica, Rio de Janeiro',
+            structured_formatting: {
+              main_text: 'Copacabana Palace',
+              secondary_text: 'Av. Atlântica, Rio de Janeiro',
+            },
+            types: ['lodging', 'establishment'],
+          },
+        ],
+      }),
+    });
+
+    const result = await fetchPlacesAutocomplete('Copacabana', 'token-repeat', {
+      lat: -22.9848,
+      lng: -43.2221,
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({ place_id: 'copacabana-palace' }),
+    ]);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch.mock.calls[0][0]).toContain(
+      'backend.leaf.test/api/places/autocomplete',
+    );
+  });
+
   it('passes query and location context to backend Place Details', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
