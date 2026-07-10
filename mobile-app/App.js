@@ -5,7 +5,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
-import * as ScreenOrientation from 'expo-screen-orientation';
 import { store } from './src/state/appStore';
 import AppNavigator from './src/navigation/AppNavigator';
 import AuthProvider from './src/components/AuthProvider';
@@ -18,6 +17,7 @@ import Logger from './src/utils/Logger';
 import NetworkStatusBanner from './src/components/NetworkStatusBanner';
 import AndroidPermissionDisclosureHost from './src/components/AndroidPermissionDisclosureHost';
 import { toUserFriendlyMessage } from './src/utils/friendlyErrorMessages';
+import { registerPortraitOrientationGuard } from './src/utils/appOrientationGuard';
 import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
 
@@ -133,17 +133,6 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function lockPortraitOrientation() {
-  if (Platform.OS === 'web') {
-    return;
-  }
-
-  ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
-    .catch(error => {
-      Logger.warn('⚠️ [App] Não foi possível travar orientação portrait:', error?.message || error);
-    });
-}
-
 // ✅ CRÍTICO: Manter a splash screen nativa visível desde o início
 // Isso DEVE ser chamado antes de qualquer renderização
 // Usar try/catch para garantir que não quebra se já foi chamado
@@ -217,7 +206,7 @@ export default function App() {
   // ✅ Desabilitar DevMenu também no useEffect para garantir (dentro do componente)
   useEffect(() => {
     hideDevelopmentClientMenu();
-    lockPortraitOrientation();
+    return registerPortraitOrientationGuard();
   }, []);
 
   // Inicializar FCM e notificações interativas quando o app iniciar

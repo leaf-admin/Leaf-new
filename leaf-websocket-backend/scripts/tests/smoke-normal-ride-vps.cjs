@@ -422,12 +422,14 @@ async function createPaymentAdvance(quote) {
     authorization: `Bearer ${passengerIdToken}`
   });
   const chargeId = String(paymentAdvance?.data?.chargeId || '').trim();
+  const paymentIntentId = String(paymentAdvance?.data?.paymentIntentId || '').trim();
   assert(paymentAdvance.ok, `payment_advance_failed:${paymentAdvance?.data?.message || paymentAdvance.status}`);
   assert(chargeId, 'payment_advance_missing_charge');
+  assert(paymentIntentId, 'payment_advance_missing_payment_intent');
   return {
     rideId,
     chargeId,
-    paymentIntentId: paymentAdvance?.data?.paymentIntentId || null,
+    paymentIntentId,
     amountInCents: quote.amountInCents,
     quote
   };

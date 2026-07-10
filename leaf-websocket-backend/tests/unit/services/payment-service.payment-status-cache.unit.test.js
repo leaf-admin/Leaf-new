@@ -483,7 +483,9 @@ describe('PaymentService payment status cache', () => {
       paymentDriverReservationId: 'pdr_reserved_1',
       paymentDriverReservationDriverId: 'driver_reserved_1',
       paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
-      paymentDriverReservationTtlSeconds: 180
+      paymentDriverReservationTtlSeconds: 180,
+      chargeExpiresInSeconds: 300,
+      chargeExpiresAtIso: expect.any(String)
     });
   });
 

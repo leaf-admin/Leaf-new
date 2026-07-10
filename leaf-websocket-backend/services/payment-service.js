@@ -736,6 +736,13 @@ class PaymentService {
     try {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) return false;
+      const chargeCreatedAtIso = chargeData.chargeCreatedAtIso || new Date().toISOString();
+      const chargeExpiresInSeconds = Number.parseInt(chargeData.chargeExpiresInSeconds, 10);
+      const chargeExpiresAtIso = chargeData.chargeExpiresAtIso || (
+        Number.isFinite(chargeExpiresInSeconds) && chargeExpiresInSeconds > 0
+          ? new Date(Date.parse(chargeCreatedAtIso) + chargeExpiresInSeconds * 1000).toISOString()
+          : null
+      );
       await this.retryOperation(
         async () => {
           await firestore.collection('payment_intents').doc(intent.paymentIntentId).set({
@@ -749,9 +756,13 @@ class PaymentService {
             paymentProfileSource: intent.paymentProfileSource || null,
             paymentProfileReason: intent.paymentProfileReason || null,
             chargeCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            chargeCreatedAtIso: new Date().toISOString(),
+            chargeCreatedAtIso,
+            chargeExpiresInSeconds: Number.isFinite(chargeExpiresInSeconds) && chargeExpiresInSeconds > 0
+              ? chargeExpiresInSeconds
+              : null,
+            chargeExpiresAtIso,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAtIso: new Date().toISOString()
+            updatedAtIso: chargeCreatedAtIso
           }, { merge: true });
         },
         'completeAdvancePaymentIntent'
@@ -1557,7 +1568,8 @@ class PaymentService {
       await this.completeAdvancePaymentIntent(paymentIntent, {
         chargeId,
         qrCode,
-        paymentLink
+        paymentLink,
+        chargeExpiresInSeconds: chargeExpiresIn
       });
 
       return {

@@ -60,6 +60,7 @@ const {
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking,
   validateSandboxTestWebhookPayload,
+  evaluateSandboxPaymentIntentFreshness,
   canSandboxTestPaymentActorConfirm,
   resolveSandboxTestWebhookPayload,
   requestWooviSandboxTestPayment,
@@ -511,7 +512,8 @@ describe('woovi webhook guards', () => {
       rideId: 'ride-123',
       passengerId: 'passenger-123',
       payableAmountInCents: 5511,
-      chargeCreatedAtIso: new Date().toISOString()
+      chargeCreatedAtIso: new Date().toISOString(),
+      paymentDriverReservationExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
     });
 
     const result = await validateSandboxTestWebhookPayload({
@@ -533,7 +535,7 @@ describe('woovi webhook guards', () => {
     expect(result.reason).toBe('SANDBOX_TEST_WEBHOOK_INTENT_VALIDATED');
   });
 
-  it('builds a sandbox confirmation payload from the latest authoritative payment intent', async () => {
+  it('builds a sandbox confirmation payload only from the exact authoritative payment intent', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
 
@@ -544,7 +546,8 @@ describe('woovi webhook guards', () => {
       rideId: 'ride-production',
       passengerId: 'passenger-latest',
       payableAmountInCents: 9999,
-      chargeCreatedAtIso: new Date().toISOString()
+      chargeCreatedAtIso: new Date().toISOString(),
+      paymentDriverReservationExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
     });
     await firestore.collection('payment_intents').doc('intent-older').set({
       status: 'charge_created',
@@ -553,7 +556,8 @@ describe('woovi webhook guards', () => {
       rideId: 'ride-older',
       passengerId: 'passenger-latest',
       payableAmountInCents: 4400,
-      chargeCreatedAtIso: new Date(Date.now() - 60_000).toISOString()
+      chargeCreatedAtIso: new Date(Date.now() - 60_000).toISOString(),
+      paymentDriverReservationExpiresAt: new Date(Date.now() + 4 * 60_000).toISOString()
     });
     await firestore.collection('payment_intents').doc('intent-latest').set({
       paymentIntentId: 'intent-latest',
@@ -564,11 +568,13 @@ describe('woovi webhook guards', () => {
       passengerId: 'passenger-latest',
       payableAmountInCents: 7690,
       correlationID: 'correlation-latest',
-      chargeCreatedAtIso: new Date().toISOString()
+      chargeCreatedAtIso: new Date().toISOString(),
+      paymentDriverReservationExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
     });
 
     const result = await resolveSandboxTestWebhookPayload({
-      passengerId: 'passenger-latest'
+      passengerId: 'passenger-latest',
+      paymentIntentId: 'intent-latest'
     });
 
     expect(result.found).toBe(true);
@@ -578,6 +584,91 @@ describe('woovi webhook guards', () => {
     expect(result.amountInCents).toBe(7690);
     expect(result.payload.charge.value).toBe(7690);
     expect(result.payload.account.environment).toBe('TESTING');
+  });
+
+  it('refuses ambiguous sandbox confirmation without paymentIntentId', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    const result = await resolveSandboxTestWebhookPayload({
+      passengerId: 'passenger-latest'
+    });
+
+    expect(result).toEqual({
+      found: false,
+      reason: 'SANDBOX_PAYMENT_INTENT_ID_REQUIRED'
+    });
+  });
+
+  it('rejects an expired exact intent even while its status remains charge_created', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const nowMs = Date.now();
+
+    await firestore.collection('payment_intents').doc('intent-expired').set({
+      paymentIntentId: 'intent-expired',
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      chargeId: 'charge-expired',
+      rideId: 'ride-expired',
+      passengerId: 'passenger-expired',
+      payableAmountInCents: 1891,
+      chargeCreatedAtIso: new Date(nowMs - 10 * 60_000).toISOString(),
+      paymentDriverReservationExpiresAt: new Date(nowMs - 5 * 60_000).toISOString()
+    });
+
+    const result = await resolveSandboxTestWebhookPayload({
+      passengerId: 'passenger-expired',
+      paymentIntentId: 'intent-expired'
+    });
+
+    expect(result).toEqual({
+      found: false,
+      reason: 'SANDBOX_PAYMENT_INTENT_EXPIRED'
+    });
+  });
+
+  it('fails closed when an exact intent has no authoritative expiration', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    await firestore.collection('payment_intents').doc('intent-no-expiry').set({
+      paymentIntentId: 'intent-no-expiry',
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      chargeId: 'charge-no-expiry',
+      rideId: 'ride-no-expiry',
+      passengerId: 'passenger-no-expiry',
+      payableAmountInCents: 2488,
+      chargeCreatedAtIso: new Date().toISOString()
+    });
+
+    const result = await resolveSandboxTestWebhookPayload({
+      passengerId: 'passenger-no-expiry',
+      paymentIntentId: 'intent-no-expiry'
+    });
+
+    expect(result).toEqual({
+      found: false,
+      reason: 'SANDBOX_PAYMENT_INTENT_EXPIRY_MISSING'
+    });
+  });
+
+  it('treats a sandbox intent as expired exactly at its deadline', () => {
+    const deadlineMs = Date.parse('2026-07-10T21:00:00.000Z');
+    const result = evaluateSandboxPaymentIntentFreshness({
+      chargeCreatedAtIso: '2026-07-10T20:55:00.000Z',
+      chargeExpiresAtIso: '2026-07-10T21:00:00.000Z'
+    }, {
+      nowMs: deadlineMs,
+      maxAgeMs: 60 * 60 * 1000
+    });
+
+    expect(result).toMatchObject({
+      fresh: false,
+      reason: 'SANDBOX_PAYMENT_INTENT_EXPIRED',
+      expiresAtMs: deadlineMs
+    });
   });
 
   it('allows sandbox app confirmation only for the matching passenger or sandbox roles', () => {
@@ -683,7 +774,8 @@ describe('woovi webhook guards', () => {
       rideId: 'ride-owned',
       passengerId: 'passenger-owner',
       payableAmountInCents: 5511,
-      chargeCreatedAtIso: new Date().toISOString()
+      chargeCreatedAtIso: new Date().toISOString(),
+      paymentDriverReservationExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
     });
 
     const result = await resolveSandboxTestWebhookPayload({
@@ -706,7 +798,8 @@ describe('woovi webhook guards', () => {
       rideId: 'ride-amount',
       passengerId: 'passenger-amount',
       payableAmountInCents: 5511,
-      chargeCreatedAtIso: new Date().toISOString()
+      chargeCreatedAtIso: new Date().toISOString(),
+      paymentDriverReservationExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
     });
 
     const result = await validateSandboxTestWebhookPayload({

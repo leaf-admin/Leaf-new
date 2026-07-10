@@ -245,12 +245,13 @@ async function validateSandboxTestWebhookPayload(data = {}) {
     const intentRideId = String(intent.rideId || '').trim();
     const intentPassengerId = String(intent.passengerId || '').trim();
     const expectedAmount = Math.round(Number(intent.payableAmountInCents || intent.amountCents || intent.amount || 0));
-    const createdAtMs = Date.parse(intent.chargeCreatedAtIso || intent.createdAtIso || intent.updatedAtIso || '');
     const maxAgeMs = Math.max(
       60 * 1000,
       Number.parseInt(process.env.WOOVI_SANDBOX_TEST_WEBHOOK_MAX_AGE_SECONDS || '86400', 10) * 1000
     );
-    const isFresh = Number.isFinite(createdAtMs) && Date.now() - createdAtMs <= maxAgeMs;
+    const freshness = evaluateSandboxPaymentIntentFreshness(intent, {
+      maxAgeMs
+    });
 
     if (providerEnvironment !== 'sandbox') {
       return { allowed: false, reason: 'SANDBOX_TEST_WEBHOOK_NOT_SANDBOX' };
@@ -274,7 +275,7 @@ async function validateSandboxTestWebhookPayload(data = {}) {
         expectedAmountInCents: expectedAmount
       };
     }
-    if (!isFresh) {
+    if (!freshness.fresh) {
       return { allowed: false, reason: 'SANDBOX_TEST_WEBHOOK_INTENT_EXPIRED' };
     }
 
@@ -296,11 +297,77 @@ async function validateSandboxTestWebhookPayload(data = {}) {
   }
 }
 
+function parsePaymentIntentTimestampMs(value) {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+
+  if (value && typeof value.toDate === 'function') {
+    const timestampDate = value.toDate();
+    return timestampDate instanceof Date ? timestampDate.getTime() : Number.NaN;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : Number.NaN;
+  }
+
+  return Date.parse(String(value || '').trim());
+}
+
+function evaluateSandboxPaymentIntentFreshness(
+  intent = {},
+  { nowMs = Date.now(), maxAgeMs = 60 * 60 * 1000 } = {}
+) {
+  const createdAtMs = parsePaymentIntentTimestampMs(
+    intent.chargeCreatedAtIso || intent.createdAtIso || intent.updatedAtIso || intent.chargeCreatedAt
+  );
+  if (!Number.isFinite(createdAtMs) || nowMs < createdAtMs) {
+    return { fresh: false, reason: 'SANDBOX_PAYMENT_INTENT_CREATED_AT_INVALID' };
+  }
+
+  const expirationCandidates = [
+    intent.chargeExpiresAtIso,
+    intent.paymentExpiresAtIso,
+    intent.paymentDriverReservationExpiresAt
+  ]
+    .map(parsePaymentIntentTimestampMs)
+    .filter(Number.isFinite);
+
+  if (expirationCandidates.length === 0) {
+    return { fresh: false, reason: 'SANDBOX_PAYMENT_INTENT_EXPIRY_MISSING' };
+  }
+
+  const configuredMaxAgeMs = Number.isFinite(Number(maxAgeMs))
+    ? Math.max(60 * 1000, Number(maxAgeMs))
+    : 60 * 60 * 1000;
+  const expiresAtMs = Math.min(
+    ...expirationCandidates,
+    createdAtMs + configuredMaxAgeMs
+  );
+
+  if (nowMs >= expiresAtMs) {
+    return {
+      fresh: false,
+      reason: 'SANDBOX_PAYMENT_INTENT_EXPIRED',
+      expiresAtMs
+    };
+  }
+
+  return {
+    fresh: true,
+    reason: 'SANDBOX_PAYMENT_INTENT_ACTIVE',
+    expiresAtMs
+  };
+}
+
 async function resolveSandboxTestWebhookPayload({ passengerId, paymentIntentId } = {}) {
   const safePassengerId = String(passengerId || '').trim();
   const safePaymentIntentId = String(paymentIntentId || '').trim();
   if (!safePassengerId) {
     return { found: false, reason: 'SANDBOX_PAYMENT_PASSENGER_REQUIRED' };
+  }
+  if (!safePaymentIntentId) {
+    return { found: false, reason: 'SANDBOX_PAYMENT_INTENT_ID_REQUIRED' };
   }
 
   const firestore = require('../firebase-config').getFirestore();
@@ -308,50 +375,36 @@ async function resolveSandboxTestWebhookPayload({ passengerId, paymentIntentId }
     return { found: false, reason: 'SANDBOX_PAYMENT_FIRESTORE_UNAVAILABLE' };
   }
 
-  let candidates = [];
-  if (safePaymentIntentId) {
-    const snapshot = await firestore.collection('payment_intents').doc(safePaymentIntentId).get();
-    if (snapshot.exists) {
-      candidates = [{ id: snapshot.id, ...(snapshot.data() || {}) }];
-    }
-  } else {
-    const snapshot = await firestore
-      .collection('payment_intents')
-      .where('passengerId', '==', safePassengerId)
-      .limit(50)
-      .get();
-    candidates = snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  const snapshot = await firestore.collection('payment_intents').doc(safePaymentIntentId).get();
+  if (!snapshot.exists) {
+    return { found: false, reason: 'SANDBOX_PAYMENT_INTENT_NOT_FOUND' };
   }
+  const intent = { id: snapshot.id, ...(snapshot.data() || {}) };
 
   const maxAgeMs = Math.max(
     60 * 1000,
     Number.parseInt(process.env.WOOVI_SANDBOX_TEST_CONFIRM_MAX_AGE_SECONDS || '3600', 10) * 1000
   );
-  const nowMs = Date.now();
-  const intent = candidates
-    .filter((candidate) => {
-      const createdAtMs = Date.parse(
-        candidate.chargeCreatedAtIso || candidate.createdAtIso || candidate.updatedAtIso || ''
-      );
-      return (
-        String(candidate.passengerId || '').trim() === safePassengerId &&
-        String(candidate.providerEnvironment || '').trim().toLowerCase() === 'sandbox' &&
-        String(candidate.status || '').trim().toLowerCase() === 'charge_created' &&
-        String(candidate.chargeId || candidate.paymentId || '').trim() &&
-        String(candidate.rideId || '').trim() &&
-        Number.isFinite(createdAtMs) &&
-        nowMs - createdAtMs >= 0 &&
-        nowMs - createdAtMs <= maxAgeMs
-      );
-    })
-    .sort((left, right) => {
-      const leftTime = Date.parse(left.chargeCreatedAtIso || left.createdAtIso || left.updatedAtIso || '') || 0;
-      const rightTime = Date.parse(right.chargeCreatedAtIso || right.createdAtIso || right.updatedAtIso || '') || 0;
-      return rightTime - leftTime;
-    })[0];
-
-  if (!intent) {
+  if (
+    String(intent.passengerId || '').trim() !== safePassengerId ||
+    String(intent.providerEnvironment || '').trim().toLowerCase() !== 'sandbox'
+  ) {
     return { found: false, reason: 'SANDBOX_PAYMENT_INTENT_NOT_FOUND' };
+  }
+
+  if (String(intent.status || '').trim().toLowerCase() !== 'charge_created') {
+    return { found: false, reason: 'SANDBOX_PAYMENT_INTENT_STATUS_INVALID' };
+  }
+
+  const chargeId = String(intent.chargeId || intent.paymentId || '').trim();
+  const rideId = String(intent.rideId || '').trim();
+  if (!chargeId || !rideId) {
+    return { found: false, reason: 'SANDBOX_PAYMENT_INTENT_INCOMPLETE' };
+  }
+
+  const freshness = evaluateSandboxPaymentIntentFreshness(intent, { maxAgeMs });
+  if (!freshness.fresh) {
+    return { found: false, reason: freshness.reason };
   }
 
   const amountInCents = Math.round(
@@ -362,8 +415,6 @@ async function resolveSandboxTestWebhookPayload({ passengerId, paymentIntentId }
   }
 
   const resolvedIntentId = String(intent.paymentIntentId || intent.id || '').trim();
-  const chargeId = String(intent.chargeId || intent.paymentId || '').trim();
-  const rideId = String(intent.rideId || '').trim();
   const paidAt = new Date().toISOString();
   return {
     found: true,
@@ -1824,7 +1875,17 @@ async function handleSandboxTestPaymentConfirmation(req, res) {
   try {
     const resolved = await resolveSandboxTestWebhookPayload(req.body || {});
     if (!resolved.found) {
-      return res.status(404).json({
+      const conflictReasons = new Set([
+        'SANDBOX_PAYMENT_INTENT_STATUS_INVALID',
+        'SANDBOX_PAYMENT_INTENT_INCOMPLETE',
+        'SANDBOX_PAYMENT_INTENT_CREATED_AT_INVALID',
+        'SANDBOX_PAYMENT_INTENT_EXPIRY_MISSING',
+        'SANDBOX_PAYMENT_INTENT_EXPIRED'
+      ]);
+      const status = resolved.reason === 'SANDBOX_PAYMENT_INTENT_ID_REQUIRED'
+        ? 400
+        : (conflictReasons.has(resolved.reason) ? 409 : 404);
+      return res.status(status).json({
         success: false,
         code: resolved.reason
       });
@@ -3053,6 +3114,7 @@ router.__private = {
   extractExpectedBookingAmountInCents,
   validateWebhookAmountAgainstBooking,
   validateSandboxTestWebhookPayload,
+  evaluateSandboxPaymentIntentFreshness,
   canSandboxTestPaymentActorConfirm,
   resolveSandboxTestWebhookPayload,
   requestWooviSandboxTestPayment,

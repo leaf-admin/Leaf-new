@@ -51,6 +51,10 @@ const PAYMENT_PASSENGER_UID =
   process.env.FIREBASE_TEST_UID ||
   process.env.PAYMENT_RUNTIME_UID ||
   "";
+const PAYMENT_INTENT_ID =
+  process.env.REAL_SMOKE_PAYMENT_INTENT_ID ||
+  process.env.PAYMENT_INTENT_ID ||
+  "";
 const TEST_DRIVER_UID = process.env.TEST_DRIVER_UID || "";
 const MANAGED_DRIVER_RIDE_REQUEST_TIMEOUT_MS = String(
   Math.max(180000, Number(process.env.DRIVER_RIDE_REQUEST_TIMEOUT_MS || 600000)),
@@ -1002,6 +1006,14 @@ function runSandboxPaymentConfirmation() {
     };
   }
 
+  if (!PAYMENT_INTENT_ID) {
+    return {
+      requested: true,
+      ok: false,
+      error: "REAL_SMOKE_PAYMENT_INTENT_ID is required for exact sandbox confirmation",
+    };
+  }
+
   const scriptPath = path.join(__dirname, "simulate-latest-ride-payment.sh");
   const evidencePath = path.join(artifactsDir, "sandbox-payment-confirmation.json");
   const result = spawnSync("bash", [scriptPath], {
@@ -1012,6 +1024,7 @@ function runSandboxPaymentConfirmation() {
       ...process.env,
       API_BASE_URL: BACKEND_URL,
       PASSENGER_UID_FILTER: PAYMENT_PASSENGER_UID,
+      PAYMENT_INTENT_ID,
       PAYMENT_EVIDENCE_PATH: evidencePath,
       WATCH_TIMEOUT_SEC: process.env.REAL_SMOKE_PAYMENT_CONFIRM_TIMEOUT_SEC || "180",
     },
