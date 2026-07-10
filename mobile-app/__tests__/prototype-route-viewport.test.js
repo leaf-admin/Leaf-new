@@ -237,46 +237,88 @@ describe('prototype route viewport', () => {
     });
   });
 
-  it('keeps a Rio pre-booking route above the full measured category card', () => {
-    const mapWidth = 430;
-    const mapHeight = 932;
-    const activeOcclusion = { top: 0, bottom: 482 };
-    const insets = { top: 59, bottom: 34 };
-    const viewportPadding = buildVisibleRouteEdgePadding({
-      mapHeight,
-      activeOcclusion,
-      insets,
-      sidePadding: 72,
-      topExtraPadding: 14,
-      bottomExtraPadding: 12,
-      minVisibleHeight: 180,
-      overlayBiasRatio: 0.1,
-    });
-    const route = [
-      { latitude: -22.9428, longitude: -43.3652 },
-      { latitude: -22.9524, longitude: -43.2921 },
-      { latitude: -22.96722, longitude: -43.17874 },
-    ];
-    const region = buildRouteViewportRegion({
-      coordinates: route,
+  it.each([
+    {
+      deviceClass: 'compact Android',
+      mapWidth: 360,
+      mapHeight: 640,
+      insets: { top: 24, bottom: 24 },
+      categoryCardHeight: 390,
+      categoryBottomOffset: 41,
+    },
+    {
+      deviceClass: 'standard iOS',
+      mapWidth: 390,
+      mapHeight: 844,
+      insets: { top: 47, bottom: 34 },
+      categoryCardHeight: 390,
+      categoryBottomOffset: 41,
+    },
+    {
+      deviceClass: 'large iOS',
+      mapWidth: 430,
+      mapHeight: 932,
+      insets: { top: 59, bottom: 34 },
+      categoryCardHeight: 390,
+      categoryBottomOffset: 41,
+    },
+    {
+      deviceClass: 'tall Android',
+      mapWidth: 412,
+      mapHeight: 915,
+      insets: { top: 32, bottom: 24 },
+      categoryCardHeight: 390,
+      categoryBottomOffset: 41,
+    },
+  ])(
+    'keeps a Rio pre-booking route above the measured category card on $deviceClass',
+    ({
       mapWidth,
       mapHeight,
-      activeOcclusion,
       insets,
-      viewportPadding,
-      minVisibleHeight: 180,
-    });
+      categoryCardHeight,
+      categoryBottomOffset,
+    }) => {
+      const activeOcclusion = {
+        top: 0,
+        bottom: insets.bottom + categoryBottomOffset + categoryCardHeight,
+      };
+      const viewportPadding = buildVisibleRouteEdgePadding({
+        mapHeight,
+        activeOcclusion,
+        insets,
+        sidePadding: 72,
+        topExtraPadding: 14,
+        bottomExtraPadding: 12,
+        minVisibleHeight: 180,
+        overlayBiasRatio: 0.1,
+      });
+      const route = [
+        { latitude: -22.9428, longitude: -43.3652 },
+        { latitude: -22.9524, longitude: -43.2921 },
+        { latitude: -22.96722, longitude: -43.17874 },
+      ];
+      const region = buildRouteViewportRegion({
+        coordinates: route,
+        mapWidth,
+        mapHeight,
+        activeOcclusion,
+        insets,
+        viewportPadding,
+        minVisibleHeight: 180,
+      });
 
-    expect(viewportPadding.bottom).toBeGreaterThanOrEqual(activeOcclusion.bottom);
-    route.forEach(coordinate => {
-      const x = projectX({ coordinate, region, mapWidth });
-      const y = projectY({ coordinate, region, mapHeight });
-      expect(x).toBeGreaterThanOrEqual(viewportPadding.left);
-      expect(x).toBeLessThanOrEqual(mapWidth - viewportPadding.right);
-      expect(y).toBeGreaterThanOrEqual(viewportPadding.top);
-      expect(y).toBeLessThanOrEqual(mapHeight - viewportPadding.bottom);
-    });
-  });
+      expect(viewportPadding.bottom).toBeGreaterThanOrEqual(activeOcclusion.bottom);
+      route.forEach(coordinate => {
+        const x = projectX({ coordinate, region, mapWidth });
+        const y = projectY({ coordinate, region, mapHeight });
+        expect(x).toBeGreaterThanOrEqual(viewportPadding.left);
+        expect(x).toBeLessThanOrEqual(mapWidth - viewportPadding.right);
+        expect(y).toBeGreaterThanOrEqual(viewportPadding.top);
+        expect(y).toBeLessThanOrEqual(mapHeight - viewportPadding.bottom);
+      });
+    },
+  );
 
   it('fits a horizontal route within the measured map width and side padding', () => {
     const mapWidth = 390;
