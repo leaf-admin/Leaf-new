@@ -122,6 +122,8 @@ describe('active route viewport contract', () => {
     expect(source).toContain('Math.round(routeViewportOcclusion.bottom)');
     expect(source).toContain('const routeViewportOcclusion = effectiveRouteOcclusion;');
     expect(source).toContain('PASSENGER_HOME_CARD_METRICS.categoryBottomOffset');
+    expect(source).toContain('PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER');
+    expect(source).toContain('PREBOOKING_ROUTE_LONG_DELTA_MULTIPLIER');
     expect(source).not.toContain('PREBOOKING_ROUTE_BOTTOM_OCCLUSION_RELIEF');
     expect(source).not.toContain('PREBOOKING_ROUTE_VIEWPORT_DELTA_SCALE');
     expect(source).toContain('shouldRevealNavigationRoute');

@@ -271,7 +271,7 @@ describe('prototype route viewport', () => {
       categoryBottomOffset: 41,
     },
   ])(
-    'tightly fits a Rio pre-booking route above the measured category card on $deviceClass',
+    'tightly fits the route above the measured category card on $deviceClass',
     ({
       mapWidth,
       mapHeight,
@@ -306,10 +306,10 @@ describe('prototype route viewport', () => {
         insets,
         viewportPadding,
         minVisibleHeight: 180,
-        shortRouteMinLatitudeDelta: 0.0035,
-        minLatitudeDelta: 0.0035,
-        shortRouteLatitudeDeltaMultiplier: 1.16,
-        shortRouteLongitudeDeltaMultiplier: 1.16,
+        shortRouteMinLatitudeDelta: 0.0015,
+        minLatitudeDelta: 0.0015,
+        shortRouteLatitudeDeltaMultiplier: 1.12,
+        shortRouteLongitudeDeltaMultiplier: 1.12,
         longRouteLatitudeDeltaMultiplier: 1.12,
         longRouteLongitudeDeltaMultiplier: 1.12,
       });
@@ -330,14 +330,17 @@ describe('prototype route viewport', () => {
       const projectedHeight =
         Math.max(...projectedPoints.map(point => point.y)) -
         Math.min(...projectedPoints.map(point => point.y));
+
+      expect(viewportPadding.bottom).toBeGreaterThanOrEqual(activeOcclusion.bottom);
       const dominantAxisUtilization = Math.max(
         projectedWidth / frame.width,
         projectedHeight / frame.height,
       );
 
-      expect(viewportPadding.bottom).toBeGreaterThanOrEqual(activeOcclusion.bottom);
-      expect(dominantAxisUtilization).toBeGreaterThanOrEqual(0.84);
-      expect(dominantAxisUtilization).toBeLessThanOrEqual(0.94);
+      expect(viewportPadding.left).toBe(28);
+      expect(viewportPadding.right).toBe(28);
+      expect(dominantAxisUtilization).toBeGreaterThanOrEqual(0.88);
+      expect(dominantAxisUtilization).toBeLessThanOrEqual(0.96);
       projectedPoints.forEach(({ x, y }) => {
         expect(x).toBeGreaterThanOrEqual(frame.left);
         expect(x).toBeLessThanOrEqual(frame.right);

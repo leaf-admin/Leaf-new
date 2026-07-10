@@ -196,8 +196,8 @@ const PREBOOKING_ROUTE_SIDE_PADDING = 28;
 const PREBOOKING_ROUTE_TOP_EXTRA_PADDING = 8;
 const PREBOOKING_ROUTE_BOTTOM_EXTRA_PADDING = 6;
 const PREBOOKING_ROUTE_OVERLAY_BIAS_RATIO = 0.04;
-const PREBOOKING_ROUTE_MIN_LATITUDE_DELTA = 0.0035;
-const PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER = 1.16;
+const PREBOOKING_ROUTE_MIN_LATITUDE_DELTA = 0.0015;
+const PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER = 1.12;
 const PREBOOKING_ROUTE_LONG_DELTA_MULTIPLIER = 1.12;
 const SEARCH_ZOOM_ANIMATION_MS = 1150;
 const SEARCH_RADIUS_MARGIN = 1.34;
@@ -5355,13 +5355,38 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     return getRouteEdgePadding();
   }, [getRouteEdgePadding, hasActiveRoute]);
+  const homeViewportCoordinates = useMemo(() => {
+    const finiteRouteCoordinates = presentedRouteCoordinates.filter(
+      coordinate =>
+        Number.isFinite(coordinate?.latitude) &&
+        Number.isFinite(coordinate?.longitude),
+    );
+    if (finiteRouteCoordinates.length >= 2) {
+      return finiteRouteCoordinates;
+    }
+
+    return [
+      presentedRouteOrigin || effectiveHomePickupCoordinate,
+      presentedRouteDestination || homeSelectedDestination?.coordinate,
+    ].filter(
+      coordinate =>
+        Number.isFinite(coordinate?.latitude) &&
+        Number.isFinite(coordinate?.longitude),
+    );
+  }, [
+    effectiveHomePickupCoordinate,
+    homeSelectedDestination?.coordinate,
+    presentedRouteCoordinates,
+    presentedRouteDestination,
+    presentedRouteOrigin,
+  ]);
   const homeRouteViewportRegion = useMemo(() => {
     if (!hasActiveRoute) {
       return null;
     }
 
     const routeViewportRegion = buildRouteViewportRegion({
-      coordinates: presentedRouteCoordinates,
+      coordinates: homeViewportCoordinates,
       mapWidth: mapWidth || windowWidth,
       mapHeight: mapHeight || windowHeight,
       activeOcclusion: routeViewportOcclusion,
@@ -5387,11 +5412,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     hasActiveRoute,
     homeRouteViewportPadding,
+    homeViewportCoordinates,
     insets,
     mapHeight,
     mapWidth,
     passengerHomePreviewRouteActive,
-    presentedRouteCoordinates,
     routeViewportOcclusion.bottom,
     routeViewportOcclusion.top,
     windowHeight,
@@ -5410,13 +5435,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    const edgePadding = getRouteEdgePadding();
     const routeViewportRegion = buildRouteViewportRegion({
       coordinates,
       mapWidth: mapWidth || windowWidth,
       mapHeight: mapHeight || windowHeight,
       activeOcclusion: routeViewportOcclusion,
       insets,
-      viewportPadding: getRouteEdgePadding(),
+      viewportPadding: edgePadding,
       minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
       ...(passengerHomePreviewRouteActive
         ? {
@@ -5433,7 +5459,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           }
         : {}),
     });
-    const edgePadding = getRouteEdgePadding();
     mapRef.current.animateCamera({ heading: 0, pitch: 0 }, { duration: animatedFit ? 220 : 0 });
     if (routeViewportRegion) {
       mapRef.current.animateToRegion(
