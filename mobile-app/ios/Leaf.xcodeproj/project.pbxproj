@@ -613,7 +613,7 @@
 				CODE_SIGN_ENTITLEMENTS = Leaf/Leaf.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = DTA8W5KA5D;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -652,7 +652,7 @@
 				CODE_SIGN_ENTITLEMENTS = Leaf/Leaf.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = DTA8W5KA5D;
 				INFOPLIST_FILE = Leaf/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -683,7 +683,7 @@
 				CODE_SIGN_ENTITLEMENTS = LeafRideActivityWidget/LeafRideActivityWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = DTA8W5KA5D;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
@@ -878,7 +878,7 @@
 				CODE_SIGN_ENTITLEMENTS = LeafRideActivityWidget/LeafRideActivityWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = DTA8W5KA5D;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LeafRideActivityWidget/Info.plist;
