@@ -194,11 +194,6 @@ const ROUTE_BOTTOM_EXTRA_PADDING = 28;
 const PREBOOKING_ROUTE_TOP_EXTRA_PADDING = 14;
 const PREBOOKING_ROUTE_BOTTOM_EXTRA_PADDING = 12;
 const PREBOOKING_ROUTE_OVERLAY_BIAS_RATIO = 0.1;
-const PREBOOKING_ROUTE_LATITUDE_DELTA_MULTIPLIER = 1.72;
-const PREBOOKING_ROUTE_LONGITUDE_DELTA_MULTIPLIER = 1.86;
-const PREBOOKING_ROUTE_BOTTOM_OCCLUSION_RELIEF = 160;
-const PREBOOKING_ROUTE_VIEWPORT_DELTA_SCALE = 0.74;
-const PREBOOKING_ROUTE_VIEWPORT_LATITUDE_OFFSET_RATIO = -0.03;
 const SEARCH_ZOOM_ANIMATION_MS = 1150;
 const SEARCH_RADIUS_MARGIN = 1.34;
 const SEARCH_INITIAL_VIEWPORT_RADIUS_KM = 0.48;
@@ -2745,12 +2740,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return '';
     }
 
-    const isPassengerPreBookingPreview =
-      !isDriverRole && !activeBookingId && normalizedBookingStatus === 'idle';
-    if (isPassengerPreBookingPreview) {
-      return routeSignature;
-    }
-
     const effectiveMapHeight = Math.max(1, Number(mapHeight || windowHeight) || 1);
     return `${routeSignature}|${Math.round(activeOcclusion.top)}|${Math.round(activeOcclusion.bottom)}|${Math.round(effectiveMapHeight)}`;
   }, [
@@ -2766,7 +2755,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     routeSignature,
     windowHeight,
   ]);
-  const passengerOccludedBottom = insets.bottom + HOME_CARD_BOTTOM_OFFSET + homeCardHeight;
+  const passengerCardBottomOffset = passengerHomePreviewRouteActive
+    ? PASSENGER_HOME_CARD_METRICS.categoryBottomOffset
+    : HOME_CARD_BOTTOM_OFFSET;
+  const passengerOccludedBottom =
+    insets.bottom + passengerCardBottomOffset + homeCardHeight;
   const driverOccludedBottom = insets.bottom + DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight;
   const driverLiveOffer = useMemo(
     () => selectDisplayableDriverOffer(driverOffers),
@@ -4597,25 +4590,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       homeOccludedTop,
     ],
   );
-  const routeViewportOcclusion = useMemo(() => {
-    if (!passengerHomePreviewRouteActive) {
-      return effectiveRouteOcclusion;
-    }
-
-    return {
-      ...effectiveRouteOcclusion,
-      bottom: Math.max(
-        Number(insets.bottom) || 0,
-        Number(effectiveRouteOcclusion.bottom || 0) -
-          PREBOOKING_ROUTE_BOTTOM_OCCLUSION_RELIEF,
-      ),
-    };
-  }, [
-    effectiveRouteOcclusion.bottom,
-    effectiveRouteOcclusion.top,
-    insets.bottom,
-    passengerHomePreviewRouteActive,
-  ]);
+  const routeViewportOcclusion = effectiveRouteOcclusion;
   const routeViewportLayoutKey = useMemo(() => {
     if (!routeLayoutKey) {
       return '';
@@ -5381,30 +5356,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       insets,
       viewportPadding: homeRouteViewportPadding,
       minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
-      longRouteLatitudeDeltaMultiplier: passengerHomePreviewRouteActive
-        ? PREBOOKING_ROUTE_LATITUDE_DELTA_MULTIPLIER
-        : undefined,
-      longRouteLongitudeDeltaMultiplier: passengerHomePreviewRouteActive
-        ? PREBOOKING_ROUTE_LONGITUDE_DELTA_MULTIPLIER
-        : undefined,
     });
-    if (!passengerHomePreviewRouteActive || !routeViewportRegion) {
-      return routeViewportRegion;
-    }
-
-    return {
-      ...routeViewportRegion,
-      latitude:
-        routeViewportRegion.latitude +
-        routeViewportRegion.latitudeDelta *
-          PREBOOKING_ROUTE_VIEWPORT_LATITUDE_OFFSET_RATIO,
-      latitudeDelta:
-        routeViewportRegion.latitudeDelta *
-        PREBOOKING_ROUTE_VIEWPORT_DELTA_SCALE,
-      longitudeDelta:
-        routeViewportRegion.longitudeDelta *
-        PREBOOKING_ROUTE_VIEWPORT_DELTA_SCALE,
-    };
+    return routeViewportRegion;
   }, [
     hasActiveRoute,
     homeRouteViewportPadding,
@@ -5439,33 +5392,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       insets,
       viewportPadding: getRouteEdgePadding(),
       minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
-      longRouteLatitudeDeltaMultiplier: passengerHomePreviewRouteActive
-        ? PREBOOKING_ROUTE_LATITUDE_DELTA_MULTIPLIER
-        : undefined,
-      longRouteLongitudeDeltaMultiplier: passengerHomePreviewRouteActive
-        ? PREBOOKING_ROUTE_LONGITUDE_DELTA_MULTIPLIER
-        : undefined,
     });
     const edgePadding = getRouteEdgePadding();
     mapRef.current.animateCamera({ heading: 0, pitch: 0 }, { duration: animatedFit ? 220 : 0 });
     if (routeViewportRegion) {
-      const adjustedRouteViewportRegion = passengerHomePreviewRouteActive
-        ? {
-            ...routeViewportRegion,
-            latitude:
-              routeViewportRegion.latitude +
-              routeViewportRegion.latitudeDelta *
-                PREBOOKING_ROUTE_VIEWPORT_LATITUDE_OFFSET_RATIO,
-            latitudeDelta:
-              routeViewportRegion.latitudeDelta *
-              PREBOOKING_ROUTE_VIEWPORT_DELTA_SCALE,
-            longitudeDelta:
-              routeViewportRegion.longitudeDelta *
-              PREBOOKING_ROUTE_VIEWPORT_DELTA_SCALE,
-          }
-        : routeViewportRegion;
       mapRef.current.animateToRegion(
-        adjustedRouteViewportRegion,
+        routeViewportRegion,
         animatedFit ? MAP_OCCLUSION_REPOSITION_MS : 0,
       );
       return;

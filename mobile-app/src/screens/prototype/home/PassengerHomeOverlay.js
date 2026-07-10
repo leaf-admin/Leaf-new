@@ -21,6 +21,7 @@ import LeafCampaignCarousel from "../../../components/campaigns/LeafCampaignCaro
 import { leafButtonMetrics } from "../../../components/prototype/LeafRideUI";
 
 const HOME_CARD_BOTTOM_OFFSET = 16;
+const HOME_CATEGORY_CARD_BOTTOM_OFFSET = 41;
 const LEAF_GREEN = "#1A330E";
 const CARD_SURFACE = "#FFFFFF";
 const CARD_BORDER = "#ECE5DC";
@@ -72,6 +73,7 @@ const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
 export const PASSENGER_HOME_CARD_METRICS = Object.freeze({
   horizontalInset: HOME_CARD_HORIZONTAL_INSET,
   bottomOffset: HOME_CARD_BOTTOM_OFFSET,
+  categoryBottomOffset: HOME_CATEGORY_CARD_BOTTOM_OFFSET,
   height: HOME_CARD_HEIGHT,
   promoHeight: HOME_PROMO_CARD_HEIGHT,
   stackGap: HOME_STACK_GAP,
@@ -718,7 +720,9 @@ function PassengerHomeOverlay({
   const effectiveKeyboardHeight = activeSearchKind
     ? Math.max(keyboardHeight, androidKeyboardFallbackHeight)
     : keyboardHeight;
-  const restingBottomOffset = shouldShowCategoryCard ? 41 : HOME_CARD_BOTTOM_OFFSET;
+  const restingBottomOffset = shouldShowCategoryCard
+    ? HOME_CATEGORY_CARD_BOTTOM_OFFSET
+    : HOME_CARD_BOTTOM_OFFSET;
 
   React.useEffect(() => {
     if (!shouldShowCategoryCard) {

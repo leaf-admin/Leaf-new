@@ -120,6 +120,10 @@ describe('active route viewport contract', () => {
     expect(source).toContain('Math.round(Number(mapHeight || windowHeight) || 0)');
     expect(source).toContain('Math.round(routeViewportOcclusion.top)');
     expect(source).toContain('Math.round(routeViewportOcclusion.bottom)');
+    expect(source).toContain('const routeViewportOcclusion = effectiveRouteOcclusion;');
+    expect(source).toContain('PASSENGER_HOME_CARD_METRICS.categoryBottomOffset');
+    expect(source).not.toContain('PREBOOKING_ROUTE_BOTTOM_OCCLUSION_RELIEF');
+    expect(source).not.toContain('PREBOOKING_ROUTE_VIEWPORT_DELTA_SCALE');
     expect(source).toContain('const nextRouteFocusKey = `${routeViewportLayoutKey}|${routeFocusTrackingKey}`;');
     expect(source).toContain('lastRouteLayoutKeyRef.current = nextRouteFocusKey;');
     expect(source).toContain('(hasActiveRoute && !driverNavigationCameraOwnsMap) ||');
