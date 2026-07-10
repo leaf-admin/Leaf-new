@@ -5,6 +5,15 @@ on:
     paths:
       - 'leaf-websocket-backend/**'
       - 'mobile-app/**'
+      - 'leaf-dashboard-js/**'
+      - 'observability/**'
+      - 'docker-compose.observability.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/maintenance/security/**'
+      - 'scripts/validation/**'
+      - 'AGENTS.md'
+      - 'PROJECT_RULES.md'
       - '.github/workflows/eas-build.yml'
   workflow_dispatch:
     inputs:
@@ -70,7 +79,34 @@ jobs:
           FORCE_PAYMENT_BYPASS: 'false'
           ALLOW_NGROK_CORS: 'false'
           ALLOW_PRIVATE_CORS: 'false'
+          LEAF_LAUNCH_PROFILE: pilot_controlled
+          LEAF_PILOT_CONTROLLED: 'true'
+          PILOT_ALLOWED_PASSENGER_IDS: ci-passenger-1
+          PILOT_ALLOWED_DRIVER_IDS: ci-driver-1
+          PILOT_REGION_IDS: rio-pilot-ci
+          LEAF_ACCEPT_NEW_PIX: 'true'
+          LEAF_ACCEPT_NEW_BOOKINGS: 'true'
+          LEAF_RUNTIME_POLICY_VERSION: ci-pilot-policy-v1
+          GEOFENCE_FAIL_CLOSED: 'true'
+          GEOFENCE_REQUIRE_DESTINATION_INSIDE_REGION: 'true'
+          GEOFENCE_REGION_FILE: config/geofence.json
+          LEAF_APPROVED_FINANCIAL_POLICY_ID: runtime_tiered_percent_above_50_v1
+          LEAF_FINANCIAL_POLICY_APPROVAL_REF: ci-contract-check
+          KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true'
+          KYC_AWS_LIVENESS_ENABLED: 'true'
+          KYC_AWS_LIVENESS_ASSUME_ROLE_ARN: arn:aws:iam::000000000000:role/ci-leaf-liveness
+          BIOMETRIC_FACE_SERVICE_URL: https://face.invalid.local
+          BIOMETRIC_FACE_SERVICE_API_KEY: ci-face-key-placeholder
+          ENABLE_CNH_FACE_BIOMETRICS: 'true'
+          MOBILE_FACE_EMBEDDING_ENABLED: 'false'
+          KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true'
+          KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false'
+          KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false'
+          MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK: 'false'
         run: npm run config:validate
+
+      - name: Validate versioned pilot geofence matrix
+        run: npm run qa:geofence-pilot
 
       - name: Assert sensitive route guards
         run: npm run test:route-guards
@@ -82,7 +118,7 @@ jobs:
         run: npm run test:integration
 
   validate-mobile:
-    name: Mobile Production Guards
+    name: Mobile Production Guards And Full Unit Suite
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -105,8 +141,57 @@ jobs:
       - name: Assert mobile production guards
         run: npm run qa:production-guards
 
-      - name: Run focused mobile auth tests
-        run: npx jest --config jest.config.js __tests__/phone-input-step.auth.test.js __tests__/otp-step.auth.test.js __tests__/auth-flow.recovery.test.js --runInBand
+      - name: Run full mobile unit suite
+        run: npm run test:unit -- --runInBand
+
+  validate-dashboard:
+    name: Dashboard Lint Build And Smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./leaf-dashboard-js
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: './package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run dashboard quality gate
+        run: npm run qa:backoffice
+
+  validate-workspace-safety:
+    name: Governance And Secret Guards
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate governance contract
+        run: npm run governance:check
+
+      - name: Validate production observability invariants
+        run: npm run observability:validate
+
+      - name: Scan tracked workspace files
+        run: node scripts/maintenance/security/scan-secrets.cjs --tracked-only
+
+      - name: Assert no hardcoded backend secrets
+        run: bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh
 
   eas-build:
     name: Manual EAS Build
@@ -114,6 +199,8 @@ jobs:
     needs:
       - validate-backend
       - validate-mobile
+      - validate-dashboard
+      - validate-workspace-safety
     if: github.event_name == 'workflow_dispatch'
     defaults:
       run:

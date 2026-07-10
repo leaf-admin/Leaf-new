@@ -10,10 +10,24 @@ route:
   routes:
     - matchers:
         - severity="critical"
+      receiver: external-critical-channel
+      continue: true
+      repeat_interval: 10m
+    - matchers:
+        - severity="critical"
       receiver: leaf-backend-webhook
       repeat_interval: 10m
 
 receivers:
+  - name: external-critical-channel
+    slack_configs:
+      - api_url_file: /run/secrets/alertmanager_slack_webhook_url
+        channel: '#alerts'
+        username: Leaf Alertmanager
+        icon_emoji: ':rotating_light:'
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }} - {{ .Annotations.description }}{{ "\n" }}{{ end }}'
+        send_resolved: true
   - name: leaf-backend-webhook
     webhook_configs:
       - url: 'http://host.docker.internal:3001/api/alerts/webhook/prometheus'

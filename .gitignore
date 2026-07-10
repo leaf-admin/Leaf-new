@@ -129,6 +129,7 @@ mobile-app/07-*.png
 
 # Workspace-level test artifacts
 /artifacts/
+/qa-artifacts/
 /reports/
 /test-results/
 QA/*

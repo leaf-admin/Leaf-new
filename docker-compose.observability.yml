@@ -3,12 +3,12 @@ version: "3.8"
 services:
   # Tempo - Storage de traces (OpenTelemetry)
   tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo:2.10.5
     container_name: leaf-tempo
     ports:
-      - "3200:3200"   # Tempo HTTP
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      - "127.0.0.1:3200:3200"   # Tempo HTTP via VPN/túnel
+      - "127.0.0.1:4317:4317"   # OTLP gRPC
+      - "127.0.0.1:4318:4318"   # OTLP HTTP
     command:
       - -config.file=/etc/tempo/tempo.yaml
     volumes:
@@ -20,15 +20,16 @@ services:
 
   # Grafana - Visualização
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.0.2
     container_name: leaf-grafana
     ports:
-      - "3002:3000"
+      - "127.0.0.1:3002:3000"
     environment:
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_AUTH_DISABLE_LOGIN_FORM=false
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      - GF_SECURITY_COOKIE_SECURE=true
+      - GF_SECURITY_COOKIE_SAMESITE=strict
       - DISCORD_ALERT_WEBHOOK_URL=${DISCORD_ALERT_WEBHOOK_URL:-}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
     volumes:
@@ -44,16 +45,18 @@ services:
 
   # Alertmanager - Roteamento de alertas para backend/Discord
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.32.1
     container_name: leaf-alertmanager
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
     volumes:
       - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
+    secrets:
+      - alertmanager_slack_webhook_url
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -62,10 +65,10 @@ services:
 
   # Prometheus - Métricas
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.13.0
     container_name: leaf-prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -91,3 +94,7 @@ volumes:
 networks:
   observability:
     driver: bridge
+
+secrets:
+  alertmanager_slack_webhook_url:
+    file: ${ALERTMANAGER_SLACK_WEBHOOK_FILE:?ALERTMANAGER_SLACK_WEBHOOK_FILE is required}
