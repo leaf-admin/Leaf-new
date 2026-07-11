@@ -37,14 +37,14 @@ export default function LoginPage() {
           <span>L</span>
           <div>
             <h1>Leaf Dashboard</h1>
-            <p>Acesso administrativo</p>
+            <p>Centro de operação</p>
           </div>
         </div>
         <label>
           Email
           <input
             type="email"
-            placeholder="admin@leaf.com"
+            placeholder="seu.email@leaf.com.br"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -60,7 +60,7 @@ export default function LoginPage() {
             required
           />
         </label>
-        {error ? <span className="error">{error}</span> : null}
+        {error ? <span className="error" role="alert">{error}</span> : null}
         <button type="submit" disabled={loading}>
           {loading ? "Entrando..." : "Entrar"}
         </button>

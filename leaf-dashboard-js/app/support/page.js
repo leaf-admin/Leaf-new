@@ -7,6 +7,7 @@ import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import ConfirmActionDialog from "@/src/components/ui/ConfirmActionDialog";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
 import wsService from "@/src/services/websocket-service";
@@ -472,8 +473,10 @@ export default function SupportPage() {
   const [actionMessage, setActionMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState("");
+  const [pendingCloseAction, setPendingCloseAction] = useState(null);
   const [mode, setMode] = useState("ticket");
   const [inboxFilter, setInboxFilter] = useState("all");
+  const [mobileWorkspaceView, setMobileWorkspaceView] = useState("inbox");
   const [orchestratorStatus, setOrchestratorStatus] = useState(null);
   const [orchestratorRuns, setOrchestratorRuns] = useState([]);
   const [orchestratorAnalysis, setOrchestratorAnalysis] = useState(null);
@@ -1123,6 +1126,7 @@ export default function SupportPage() {
   const selectInboxItem = (item) => {
     setError("");
     setActionMessage("");
+    setMobileWorkspaceView("conversation");
     if (item.type === "n0") {
       setSelectedN0Chat(item.raw);
       setMode("n0");
@@ -1359,26 +1363,17 @@ export default function SupportPage() {
     }
   };
 
-  const closeChat = async () => {
+  const closeChat = () => {
     if (!selectedUserId) return;
     if (!canRunSupportAction(supportPolicy, "close_chat", selectedTicketTier)) {
       setError(supportActionBlockReason(supportPolicy, "close_chat", selectedTicketTier));
       return;
     }
-    if (!window.confirm("Encerrar chat deste usuario?")) return;
-    try {
-      setActionBusy("close-chat");
-      setError("");
-      setActionMessage("");
-      await leafAPI.closeChat(selectedUserId, "agent");
-      const status = await leafAPI.getChatStatus(selectedUserId);
-      setChatStatus(status?.status || null);
-      setActionMessage("Chat encerrado com sucesso.");
-    } catch (err) {
-      setError(err?.message || "Falha ao encerrar chat");
-    } finally {
-      setActionBusy("");
-    }
+    setPendingCloseAction({
+      type: "ticket-chat",
+      userId: selectedUserId,
+      label: activeThreadTitle || selectedUserId,
+    });
   };
 
   const sendN0ChatMessage = async () => {
@@ -1447,22 +1442,38 @@ export default function SupportPage() {
     }
   };
 
-  const closeN0Chat = async () => {
+  const closeN0Chat = () => {
     if (!selectedN0Chat?.userId) return;
     if (!canRunSupportAction(supportPolicy, "close_chat", "N3")) {
       setError(supportActionBlockReason(supportPolicy, "close_chat", "N3"));
       return;
     }
-    if (!window.confirm("Encerrar este atendimento simples?")) return;
+    setPendingCloseAction({
+      type: "n0-chat",
+      userId: selectedN0Chat.userId,
+      label: selectedN0Chat.userName || selectedN0Chat.name || selectedN0Chat.userId,
+    });
+  };
+
+  const confirmCloseSupportChat = async () => {
+    const pending = pendingCloseAction;
+    if (!pending?.userId) return;
     try {
-      setActionBusy("n0-close");
+      setActionBusy(pending.type === "n0-chat" ? "n0-close" : "close-chat");
       setError("");
       setActionMessage("");
-      await leafAPI.closeChat(selectedN0Chat.userId, "agent");
-      await loadChatInbox();
-      setActionMessage("Chat N0 encerrado e historico arquivado.");
+      await leafAPI.closeChat(pending.userId, "agent");
+      if (pending.type === "n0-chat") {
+        await loadChatInbox();
+        setActionMessage("Chat N0 encerrado e histórico arquivado.");
+      } else {
+        const status = await leafAPI.getChatStatus(pending.userId);
+        setChatStatus(status?.status || null);
+        setActionMessage("Chat encerrado com sucesso.");
+      }
+      setPendingCloseAction(null);
     } catch (err) {
-      setError(err?.message || "Falha ao encerrar chat N0");
+      setError(err?.message || "Falha ao encerrar chat");
     } finally {
       setActionBusy("");
     }
@@ -1559,6 +1570,8 @@ export default function SupportPage() {
     }
   };
 
+  const slaRiskCount = summary.overdueAckCount + summary.overdueFirstResponseCount;
+
   return (
     <ProtectedRoute>
       <main className="page-shell support-page-shell">
@@ -1568,7 +1581,15 @@ export default function SupportPage() {
             <p>Fila operacional N1/N2/N3 com SLA, ownership, ticket e chat.</p>
           </div>
           <div className="filters support-header-filters">
-            <span className="meta-badge">Tickets {SUPPORT_POLL_MS / 1000}s · mensagens {MESSAGE_POLL_MS / 1000}s</span>
+            <input
+              aria-label="Buscar atendimentos"
+              placeholder="Buscar ticket, usuario, corrida"
+              value={ticketSearch}
+              onChange={(event) => setTicketSearch(event.target.value)}
+            />
+            <button type="button" onClick={() => loadTickets({ silent: false })}>
+              Atualizar
+            </button>
             <span
               className={supportFreshnessStatus.className}
               data-testid="support-freshness-status"
@@ -1576,29 +1597,35 @@ export default function SupportPage() {
             >
               {supportFreshnessStatus.label}
             </span>
-            <input
-              placeholder="Buscar ticket, usuario, corrida"
-              value={ticketSearch}
-              onChange={(event) => setTicketSearch(event.target.value)}
-            />
-            <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>
-              <option value="all">Todas prioridades</option>
-              <option value="N1">N1</option>
-              <option value="N2">N2</option>
-              <option value="N3">N3</option>
-            </select>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">Todos status</option>
-              <option value="open">Abertos</option>
-              <option value="assigned">Atribuidos</option>
-              <option value="in_progress">Em andamento</option>
-              <option value="escalated">Escalados</option>
-              <option value="resolved">Resolvidos</option>
-              <option value="closed">Fechados</option>
-            </select>
-            <button type="button" onClick={() => loadTickets({ silent: false })}>
-              Atualizar
-            </button>
+            <details className="header-filter-disclosure">
+              <summary>Filtros e status</summary>
+              <div className="filters">
+                <select
+                  aria-label="Filtrar atendimentos por prioridade"
+                  value={priorityFilter}
+                  onChange={(event) => setPriorityFilter(event.target.value)}
+                >
+                  <option value="all">Todas prioridades</option>
+                  <option value="N1">N1</option>
+                  <option value="N2">N2</option>
+                  <option value="N3">N3</option>
+                </select>
+                <select
+                  aria-label="Filtrar atendimentos por status"
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                >
+                  <option value="all">Todos status</option>
+                  <option value="open">Abertos</option>
+                  <option value="assigned">Atribuidos</option>
+                  <option value="in_progress">Em andamento</option>
+                  <option value="escalated">Escalados</option>
+                  <option value="resolved">Resolvidos</option>
+                  <option value="closed">Fechados</option>
+                </select>
+                <span className="meta-badge">Tickets {SUPPORT_POLL_MS / 1000}s · mensagens {MESSAGE_POLL_MS / 1000}s</span>
+              </div>
+            </details>
           </div>
         </header>
         <AppNav />
@@ -1606,28 +1633,67 @@ export default function SupportPage() {
 
         <section className="grid grid-kpi support-kpi-strip">
           <KpiCard title="Abertos" value={summary.totalOpenTickets} />
-          <KpiCard title="N1" value={summary.n1} tone={summary.n1 > 0 ? "danger" : "default"} />
-          <KpiCard title="N2" value={summary.n2} tone={summary.n2 > 0 ? "warning" : "default"} />
-          <KpiCard title="N3" value={summary.n3} />
-          <KpiCard title="Ack vencido" value={summary.overdueAckCount} tone={summary.overdueAckCount > 0 ? "danger" : "positive"} />
           <KpiCard
-            title="1a resposta vencida"
-            value={summary.overdueFirstResponseCount}
-            tone={summary.overdueFirstResponseCount > 0 ? "danger" : "positive"}
+            title="SLA em risco"
+            value={slaRiskCount}
+            tone={slaRiskCount > 0 ? "danger" : "positive"}
+            subtitle="ack + 1ª resposta"
           />
-          <KpiCard title="Sem dono" value={summary.ticketsWithoutOwner} tone={summary.ticketsWithoutOwner > 0 ? "warning" : "positive"} />
-          <KpiCard
-            title="FRT mediana"
-            value={formatMinutes(summary.medianFirstResponseMinutes)}
-            subtitle="tickets respondidos"
-          />
-          <KpiCard title="Chats N0" value={chatInbox.length} subtitle="atendimentos simples" />
-          <KpiCard title="Nao lidas N0" value={n0UnreadCount} tone={n0UnreadCount > 0 ? "warning" : "positive"} />
-          <KpiCard title="Chat" value={chatRealtime} subtitle="notificacoes" />
+          <KpiCard title="Sem responsável" value={summary.ticketsWithoutOwner} tone={summary.ticketsWithoutOwner > 0 ? "warning" : "positive"} />
+          <KpiCard title="Não lidas N0" value={n0UnreadCount} tone={n0UnreadCount > 0 ? "warning" : "positive"} />
         </section>
 
+        <details className="support-metrics-disclosure">
+          <summary>Ver indicadores operacionais</summary>
+          <section className="grid grid-kpi support-kpi-strip">
+            <KpiCard title="N1" value={summary.n1} tone={summary.n1 > 0 ? "danger" : "default"} />
+            <KpiCard title="N2" value={summary.n2} tone={summary.n2 > 0 ? "warning" : "default"} />
+            <KpiCard title="N3" value={summary.n3} />
+            <KpiCard title="Ack vencido" value={summary.overdueAckCount} tone={summary.overdueAckCount > 0 ? "danger" : "positive"} />
+            <KpiCard
+              title="1ª resposta vencida"
+              value={summary.overdueFirstResponseCount}
+              tone={summary.overdueFirstResponseCount > 0 ? "danger" : "positive"}
+            />
+            <KpiCard
+              title="FRT mediana"
+              value={formatMinutes(summary.medianFirstResponseMinutes)}
+              subtitle="tickets respondidos"
+            />
+            <KpiCard title="Chats N0" value={chatInbox.length} subtitle="atendimentos simples" />
+            <KpiCard title="Chat" value={chatRealtime} subtitle="notificações" />
+          </section>
+        </details>
+
+        <nav className="support-mobile-workspace-tabs" aria-label="Áreas do atendimento móvel">
+          <button
+            type="button"
+            className={mobileWorkspaceView === "inbox" ? "mode-btn mode-btn-active" : "mode-btn"}
+            aria-pressed={mobileWorkspaceView === "inbox"}
+            onClick={() => setMobileWorkspaceView("inbox")}
+          >
+            Fila
+          </button>
+          <button
+            type="button"
+            className={mobileWorkspaceView === "conversation" ? "mode-btn mode-btn-active" : "mode-btn"}
+            aria-pressed={mobileWorkspaceView === "conversation"}
+            onClick={() => setMobileWorkspaceView("conversation")}
+          >
+            Conversa
+          </button>
+          <button
+            type="button"
+            className={mobileWorkspaceView === "context" ? "mode-btn mode-btn-active" : "mode-btn"}
+            aria-pressed={mobileWorkspaceView === "context"}
+            onClick={() => setMobileWorkspaceView("context")}
+          >
+            Contexto
+          </button>
+        </nav>
+
         <section className="support-inbox-layout">
-          <aside className="support-inbox-panel card">
+          <aside className={`support-inbox-panel support-workspace-pane ${mobileWorkspaceView === "inbox" ? "support-workspace-pane-active" : ""} card`}>
             <div className="support-inbox-head">
               <div>
                 <h2>Inbox</h2>
@@ -1662,6 +1728,7 @@ export default function SupportPage() {
             </div>
             <div className="support-inbox-search">
               <input
+                aria-label="Buscar na caixa de entrada do suporte"
                 placeholder="Buscar usuário, mensagem ou corrida"
                 value={ticketSearch}
                 onChange={(event) => setTicketSearch(event.target.value)}
@@ -1703,7 +1770,7 @@ export default function SupportPage() {
             </div>
           </aside>
 
-          <section className="support-conversation-panel card">
+          <section className={`support-conversation-panel support-workspace-pane ${mobileWorkspaceView === "conversation" ? "support-workspace-pane-active" : ""} card`}>
             {mode === "n0" ? (
               selectedN0Chat ? (
                 <>
@@ -1887,7 +1954,7 @@ export default function SupportPage() {
             )}
           </section>
 
-          <aside className="support-context-panel card">
+          <aside className={`support-context-panel support-workspace-pane ${mobileWorkspaceView === "context" ? "support-workspace-pane-active" : ""} card`}>
             <div className="support-context-section">
               <h2>Contexto</h2>
               {activeContextUserId ? (
@@ -1936,6 +2003,7 @@ export default function SupportPage() {
                   onChange={(event) => setN0TicketForm((current) => ({ ...current, subject: event.target.value }))}
                 />
                 <select
+                  aria-label="Prioridade do ticket criado a partir do chat"
                   value={n0TicketForm.priority}
                   onChange={(event) => setN0TicketForm((current) => ({ ...current, priority: event.target.value }))}
                 >
@@ -2482,6 +2550,7 @@ export default function SupportPage() {
 
                 <div className="filters">
                   <input
+                    aria-label="Filtrar mensagens do atendimento"
                     placeholder="Filtrar mensagens"
                     value={messageSearch}
                     onChange={(event) => setMessageSearch(event.target.value)}
@@ -2674,6 +2743,7 @@ export default function SupportPage() {
                       }
                     />
                     <select
+                      aria-label="Prioridade do novo ticket criado a partir do chat"
                       value={n0TicketForm.priority}
                       onChange={(event) =>
                         setN0TicketForm((current) => ({ ...current, priority: event.target.value }))
@@ -2752,6 +2822,22 @@ export default function SupportPage() {
           </Panel>
         </section>
         </details>
+        <ConfirmActionDialog
+          open={Boolean(pendingCloseAction)}
+          title="Encerrar atendimento?"
+          description="O histórico será preservado, mas esta conversa deixará a fila ativa."
+          confirmLabel="Encerrar atendimento"
+          tone="danger"
+          busy={actionBusy === "close-chat" || actionBusy === "n0-close"}
+          onConfirm={confirmCloseSupportChat}
+          onCancel={() => setPendingCloseAction(null)}
+        >
+          <div className="confirm-dialog-context">
+            <p className="confirm-dialog-context-row"><strong>Usuário:</strong> {pendingCloseAction?.label || "-"}</p>
+            <p className="confirm-dialog-context-row"><strong>Canal:</strong> {pendingCloseAction?.type === "n0-chat" ? "Chat N0" : "Atendimento vinculado"}</p>
+            <p className="confirm-dialog-consequence"><strong>Consequência:</strong> o envio de novas mensagens exigirá reabertura ou novo atendimento.</p>
+          </div>
+        </ConfirmActionDialog>
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         <ErrorText message={error} />
       </main>

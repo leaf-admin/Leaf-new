@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
+import ConfirmActionDialog from "@/src/components/ui/ConfirmActionDialog";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { useAuth } from "@/src/contexts/AuthContext";
@@ -297,6 +298,7 @@ export default function CampaignCenterPage() {
   const [assetUploading, setAssetUploading] = useState(false);
   const [previewResult, setPreviewResult] = useState(null);
   const [busyCampaignId, setBusyCampaignId] = useState("");
+  const [pendingAction, setPendingAction] = useState(null);
   const allowedRoles = useMemo(() => ["admin", "super-admin", "manager", "development"], []);
   const roleMessage = roleBlockedMessage(user, allowedRoles);
   const featureMessage = runtimeFeatureMessage(runtimeFlags, "campaignCenterEnabled", "Campaign Center");
@@ -562,6 +564,70 @@ export default function CampaignCenterPage() {
     }));
   };
 
+  const requestCreateConfirmation = () => {
+    if (!canCreate) {
+      setError(actionBlockedMessage || "Informe nome, titulo e texto da campanha.");
+      return;
+    }
+
+    const nextStatus = form.status;
+    setPendingAction({
+      kind: "create",
+      title: nextStatus === "active" ? "Criar e publicar campanha?" : "Criar campanha?",
+      confirmLabel: nextStatus === "active" ? "Criar e publicar" : "Criar campanha",
+      tone: nextStatus === "active" ? "warning" : "neutral",
+      name: form.name.trim(),
+      roles: csvToArray(form.roles).join(", ") || "all",
+      surfaces: csvToArray(form.surfaces).join(", ") || "-",
+      placements: csvToArray(form.placements).join(", ") || "-",
+      window: `${formatDate(form.startAt)} → ${formatDate(form.endAt)}`,
+      currentStatus: "não criada",
+      nextStatus,
+      consequence: nextStatus === "active"
+        ? "A campanha será criada ativa e poderá ser entregue pelo app conforme audiência, surface, placement e janela exibidos."
+        : `A campanha será criada com status ${nextStatus}; nenhuma publicação adicional será feita pelo dashboard.`,
+    });
+  };
+
+  const requestStatusConfirmation = (campaign, nextStatus) => {
+    if (!campaign?.id || !nextStatus) return;
+    if (!canMutateCampaignCenter) {
+      setError(actionBlockedMessage || "Ação bloqueada para este perfil.");
+      return;
+    }
+
+    setPendingAction({
+      kind: "status",
+      title: nextStatus === "active" ? "Publicar esta campanha?" : "Alterar status da campanha?",
+      confirmLabel: nextStatus === "active" ? "Ativar campanha" : "Pausar campanha",
+      tone: nextStatus === "active" ? "warning" : "neutral",
+      campaignId: campaign.id,
+      name: campaign.name || campaign.id,
+      roles: campaign.audience?.roles?.join(", ") || "all",
+      surfaces: campaign.surfaces?.join(", ") || "-",
+      placements: campaign.placements?.join(", ") || "-",
+      window: `${formatDate(campaign.startAt)} → ${formatDate(campaign.endAt)}`,
+      currentStatus: campaign.status || "-",
+      nextStatus,
+      consequence: nextStatus === "active"
+        ? "A campanha poderá ser entregue imediatamente quando audiência, surface, placement e janela forem elegíveis."
+        : "A campanha deixará de ser elegível para novas entregas após o backend aplicar o novo status.",
+    });
+  };
+
+  const confirmPendingAction = async () => {
+    const action = pendingAction;
+    if (!action) return;
+
+    if (action.kind === "create") {
+      await create();
+    } else if (action.kind === "status") {
+      await updateStatus(action.campaignId, action.nextStatus);
+    }
+
+    setPendingAction(null);
+  };
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -572,33 +638,51 @@ export default function CampaignCenterPage() {
           </div>
           <div className="filters">
             <input
+              aria-label="Buscar campanhas"
               placeholder="Buscar por nome, id ou texto"
               value={queryFilter}
               onChange={(event) => setQueryFilter(event.target.value)}
             />
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              {statusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-            <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
-              {roleOptions.map((role) => (
-                <option key={role} value={role}>
-                  {role}
-                </option>
-              ))}
-            </select>
-            <select value={surfaceFilter} onChange={(event) => setSurfaceFilter(event.target.value)}>
-              <option value="">todas surfaces</option>
-              {surfaceOptions.map((surface) => (
-                <option key={surface} value={surface}>
-                  {surface}
-                </option>
-              ))}
-            </select>
             <button onClick={load}>Atualizar</button>
+            <details className="header-filter-disclosure">
+              <summary>Filtros</summary>
+              <div className="filters">
+                <select
+                  aria-label="Filtrar campanhas por status"
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                >
+                  {statusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Filtrar campanhas por público"
+                  value={roleFilter}
+                  onChange={(event) => setRoleFilter(event.target.value)}
+                >
+                  {roleOptions.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Filtrar campanhas por superfície"
+                  value={surfaceFilter}
+                  onChange={(event) => setSurfaceFilter(event.target.value)}
+                >
+                  <option value="">todas surfaces</option>
+                  {surfaceOptions.map((surface) => (
+                    <option key={surface} value={surface}>
+                      {surface}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </details>
           </div>
         </header>
 
@@ -610,10 +694,6 @@ export default function CampaignCenterPage() {
         {notice ? <p className="success-text">{notice}</p> : null}
 
         <section className="grid grid-kpi">
-          <Panel title="Total">
-            <strong>{stats?.total ?? rows.length}</strong>
-            <p className="text-muted">campanhas</p>
-          </Panel>
           <Panel title="Ativas">
             <strong>{stats?.active ?? rows.filter((row) => row.status === "active").length}</strong>
             <p className="text-muted">em exibicao</p>
@@ -622,51 +702,38 @@ export default function CampaignCenterPage() {
             <strong>{stats?.impressions ?? 0}</strong>
             <p className="text-muted">eventos registrados</p>
           </Panel>
-          <Panel title="Cliques">
-            <strong>{stats?.clicks ?? 0}</strong>
-            <p className="text-muted">interacoes</p>
-          </Panel>
-        </section>
-
-        <section className="grid grid-kpi">
-          <Panel title="Valor contratado">
-            <strong>{formatCurrencyCents(commercialReport?.totals?.campaignValueCents)}</strong>
-            <p className="text-muted">receita potencial do inventário</p>
-          </Panel>
           <Panel title="CTR">
             <strong>{formatPercent(commercialReport?.totals?.ctr)}</strong>
             <p className="text-muted">cliques / visualizações</p>
           </Panel>
-          <Panel title="CPM efetivo">
-            <strong>{formatCurrencyCents(commercialReport?.totals?.effectiveCpmCents)}</strong>
-            <p className="text-muted">valor a cada mil visualizações</p>
-          </Panel>
-          <Panel title="CPC efetivo">
-            <strong>{formatCurrencyCents(commercialReport?.totals?.effectiveCpcCents)}</strong>
-            <p className="text-muted">valor por clique</p>
+          <Panel title="Valor contratado">
+            <strong>{formatCurrencyCents(commercialReport?.totals?.campaignValueCents)}</strong>
+            <p className="text-muted">receita potencial do inventário</p>
           </Panel>
         </section>
 
-        <section className="grid">
-          <Panel
-            title="Alertas operacionais"
-            subtitle="Validação rápida antes de publicar ou vender inventário."
-          >
-            <div className="metric-list">
-              {campaignAlerts.map((alert) => (
-                <div className="row" key={alert.id}>
-                  <div className="label">
-                    <span className={alert.tone}>{alert.title}</span>
-                    <small>{alert.detail}</small>
-                  </div>
-                  <div className="value">campanhas</div>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
+        <details className="campaign-metrics-disclosure">
+          <summary>Ver métricas detalhadas</summary>
+          <section className="grid grid-kpi">
+            <Panel title="Total">
+              <strong>{stats?.total ?? rows.length}</strong>
+              <p className="text-muted">campanhas</p>
+            </Panel>
+            <Panel title="Cliques">
+              <strong>{stats?.clicks ?? 0}</strong>
+              <p className="text-muted">interacoes</p>
+            </Panel>
+            <Panel title="CPM efetivo">
+              <strong>{formatCurrencyCents(commercialReport?.totals?.effectiveCpmCents)}</strong>
+              <p className="text-muted">valor a cada mil visualizações</p>
+            </Panel>
+            <Panel title="CPC efetivo">
+              <strong>{formatCurrencyCents(commercialReport?.totals?.effectiveCpcCents)}</strong>
+              <p className="text-muted">valor por clique</p>
+            </Panel>
+          </section>
           <Panel title="Visão diária por superfície" subtitle="Onde existe inventário ativo e o que está performando.">
-            <div className="metric-list">
+            <div className="metric-list campaign-alert-list">
               {surfaceOverview.map((surface) => (
                 <div className="row" key={surface.surface}>
                   <div className="label">
@@ -682,38 +749,143 @@ export default function CampaignCenterPage() {
               ))}
             </div>
           </Panel>
+        </details>
 
+        <section className="grid">
           <Panel
-            title="Slots de campanha"
-            subtitle="Passageiro e motorista são inventários separados. Cadastre até 3 campanhas por slot para virar carrossel."
+            title="Alertas operacionais"
+            subtitle="Validação rápida antes de publicar ou vender inventário."
           >
-            <KeyValueGrid
-              data={{
-                passageiro: `${homeBannerSlot.surface} / ${homeBannerSlot.placement}`,
-                motorista: `${(slots.find((slot) => slot.id === "driver_home_banner_stack") || fallbackCampaignSlots[1]).surface} / ${(slots.find((slot) => slot.id === "driver_home_banner_stack") || fallbackCampaignSlots[1]).placement}`,
-                template: homeBannerSlot.template,
-                itens: homeBannerSlot.maxItems,
-                giro: `${homeBannerSlot.autoRotateSeconds || 6}s`,
-                largura: "tela - 48dp",
-                altura: `${homeBannerDimensions.heightDp}dp`,
-                figma: `${homeBannerDimensions.referenceFramePx?.width} x ${homeBannerDimensions.referenceFramePx?.height}`,
-                export3x: `${homeBannerDimensions.exportPx?.["@3x"]?.width} x ${homeBannerDimensions.exportPx?.["@3x"]?.height}`,
-              }}
-            />
-            <p className="text-muted">
-              Recomendação: peça 3 artes independentes no mesmo frame. O app mede impressões, cliques e troca a ordem por campanha.
-            </p>
-            <TechnicalDetails title="Especificação completa dos slots" data={slots} />
+            <div className="metric-list">
+              {campaignAlerts.map((alert) => (
+                <div className="row" key={alert.id}>
+                  <div className="label">
+                    <span className={alert.tone}>{alert.title}</span>
+                    <small>{alert.detail}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
           </Panel>
 
-          <Panel
-            title="Criar campanha"
-            subtitle={
-              canMutateCampaignCenter
-                ? "Seed do Figma entra pausado; ative somente quando quiser publicar no app."
-                : "Criação bloqueada por permissão ou feature flag do backend."
-            }
-          >
+          <Panel className="panel-span-full" title="Campanhas cadastradas">
+            <div
+              className="table-shell"
+              role="region"
+              tabIndex={0}
+              aria-label="Tabela de campanhas cadastradas"
+            >
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Status</th>
+                    <th>Template</th>
+                    <th>Publico</th>
+                    <th>Surface</th>
+                    <th>Janela</th>
+                    <th>Metricas</th>
+                    <th>Acoes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={8}>Nenhuma campanha encontrada.</td>
+                    </tr>
+                  ) : (
+                    rows.map((campaign) => {
+                      const isBusy = busyCampaignId === campaign.id;
+                      return (
+                        <tr key={campaign.id}>
+                          <td>
+                            <strong>{campaign.name}</strong>
+                            <br />
+                            <span className="text-muted">{campaign.content?.title || campaign.id}</span>
+                          </td>
+                          <td>
+                            <span className={statusClass(campaign.status)}>{campaign.status}</span>
+                          </td>
+                          <td>{campaign.template || "-"}</td>
+                          <td>{campaign.audience?.roles?.join(", ") || "all"}</td>
+                          <td>{campaign.surfaces?.join(", ") || "-"}</td>
+                          <td>
+                            {formatDate(campaign.startAt)}
+                            <br />
+                            <span className="text-muted">{formatDate(campaign.endAt)}</span>
+                          </td>
+                          <td>
+                            {campaign.metrics?.impressions || 0} imp
+                            <br />
+                            <span className="text-muted">{campaign.metrics?.clicks || 0} clicks</span>
+                          </td>
+                          <td>
+                            <div className="actions-cell">
+                              <button
+                                disabled={!canMutateCampaignCenter || isBusy || campaign.status === "active"}
+                                onClick={() => requestStatusConfirmation(campaign, "active")}
+                                title={!canMutateCampaignCenter ? actionBlockedMessage : undefined}
+                              >
+                                Ativar
+                              </button>
+                              <button
+                                disabled={!canMutateCampaignCenter || isBusy || campaign.status === "paused"}
+                                onClick={() => requestStatusConfirmation(campaign, "paused")}
+                                title={!canMutateCampaignCenter ? actionBlockedMessage : undefined}
+                              >
+                                Pausar
+                              </button>
+                              <button disabled={isBusy} onClick={() => preview(campaign)}>
+                                Simular
+                              </button>
+                            </div>
+                            <TechnicalDetails title="Payload" data={campaign} />
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+
+          <details className="campaign-config-disclosure">
+            <summary>Slots e especificação</summary>
+            <Panel
+              title="Slots de campanha"
+              subtitle="Passageiro e motorista são inventários separados. Cadastre até 3 campanhas por slot para virar carrossel."
+            >
+              <KeyValueGrid
+                data={{
+                  passageiro: `${homeBannerSlot.surface} / ${homeBannerSlot.placement}`,
+                  motorista: `${(slots.find((slot) => slot.id === "driver_home_banner_stack") || fallbackCampaignSlots[1]).surface} / ${(slots.find((slot) => slot.id === "driver_home_banner_stack") || fallbackCampaignSlots[1]).placement}`,
+                  template: homeBannerSlot.template,
+                  itens: homeBannerSlot.maxItems,
+                  giro: `${homeBannerSlot.autoRotateSeconds || 6}s`,
+                  largura: "tela - 48dp",
+                  altura: `${homeBannerDimensions.heightDp}dp`,
+                  figma: `${homeBannerDimensions.referenceFramePx?.width} x ${homeBannerDimensions.referenceFramePx?.height}`,
+                  export3x: `${homeBannerDimensions.exportPx?.["@3x"]?.width} x ${homeBannerDimensions.exportPx?.["@3x"]?.height}`,
+                }}
+              />
+              <p className="text-muted">
+                Recomendação: peça 3 artes independentes no mesmo frame. O app mede impressões, cliques e troca a ordem por campanha.
+              </p>
+              <TechnicalDetails title="Especificação completa dos slots" data={slots} />
+            </Panel>
+          </details>
+
+          <details className="campaign-editor-disclosure">
+            <summary>Criar nova campanha</summary>
+            <Panel
+              title="Criar campanha"
+              subtitle={
+                canMutateCampaignCenter
+                  ? "Seed do Figma entra pausado; ative somente quando quiser publicar no app."
+                  : "Criação bloqueada por permissão ou feature flag do backend."
+              }
+            >
             <div className="form-grid">
               <label className="form-field">
                 Nome interno
@@ -1067,11 +1239,12 @@ export default function CampaignCenterPage() {
                   onChange={(event) => setForm((prev) => ({ ...prev, endAt: event.target.value }))}
                 />
               </label>
-              <button onClick={create} disabled={!canCreate || saving} title={!canCreate ? actionBlockedMessage : undefined}>
+              <button onClick={requestCreateConfirmation} disabled={!canCreate || saving} title={!canCreate ? actionBlockedMessage : undefined}>
                 {saving ? "Criando..." : "Criar campanha"}
               </button>
-            </div>
-          </Panel>
+              </div>
+            </Panel>
+          </details>
 
           <Panel title="Preview de elegibilidade" subtitle="Simula a primeira surface cadastrada na campanha selecionada.">
             {previewResult ? (
@@ -1096,7 +1269,12 @@ export default function CampaignCenterPage() {
             title="Relatório comercial"
             subtitle="Base para venda futura desse inventário: visualizações, cliques, CTR, CPM, CPC, valor e prazo."
           >
-            <div className="table-shell">
+            <div
+              className="table-shell"
+              role="region"
+              tabIndex={0}
+              aria-label="Tabela do relatório comercial de campanhas"
+            >
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -1169,83 +1347,56 @@ export default function CampaignCenterPage() {
             <TechnicalDetails title="Payload do relatório comercial" data={commercialReport} />
           </Panel>
 
-          <Panel className="panel-span-full" title="Campanhas cadastradas">
-            <div className="table-shell">
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>Nome</th>
-                    <th>Status</th>
-                    <th>Template</th>
-                    <th>Publico</th>
-                    <th>Surface</th>
-                    <th>Janela</th>
-                    <th>Metricas</th>
-                    <th>Acoes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={8}>Nenhuma campanha encontrada.</td>
-                    </tr>
-                  ) : (
-                    rows.map((campaign) => {
-                      const isBusy = busyCampaignId === campaign.id;
-                      return (
-                        <tr key={campaign.id}>
-                          <td>
-                            <strong>{campaign.name}</strong>
-                            <br />
-                            <span className="text-muted">{campaign.content?.title || campaign.id}</span>
-                          </td>
-                          <td>
-                            <span className={statusClass(campaign.status)}>{campaign.status}</span>
-                          </td>
-                          <td>{campaign.template || "-"}</td>
-                          <td>{campaign.audience?.roles?.join(", ") || "all"}</td>
-                          <td>{campaign.surfaces?.join(", ") || "-"}</td>
-                          <td>
-                            {formatDate(campaign.startAt)}
-                            <br />
-                            <span className="text-muted">{formatDate(campaign.endAt)}</span>
-                          </td>
-                          <td>
-                            {campaign.metrics?.impressions || 0} imp
-                            <br />
-                            <span className="text-muted">{campaign.metrics?.clicks || 0} clicks</span>
-                          </td>
-                          <td>
-                            <div className="actions-cell">
-                              <button
-                                disabled={!canMutateCampaignCenter || isBusy || campaign.status === "active"}
-                                onClick={() => updateStatus(campaign.id, "active")}
-                                title={!canMutateCampaignCenter ? actionBlockedMessage : undefined}
-                              >
-                                Ativar
-                              </button>
-                              <button
-                                disabled={!canMutateCampaignCenter || isBusy || campaign.status === "paused"}
-                                onClick={() => updateStatus(campaign.id, "paused")}
-                                title={!canMutateCampaignCenter ? actionBlockedMessage : undefined}
-                              >
-                                Pausar
-                              </button>
-                              <button disabled={isBusy} onClick={() => preview(campaign)}>
-                                Simular
-                              </button>
-                            </div>
-                            <TechnicalDetails title="Payload" data={campaign} />
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
         </section>
+
+        <ConfirmActionDialog
+          open={Boolean(pendingAction)}
+          title={pendingAction?.title}
+          description="Revise a audiência, o local de exibição, a janela e o estado antes de confirmar."
+          confirmLabel={pendingAction?.confirmLabel}
+          tone={pendingAction?.tone}
+          busy={pendingAction?.kind === "create"
+            ? saving
+            : Boolean(pendingAction?.campaignId && busyCampaignId === pendingAction.campaignId)}
+          onCancel={() => setPendingAction(null)}
+          onConfirm={confirmPendingAction}
+        >
+          {pendingAction ? (
+            <div className="confirm-action-review">
+              <dl>
+                <div>
+                  <dt>Campanha</dt>
+                  <dd>{pendingAction.name}</dd>
+                </div>
+                <div>
+                  <dt>Audiência / roles</dt>
+                  <dd>{pendingAction.roles}</dd>
+                </div>
+                <div>
+                  <dt>Surface</dt>
+                  <dd>{pendingAction.surfaces}</dd>
+                </div>
+                <div>
+                  <dt>Placement</dt>
+                  <dd>{pendingAction.placements}</dd>
+                </div>
+                <div>
+                  <dt>Janela</dt>
+                  <dd>{pendingAction.window}</dd>
+                </div>
+                <div>
+                  <dt>Estado atual</dt>
+                  <dd>{pendingAction.currentStatus}</dd>
+                </div>
+                <div>
+                  <dt>Novo estado</dt>
+                  <dd>{pendingAction.nextStatus}</dd>
+                </div>
+              </dl>
+              <p>{pendingAction.consequence}</p>
+            </div>
+          ) : null}
+        </ConfirmActionDialog>
 
         <ErrorText message={error} />
       </main>

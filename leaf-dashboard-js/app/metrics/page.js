@@ -11,13 +11,26 @@ import { KeyValueGrid } from "@/src/components/ui/DataViews";
 
 const DASHBOARD_REFRESH_MS = 60000;
 
-function toNumber(value, fallback = 0) {
+function toOptionalNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
-function brlFromValue(value) {
-  return `R$ ${toNumber(value).toLocaleString("pt-BR", {
+function formatCount(value, missingLabel = "Sem dado") {
+  const numeric = toOptionalNumber(value);
+  return numeric === null ? missingLabel : numeric.toLocaleString("pt-BR");
+}
+
+function formatPercent(value, missingLabel = "Sem dado") {
+  const numeric = toOptionalNumber(value);
+  return numeric === null ? missingLabel : `${numeric.toLocaleString("pt-BR")}%`;
+}
+
+function brlFromValue(value, missingLabel = "Sem dado") {
+  const numeric = toOptionalNumber(value);
+  if (numeric === null) return missingLabel;
+  return `R$ ${numeric.toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -25,12 +38,12 @@ function brlFromValue(value) {
 
 function normalizeFinancialMetrics(financial = {}) {
   return {
-    totalRevenue: toNumber(financial.totalRevenue ?? financial.totalValue),
-    averageTicket: toNumber(financial.averageTicket ?? financial.averageValue),
-    totalRides: toNumber(financial.totalRides),
-    reconciledRides: toNumber(financial.reconciledRides),
-    pendingReconciliationRides: toNumber(financial.pendingReconciliationRides),
-    reserveFundLosses: toNumber(financial.reserveFundLosses),
+    totalRevenue: toOptionalNumber(financial.totalRevenue ?? financial.totalValue),
+    averageTicket: toOptionalNumber(financial.averageTicket ?? financial.averageValue),
+    totalRides: toOptionalNumber(financial.totalRides),
+    reconciledRides: toOptionalNumber(financial.reconciledRides),
+    pendingReconciliationRides: toOptionalNumber(financial.pendingReconciliationRides),
+    reserveFundLosses: toOptionalNumber(financial.reserveFundLosses),
   };
 }
 
@@ -47,7 +60,10 @@ export default function MetricsPage() {
       }
 
       try {
-        if (mounted) setLoading(true);
+        if (mounted) {
+          setLoading(true);
+          setError("");
+        }
         const [overview, ridesDaily, financial] = await Promise.all([
           leafAPI.getMetricsOverview(),
           leafAPI.getMetricsRidesDaily(),
@@ -72,6 +88,8 @@ export default function MetricsPage() {
     () => normalizeFinancialMetrics(data?.financial || {}),
     [data?.financial],
   );
+  const missingLabel = error && data === null ? "Indisponível" : loading && data === null ? "—" : "Sem dado";
+  const hasRidesDaily = Boolean(data?.ridesDaily && typeof data.ridesDaily === "object");
 
   return (
     <ProtectedRoute>
@@ -83,110 +101,123 @@ export default function MetricsPage() {
         {loading ? <LoadingState message="Carregando métricas..." /> : null}
 
         <section className="grid grid-kpi">
-          <KpiCard title="Waitlist" value={data?.overview?.waitlistCount ?? 0} />
-          <KpiCard title="Simulações" value={data?.overview?.calculatorSimulations ?? 0} />
-          <KpiCard title="Corridas Hoje" value={data?.ridesDaily?.totalToday ?? 0} />
+          <KpiCard title="Corridas hoje" value={formatCount(data?.ridesDaily?.totalToday, missingLabel)} />
+          <KpiCard
+            title="Concluídas hoje"
+            value={formatCount(data?.ridesDaily?.completedToday, missingLabel)}
+            tone="positive"
+          />
           <KpiCard
             title="Taxa de Cancelamento"
-            value={`${data?.ridesDaily?.cancellationRate ?? 0}%`}
+            value={formatPercent(data?.ridesDaily?.cancellationRate, missingLabel)}
             tone="warning"
           />
           <KpiCard
             title="Receita"
-            value={brlFromValue(financialMetrics.totalRevenue)}
+            value={brlFromValue(financialMetrics.totalRevenue, missingLabel)}
             tone="positive"
-          />
-          <KpiCard
-            title="Ticket Médio"
-            value={brlFromValue(financialMetrics.averageTicket)}
           />
         </section>
 
         <section className="grid">
-          <Panel title="Visão geral">
-            <KeyValueGrid
-              data={data?.overview || {}}
-              labels={{
-                waitlistCount: "Entradas na waitlist",
-                calculatorSimulations: "Simulações do cálculo",
-                totalUsers: "Usuários totais",
-                totalDrivers: "Motoristas totais",
-                totalCustomers: "Passageiros totais",
-              }}
-            />
-          </Panel>
-          <Panel title="Corridas diárias">
-            <KeyValueGrid
-              data={data?.ridesDaily || {}}
-              labels={{
-                totalToday: "Corridas hoje",
-                completedToday: "Concluídas hoje",
-                cancelledAfterAcceptance: "Canceladas após aceite",
-                cancellationRate: "Taxa de cancelamento (%)",
-                averagePickupMinutes: "Pickup médio (min)",
-                averageWaitMinutes: "Espera média (min)",
-                averagePaymentApprovalToPickupMinutes: "Pagamento -> embarque (min)",
-              }}
-              valueFormatter={(key, value) => {
-                if (key === "cancellationRate") return `${Number(value || 0).toFixed(1)}%`;
-                if (
-                  key === "averagePickupMinutes" ||
-                  key === "averageWaitMinutes" ||
-                  key === "averagePaymentApprovalToPickupMinutes"
-                ) {
-                  return `${Number(value || 0).toFixed(1)} min`;
-                }
-                return value;
-              }}
-            />
-          </Panel>
-          <Panel title="Financeiro">
-            <KeyValueGrid
-              data={financialMetrics}
-              labels={{
-                totalRevenue: "Receita total",
-                averageTicket: "Ticket médio",
-                totalRides: "Corridas contabilizadas",
-                reconciledRides: "Corridas reconciliadas",
-                pendingReconciliationRides: "Pendentes de reconciliação",
-                reserveFundLosses: "Perdas fundo reserva",
-              }}
-              valueFormatter={(key, value) => {
-                if (["totalRevenue", "averageTicket", "reserveFundLosses"].includes(key)) {
-                  return brlFromValue(value);
-                }
-                return Number(value || 0).toLocaleString("pt-BR");
-              }}
-            />
-          </Panel>
-          <Panel title="Distribuição de corridas (visual)">
-            <div className="bar-list">
-              {[
-                { label: "Total", value: Number(data?.ridesDaily?.totalToday || 0), tone: "default" },
-                { label: "Completadas", value: Number(data?.ridesDaily?.completedToday || 0), tone: "positive" },
-                {
-                  label: "Canceladas",
-                  value: Number(data?.ridesDaily?.cancelledAfterAcceptance || 0),
-                  tone: "danger",
-                },
-              ].map((item) => {
-                const max = Number(data?.ridesDaily?.totalToday || 1);
-                const pct = max > 0 ? Math.min((item.value / max) * 100, 100) : 0;
-                return (
-                  <div key={item.label} className="bar-item">
-                    <div className="bar-label">
-                      <span>{item.label}</span>
-                      <strong>{item.value}</strong>
+          <Panel className="panel-span-full" title="Distribuição de corridas" subtitle="Leitura operacional do dia.">
+            {hasRidesDaily ? (
+              <div className="bar-list">
+                {[
+                  { label: "Total", value: toOptionalNumber(data.ridesDaily.totalToday), tone: "default" },
+                  { label: "Completadas", value: toOptionalNumber(data.ridesDaily.completedToday), tone: "positive" },
+                  {
+                    label: "Canceladas",
+                    value: toOptionalNumber(data.ridesDaily.cancelledAfterAcceptance),
+                    tone: "danger",
+                  },
+                ].map((item) => {
+                  const max = toOptionalNumber(data.ridesDaily.totalToday);
+                  const pct = item.value !== null && max !== null && max > 0
+                    ? Math.min((item.value / max) * 100, 100)
+                    : 0;
+                  return (
+                    <div key={item.label} className="bar-item">
+                      <div className="bar-label">
+                        <span>{item.label}</span>
+                        <strong>{formatCount(item.value)}</strong>
+                      </div>
+                      <div className="bar-track">
+                        <div className={`bar-fill bar-${item.tone}`} style={{ width: `${pct}%` }} />
+                      </div>
                     </div>
-                    <div className="bar-track">
-                      <div className={`bar-fill bar-${item.tone}`} style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-muted">Dados diários não disponíveis.</p>
+            )}
           </Panel>
         </section>
+
+        <details className="metrics-secondary-disclosure">
+          <summary>Métricas secundárias e detalhamento</summary>
+          <section className="grid">
+            <Panel title="Visão geral">
+              <KeyValueGrid
+                data={data?.overview || {}}
+                labels={{
+                  waitlistCount: "Entradas na waitlist",
+                  calculatorSimulations: "Simulações do cálculo",
+                  totalUsers: "Usuários totais",
+                  totalDrivers: "Motoristas totais",
+                  totalCustomers: "Passageiros totais",
+                }}
+              />
+            </Panel>
+            <Panel title="Corridas diárias">
+              <KeyValueGrid
+                data={data?.ridesDaily || {}}
+                labels={{
+                  totalToday: "Corridas hoje",
+                  completedToday: "Concluídas hoje",
+                  cancelledAfterAcceptance: "Canceladas após aceite",
+                  cancellationRate: "Taxa de cancelamento (%)",
+                  averagePickupMinutes: "Pickup médio (min)",
+                  averageWaitMinutes: "Espera média (min)",
+                  averagePaymentApprovalToPickupMinutes: "Pagamento -> embarque (min)",
+                }}
+                valueFormatter={(key, value) => {
+                  const numeric = toOptionalNumber(value);
+                  if (numeric === null) return "Sem dado";
+                  if (key === "cancellationRate") return `${numeric.toFixed(1)}%`;
+                  if (
+                    key === "averagePickupMinutes" ||
+                    key === "averageWaitMinutes" ||
+                    key === "averagePaymentApprovalToPickupMinutes"
+                  ) {
+                    return `${numeric.toFixed(1)} min`;
+                  }
+                  return value;
+                }}
+              />
+            </Panel>
+            <Panel title="Financeiro">
+              <KeyValueGrid
+                data={financialMetrics}
+                labels={{
+                  totalRevenue: "Receita total",
+                  averageTicket: "Ticket médio",
+                  totalRides: "Corridas contabilizadas",
+                  reconciledRides: "Corridas reconciliadas",
+                  pendingReconciliationRides: "Pendentes de reconciliação",
+                  reserveFundLosses: "Perdas fundo reserva",
+                }}
+                valueFormatter={(key, value) => {
+                  if (["totalRevenue", "averageTicket", "reserveFundLosses"].includes(key)) {
+                    return brlFromValue(value);
+                  }
+                  return formatCount(value);
+                }}
+              />
+            </Panel>
+          </section>
+        </details>
         <ErrorText message={error} />
       </main>
     </ProtectedRoute>

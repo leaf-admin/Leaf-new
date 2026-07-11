@@ -55,45 +55,76 @@ export default function FinancialSimulatorPage() {
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
-          <h1>Simulador Financeiro</h1>
+          <div>
+            <p className="ops-eyebrow">Labs · simulação</p>
+            <h1>Simulador Financeiro</h1>
+            <p>Cenário hipotético isolado dos indicadores e lançamentos da operação real.</p>
+          </div>
           <div className="filters">
-            <input
-              type="number"
-              min="1"
-              value={drivers}
-              onChange={(e) => setDrivers(Number(e.target.value))}
-            />
-            <input
-              type="number"
-              min="0.5"
-              step="0.5"
-              value={hours}
-              onChange={(e) => setHours(Number(e.target.value))}
-            />
+            <label>
+              Motoristas no cenário
+              <input
+                type="number"
+                min="1"
+                value={drivers}
+                onChange={(e) => setDrivers(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Duração simulada (horas)
+              <input
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={hours}
+                onChange={(e) => setHours(Number(e.target.value))}
+              />
+            </label>
             <button onClick={run} disabled={loading || !simulatorEnabled}>
               {loading ? "Executando..." : "Simular"}
             </button>
           </div>
         </header>
         <AppNav />
+
+        <article className="card">
+          <div className="filters">
+            <span className="status-warn">LABS · NÃO OPERACIONAL</span>
+          </div>
+          <strong>Os valores desta página pertencem somente ao cenário simulado.</strong>
+          <p className="text-muted">
+            Eles não representam corridas, receita, repasses ou taxas confirmadas na operação real.
+          </p>
+        </article>
+
         <section className="grid grid-kpi">
-          <KpiCard title="Motoristas" value={drivers} />
+          <KpiCard title="Motoristas no cenário" value={drivers} />
           <KpiCard title="Horas simuladas" value={hours} />
-          <KpiCard title="Corridas totais" value={report?.totalRequests || 0} />
-          <KpiCard title="Concluídas" value={report?.completed || 0} tone="positive" />
-          <KpiCard title="Canceladas" value={report?.canceledByPassenger || 0} tone="warning" />
-          <KpiCard title="Rejeitadas" value={report?.rejectedByDriver || 0} tone="danger" />
+          <KpiCard title="Solicitações simuladas" value={report ? report.totalRequests || 0 : "—"} />
+          <KpiCard title="Concluídas na simulação" value={report ? report.completed || 0 : "—"} tone={report ? "positive" : "default"} />
         </section>
-        <section className="grid">
-          {!simulatorEnabled ? (
-            <Panel title="Simulador desativado">
-              <p className="text-muted">
-                Esta superfície usa cenários hipotéticos e só pode ser usada com flag explícita de lançamento.
-              </p>
-            </Panel>
-          ) : null}
-          <Panel title="Resumo financeiro">
-            <div className="table-shell table-shell-tight">
+
+        {!simulatorEnabled ? (
+          <Panel title="Simulador desativado">
+            <p className="text-muted">
+              Esta superfície usa cenários hipotéticos e só pode ser usada com flag explícita de lançamento.
+            </p>
+          </Panel>
+        ) : null}
+
+        {simulatorEnabled && !report ? (
+          <Panel title="Aguardando simulação">
+            <p className="text-muted">Defina o cenário e execute a simulação para gerar resultados hipotéticos.</p>
+          </Panel>
+        ) : (
+        <section className="grid" aria-label="Resultados simulados">
+          <Panel title="Resultado simulado · Financeiro">
+            <div
+              className="table-shell table-shell-tight"
+              role="region"
+              tabIndex={0}
+              aria-label="Resultado da simulação financeira"
+            >
               <table className="table table-compact">
                 <tbody>
                   <tr>
@@ -116,7 +147,7 @@ export default function FinancialSimulatorPage() {
               </table>
             </div>
           </Panel>
-          <Panel title="Resumo de performance">
+          <Panel title="Resultado simulado · Performance">
             <KeyValueGrid
               data={{
                 totalRequests: report?.totalRequests || 0,
@@ -136,9 +167,10 @@ export default function FinancialSimulatorPage() {
                 completionRate: "Taxa de conclusão",
               }}
             />
-            <TechnicalDetails title="Ver payload técnico da simulação" data={report || {}} />
+            <TechnicalDetails title="Ver payload técnico da simulação" data={report} />
           </Panel>
         </section>
+        )}
         <ErrorText message={error} />
       </main>
     </ProtectedRoute>

@@ -101,7 +101,11 @@ export function TechnicalDetails({ title = "Detalhes técnicos", data, defaultOp
   return (
     <details className="technical-details" open={defaultOpen}>
       <summary>{title}</summary>
-      {hasData ? <pre>{JSON.stringify(data, null, 2)}</pre> : <p className="text-muted">Sem dados técnicos.</p>}
+      {hasData ? (
+        <pre role="region" tabIndex={0} aria-label={`${title}: conteúdo técnico`}>
+          {JSON.stringify(data, null, 2)}
+        </pre>
+      ) : <p className="text-muted">Sem dados técnicos.</p>}
     </details>
   );
 }

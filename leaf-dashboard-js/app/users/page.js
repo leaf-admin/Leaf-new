@@ -25,7 +25,17 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [type, setType] = useState("all");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setDebouncedSearchTerm(searchTerm);
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   useEffect(() => {
     let mounted = true;
@@ -42,7 +52,7 @@ export default function UsersPage() {
         const params = {
           page,
           limit: 20,
-          searchTerm: searchTerm || undefined,
+          searchTerm: debouncedSearchTerm || undefined,
           type: type === "all" ? undefined : type,
         };
         const response = await leafAPI.getUsers(params);
@@ -60,14 +70,13 @@ export default function UsersPage() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [page, searchTerm, type]);
+  }, [debouncedSearchTerm, page, type]);
 
   const summary = useMemo(() => {
     const base = {
       total: users.length,
       drivers: 0,
       customers: 0,
-      active: 0,
       pending: 0,
     };
     users.forEach((user) => {
@@ -75,7 +84,6 @@ export default function UsersPage() {
       const status = String(user?.status || "").toLowerCase();
       if (userType === "driver") base.drivers += 1;
       if (userType === "customer") base.customers += 1;
-      if (status === "active" || status === "approved") base.active += 1;
       if (status === "pending" || status === "analyzing") base.pending += 1;
     });
     return base;
@@ -88,41 +96,55 @@ export default function UsersPage() {
           <h1>Usuarios</h1>
           <div className="filters">
             <input
+              aria-label="Buscar usuário"
               placeholder="buscar..."
               value={searchTerm}
-              onChange={(e) => {
-                setPage(1);
-                setSearchTerm(e.target.value);
-              }}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
-            <select
-              value={type}
-              onChange={(e) => {
-                setPage(1);
-                setType(e.target.value);
-              }}
-            >
-              <option value="all">Todos</option>
-              <option value="driver">Motoristas</option>
-              <option value="customer">Clientes</option>
-            </select>
           </div>
         </header>
 
         <AppNav />
+        <details className="users-filter-disclosure">
+          <summary>Filtros</summary>
+          <div className="filters">
+            <label>
+              Tipo de usuário
+              <select
+                value={type}
+                onChange={(e) => {
+                  setPage(1);
+                  setType(e.target.value);
+                }}
+              >
+                <option value="all">Todos</option>
+                <option value="driver">Motoristas</option>
+                <option value="customer">Clientes</option>
+              </select>
+            </label>
+          </div>
+        </details>
         {loading ? <LoadingState message="Carregando usuarios..." /> : null}
 
         <section className="grid grid-kpi">
-          <KpiCard title="Lista atual" value={summary.total} />
-          <KpiCard title="Motoristas" value={summary.drivers} />
-          <KpiCard title="Clientes" value={summary.customers} />
-          <KpiCard title="Ativos" value={summary.active} tone="positive" />
-          <KpiCard title="Pendentes" value={summary.pending} tone="warning" />
+          <KpiCard title="Itens carregados" value={summary.total} subtitle="nesta página" />
+          <KpiCard title="Motoristas" value={summary.drivers} subtitle="nesta página" />
+          <KpiCard title="Clientes" value={summary.customers} subtitle="nesta página" />
+          <KpiCard title="Pendentes" value={summary.pending} subtitle="nesta página" tone="warning" />
         </section>
 
         <section className="grid">
-          <Panel title="Usuários" subtitle="Gestão de contas com atalhos para perfil e documentos do motorista.">
-            <div className="table-shell">
+          <Panel
+            className="panel-span-full"
+            title="Usuários"
+            subtitle="Workspace de consulta com acesso à ficha dedicada de cada conta."
+          >
+            <div
+              className="table-shell"
+              role="region"
+              tabIndex={0}
+              aria-label="Usuários cadastrados"
+            >
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -130,7 +152,7 @@ export default function UsersPage() {
                     <th>Email</th>
                     <th>Tipo</th>
                     <th>Status</th>
-                    <th>Ações</th>
+                    <th>Ação</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -158,10 +180,7 @@ export default function UsersPage() {
                           </td>
                           <td>
                             <div className="actions-cell">
-                              {userId ? <Link href={`/users/${userId}`}>Detalhes</Link> : null}
-                              {userType === "driver" && userId ? (
-                                <Link href={`/drivers/${userId}/documents`}>Documentos</Link>
-                              ) : null}
+                              {userId ? <Link href={`/users/${userId}`}>Abrir ficha</Link> : null}
                             </div>
                           </td>
                         </tr>
@@ -172,9 +191,9 @@ export default function UsersPage() {
               </table>
             </div>
             <div className="pager">
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
+              <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
               <span>Pagina {page}</span>
-              <button onClick={() => setPage((p) => p + 1)}>Proxima</button>
+              <button type="button" onClick={() => setPage((p) => p + 1)}>Proxima</button>
             </div>
           </Panel>
         </section>

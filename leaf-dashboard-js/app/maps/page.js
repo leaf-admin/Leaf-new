@@ -7,14 +7,36 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
-import GoogleDriversMap from "@/src/components/map/GoogleDriversMap";
+import LeafOperationsMap from "@/src/components/map/LeafOperationsMap";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
+import ConfirmActionDialog from "@/src/components/ui/ConfirmActionDialog";
 
 const H3_VIEWPORT_DEBOUNCE_MS = 400;
 
 function formatRegionDraft(region) {
   if (!Array.isArray(region)) return "[]";
   return JSON.stringify(region, null, 2);
+}
+
+function normalizeCoordinatePoint(point) {
+  const lng = Array.isArray(point) ? Number(point[0]) : Number(point?.lng);
+  const lat = Array.isArray(point) ? Number(point[1]) : Number(point?.lat);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+}
+
+function isCoordinatePair(point) {
+  return normalizeCoordinatePoint(point) !== null;
+}
+
+function normalizeRegionRing(points) {
+  if (!Array.isArray(points) || points.length < 3 || !points.every(isCoordinatePair)) return null;
+  const normalized = points.map(normalizeCoordinatePoint);
+  const first = normalized[0];
+  const last = normalized[normalized.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    normalized.push([first[0], first[1]]);
+  }
+  return normalized;
 }
 
 function parseRegionDraft(regionDraft) {
@@ -30,33 +52,35 @@ function parseRegionDraft(regionDraft) {
   if (!Array.isArray(parsed)) return null;
   if (parsed.length === 0) return [];
 
-  const normalized = [];
-  for (const point of parsed) {
-    let lng = null;
-    let lat = null;
-    if (Array.isArray(point) && point.length >= 2) {
-      lng = Number(point[0]);
-      lat = Number(point[1]);
-    } else if (point && typeof point === "object") {
-      lng = Number(point.lng);
-      lat = Number(point.lat);
-    } else {
-      return null;
-    }
-
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-      return null;
-    }
-    normalized.push([lng, lat]);
+  if (parsed.every(isCoordinatePair)) {
+    return normalizeRegionRing(parsed);
   }
 
-  if (normalized.length < 3) return null;
-  const first = normalized[0];
-  const last = normalized[normalized.length - 1];
-  if (first[0] !== last[0] || first[1] !== last[1]) {
-    normalized.push([first[0], first[1]]);
-  }
-  return normalized;
+  const rings = parsed.map(normalizeRegionRing);
+  return rings.every(Boolean) ? rings : null;
+}
+
+function parseRegionPayload(regionDraft) {
+  const parsed = parseRegionDraft(regionDraft);
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+  if (parsed.every(isCoordinatePair)) return parsed.length >= 4 ? parsed : null;
+  return parsed.every((ring) => Array.isArray(ring) && ring.length >= 4) ? parsed : null;
+}
+
+function getRegionPointCount(region) {
+  if (!Array.isArray(region)) return 0;
+  if (region.every(isCoordinatePair)) return region.length;
+  return region.reduce((total, ring) => total + (Array.isArray(ring) ? ring.length : 0), 0);
+}
+
+function getRegionAreaCount(region) {
+  if (!Array.isArray(region) || region.length === 0) return 0;
+  return region.every(isCoordinatePair) ? 1 : region.filter(Array.isArray).length;
+}
+
+function getConfiguredRegionPointCount(geofence) {
+  const reportedCount = Number(geofence?.regionPoints);
+  return Number.isFinite(reportedCount) ? reportedCount : getRegionPointCount(geofence?.region);
 }
 
 function formatTimeLabel(isoDate) {
@@ -97,6 +121,9 @@ export default function MapsPage() {
   const [geofenceBusy, setGeofenceBusy] = useState(false);
   const [geofenceEnabledDraft, setGeofenceEnabledDraft] = useState(true);
   const [geofenceRegionDraft, setGeofenceRegionDraft] = useState("[]");
+  const [isGeofenceEditing, setIsGeofenceEditing] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
+  const [confirmationBusy, setConfirmationBusy] = useState(false);
   const h3ViewportRequestRef = useRef("");
   const [h3RefreshNonce, setH3RefreshNonce] = useState(0);
 
@@ -222,13 +249,8 @@ export default function MapsPage() {
   };
 
   const saveGeofenceRegion = async () => {
-    let parsedRegion = null;
-    try {
-      parsedRegion = JSON.parse(geofenceRegionDraft);
-      if (!Array.isArray(parsedRegion)) {
-        throw new Error("Formato invalido");
-      }
-    } catch {
+    const parsedRegion = parseRegionPayload(geofenceRegionDraft);
+    if (!parsedRegion) {
       setGeoError("Poligono invalido. Use JSON no formato [[lng,lat], ...].");
       return;
     }
@@ -241,6 +263,7 @@ export default function MapsPage() {
         enabled: geofenceEnabledDraft,
       });
       await loadGeoConfig();
+      setIsGeofenceEditing(false);
     } catch (err) {
       setGeoError(err?.message || "Falha ao salvar poligono da geofence");
     } finally {
@@ -276,12 +299,13 @@ export default function MapsPage() {
   }, [cityFilterMode, selectedState, citySearch]);
 
   const geofenceDraftParsed = useMemo(() => parseRegionDraft(geofenceRegionDraft), [geofenceRegionDraft]);
+  const geofenceDraftReady = parseRegionPayload(geofenceRegionDraft) !== null;
   const geofenceRegionForMap = useMemo(() => {
-    if (Array.isArray(geofenceDraftParsed)) {
+    if (isGeofenceEditing && Array.isArray(geofenceDraftParsed)) {
       return geofenceDraftParsed;
     }
     return Array.isArray(geoConfig?.geofence?.region) ? geoConfig.geofence.region : [];
-  }, [geoConfig?.geofence?.region, geofenceDraftParsed]);
+  }, [geoConfig?.geofence?.region, geofenceDraftParsed, isGeofenceEditing]);
   const geofenceDraftInvalid = geofenceRegionDraft.trim().length > 0 && geofenceDraftParsed === null;
   const selectedStateCapacity = useMemo(
     () => (selectedState?.cities || []).reduce((sum, city) => sum + Number(city?.maxActiveDrivers || 0), 0),
@@ -413,6 +437,122 @@ export default function MapsPage() {
     setGeofenceRegionDraft((previous) => (previous === nextDraft ? previous : nextDraft));
   }, []);
 
+  const beginGeofenceEditing = () => {
+    resetGeofenceDraft();
+    setIsGeofenceEditing(true);
+  };
+
+  const cancelGeofenceEditing = () => {
+    if (geofenceBusy) return;
+    resetGeofenceDraft();
+    setIsGeofenceEditing(false);
+  };
+
+  const requestGeofencePublish = () => {
+    const nextRegion = parseRegionPayload(geofenceRegionDraft);
+    if (!nextRegion) {
+      setGeoError("Poligono invalido. Use JSON no formato [[lng,lat], ...].");
+      return;
+    }
+
+    const currentEnabled = geoConfig?.geofence?.enabled !== false;
+    const currentPointCount = getConfiguredRegionPointCount(geoConfig?.geofence);
+
+    setPendingConfirmation({
+      title: "Publicar nova região da geofence?",
+      description: "Revise a alteração antes de substituir a região operacional publicada.",
+      confirmLabel: "Publicar região",
+      tone: "warning",
+      details: [
+        { label: "Estado atual", value: currentEnabled ? "Habilitada" : "Desabilitada" },
+        { label: "Novo estado", value: geofenceEnabledDraft ? "Habilitada" : "Desabilitada" },
+        { label: "Polígono atual", value: `${currentPointCount} ponto(s)` },
+        { label: "Áreas no rascunho", value: String(getRegionAreaCount(nextRegion)) },
+        { label: "Novo polígono", value: `${getRegionPointCount(nextRegion)} ponto(s)` },
+      ],
+      consequence:
+        "O polígono persistido será substituído e a configuração enabled será mantida conforme o rascunho atual.",
+      execute: saveGeofenceRegion,
+    });
+  };
+
+  const requestGeofenceToggle = () => {
+    const currentEnabled = geoConfig?.geofence?.enabled !== false;
+    const nextEnabled = !currentEnabled;
+    setPendingConfirmation({
+      title: `${nextEnabled ? "Ativar" : "Desativar"} geofence?`,
+      description: "Confirme a mudança do controle geográfico global.",
+      confirmLabel: nextEnabled ? "Ativar geofence" : "Desativar geofence",
+      tone: nextEnabled ? "warning" : "danger",
+      details: [
+        { label: "Estado atual", value: currentEnabled ? "Habilitada" : "Desabilitada" },
+        { label: "Novo estado", value: nextEnabled ? "Habilitada" : "Desabilitada" },
+        {
+          label: "Polígono publicado",
+          value: `${getConfiguredRegionPointCount(geoConfig?.geofence)} ponto(s)`,
+        },
+      ],
+      consequence: "O backend passará a considerar o novo valor de enabled na política geográfica existente.",
+      execute: toggleGeofenceEnabled,
+    });
+  };
+
+  const requestStateToggle = () => {
+    if (!selectedState) return;
+    const nextEnabled = !selectedState.enabled;
+    setPendingConfirmation({
+      title: `${nextEnabled ? "Ativar" : "Desativar"} ${selectedState.name || selectedState.stateCode}?`,
+      description: "Revise o estado selecionado antes de alterar sua ativação.",
+      confirmLabel: nextEnabled ? "Ativar estado" : "Desativar estado",
+      tone: nextEnabled ? "warning" : "danger",
+      details: [
+        { label: "Estado", value: `${selectedState.name || "-"} (${selectedState.stateCode})` },
+        { label: "Estado atual", value: selectedState.enabled ? "Ativo" : "Inativo" },
+        { label: "Novo estado", value: nextEnabled ? "Ativo" : "Inativo" },
+        { label: "Cidades vinculadas", value: String(selectedStateTotalCities) },
+      ],
+      consequence: "A ativação do estado será atualizada no catálogo geográfico usado pelo backend.",
+      execute: toggleStateActivation,
+    });
+  };
+
+  const requestCityToggle = (city) => {
+    if (!selectedState || !city?.key) return;
+    const nextActive = !city.active;
+    const cityLabel = city.label || city.name || city.value || city.key;
+    setPendingConfirmation({
+      title: `${nextActive ? "Ativar" : "Desativar"} ${cityLabel}?`,
+      description: "Confirme a mudança desta cidade na operação geográfica.",
+      confirmLabel: nextActive ? "Ativar cidade" : "Desativar cidade",
+      tone: nextActive ? "warning" : "danger",
+      details: [
+        { label: "Estado", value: selectedState.stateCode },
+        { label: "Cidade", value: cityLabel },
+        { label: "Estado atual", value: city.active ? "Ativa" : "Inativa" },
+        { label: "Novo estado", value: nextActive ? "Ativa" : "Inativa" },
+      ],
+      consequence: "O status da cidade será atualizado pela regra geográfica já existente no backend.",
+      execute: () => toggleCityActivation(city),
+    });
+  };
+
+  const closeConfirmation = () => {
+    if (!confirmationBusy) setPendingConfirmation(null);
+  };
+
+  const confirmPendingAction = async () => {
+    if (!pendingConfirmation?.execute || confirmationBusy) return;
+
+    const action = pendingConfirmation;
+    try {
+      setConfirmationBusy(true);
+      await action.execute();
+    } finally {
+      setConfirmationBusy(false);
+      setPendingConfirmation((current) => (current === action ? null : current));
+    }
+  };
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -430,37 +570,68 @@ export default function MapsPage() {
           >
             {geoLoading ? <p>Carregando configuração geográfica...</p> : null}
 
-            <div className="filters map-status-strip">
-              <span className="meta-badge">Atualização: API/polling</span>
-              <span className={h3StatusMeta.className}>H3: {h3StatusMeta.label}</span>
-              <span className={geoConfig?.geofence?.active ? "status-ok" : "status-warn"}>
-                Geofence runtime: {geoConfig?.geofence?.active ? "ativo" : "inativo"}
-              </span>
-              <span className={geoConfig?.geofence?.enabled !== false ? "status-ok" : "status-warn"}>
-                Configuração: {geoConfig?.geofence?.enabled !== false ? "habilitada" : "desabilitada"}
-              </span>
-              <span className="meta-badge">Pontos: {geoConfig?.geofence?.regionPoints || 0}</span>
-              <span className="meta-badge">Storage: {geoConfig?.geofenceStorage || "-"}</span>
-              <span className={geoConfig?.geofence?.bypassEnabled ? "status-warn" : "status-ok"}>
-                Bypass: {geoConfig?.geofence?.bypassEnabled ? "ligado" : "desligado"}
-              </span>
+            <div className="map-command-bar">
+              <div className="filters">
+                <span className={h3StatusMeta.className}>H3: {h3StatusMeta.label}</span>
+                <span className={geoConfig?.geofence?.active ? "status-ok" : "status-warn"}>
+                  Geofence {geoConfig?.geofence?.active ? "ativa" : "inativa"}
+                </span>
+                {isGeofenceEditing ? <span className="status-warn">Rascunho em edição</span> : null}
+                {isGeofenceEditing && !geofenceDraftReady ? (
+                  <span className="meta-badge">Adicione ao menos 3 pontos</span>
+                ) : null}
+              </div>
+              <div className="map-command-actions">
+              {isGeofenceEditing ? (
+                <>
+                  <button
+                    className="primary-action"
+                    onClick={requestGeofencePublish}
+                    disabled={geoLoading || geofenceBusy || !geofenceDraftReady}
+                    title={geofenceDraftReady ? "" : "Adicione ao menos 3 pontos para revisar a região"}
+                  >
+                    Revisar e publicar
+                  </button>
+                  <button onClick={cancelGeofenceEditing} disabled={geoLoading || geofenceBusy}>
+                    Cancelar edição
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="primary-action" onClick={beginGeofenceEditing} disabled={geoLoading || geofenceBusy}>
+                    Editar região
+                  </button>
+                  <details className="map-runtime-disclosure">
+                    <summary>Opções</summary>
+                    <div>
+                      <button onClick={refreshMapLocations}>Atualizar mapa</button>
+                      <button onClick={loadGeoConfig}>Atualizar geografia</button>
+                      <button onClick={requestGeofenceToggle} disabled={geoLoading || geofenceBusy}>
+                        {geoConfig?.geofence?.enabled !== false ? "Desativar geofence" : "Ativar geofence"}
+                      </button>
+                    </div>
+                  </details>
+                </>
+              )}
+              </div>
             </div>
 
-            <div className="filters">
-              <button onClick={refreshMapLocations}>Atualizar mapa</button>
-              <button onClick={loadGeoConfig}>Atualizar geografia</button>
-              <button onClick={toggleGeofenceEnabled} disabled={geoLoading || geofenceBusy}>
-                {geoConfig?.geofence?.enabled !== false ? "Desativar geofence" : "Ativar geofence"}
-              </button>
-              <button onClick={saveGeofenceRegion} disabled={geoLoading || geofenceBusy}>
-                Salvar geofence
-              </button>
-              <button onClick={resetGeofenceDraft} disabled={geoLoading || geofenceBusy}>
-                Reverter rascunho
-              </button>
-            </div>
+            <details className="map-status-disclosure">
+              <summary>Detalhes do runtime geográfico</summary>
+              <div className="filters map-status-strip">
+                <span className="meta-badge">Atualização: API/polling</span>
+                <span className={geoConfig?.geofence?.enabled !== false ? "status-ok" : "status-warn"}>
+                  Configuração: {geoConfig?.geofence?.enabled !== false ? "habilitada" : "desabilitada"}
+                </span>
+                <span className="meta-badge">Pontos: {geoConfig?.geofence?.regionPoints || 0}</span>
+                <span className="meta-badge">Storage: {geoConfig?.geofenceStorage || "-"}</span>
+                <span className={geoConfig?.geofence?.bypassEnabled ? "status-warn" : "status-ok"}>
+                  Bypass: {geoConfig?.geofence?.bypassEnabled ? "ligado" : "desligado"}
+                </span>
+              </div>
+            </details>
 
-            <GoogleDriversMap
+            <LeafOperationsMap
               drivers={locations?.locations?.drivers || []}
               h3Cells={h3Cells}
               h3Loading={h3Loading}
@@ -469,32 +640,38 @@ export default function MapsPage() {
               onViewportChange={handleMapViewportChange}
               mapHeight="clamp(460px, 58vh, 680px)"
               geofenceRegion={geofenceRegionForMap}
-              geofenceEditable
-              onGeofenceChange={handleGeofenceMapChange}
+              geofenceEditable={isGeofenceEditing}
+              onGeofenceChange={isGeofenceEditing ? handleGeofenceMapChange : undefined}
               showH3SyncLabel={false}
             />
 
-            <details className="technical-details">
-              <summary>Editar geofence em JSON (opcional)</summary>
-              <div style={{ padding: "12px" }}>
-                <textarea
-                  id="geofence-region-draft"
-                  value={geofenceRegionDraft}
-                  onChange={(event) => setGeofenceRegionDraft(event.target.value)}
-                  rows={8}
-                  style={{ width: "100%", resize: "vertical", fontFamily: "monospace" }}
-                  placeholder='[[-43.8,-23.1],[-43.1,-23.1],[-43.1,-22.7],[-43.8,-22.7],[-43.8,-23.1]]'
-                />
-                <small style={{ color: "#64748b" }}>
-                  O método recomendado é editar direto no mapa; use JSON só para ajustes finos.
-                </small>
-                {geofenceDraftInvalid ? (
-                  <small style={{ display: "block", color: "#b91c1c", marginTop: 6 }}>
-                    JSON inválido. Ajuste o formato para habilitar visualização no mapa.
+            {isGeofenceEditing ? (
+              <details className="technical-details">
+                <summary>Editar por coordenadas (alternativa ao mapa)</summary>
+                <div style={{ padding: "12px" }}>
+                  <label className="geofence-json-editor-label" htmlFor="geofence-region-draft">
+                    Coordenadas da geofence em JSON
+                  </label>
+                  <small id="geofence-region-draft-help" className="geofence-json-editor-help">
+                    Alternativa acessível equivalente ao desenho no mapa. Aceita um anel ou uma lista de áreas; cada ponto usa longitude, latitude.
                   </small>
-                ) : null}
-              </div>
-            </details>
+                  <textarea
+                    id="geofence-region-draft"
+                    aria-describedby="geofence-region-draft-help"
+                    value={geofenceRegionDraft}
+                    onChange={(event) => setGeofenceRegionDraft(event.target.value)}
+                    rows={8}
+                    style={{ width: "100%", resize: "vertical", fontFamily: "monospace" }}
+                    placeholder='[[-43.8,-23.1],[-43.1,-23.1],[-43.1,-22.7],[-43.8,-22.7],[-43.8,-23.1]]'
+                  />
+                  {geofenceDraftInvalid ? (
+                    <small style={{ display: "block", color: "#b91c1c", marginTop: 6 }}>
+                      JSON inválido. Ajuste o formato para habilitar visualização no mapa.
+                    </small>
+                  ) : null}
+                </div>
+              </details>
+            ) : null}
           </Panel>
         </section>
 
@@ -505,7 +682,15 @@ export default function MapsPage() {
           <KpiCard title="Corridas ativas" value={locations?.summary?.activeBookings || 0} />
         </section>
 
-        <section className="grid">
+        <details className="map-geography-disclosure">
+          <summary>
+            <span>
+              <strong>Território, cidades e capacidade</strong>
+              <small>Configuração administrativa separada do mapa operacional.</small>
+            </span>
+            <span className="meta-badge">{selectedStateTotalCities} cidades</span>
+          </summary>
+          <section className="grid">
           <Panel
             className="panel-span-full"
             title="Controle Geografico (Geofence + Cidades)"
@@ -571,7 +756,7 @@ export default function MapsPage() {
                 >
                   Adicionar cidade
                 </button>
-                <button onClick={toggleStateActivation} disabled={!selectedState || stateBusy}>
+                <button onClick={requestStateToggle} disabled={!selectedState || stateBusy}>
                   {selectedState?.enabled ? "Desativar estado" : "Ativar estado"}
                 </button>
               </div>
@@ -624,7 +809,7 @@ export default function MapsPage() {
                     <button disabled={cityBusyKey === `city-config-${city.key}`} onClick={() => saveCityCapacity(city)}>
                       Salvar
                     </button>
-                    <button disabled={cityBusyKey === city.key} onClick={() => toggleCityActivation(city)}>
+                    <button disabled={cityBusyKey === city.key} onClick={() => requestCityToggle(city)}>
                       {city.active ? "Desativar" : "Ativar"}
                     </button>
                   </div>
@@ -644,8 +829,32 @@ export default function MapsPage() {
               }}
             />
           </Panel>
-        </section>
+          </section>
+        </details>
         <ErrorText message={allErrors} />
+        <ConfirmActionDialog
+          open={Boolean(pendingConfirmation)}
+          title={pendingConfirmation?.title}
+          description={pendingConfirmation?.description}
+          confirmLabel={pendingConfirmation?.confirmLabel}
+          tone={pendingConfirmation?.tone}
+          busy={confirmationBusy}
+          onConfirm={confirmPendingAction}
+          onCancel={closeConfirmation}
+        >
+          <div className="confirm-dialog-context">
+            {(pendingConfirmation?.details || []).map((detail) => (
+              <p key={detail.label} className="confirm-dialog-context-row">
+                <strong>{detail.label}:</strong> {detail.value}
+              </p>
+            ))}
+            {pendingConfirmation?.consequence ? (
+              <p className="confirm-dialog-consequence">
+                <strong>Consequência:</strong> {pendingConfirmation.consequence}
+              </p>
+            ) : null}
+          </div>
+        </ConfirmActionDialog>
       </main>
     </ProtectedRoute>
   );

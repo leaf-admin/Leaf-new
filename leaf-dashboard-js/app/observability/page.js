@@ -581,12 +581,10 @@ export default function ObservabilityPage() {
             <div className="ops-header-actions">
               <span className={toneClass(overallTone)}>{overallLabel}</span>
               <span className="meta-badge">Atualizado: {formatDateTime(metrics?.timestamp || lastUpdatedAt)}</span>
-              <button type="button" onClick={copyPayload}>Exportar payload</button>
             </div>
           </header>
 
           {loading ? <LoadingState message="Carregando observabilidade..." /> : null}
-          {copyStatus ? <p className="text-muted">{copyStatus}</p> : null}
           <ErrorText message={error} />
 
           <section className={`ops-hero ops-hero-${overallTone}`}>
@@ -608,29 +606,6 @@ export default function ObservabilityPage() {
               value={formatCompact(metrics?.critical?.createBooking?.errors)}
               detail={formatPct(metrics?.critical?.createBooking?.errorRatePct)}
               tone={toNumber(metrics?.critical?.createBooking?.errorRatePct) > 1 ? "danger" : "positive"}
-            />
-            <StatTile
-              label="DLQ"
-              value={formatCompact(workerDlqSize)}
-              detail="eventos"
-              tone={workerDlqSize > 20 ? "danger" : workerDlqSize > 0 ? "warning" : "positive"}
-            />
-            <StatTile
-              label="Worker lag"
-              value={formatCompact(workerLagValue)}
-              tone={workerLagValue > 1000 ? "danger" : workerLagValue > 100 ? "warning" : "positive"}
-            />
-            <StatTile
-              label="Redis"
-              value={formatCompact(metrics?.redis?.operations?.errors)}
-              detail={`${formatMs(metrics?.redis?.latency?.p95)} p95`}
-              tone={toNumber(metrics?.redis?.operations?.errors) > 0 ? "danger" : "positive"}
-            />
-            <StatTile
-              label="Event loop"
-              value={formatMs(metrics?.eventLoopLag?.p95Ms)}
-              detail="p95"
-              tone={toNumber(metrics?.eventLoopLag?.p95Ms) > 100 ? "danger" : toNumber(metrics?.eventLoopLag?.p95Ms) > 50 ? "warning" : "positive"}
             />
             <StatTile
               label="Commands"
@@ -671,7 +646,10 @@ export default function ObservabilityPage() {
               )}
             </Panel>
 
-            <Panel title="Fila de eventos" subtitle="Workers, lag e DLQ.">
+            <details className="observability-services-disclosure panel-span-full">
+              <summary>Workers e DLQ</summary>
+              <section className="ops-main-grid">
+                <Panel title="Fila de eventos" subtitle="Workers, lag e DLQ.">
               <CompactRows
                 rows={[
                   { label: "Worker", value: workerHealth?.status || "sem dado", detail: workerHealth?.reason || "" },
@@ -681,14 +659,14 @@ export default function ObservabilityPage() {
                   { label: "DLQ", value: formatCompact(workerDlqSize), detail: workerDlqSize > 0 ? "triagem necessária" : "" },
                 ]}
               />
-            </Panel>
+                </Panel>
 
-            <Panel
-              title="DLQ Inspector"
-              subtitle="Amostra read-only dos eventos que falharam depois dos retries."
-              className="panel-span-full"
-              actions={<span className="meta-badge">{formatCompact(filteredDlqEvents.length)} de {formatCompact(workerDLQEvents?.dlqSize ?? workerDlqSize)}</span>}
-            >
+                <Panel
+                  title="DLQ Inspector"
+                  subtitle="Amostra read-only dos eventos que falharam depois dos retries."
+                  className="panel-span-full"
+                  actions={<span className="meta-badge">{formatCompact(filteredDlqEvents.length)} de {formatCompact(workerDLQEvents?.dlqSize ?? workerDlqSize)}</span>}
+                >
               <div className="filters">
                 <label>
                   Tipo
@@ -718,7 +696,12 @@ export default function ObservabilityPage() {
                     : "DLQ vazia."}
                 </p>
               ) : (
-                <div className="table-shell table-shell-tall">
+                <div
+                  className="table-shell table-shell-tall"
+                  role="region"
+                  tabIndex={0}
+                  aria-label="Eventos na fila de mensagens não processadas"
+                >
                   <table className="table table-compact dlq-table">
                     <thead>
                       <tr>
@@ -773,7 +756,9 @@ export default function ObservabilityPage() {
                   </table>
                 </div>
               )}
-            </Panel>
+                </Panel>
+              </section>
+            </details>
 
             <Panel title="Fluxo crítico" subtitle="Criação de corrida e commands.">
               <CompactRows
@@ -811,22 +796,27 @@ export default function ObservabilityPage() {
               ) : null}
             </Panel>
 
-            <Panel title="Infraestrutura" subtitle="Serviços essenciais.">
-              <div className="ops-chip-row">
-                <HealthChip label="Health" status={monitoringHealth?.status} />
-                <HealthChip label="Redis" status={monitoringHealth?.checks?.redis?.status} />
-                <HealthChip label="Firebase" status={monitoringHealth?.checks?.firebase?.status} />
-                <HealthChip label="WebSocket" status={monitoringHealth?.checks?.websocket?.status} />
-                <HealthChip label="Sistema" status={monitoringHealth?.checks?.system?.status} />
-              </div>
-              <CompactRows
-                rows={[
-                  { label: "Redis ops", value: formatCompact(metrics?.redis?.operations?.total), detail: `${formatPct(metrics?.redis?.operations?.errorRate)} erro` },
-                  { label: "Hotpath", value: formatCompact(metrics?.hotpath?.total), detail: `${formatMs(metrics?.hotpath?.avgLatencyMs)} média` },
-                  { label: "OTEL ingest", value: formatCompact(metrics?.otel?.ingest?.totalRequests), detail: toNumber(metrics?.otel?.ingest?.errors) > 0 ? `${formatCompact(metrics?.otel?.ingest?.errors)} erro(s)` : "" },
-                ]}
-              />
-            </Panel>
+            <details className="observability-services-disclosure panel-span-full">
+              <summary>Saúde dos serviços</summary>
+              <section className="ops-main-grid">
+                <Panel title="Infraestrutura" subtitle="Serviços essenciais.">
+                  <div className="ops-chip-row">
+                    <HealthChip label="Health" status={monitoringHealth?.status} />
+                    <HealthChip label="Redis" status={monitoringHealth?.checks?.redis?.status} />
+                    <HealthChip label="Firebase" status={monitoringHealth?.checks?.firebase?.status} />
+                    <HealthChip label="WebSocket" status={monitoringHealth?.checks?.websocket?.status} />
+                    <HealthChip label="Sistema" status={monitoringHealth?.checks?.system?.status} />
+                  </div>
+                  <CompactRows
+                    rows={[
+                      { label: "Redis ops", value: formatCompact(metrics?.redis?.operations?.total), detail: `${formatPct(metrics?.redis?.operations?.errorRate)} erro` },
+                      { label: "Hotpath", value: formatCompact(metrics?.hotpath?.total), detail: `${formatMs(metrics?.hotpath?.avgLatencyMs)} média` },
+                      { label: "OTEL ingest", value: formatCompact(metrics?.otel?.ingest?.totalRequests), detail: toNumber(metrics?.otel?.ingest?.errors) > 0 ? `${formatCompact(metrics?.otel?.ingest?.errors)} erro(s)` : "" },
+                    ]}
+                  />
+                </Panel>
+              </section>
+            </details>
 
             <Panel title="Operação" subtitle="Corridas, suporte e disputas.">
               <CompactRows
@@ -856,7 +846,10 @@ export default function ObservabilityPage() {
               />
             </Panel>
 
-            <Panel title="Conectividade" subtitle="Fontes usadas pela tela.">
+            <details className="observability-services-disclosure panel-span-full">
+              <summary>Fontes e flags de runtime</summary>
+              <section className="ops-main-grid">
+                <Panel title="Conectividade" subtitle="Fontes usadas pela tela.">
               <div className="ops-chip-row">
                 <span className={allSourcesOk ? "status-ok" : failedSources.length > 0 ? "status-warn" : "meta-badge"}>
                   {allSourcesOk ? "Todas conectadas" : `${failedSources.length} fonte(s) com falha`}
@@ -877,34 +870,47 @@ export default function ObservabilityPage() {
               ) : (
                 <p className="text-muted">Sem falhas de integração no último polling.</p>
               )}
-            </Panel>
+                </Panel>
 
-            <Panel title="Flags runtime" subtitle="Estado que governa telas e mutações do dashboard.">
-              <CompactRows rows={launchFlagRows} />
-              {runtimeFlags?.realSandbox?.blockers?.length > 0 ? (
-                <div className="ops-chip-row">
-                  {runtimeFlags.realSandbox.blockers.slice(0, 4).map((blocker) => (
-                    <span key={blocker} className="status-warn">{blocker}</span>
-                  ))}
-                </div>
-              ) : null}
-            </Panel>
+                <Panel title="Flags runtime" subtitle="Estado que governa telas e mutações do dashboard.">
+                  <CompactRows rows={launchFlagRows} />
+                  {runtimeFlags?.realSandbox?.blockers?.length > 0 ? (
+                    <div className="ops-chip-row">
+                      {runtimeFlags.realSandbox.blockers.slice(0, 4).map((blocker) => (
+                        <span key={blocker} className="status-warn">{blocker}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                </Panel>
+              </section>
+            </details>
 
-            {quickLinks.length > 0 ? (
-              <Panel title="Acesso rápido">
-                <div className="filters">
-                  {quickLinks.map((link) => (
-                    <a key={link.name} href={link.href} target="_blank" rel="noreferrer" className="nav-link">
-                      {link.name}
-                    </a>
-                  ))}
-                </div>
-              </Panel>
-            ) : null}
+            <details className="observability-technical-disclosure panel-span-full">
+              <summary>Ferramentas e detalhes técnicos</summary>
+              <section className="ops-main-grid">
+                {quickLinks.length > 0 ? (
+                  <Panel title="Acesso rápido">
+                    <div className="filters">
+                      {quickLinks.map((link) => (
+                        <a key={link.name} href={link.href} target="_blank" rel="noreferrer" className="nav-link">
+                          {link.name}
+                        </a>
+                      ))}
+                    </div>
+                  </Panel>
+                ) : null}
 
-            <Panel title="Detalhe técnico" className="panel-span-full" subtitle="Aberto só quando precisar investigar.">
-              <TechnicalDetails title="Payload completo" data={metricsPayload} />
-            </Panel>
+                <Panel
+                  title="Detalhe técnico"
+                  className="panel-span-full"
+                  subtitle="Aberto só quando precisar investigar."
+                  actions={<button type="button" onClick={copyPayload}>Exportar payload</button>}
+                >
+                  {copyStatus ? <p className="text-muted">{copyStatus}</p> : null}
+                  <TechnicalDetails title="Payload completo" data={metricsPayload} />
+                </Panel>
+              </section>
+            </details>
           </section>
         </section>
       </main>

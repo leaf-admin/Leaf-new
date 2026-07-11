@@ -176,49 +176,13 @@ export default function AuditPage() {
           </div>
         </Panel>
 
-        <section className="grid">
-          <Panel title="Perfis de acesso" subtitle="Mapa operacional do que cada perfil deve conseguir fazer.">
-            <div className="table-shell">
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>Perfil</th>
-                    <th>Leitura</th>
-                    <th>Ação</th>
-                    <th>Restrição</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rbacMatrix.map((row) => (
-                    <tr key={row.perfil}>
-                      <td><strong>{row.perfil}</strong></td>
-                      <td>{row.leitura}</td>
-                      <td>{row.mutacao}</td>
-                      <td>{row.restricao}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-
-          <Panel title="Resumo por severidade">
-            <KeyValueGrid data={stats?.bySeverity || {}} maxItems={8} />
-            <TechnicalDetails
-              title="Estatísticas completas"
-              data={{
-                bySeverity: stats?.bySeverity || {},
-                byAction: stats?.byAction || {},
-                byResource: stats?.byResource || {},
-                successRate: stats?.successRate,
-                errorRate: stats?.errorRate,
-              }}
-            />
-          </Panel>
-        </section>
-
         <Panel className="panel-span-full" title="Logs recentes" subtitle="Ações mais recentes gravadas em audit_logs.">
-          <div className="table-shell table-shell-tall">
+          <div
+            className="table-shell table-shell-tall"
+            role="region"
+            tabIndex={0}
+            aria-label="Logs recentes de auditoria"
+          >
             <table className="table table-compact">
               <thead>
                 <tr>
@@ -254,6 +218,55 @@ export default function AuditPage() {
             </table>
           </div>
         </Panel>
+
+        <details className="audit-reference-disclosure">
+          <summary>Matriz de acesso e estatísticas</summary>
+          <section className="grid">
+            <Panel title="Perfis de acesso" subtitle="Mapa operacional do que cada perfil deve conseguir fazer.">
+              <div
+                className="table-shell"
+                role="region"
+                tabIndex={0}
+                aria-label="Matriz de acesso por perfil"
+              >
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Perfil</th>
+                      <th>Leitura</th>
+                      <th>Ação</th>
+                      <th>Restrição</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rbacMatrix.map((row) => (
+                      <tr key={row.perfil}>
+                        <td><strong>{row.perfil}</strong></td>
+                        <td>{row.leitura}</td>
+                        <td>{row.mutacao}</td>
+                        <td>{row.restricao}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+
+            <Panel title="Resumo por severidade">
+              <KeyValueGrid data={stats?.bySeverity || {}} maxItems={8} />
+              <TechnicalDetails
+                title="Estatísticas completas"
+                data={{
+                  bySeverity: stats?.bySeverity || {},
+                  byAction: stats?.byAction || {},
+                  byResource: stats?.byResource || {},
+                  successRate: stats?.successRate,
+                  errorRate: stats?.errorRate,
+                }}
+              />
+            </Panel>
+          </section>
+        </details>
 
         <ErrorText message={error} />
       </main>
