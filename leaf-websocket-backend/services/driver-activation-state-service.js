@@ -26,16 +26,11 @@ const STATE_LABELS = Object.freeze({
   [DRIVER_ACTIVATION_STATES.REJECTED]: 'Rejeitado'
 });
 
-const KYC_BLOCKING_STATUSES = new Set([
+const KYC_TERMINAL_STATUSES = new Set([
   'blocked',
   'rejected',
   'failed',
-  'denied',
-  'pending',
-  'pending_review',
-  'pending_reverify',
-  'in_review',
-  'review'
+  'denied'
 ]);
 
 function boolish(value) {
@@ -62,22 +57,36 @@ function isRejectedStatus(status) {
 }
 
 function resolveKycApproval(userData = {}) {
-  const status = normalizeStatus(userData?.kycStatus || userData?.kyc_status || userData?.kyc?.status || '');
-  const blocked = boolish(userData?.kycBlocked) || boolish(userData?.kyc?.blocked) || boolish(userData?.kycReverifyRequired);
-  const approved = status === 'approved' || boolish(userData?.kyc?.approved);
+  const normalizedStatus = normalizeStatus(
+    userData?.kycStatus || userData?.kyc_status || userData?.kyc?.status || '',
+    'missing'
+  );
+  const explicitlyBlocked = boolish(userData?.kycBlocked) || boolish(userData?.kyc?.blocked);
+  const reverifyRequired = boolish(userData?.kycReverifyRequired);
 
-  if (blocked || KYC_BLOCKING_STATUSES.has(status)) {
+  if (explicitlyBlocked || KYC_TERMINAL_STATUSES.has(normalizedStatus)) {
     return {
       approved: false,
       blocked: true,
-      status: status || 'blocked'
+      pending: false,
+      status: KYC_TERMINAL_STATUSES.has(normalizedStatus) ? normalizedStatus : 'blocked',
+      reverifyRequired
     };
   }
+
+  const status = reverifyRequired ? 'pending_reverify' : normalizedStatus;
+  const approved = !reverifyRequired &&
+    (
+      status === 'approved' ||
+      (status === 'missing' && boolish(userData?.kyc?.approved))
+    );
 
   return {
     approved,
     blocked: false,
-    status: status || (approved ? 'approved' : 'missing')
+    pending: !approved,
+    status,
+    reverifyRequired
   };
 }
 
@@ -260,7 +269,7 @@ function resolveVehicleStatusFromEntries(userData = {}, entries = [], crlvIdenti
     model,
     color,
     year,
-    documentStatus: crlvIdentity?.verified ? 'approved' : undefined,
+    documentStatus: crlvIdentity?.verified ? 'approved' : null,
     identitySource: usesDocumentIdentity ? 'crlv_pdf_ocr' : (plate || model || color ? 'vehicle_record' : 'unavailable'),
     identityComplete: Boolean(plate && model && color)
   };

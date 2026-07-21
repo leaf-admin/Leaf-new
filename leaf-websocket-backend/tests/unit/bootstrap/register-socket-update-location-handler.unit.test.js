@@ -14,7 +14,8 @@ jest.mock('../../../utils/map-h3-refresh-broadcaster', () => ({
 
 jest.mock('../../../utils/active-trip-index', () => ({
   resolveActiveTripForDriver: jest.fn().mockResolvedValue(null),
-  setActiveTripForDriver: jest.fn().mockResolvedValue(undefined)
+  setActiveTripForDriver: jest.fn().mockResolvedValue(undefined),
+  renewActiveTripForDriver: jest.fn().mockResolvedValue(true)
 }));
 
 const driverEligibilityService = require('../../../services/driver-eligibility-service');
@@ -60,6 +61,8 @@ function createHarness() {
   const io = {
     to: jest.fn(() => ({ emit: roomEmit }))
   };
+  const enforceSubscriptionForOnline = jest.fn().mockResolvedValue({ allowed: true });
+  const enforceDailyKYCForOnline = jest.fn().mockResolvedValue({ allowed: true });
 
   registerSocketUpdateLocationHandler({
     socket,
@@ -71,12 +74,21 @@ function createHarness() {
     redisPool: {
       getConnection: jest.fn(() => redis)
     },
-    enforceSubscriptionForOnline: jest.fn().mockResolvedValue({ allowed: true }),
-    enforceDailyKYCForOnline: jest.fn().mockResolvedValue({ allowed: true }),
+    enforceSubscriptionForOnline,
+    enforceDailyKYCForOnline,
     saveDriverLocation
   });
 
-  return { handlers, io, redis, roomEmit, saveDriverLocation, socket };
+  return {
+    handlers,
+    io,
+    redis,
+    roomEmit,
+    saveDriverLocation,
+    socket,
+    enforceSubscriptionForOnline,
+    enforceDailyKYCForOnline
+  };
 }
 
 describe('registerSocketUpdateLocationHandler', () => {
@@ -84,6 +96,7 @@ describe('registerSocketUpdateLocationHandler', () => {
     jest.clearAllMocks();
     activeTripIndex.resolveActiveTripForDriver.mockResolvedValue(null);
     activeTripIndex.setActiveTripForDriver.mockResolvedValue(undefined);
+    activeTripIndex.renewActiveTripForDriver.mockResolvedValue(true);
   });
 
   it('blocks offline-to-online location sync when canonical driver activation/KYC is not eligible', async () => {
@@ -125,6 +138,47 @@ describe('registerSocketUpdateLocationHandler', () => {
     );
   });
 
+  it('does not trust client ride flags or route plans to bypass KYC', async () => {
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
+      eligible: true,
+      code: 'ELIGIBLE'
+    });
+    const harness = createHarness();
+    harness.enforceDailyKYCForOnline.mockResolvedValue({
+      allowed: false,
+      code: 'KYC_REQUIRED',
+      reason: 'identity gate pending'
+    });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'started',
+      isInTrip: true,
+      bookingId: 'forged_trip',
+      routePlan: { bookingId: 'forged_trip', coordinates: [] }
+    });
+
+    expect(activeTripIndex.resolveActiveTripForDriver).toHaveBeenCalledWith(
+      harness.redis,
+      'driver_1'
+    );
+    expect(harness.enforceSubscriptionForOnline).toHaveBeenCalledWith('driver_1');
+    expect(harness.enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
+    expect(harness.saveDriverLocation).not.toHaveBeenCalled();
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'KYC_REQUIRED'
+      })
+    );
+    expect(harness.redis.hset).not.toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
+    );
+  });
+
   it('marks batched location sync as rejected when driver is not eligible', async () => {
     driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
       eligible: false,
@@ -135,6 +189,7 @@ describe('registerSocketUpdateLocationHandler', () => {
     await handlers.updateLocationBatch({
       bookingId: 'booking_batch_rejected',
       tripStatus: 'available',
+      isInTrip: false,
       batchId: 'batch_rejected',
       locations: [
         {
@@ -275,7 +330,26 @@ describe('registerSocketUpdateLocationHandler', () => {
     });
 
     expect(saveDriverLocation).toHaveBeenCalledTimes(2);
+    expect(activeTripIndex.renewActiveTripForDriver).toHaveBeenCalledTimes(2);
+    expect(activeTripIndex.renewActiveTripForDriver).toHaveBeenCalledWith(
+      redis,
+      'driver_1',
+      'booking_batch_1',
+      {
+        bookingData: expect.objectContaining({
+          driverId: 'driver_1',
+          status: 'IN_PROGRESS'
+        })
+      }
+    );
     expect(redis.xadd).toHaveBeenCalledTimes(2);
+    expect(redis.xadd.mock.calls[0].slice(0, 4)).toEqual([
+      'trip_location_events',
+      '*',
+      'type',
+      'trip.location.v1'
+    ]);
+    expect(redis.xadd.mock.calls[0]).not.toContain('MAXLEN');
     expect(redis.zadd).toHaveBeenCalledWith(
       'ride_health:driver_signal_active',
       1710000000000,
@@ -305,5 +379,128 @@ describe('registerSocketUpdateLocationHandler', () => {
         acceptedCount: 2
       })
     );
+  });
+
+  it('does not stream or fan out a ride location when lease renewal is rejected', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: 'booking_lease_rejected',
+      customerId: 'customer_1'
+    });
+    activeTripIndex.renewActiveTripForDriver.mockResolvedValue(false);
+    const { handlers, redis, roomEmit } = createHarness();
+    redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'driver:driver_1') {
+        return {
+          isOnline: 'true',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'IN_TRIP'
+        };
+      }
+      if (key === 'booking:booking_lease_rejected') {
+        return {
+          bookingId: 'booking_lease_rejected',
+          driverId: 'driver_1',
+          customerId: 'customer_1',
+          status: 'IN_PROGRESS'
+        };
+      }
+      return {};
+    });
+
+    await handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'started',
+      isInTrip: true,
+      seq: 1,
+      capturedAt: 1710000000000
+    });
+
+    expect(redis.xadd).not.toHaveBeenCalled();
+    expect(roomEmit).not.toHaveBeenCalled();
+    expect(redis.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
+  });
+
+  describe('safe stream retention', () => {
+    const { trimTripLocationStreamSafely } = registerSocketUpdateLocationHandler.__private__;
+
+    it('trims only entries older than the oldest pending id', async () => {
+      const redis = {
+        xlen: jest.fn().mockResolvedValue(500001),
+        xinfo: jest.fn().mockResolvedValue([
+          ['name', 'trip-location-workers', 'pending', 1, 'last-delivered-id', '900-0']
+        ]),
+        xpending: jest.fn().mockResolvedValue([1, '400-2', '400-2', [['worker-1', '1']]]),
+        xtrim: jest.fn().mockResolvedValue(120)
+      };
+
+      await expect(trimTripLocationStreamSafely(redis)).resolves.toEqual(
+        expect.objectContaining({
+          trimmed: 120,
+          safeBoundary: '400-2',
+          reason: 'safe_boundary_trimmed'
+        })
+      );
+      expect(redis.xtrim).toHaveBeenCalledWith(
+        'trip_location_events',
+        'MINID',
+        '~',
+        '400-2'
+      );
+    });
+
+    it('uses the oldest safe boundary across all consumer groups', async () => {
+      const redis = {
+        xlen: jest.fn().mockResolvedValue(600000),
+        xinfo: jest.fn().mockResolvedValue([
+          ['name', 'group-a', 'pending', 1, 'last-delivered-id', '900-0'],
+          ['name', 'group-b', 'pending', 0, 'last-delivered-id', '300-5']
+        ]),
+        xpending: jest.fn()
+          .mockResolvedValueOnce([1, '400-2', '400-2', [['worker-a', '1']]])
+          .mockResolvedValueOnce([0, null, null, []]),
+        xtrim: jest.fn().mockResolvedValue(10)
+      };
+
+      await trimTripLocationStreamSafely(redis);
+
+      expect(redis.xtrim).toHaveBeenCalledWith(
+        'trip_location_events',
+        'MINID',
+        '~',
+        '300-5'
+      );
+    });
+
+    it('keeps the stream intact when no consumer group proves a safe boundary', async () => {
+      const redis = {
+        xlen: jest.fn().mockResolvedValue(600000),
+        xinfo: jest.fn().mockResolvedValue([]),
+        xpending: jest.fn(),
+        xtrim: jest.fn()
+      };
+
+      await expect(trimTripLocationStreamSafely(redis)).resolves.toEqual(
+        expect.objectContaining({ reason: 'no_consumer_group', trimmed: 0 })
+      );
+      expect(redis.xpending).not.toHaveBeenCalled();
+      expect(redis.xtrim).not.toHaveBeenCalled();
+    });
+
+    it('does not trim unread entries when a group has not delivered anything', async () => {
+      const redis = {
+        xlen: jest.fn().mockResolvedValue(600000),
+        xinfo: jest.fn().mockResolvedValue([
+          ['name', 'trip-location-workers', 'pending', 0, 'last-delivered-id', '0-0']
+        ]),
+        xpending: jest.fn().mockResolvedValue([0, null, null, []]),
+        xtrim: jest.fn()
+      };
+
+      await expect(trimTripLocationStreamSafely(redis)).resolves.toEqual(
+        expect.objectContaining({ reason: 'unread_or_pending_boundary', trimmed: 0 })
+      );
+      expect(redis.xtrim).not.toHaveBeenCalled();
+    });
   });
 });

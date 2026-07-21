@@ -9,6 +9,60 @@ const {
 const {
     classifySupportTicketSeverity
 } = require('../services/support-severity-classifier');
+const { publishSupportEvent } = require('../services/support-realtime-publisher');
+const { serializeSupportTicket } = require('../services/support-visibility-policy');
+const supportTicketService = require('../services/support-ticket-service');
+const kycIdentityReviewWorkflowService = require('../services/kyc-identity-review-workflow-service');
+const {
+    resolveRidePersistenceScope,
+    resolveUserPersistenceScope,
+    assertRideParticipantsSharePersistenceScope
+} = require('../services/sandbox-persistence-context');
+
+const SUPPORT_SANDBOX_PERMISSION = 'support:sandbox';
+const KYC_IDENTITY_REVIEW_SOURCE = 'kyc_identity_mismatch_appeal';
+const SAFE_KYC_CONTEXT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const SAFE_KYC_REQUIREMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+function normalizeKycContextId(value) {
+    const normalized = String(value || '').trim();
+    return SAFE_KYC_CONTEXT_ID_PATTERN.test(normalized) ? normalized : null;
+}
+
+function normalizeKycRequirement(value) {
+    const normalized = String(value || '').trim().toUpperCase();
+    return SAFE_KYC_REQUIREMENT_PATTERN.test(normalized) ? normalized : null;
+}
+
+function resolveIdentityReviewTicketScope(data = {}, identity = {}) {
+    const source = String(data.source || '').trim().toLowerCase();
+    const evidenceId = normalizeKycContextId(data.kycEvidenceId);
+    const requested = source === KYC_IDENTITY_REVIEW_SOURCE || Boolean(evidenceId);
+    if (!requested) return null;
+
+    if (String(identity.userType || '').trim().toLowerCase() !== 'driver') {
+        const error = new Error('Revisao de identidade disponivel somente para o proprio motorista');
+        error.code = 'KYC_IDENTITY_REVIEW_DRIVER_REQUIRED';
+        throw error;
+    }
+    if (!evidenceId) {
+        return {
+            source: KYC_IDENTITY_REVIEW_SOURCE,
+            driverId: identity.userId,
+            reviewAvailable: false
+        };
+    }
+
+    return {
+        source: KYC_IDENTITY_REVIEW_SOURCE,
+        driverId: identity.userId,
+        kycEvidenceId: evidenceId,
+        kycReviewCaseId: normalizeKycContextId(data.kycReviewCaseId),
+        kycChallengeId: normalizeKycContextId(data.kycChallengeId),
+        requirement: normalizeKycRequirement(data.requirement),
+        reviewAvailable: data.reviewAvailable !== false
+    };
+}
 
 const INCIDENT_SEVERITY_RANK = {
     low: 1,
@@ -41,6 +95,25 @@ function strongerIncidentSeverity(left, right) {
     return INCIDENT_SEVERITY_RANK[safeLeft] >= INCIDENT_SEVERITY_RANK[safeRight]
         ? safeLeft
         : safeRight;
+}
+
+function isPersistenceBoundaryError(error) {
+    const code = String(error?.code || '');
+    return (
+        code.startsWith('PERSISTENCE_') ||
+        code.startsWith('FINANCIAL_') ||
+        code.startsWith('SANDBOX_')
+    );
+}
+
+function supportExplicitlyRequestsSandbox(data = {}) {
+    return [data.supportScope, data.persistenceScope]
+        .some((value) => String(value || '').trim().toLowerCase() === 'sandbox');
+}
+
+function supportCanAccessSandbox(identity = {}) {
+    const permissions = Array.isArray(identity.permissions) ? identity.permissions : [];
+    return permissions.includes('*') || permissions.includes(SUPPORT_SANDBOX_PERMISSION);
 }
 
 function resolveIncidentSeverity({ type, description, requestedSeverity, requesterIsAgent }) {
@@ -123,6 +196,32 @@ function registerSocketSafetySupportHandlers({
         };
     }
 
+    async function resolveIncidentPersistenceContext(bookingScope, identity) {
+        let persistenceContext = bookingScope.bookingId
+            ? resolveRidePersistenceScope(
+                bookingScope.participant?.scope?.raw ||
+                bookingScope.participant?.scope ||
+                {}
+            )
+            : await resolveUserPersistenceScope({
+                userId: identity.userId,
+                actor: identity
+            });
+
+        if (bookingScope.bookingId && persistenceContext.namespace === 'sandbox') {
+            persistenceContext = await assertRideParticipantsSharePersistenceScope(
+                persistenceContext,
+                {
+                    passengerId: bookingScope.participant?.scope?.customerId,
+                    driverId: bookingScope.participant?.scope?.driverId,
+                    requireBoth: true
+                }
+            );
+        }
+
+        return persistenceContext;
+    }
+
     // ==================== NOVOS EVENTOS - SISTEMA DE SEGURANÇA ====================
 
     // Reportar incidente
@@ -151,6 +250,10 @@ function registerSocketSafetySupportHandlers({
             if (!bookingScope.allowed) {
                 return;
             }
+            const persistenceContext = await resolveIncidentPersistenceContext(
+                bookingScope,
+                identity
+            );
 
             const severityResolution = resolveIncidentSeverity({
                 type,
@@ -170,7 +273,8 @@ function registerSocketSafetySupportHandlers({
                 description,
                 evidence: evidence || [],
                 location: location || null,
-                actorId: identity.userId
+                actorId: identity.userId,
+                persistenceContext
             });
 
             // Emitir confirmação
@@ -202,7 +306,9 @@ function registerSocketSafetySupportHandlers({
                 userId: socket.userId || socket.id,
                 error: error.message
             });
-            socket.emit('incidentReportError', { error: 'Erro interno do servidor' });
+            socket.emit('incidentReportError', isPersistenceBoundaryError(error)
+                ? { error: error.message, code: error.code }
+                : { error: 'Erro interno do servidor' });
         }
     });
 
@@ -232,6 +338,10 @@ function registerSocketSafetySupportHandlers({
             if (!bookingScope.allowed) {
                 return;
             }
+            const persistenceContext = await resolveIncidentPersistenceContext(
+                bookingScope,
+                identity
+            );
 
             const emergencyData = await safetyIncidentService.createIncident({
                 bookingId: bookingScope.bookingId || null,
@@ -244,7 +354,8 @@ function registerSocketSafetySupportHandlers({
                 description: message || 'Solicitação de emergência',
                 evidence: [],
                 location: location || null,
-                actorId: identity.userId
+                actorId: identity.userId,
+                persistenceContext
             });
 
             // Emitir confirmação
@@ -275,7 +386,9 @@ function registerSocketSafetySupportHandlers({
                 userId: socket.userId || socket.id,
                 error: error.message
             });
-            socket.emit('emergencyError', { error: 'Erro interno do servidor' });
+            socket.emit('emergencyError', isPersistenceBoundaryError(error)
+                ? { error: error.message, code: error.code }
+                : { error: 'Erro interno do servidor' });
         }
     });
 
@@ -368,6 +481,62 @@ function registerSocketSafetySupportHandlers({
             if (!bookingScope.allowed) {
                 return;
             }
+            let persistenceContext = bookingScope.bookingId
+                ? resolveRidePersistenceScope(bookingScope.participant?.scope?.raw || {})
+                : await resolveUserPersistenceScope({
+                    userId: identity.userId,
+                    actor: identity
+                });
+            const supportRequestedSandbox = supportExplicitlyRequestsSandbox(data);
+            if (!bookingScope.bookingId) {
+                if (isSupportActor(socket) && supportRequestedSandbox) {
+                    throw Object.assign(
+                        new Error('Ticket sandbox de agente exige uma corrida ou usuário sandbox autoritativo'),
+                        { code: 'SANDBOX_SUPPORT_CONTEXT_REQUIRED' }
+                    );
+                }
+                if (supportRequestedSandbox && persistenceContext.namespace !== 'sandbox') {
+                    throw Object.assign(
+                        new Error('Usuário não pertence ao namespace sandbox solicitado'),
+                        { code: 'SANDBOX_PERSISTENCE_SCOPE_MISMATCH' }
+                    );
+                }
+                if (isSupportActor(socket) && persistenceContext.namespace === 'sandbox') {
+                    throw Object.assign(
+                        new Error('Acesso sandbox de agente exige contexto autoritativo'),
+                        { code: 'SANDBOX_SUPPORT_CONTEXT_REQUIRED' }
+                    );
+                }
+            }
+            if (bookingScope.bookingId) {
+                if (bookingScope.participant?.participantRole === 'support') {
+                    if (supportRequestedSandbox && persistenceContext.namespace !== 'sandbox') {
+                        throw Object.assign(
+                            new Error('A corrida solicitada não pertence ao namespace sandbox'),
+                            { code: 'SANDBOX_PERSISTENCE_SCOPE_MISMATCH' }
+                        );
+                    }
+                    if (
+                        persistenceContext.namespace === 'sandbox' &&
+                        (!supportRequestedSandbox || !supportCanAccessSandbox(identity))
+                    ) {
+                        throw Object.assign(
+                            new Error('Acesso explícito ao suporte sandbox não autorizado'),
+                            { code: 'SANDBOX_PERSISTENCE_ACCESS_DENIED' }
+                        );
+                    }
+                }
+                persistenceContext = await assertRideParticipantsSharePersistenceScope(
+                    persistenceContext,
+                    {
+                        passengerId: bookingScope.participant?.scope?.customerId,
+                        driverId: bookingScope.participant?.scope?.driverId,
+                        requireBoth: persistenceContext.namespace === 'sandbox'
+                    }
+                );
+            }
+
+            const identityReviewScope = resolveIdentityReviewTicketScope(data, identity);
 
             const { ticket, queue } = await supportQueueService.createSupportTicket({
                 subject: data.subject || `${type} support request`,
@@ -377,10 +546,88 @@ function registerSocketSafetySupportHandlers({
                 requesterId: identity.userId,
                 userType: identity.userType || 'passenger',
                 metadata: {
-                    source: 'socket_support',
+                    source: identityReviewScope?.source || 'socket_support',
                     attachments: attachments || [],
-                    bookingId: bookingScope.bookingId || null
+                    bookingId: bookingScope.bookingId || null,
+                    ...(identityReviewScope || {}),
+                    ...(identityReviewScope?.kycEvidenceId
+                        ? {
+                            identityReviewLinkStatus: 'pending',
+                            identityReviewLinkAttempts: 0
+                        }
+                        : {})
+                },
+                persistenceContext
+            });
+
+            let identityReviewCase = null;
+            let identityReviewLinkError = null;
+            let identityReviewLinkAttempts = 0;
+            let persistedTicket = ticket;
+            if (identityReviewScope?.kycEvidenceId) {
+                for (let attempt = 1; attempt <= 2 && !identityReviewCase; attempt += 1) {
+                    identityReviewLinkAttempts = attempt;
+                    try {
+                        const reviewResult = await kycIdentityReviewWorkflowService.openCaseFromTicket({
+                            driverId: identity.userId,
+                            evidenceId: identityReviewScope.kycEvidenceId,
+                            ticketId: ticket.id,
+                            requestedBy: {
+                                uid: identity.userId,
+                                email: identity.email || null,
+                                type: 'driver'
+                            }
+                        });
+                        identityReviewCase = reviewResult?.case || null;
+                        identityReviewLinkError = null;
+                    } catch (reviewError) {
+                        identityReviewLinkError = reviewError;
+                    }
                 }
+
+                try {
+                    persistedTicket = await supportTicketService.updateTicketMetadata(ticket.id, {
+                        identityReviewLinkStatus: identityReviewCase?.caseId ? 'registered' : 'pending',
+                        identityReviewLinkAttempts,
+                        identityReviewCaseId: identityReviewCase?.caseId || null,
+                        identityReviewLinkUpdatedAt: new Date().toISOString()
+                    }, persistenceContext);
+                } catch (metadataError) {
+                    logStructured('error', 'Falha ao atualizar estado do vinculo KYC no ticket', {
+                        service: 'websocket',
+                        operation: 'createSupportTicketKycIdentityReviewMetadata',
+                        userId: identity.userId,
+                        ticketId: ticket.id,
+                        error: metadataError?.message || String(metadataError)
+                    });
+                }
+
+                if (!identityReviewCase) {
+                    // O ticket permanece válido para atendimento, mas nenhuma
+                    // decisão biométrica pode ocorrer sem o caso canônico. O
+                    // status pending permite reconciliação explícita no backoffice.
+                    logStructured('error', 'Falha ao vincular ticket ao caso KYC', {
+                        service: 'websocket',
+                        operation: 'createSupportTicketKycIdentityReview',
+                        userId: identity.userId,
+                        ticketId: ticket.id,
+                        code: identityReviewLinkError?.code || null,
+                        error: identityReviewLinkError?.message || String(identityReviewLinkError)
+                    });
+                }
+            }
+
+            const publicTicket = serializeSupportTicket(persistedTicket, { isAgent: false });
+            const realtimePayload = { ticket: publicTicket };
+            publishSupportEvent(io, {
+                dashboardEvent: persistenceContext.namespace === 'sandbox'
+                    ? null
+                    : 'support:ticket:new',
+                ownerEvent: 'support:ticket:new',
+                dashboardPayload: realtimePayload,
+                ownerPayload: realtimePayload,
+                userId: ticket.userId || identity.userId,
+                userType: ticket.userType || identity.userType
             });
 
             // Emitir confirmação
@@ -390,8 +637,12 @@ function registerSocketSafetySupportHandlers({
                 estimatedResponseTime: queue?.slaMinutes?.firstResponse || 240,
                 ackTargetAt: queue?.ackTargetAt || null,
                 firstResponseTargetAt: queue?.firstResponseTargetAt || null,
-                message: 'Ticket de suporte criado com sucesso',
-                data: ticket
+                reviewCaseId: identityReviewCase?.caseId || null,
+                identityReviewRegistered: Boolean(identityReviewCase?.caseId),
+                message: identityReviewScope?.kycEvidenceId && !identityReviewCase?.caseId
+                    ? 'Solicitacao recebida e aguardando vinculacao segura'
+                    : 'Ticket de suporte criado com sucesso',
+                data: publicTicket
             });
 
             logStructured('info', 'Ticket de suporte criado com sucesso', {
@@ -408,7 +659,9 @@ function registerSocketSafetySupportHandlers({
                 userId: socket.userId || socket.id,
                 error: error.message
             });
-            socket.emit('supportTicketError', { error: 'Erro interno do servidor' });
+            socket.emit('supportTicketError', isPersistenceBoundaryError(error)
+                ? { error: error.message, code: error.code }
+                : { error: 'Erro interno do servidor' });
         }
     });
 }

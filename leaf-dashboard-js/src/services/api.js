@@ -1,5 +1,8 @@
 import config from "@/src/config";
 import { authService } from "@/src/services/auth-service";
+import FinanceApiClient from "@/src/services/finance-api";
+import GeofenceApiClient from "@/src/services/geofence-api";
+import SupportApiClient from "@/src/services/support-api";
 
 class LeafApiService {
   constructor() {
@@ -7,6 +10,9 @@ class LeafApiService {
     this.timeoutMs = config.api.timeoutMs;
     this.supportOrchestratorBaseURL = config.supportOrchestrator?.baseUrl || "";
     this.supportOrchestratorTimeoutMs = config.supportOrchestrator?.timeoutMs || this.timeoutMs;
+    this.financeApi = new FinanceApiClient({ request: this.request.bind(this) });
+    this.geofenceApi = new GeofenceApiClient({ request: this.request.bind(this) });
+    this.supportApi = new SupportApiClient({ request: this.request.bind(this) });
   }
 
   async request(endpoint, options = {}) {
@@ -443,6 +449,20 @@ class LeafApiService {
     });
   }
 
+  async getTollCatalog(options = {}) {
+    const params = new URLSearchParams();
+    if (options.refresh) params.set("refresh", "true");
+    const suffix = params.toString();
+    return this.request(`/pricing/toll-catalog${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async updateTollCatalog(catalog = {}) {
+    return this.request("/pricing/toll-catalog", {
+      method: "PUT",
+      body: JSON.stringify(catalog),
+    });
+  }
+
   async getAlerts(limit = 20) {
     return this.request(`/alerts?limit=${encodeURIComponent(limit)}`);
   }
@@ -488,6 +508,63 @@ class LeafApiService {
 
   async getDriverDocuments(driverId) {
     return this.request(`/drivers/${driverId}/documents`);
+  }
+
+  async getDriverKycIdentityReviews(driverId) {
+    return this.request(`/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews`);
+  }
+
+  async reconcileDriverKycIdentityReview(driverId, payload = {}) {
+    return this.request(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/reconcile`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async getDriverKycIdentityEvidence(
+    driverId,
+    caseId,
+    evidenceKind,
+    { ticketId, justification, evidenceBindingHash } = {},
+  ) {
+    return this.requestFile(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceKind)}`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "image/jpeg,image/png,application/octet-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ticketId,
+          reason: justification,
+          evidenceBindingHash,
+        }),
+      },
+    );
+  }
+
+  async startDriverKycIdentityReview(driverId, caseId, payload = {}) {
+    return this.request(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/start`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async decideDriverKycIdentityReview(driverId, caseId, payload = {}) {
+    return this.request(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/decision`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   async getDriverDocumentReviewQueue(params = {}) {
@@ -597,34 +674,19 @@ class LeafApiService {
   }
 
   async getGeofenceAdminConfig() {
-    return this.request("/geofence/admin/config");
+    return this.geofenceApi.getGeofenceAdminConfig();
   }
 
   async updateGeofenceConfig(payload = {}) {
-    return this.request("/geofence/admin/config", {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
+    return this.geofenceApi.updateGeofenceConfig(payload);
   }
 
   async updateGeofenceState(stateCode, enabled) {
-    return this.request(`/geofence/admin/states/${encodeURIComponent(stateCode)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ enabled: Boolean(enabled) }),
-    });
+    return this.geofenceApi.updateGeofenceState(stateCode, enabled);
   }
 
   async updateGeofenceCity(stateCode, cityKey, payloadOrActive) {
-    const payload = (typeof payloadOrActive === "object" && payloadOrActive !== null)
-      ? payloadOrActive
-      : { active: Boolean(payloadOrActive) };
-    return this.request(
-      `/geofence/admin/cities/${encodeURIComponent(stateCode)}/${encodeURIComponent(cityKey)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      },
-    );
+    return this.geofenceApi.updateGeofenceCity(stateCode, cityKey, payloadOrActive);
   }
 
   async getReferralProgramsSummary() {
@@ -728,10 +790,7 @@ class LeafApiService {
   }
 
   async createGeofenceCity(payload = {}) {
-    return this.request("/geofence/admin/cities", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return this.geofenceApi.createGeofenceCity(payload);
   }
 
   async getNotifications() {
@@ -876,31 +935,19 @@ class LeafApiService {
   }
 
   async listFinancialReconciliationReports(params = {}) {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") {
-        query.append(key, String(value));
-      }
-    });
-    const suffix = query.toString();
-    return this.request(`/financial/reconciliation/reports${suffix ? `?${suffix}` : ""}`);
+    return this.financeApi.listFinancialReconciliationReports(params);
   }
 
   async getFinancialReconciliationRide(rideId) {
-    return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}`);
+    return this.financeApi.getFinancialReconciliationRide(rideId);
   }
 
   async runFinancialReconciliation(payload = {}) {
-    return this.request("/financial/reconciliation/run", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return this.financeApi.runFinancialReconciliation(payload);
   }
 
   async runFinancialReconciliationRide(rideId) {
-    return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}/run`, {
-      method: "POST",
-    });
+    return this.financeApi.runFinancialReconciliationRide(rideId);
   }
 
   async listPaymentRuntimeProfiles({ includeInactive = true } = {}) {
@@ -952,73 +999,40 @@ class LeafApiService {
     return this.request(`/audit/stats${suffix ? `?${suffix}` : ""}`);
   }
 
-  async getSupportTickets(params = {}) {
-    const query = new URLSearchParams();
-    if (params.status) query.append("status", params.status);
-    if (params.userId) query.append("userId", params.userId);
-    if (params.page) {
-      const limit = Number(params.limit || 100);
-      const offset = (Number(params.page) - 1) * limit;
-      query.append("offset", String(offset));
+  async getSupportTickets(params = {}, context = {}) {
+    const requestedScope = String(context?.scope || "operational").trim().toLowerCase();
+    if (requestedScope !== "operational") {
+      throw new Error("Chamados KYC só podem ser consultados no escopo operacional");
     }
-    if (params.limit) query.append("limit", String(params.limit));
-    if (params.priority) query.append("priority", params.priority);
-    if (params.category) query.append("category", params.category);
-
-    try {
-      const response = await this.request(`/support/admin/tickets?${query.toString()}`);
-      if (response && (response.tickets || response.success !== false)) return response;
-      throw new Error("Resposta inválida da API");
-    } catch {
-      return this.request(`/support/tickets?${query.toString()}`);
-    }
+    return this.supportApi.getSupportTickets(params);
   }
 
   async getSupportQueueSummary() {
-    return this.request("/support/queue/summary");
+    return this.supportApi.getSupportQueueSummary();
   }
 
   async getSupportQueueBacklog(params = {}) {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") {
-        query.append(key, String(value));
-      }
-    });
-    const suffix = query.toString();
-    return this.request(`/support/queue/backlog${suffix ? `?${suffix}` : ""}`);
+    return this.supportApi.getSupportQueueBacklog(params);
   }
 
   async assignSupportTicket(ticketId, agentId, agentName) {
-    return this.request(`/support/admin/tickets/${ticketId}/assign`, {
-      method: "POST",
-      body: JSON.stringify({ agentId, agentName }),
-    });
+    return this.supportApi.assignSupportTicket(ticketId, agentId, agentName);
   }
 
   async escalateSupportTicket(ticketId, reason) {
-    return this.request(`/support/admin/tickets/${ticketId}/escalate`, {
-      method: "POST",
-      body: JSON.stringify({ reason }),
-    });
+    return this.supportApi.escalateSupportTicket(ticketId, reason);
   }
 
   async resolveSupportTicket(ticketId, resolution = "") {
-    return this.request(`/support/admin/tickets/${ticketId}/resolve`, {
-      method: "POST",
-      body: JSON.stringify({ resolution }),
-    });
+    return this.supportApi.resolveSupportTicket(ticketId, resolution);
   }
 
   async getSupportMessages(ticketId) {
-    return this.request(`/support/tickets/${ticketId}/messages`);
+    return this.supportApi.getSupportMessages(ticketId);
   }
 
   async sendSupportMessage(ticketId, message, messageType = "text", attachments = []) {
-    return this.request(`/support/tickets/${ticketId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ message, messageType, attachments }),
-    });
+    return this.supportApi.sendSupportMessage(ticketId, message, messageType, attachments);
   }
 
   async createSupportTicket(
@@ -1029,64 +1043,42 @@ class LeafApiService {
     userInfo = {},
     metadata = {},
   ) {
-    return this.request("/support/tickets", {
-      method: "POST",
-      body: JSON.stringify({ subject, description, category, priority, userInfo, metadata }),
-    });
+    return this.supportApi.createSupportTicket(
+      subject,
+      description,
+      category,
+      priority,
+      userInfo,
+      metadata,
+    );
   }
 
   async getChatHistory(userId, limit = 50, { includeArchived = true } = {}) {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    if (!includeArchived) params.set("includeArchived", "false");
-    return this.request(`/support/chat/${userId}/history?${params.toString()}`);
+    return this.supportApi.getChatHistory(userId, limit, { includeArchived });
   }
 
   async getSupportChatInbox({ limit = 50, includeClosed = false } = {}) {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    if (includeClosed) params.set("includeClosed", "true");
-    return this.request(`/support/chat/inbox?${params.toString()}`);
+    return this.supportApi.getSupportChatInbox({ limit, includeClosed });
   }
 
   async getChatStatus(userId) {
-    return this.request(`/support/chat/${userId}/status`);
+    return this.supportApi.getChatStatus(userId);
   }
 
   async markChatRead(userId, messageIds = []) {
-    return this.request(`/support/chat/${userId}/mark-read`, {
-      method: "POST",
-      body: JSON.stringify({ messageIds }),
-    });
+    return this.supportApi.markChatRead(userId, messageIds);
   }
 
   async sendChatMessage(userId, message) {
-    return this.request(`/support/chat/${userId}/message`, {
-      method: "POST",
-      body: JSON.stringify({ message, senderType: "agent" }),
-    });
+    return this.supportApi.sendChatMessage(userId, message);
   }
 
   async convertChatToTicket(userId, payload = {}, options = {}) {
-    const idempotencyKey = options.idempotencyKey || payload.idempotencyKey;
-    const headers = idempotencyKey
-      ? {
-          "Idempotency-Key": idempotencyKey,
-          "X-Idempotency-Key": idempotencyKey,
-        }
-      : undefined;
-    return this.request(`/support/chat/${userId}/convert-ticket`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(idempotencyKey ? { ...payload, idempotencyKey } : payload),
-    });
+    return this.supportApi.convertChatToTicket(userId, payload, options);
   }
 
   async closeChat(userId, closedBy = "agent") {
-    return this.request(`/support/chat/${userId}/close`, {
-      method: "POST",
-      body: JSON.stringify({ closedBy }),
-    });
+    return this.supportApi.closeChat(userId, closedBy);
   }
 }
 

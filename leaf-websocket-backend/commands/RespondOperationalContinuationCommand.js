@@ -21,6 +21,21 @@ const {
   buildInterruptedOperationalEndedSettlement
 } = require('../services/ride-settlement-service');
 
+async function applyDeferredIdentityReverification(driverId, context = {}) {
+  try {
+    const kycPolicyService = require('../services/kyc-policy-service');
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') return;
+    await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
+  } catch (error) {
+    logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos fim da interrupcao operacional', {
+      service: 'respond-operational-continuation-command',
+      bookingId: context.tripId || null,
+      driverId,
+      error: error.message
+    });
+  }
+}
+
 class RespondOperationalContinuationCommand extends Command {
   constructor(data) {
     super(data);
@@ -221,7 +236,23 @@ class RespondOperationalContinuationCommand extends Command {
         await redis.hdel('bookings:active', this.bookingId);
 
         if (interruptedDriverId) {
-          await clearActiveTripForDriver(redis, interruptedDriverId, this.bookingId);
+          const activeTripCleared = await clearActiveTripForDriver(
+            redis,
+            interruptedDriverId,
+            this.bookingId
+          );
+          if (activeTripCleared) {
+            await applyDeferredIdentityReverification(interruptedDriverId, {
+              source: 'ride_interrupted_operational_ended',
+              tripId: this.bookingId
+            });
+          } else {
+            logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida continuada', {
+              service: 'respond-operational-continuation-command',
+              bookingId: this.bookingId,
+              driverId: interruptedDriverId
+            });
+          }
         }
 
         setImmediate(async () => {

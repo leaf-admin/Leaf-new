@@ -564,11 +564,23 @@ class CompleteTripCommand extends Command {
 
                 // ✅ NOVO: Remover da lista de corridas ativas
                 await redis.hdel('bookings:active', this.bookingId);
-                await clearActiveTripForDriver(redis, this.driverId, this.bookingId);
-                await applyDeferredIdentityReverification(this.driverId, {
-                    source: 'ride_completed',
-                    tripId: this.bookingId
-                });
+                const activeTripCleared = await clearActiveTripForDriver(
+                    redis,
+                    this.driverId,
+                    this.bookingId
+                );
+                if (activeTripCleared) {
+                    await applyDeferredIdentityReverification(this.driverId, {
+                        source: 'ride_completed',
+                        tripId: this.bookingId
+                    });
+                } else {
+                    logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida concluida', {
+                        service: 'complete-trip-command',
+                        bookingId: this.bookingId,
+                        driverId: this.driverId
+                    });
+                }
                 await pricingH3ReadModelService.clearBookingSnapshot(redis, this.bookingId).catch(() => null);
 
                 const refreshedDriverState = await redis.hgetall(`driver:${this.driverId}`);

@@ -22,6 +22,21 @@ const {
   buildAuthoritativeCompletionArtifacts
 } = require('../services/ride-settlement-service');
 
+async function applyDeferredIdentityReverification(driverId, context = {}) {
+  try {
+    const kycPolicyService = require('../services/kyc-policy-service');
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') return;
+    await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
+  } catch (error) {
+    logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos encerramento antecipado', {
+      service: 'end-ride-early-command',
+      bookingId: context.tripId || null,
+      driverId,
+      error: error.message
+    });
+  }
+}
+
 class EndRideEarlyByRiderCommand extends Command {
   constructor(data) {
     super(data);
@@ -167,7 +182,23 @@ class EndRideEarlyByRiderCommand extends Command {
         );
         await redis.hdel('bookings:active', this.bookingId);
         if (driverId) {
-          await clearActiveTripForDriver(redis, driverId, this.bookingId);
+          const activeTripCleared = await clearActiveTripForDriver(
+            redis,
+            driverId,
+            this.bookingId
+          );
+          if (activeTripCleared) {
+            await applyDeferredIdentityReverification(driverId, {
+              source: 'ride_early_ended_by_rider',
+              tripId: this.bookingId
+            });
+          } else {
+            logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida encerrada', {
+              service: 'end-ride-early-command',
+              bookingId: this.bookingId,
+              driverId
+            });
+          }
         }
 
         setImmediate(async () => {

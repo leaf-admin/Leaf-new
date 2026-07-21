@@ -4,6 +4,10 @@ const firebaseConfig = require('../firebase-config');
 const RedisScan = require('../utils/redis-scan');
 const { logStructured, logError } = require('../utils/logger');
 
+const DEFAULT_WORKER_HEALTH_KEY = 'leaf:runtime:trip-location-worker:health';
+const DEFAULT_WORKER_HEALTH_TTL_SECONDS = 90;
+const WORKER_HEALTH_STATUSES = new Set(['healthy', 'idle', 'degraded']);
+
 class TripLocationPersistenceService {
     constructor() {
         this.chunkSize = Number.parseInt(process.env.TRIP_LOCATION_CHUNK_SIZE || '30', 10);
@@ -15,6 +19,17 @@ class TripLocationPersistenceService {
         this.chunkRetentionDays = Number.parseInt(process.env.TRIP_LOCATION_CHUNK_RETENTION_DAYS || '30', 10);
         this.chunkRetentionMs = this.chunkRetentionDays * 24 * 60 * 60 * 1000;
         this.enableFirestorePersistence = process.env.ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE !== 'false';
+        this.workerHealthKey = String(
+            process.env.TRIP_LOCATION_WORKER_HEALTH_KEY || DEFAULT_WORKER_HEALTH_KEY
+        ).trim() || DEFAULT_WORKER_HEALTH_KEY;
+        this.workerHealthTtlSeconds = Math.max(
+            30,
+            Number.parseInt(
+                process.env.TRIP_LOCATION_WORKER_HEALTH_TTL_SECONDS
+                    || String(DEFAULT_WORKER_HEALTH_TTL_SECONDS),
+                10
+            ) || DEFAULT_WORKER_HEALTH_TTL_SECONDS
+        );
     }
 
     getBufferKey(tripId) {
@@ -41,6 +56,46 @@ class TripLocationPersistenceService {
     async getRedis() {
         await redisPool.ensureConnection();
         return redisPool.getConnection();
+    }
+
+    async publishWorkerHealth(status, counters = {}, redisClient = null) {
+        const normalizedStatus = String(status || '').trim().toLowerCase();
+        if (!WORKER_HEALTH_STATUSES.has(normalizedStatus)) {
+            throw new Error('Status de saúde inválido para trip-location-worker');
+        }
+
+        const redis = redisClient || await this.getRedis();
+        const payload = {
+            status: normalizedStatus,
+            heartbeatAt: String(Date.now()),
+            processedTrips: String(Math.max(0, Number(counters.processedTrips) || 0)),
+            flushedPoints: String(Math.max(0, Number(counters.flushedPoints) || 0)),
+            failures: String(Math.max(0, Number(counters.failures) || 0))
+        };
+
+        await redis.hset(this.workerHealthKey, payload);
+        await redis.expire(this.workerHealthKey, this.workerHealthTtlSeconds);
+
+        return payload;
+    }
+
+    async tryMarkWorkerDegraded(counters = {}, redisClient = null) {
+        try {
+            await this.publishWorkerHealth('degraded', {
+                ...counters,
+                failures: Math.max(1, Number(counters.failures) || 0)
+            }, redisClient);
+            return true;
+        } catch (healthError) {
+            logStructured('warn', 'Não foi possível publicar saúde degradada do trip-location-worker', {
+                service: 'trip-location-persistence',
+                operation: 'worker-health-heartbeat',
+                errorCode: /^[A-Z0-9_-]{1,64}$/.test(String(healthError?.code || ''))
+                    ? String(healthError.code)
+                    : null
+            });
+            return false;
+        }
     }
 
     getFirestore() {
@@ -310,46 +365,78 @@ class TripLocationPersistenceService {
     }
 
     async flushPendingTrips(maxTrips = this.flushMaxTripsPerCycle) {
-        const redis = await this.getRedis();
-        const keys = await RedisScan.scanKeys(redis, 'trip_loc_buffer:*', 200);
-        const selectedKeys = keys.slice(0, maxTrips);
-
+        let redis = null;
         let processedTrips = 0;
         let flushedPoints = 0;
         let failures = 0;
 
-        for (const key of selectedKeys) {
-            const tripId = key.replace('trip_loc_buffer:', '');
-            if (!tripId) {
-                continue;
+        try {
+            redis = await this.getRedis();
+
+            if (this.enableFirestorePersistence && !this.getFirestore()) {
+                failures = 1;
+                const result = {
+                    success: false,
+                    processedTrips,
+                    flushedPoints,
+                    failures,
+                    reason: 'firestore_unavailable'
+                };
+
+                await this.publishWorkerHealth('degraded', result, redis);
+                return result;
             }
-            processedTrips += 1;
-            try {
-                const result = await this.flushTripChunks(tripId, {
-                    force: false,
-                    maxChunks: 1,
-                    reason: 'periodic'
-                });
-                if (!result.success) {
-                    failures += 1;
+
+            const keys = await RedisScan.scanKeys(redis, 'trip_loc_buffer:*', 200);
+            const selectedKeys = keys.slice(0, maxTrips);
+
+            for (const key of selectedKeys) {
+                const tripId = key.replace('trip_loc_buffer:', '');
+                if (!tripId) {
                     continue;
                 }
-                flushedPoints += result.flushedPoints || 0;
-            } catch (error) {
-                failures += 1;
-                logError(error, 'Falha ao flush periódico de trip location', {
-                    service: 'trip-location-persistence',
-                    tripId
-                });
+                processedTrips += 1;
+                try {
+                    const result = await this.flushTripChunks(tripId, {
+                        force: false,
+                        maxChunks: 1,
+                        reason: 'periodic'
+                    });
+                    if (!result.success) {
+                        failures += 1;
+                        continue;
+                    }
+                    flushedPoints += result.flushedPoints || 0;
+                } catch (error) {
+                    failures += 1;
+                    logError(error, 'Falha ao flush periódico de trip location', {
+                        service: 'trip-location-persistence',
+                        tripId
+                    });
+                }
             }
-        }
 
-        return {
-            success: true,
-            processedTrips,
-            flushedPoints,
-            failures
-        };
+            const success = failures === 0;
+            const status = success
+                ? (processedTrips === 0 ? 'idle' : 'healthy')
+                : 'degraded';
+            const result = {
+                success,
+                processedTrips,
+                flushedPoints,
+                failures
+            };
+
+            await this.publishWorkerHealth(status, result, redis);
+            return result;
+        } catch (error) {
+            await this.tryMarkWorkerDegraded({
+                processedTrips,
+                flushedPoints,
+                failures
+            }, redis);
+            throw error;
+        }
     }
 }
 

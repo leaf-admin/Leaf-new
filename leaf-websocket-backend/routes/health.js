@@ -10,8 +10,10 @@ const healthCheckService = require('../services/health-check-service');
 const { logStructured, logError } = require('../utils/logger');
 const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
 const { getPublicPilotAccessSnapshot } = require('../services/pilot-access-control-service');
+const redisCriticalAuthorityService = require('../services/redis-critical-authority-service');
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
 const FALSY_VALUES = new Set(['0', 'false', 'no', 'off', 'nao', 'não']);
+const MIN_AWS_COMPARE_FACES_APPROVE_THRESHOLD = 0.95;
 
 function envBool(name, fallback = false) {
   const rawValue = process.env[name];
@@ -68,14 +70,297 @@ function buildPushSection() {
   };
 }
 
-function buildKycSection() {
+function publicRedisAuthorityAttestation(attestation) {
+  if (!attestation) return null;
   return {
-    configured: presence('KYC_PRODUCTION_BIOMETRICS_ENABLED') || presence('KYC_AWS_LIVENESS_ENABLED'),
+    ready: attestation.ready === true,
+    status: attestation.status || 'unknown',
+    quarantined: attestation.quarantined === true,
+    checkedAt: attestation.checkedAt || null,
+    blockers: Array.isArray(attestation.blockers) ? attestation.blockers : [],
+    configuration: attestation.configuration || null,
+    dataset: attestation.dataset || null,
+    redis: attestation.redis || null,
+    memory: attestation.memory || null,
+    streams: attestation.streams || null,
+    cache: attestation.cache || null
+  };
+}
+
+async function collectRedisAuthorityAttestation() {
+  const authorityMode = String(
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || ''
+  ).trim().toLowerCase();
+  if (authorityMode !== 'redis_noeviction') return null;
+  return redisCriticalAuthorityService.attest();
+}
+
+function isRedisAuthorityAttestationReady(attestation) {
+  const criticalPercent = attestation?.configuration?.thresholds?.criticalPercent;
+  const memoryUsagePercent = attestation?.memory?.usagePercent;
+  return attestation?.ready === true
+    && attestation?.quarantined === false
+    && attestation?.configuration?.enabled === true
+    && attestation?.configuration?.quarantineEnabled === true
+    && attestation?.configuration?.generationConfigured === true
+    && attestation?.configuration?.generationKeyValid === true
+    && attestation?.configuration?.thresholdPolicyMatches === true
+    && attestation?.dataset?.markerPresent === true
+    && attestation?.dataset?.generationMatches === true
+    && attestation?.dataset?.markerPersistent === true
+    && attestation?.redis?.maxmemoryPolicy === 'noeviction'
+    && attestation?.redis?.appendonly === 'yes'
+    && attestation?.redis?.appendfsync === 'everysec'
+    && attestation?.redis?.aofEnabled === 1
+    && attestation?.redis?.aofLastWriteStatus === 'ok'
+    && attestation?.redis?.evictedKeys === 0
+    && Number.isFinite(criticalPercent)
+    && criticalPercent === 85
+    && Number.isFinite(memoryUsagePercent)
+    && memoryUsagePercent < criticalPercent
+    && attestation?.memory?.maxmemoryMatchesApproved === true
+    && (
+      attestation?.configuration?.tripLocationStreamEnabled !== true
+      || (
+        attestation?.streams?.tripLocation?.consumerGroupPresent === true
+        && attestation?.streams?.tripLocation?.consumerActive === true
+      )
+    );
+}
+
+function buildAcceptRideAuthoritySection(redisAuthorityAttestation = null) {
+  const mode = String(
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || ''
+  ).trim().toLowerCase();
+  const valid = mode === '' || mode === 'redis_noeviction';
+  const required = mode === 'redis_noeviction';
+
+  return {
+    valid,
+    required,
+    mode: mode || null,
+    ready: valid && required && isRedisAuthorityAttestationReady(redisAuthorityAttestation),
+    attestation: required
+      ? publicRedisAuthorityAttestation(redisAuthorityAttestation)
+      : null
+  };
+}
+
+function buildKycStrictReadinessRequirement() {
+  const launchProfile = getPilotLaunchFlags().launchProfile;
+  const triggers = {
+    pilotControlledProfile:
+      launchProfile === 'pilot_controlled'
+      || envBool('LEAF_PILOT_CONTROLLED', false),
+    productionBiometrics: envBool('KYC_PRODUCTION_BIOMETRICS_ENABLED', false),
+    strictProductionMode: envBool('KYC_STRICT_PRODUCTION_MODE', false),
+    awsLiveness: envBool('KYC_AWS_LIVENESS_ENABLED', false)
+      || envBool('AWS_LIVENESS_ENABLED', false),
+    awsLivenessCredentials: envBool('KYC_AWS_LIVENESS_CREDENTIALS_ENABLED', false),
+    awsCompareFaces: envBool('KYC_AWS_COMPARE_FACES_ENABLED', false),
+    adaptiveCadence: envBool('KYC_TRUST_CADENCE_ENABLED', false),
+    onlineGate: envBool('DAILY_KYC_ONLINE_GATE_ENABLED', false)
+  };
+
+  return {
+    required: Object.values(triggers).some(Boolean),
+    triggers
+  };
+}
+
+function buildKycSection(redisAuthorityAttestation = null) {
+  const adaptiveCadenceEnabled = envBool('KYC_TRUST_CADENCE_ENABLED', false);
+  const trustPolicyVersion = String(
+    process.env.KYC_TRUST_POLICY_VERSION || (
+      adaptiveCadenceEnabled
+        ? 'driver_identity_recurring_v2'
+        : 'driver_identity_recurring_v1'
+    )
+  ).trim();
+  const newMaxAgeHours = Number(process.env.KYC_TRUST_T0_MAX_AGE_HOURS || 24);
+  const observedMaxAgeHours = Number(process.env.KYC_TRUST_T1_MAX_AGE_HOURS || 72);
+  const trustedMaxAgeHours = Number(process.env.KYC_TRUST_T2_MAX_AGE_HOURS || 168);
+  const randomAuditPercent = Number(process.env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT || 10);
+  const observedMinDistinctSuccessDays = Number(
+    process.env.KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS || 7
+  );
+  const trustedMinAgeDays = Number(process.env.KYC_TRUST_T2_MIN_AGE_DAYS || 30);
+  const trustedMinSuccessCount = Number(process.env.KYC_TRUST_T2_MIN_SUCCESS_COUNT || 14);
+  const trustedMinDistinctSuccessDays = Number(
+    process.env.KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS || 14
+  );
+  const trustPromotionRequirementsValid =
+    Number.isInteger(observedMinDistinctSuccessDays)
+    && observedMinDistinctSuccessDays >= 2
+    && observedMinDistinctSuccessDays <= 30
+    && Number.isInteger(trustedMinAgeDays)
+    && trustedMinAgeDays >= 7
+    && trustedMinAgeDays <= 365
+    && Number.isInteger(trustedMinSuccessCount)
+    && trustedMinSuccessCount >= 2
+    && trustedMinSuccessCount <= 365
+    && Number.isInteger(trustedMinDistinctSuccessDays)
+    && trustedMinDistinctSuccessDays >= observedMinDistinctSuccessDays
+    && trustedMinDistinctSuccessDays <= trustedMinSuccessCount;
+  const approvedAdaptiveCadencePolicyValid = !adaptiveCadenceEnabled || (
+    trustPolicyVersion === 'driver_identity_recurring_v2'
+    && randomAuditPercent === 10
+    && newMaxAgeHours === 24
+    && observedMaxAgeHours === 72
+    && trustedMaxAgeHours === 168
+    && observedMinDistinctSuccessDays === 7
+    && trustedMinAgeDays === 30
+    && trustedMinSuccessCount === 14
+    && trustedMinDistinctSuccessDays === 14
+    && trustPromotionRequirementsValid
+  );
+  const faceCompareProvider = String(
+    process.env.KYC_FACE_COMPARE_PROVIDER || 'leaf_face_compare_service'
+  ).trim().toLowerCase();
+  const awsCompareFacesConfigured = faceCompareProvider === 'aws_rekognition_compare_faces'
+    && envBool('KYC_AWS_COMPARE_FACES_ENABLED', false);
+  const awsCompareApproveThreshold = Number(
+    process.env.KYC_AWS_COMPARE_FACES_APPROVE_THRESHOLD ?? MIN_AWS_COMPARE_FACES_APPROVE_THRESHOLD
+  );
+  const awsCompareReviewThreshold = Number(
+    process.env.KYC_AWS_COMPARE_FACES_REVIEW_THRESHOLD ?? 0.80
+  );
+  const awsCompareApproveThresholdValid = faceCompareProvider !== 'aws_rekognition_compare_faces'
+    || (
+      Number.isFinite(awsCompareApproveThreshold)
+      && awsCompareApproveThreshold >= MIN_AWS_COMPARE_FACES_APPROVE_THRESHOLD
+      && awsCompareApproveThreshold <= 1
+    );
+  const awsCompareThresholdsValid = faceCompareProvider !== 'aws_rekognition_compare_faces'
+    || (
+      awsCompareApproveThresholdValid
+      && Number.isFinite(awsCompareReviewThreshold)
+      && awsCompareReviewThreshold >= 0
+      && awsCompareReviewThreshold < awsCompareApproveThreshold
+    );
+  const faceServiceConfigured = presence('BIOMETRIC_FACE_SERVICE_URL');
+  const awsCredentialSource = String(process.env.KYC_AWS_CREDENTIAL_SOURCE || '')
+    .trim()
+    .toLowerCase();
+  const awsBaseCredentialsConfigured = awsCredentialSource === 'ambient' || (
+    awsCredentialSource === 'static'
+    && presence('AWS_ACCESS_KEY_ID')
+    && presence('AWS_SECRET_ACCESS_KEY')
+  );
+  const canonicalReferenceImageMode = presence('KYC_AWS_LIVENESS_S3_BUCKET')
+    || presence('AWS_LIVENESS_S3_BUCKET')
+    ? 's3_unsupported'
+    : 'inline_bytes';
+  const acceptRideAuthority = buildAcceptRideAuthoritySection(redisAuthorityAttestation);
+  const activeTripAuthorityMode = acceptRideAuthority.mode;
+  const activeTripAuthorityReady = acceptRideAuthority.ready;
+  const strictReadiness = buildKycStrictReadinessRequirement();
+  const awsCostDailyLimitUsd = Number(process.env.KYC_AWS_COST_DAILY_LIMIT_USD);
+  const awsCostMonthlyLimitUsd = Number(process.env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
+  const awsCostLimitsValid = Number.isFinite(awsCostDailyLimitUsd)
+    && Number.isFinite(awsCostMonthlyLimitUsd)
+    && awsCostDailyLimitUsd > 0
+    && awsCostMonthlyLimitUsd > 0
+    && awsCostDailyLimitUsd <= awsCostMonthlyLimitUsd;
+  const awsCostOperationRetentionDays = Number(
+    process.env.KYC_AWS_COST_OPERATION_RETENTION_DAYS ?? 35
+  );
+  const awsCostRetentionValid = Number.isInteger(awsCostOperationRetentionDays)
+    && awsCostOperationRetentionDays >= 1
+    && awsCostOperationRetentionDays <= 400;
+  const awsCompareResultPersistenceAttempts = Number(
+    process.env.KYC_AWS_COMPARE_RESULT_PERSIST_MAX_ATTEMPTS ?? 3
+  );
+  const awsCompareResultPersistenceValid = Number.isInteger(awsCompareResultPersistenceAttempts)
+    && awsCompareResultPersistenceAttempts >= 1
+    && awsCompareResultPersistenceAttempts <= 5;
+  const awsLivenessRetryDelaySeconds = Number(
+    process.env.KYC_AWS_LIVENESS_IDEMPOTENT_RETRY_DELAY_SECONDS ?? 2
+  );
+  const awsLivenessRetryWindowSeconds = Number(
+    process.env.KYC_AWS_LIVENESS_IDEMPOTENT_RETRY_WINDOW_SECONDS ?? 120
+  );
+  const awsLivenessIdempotentRetryValid = Number.isInteger(awsLivenessRetryDelaySeconds)
+    && Number.isInteger(awsLivenessRetryWindowSeconds)
+    && awsLivenessRetryDelaySeconds >= 0
+    && awsLivenessRetryDelaySeconds <= 30
+    && awsLivenessRetryWindowSeconds >= 30
+    && awsLivenessRetryWindowSeconds <= 150
+    && awsLivenessRetryDelaySeconds < awsLivenessRetryWindowSeconds;
+  return {
+    configured:
+      presence('KYC_PRODUCTION_BIOMETRICS_ENABLED')
+      || presence('KYC_STRICT_PRODUCTION_MODE')
+      || presence('KYC_AWS_LIVENESS_ENABLED')
+      || presence('KYC_TRUST_CADENCE_ENABLED'),
     productionBiometricsEnabled: envBool('KYC_PRODUCTION_BIOMETRICS_ENABLED', false),
+    strictProductionMode: envBool('KYC_STRICT_PRODUCTION_MODE', false),
     awsLivenessConfigured: envBool('KYC_AWS_LIVENESS_ENABLED', false) || envBool('AWS_LIVENESS_ENABLED', false),
-    faceServiceConfigured: presence('BIOMETRIC_FACE_SERVICE_URL'),
+    awsLivenessCredentialsEnabled: envBool('KYC_AWS_LIVENESS_CREDENTIALS_ENABLED', false),
+    awsLivenessIdempotentRetryValid,
+    awsLivenessRetryDelaySeconds,
+    awsLivenessRetryWindowSeconds,
+    awsAssumeRoleConfigured: presence('KYC_AWS_LIVENESS_ASSUME_ROLE_ARN')
+      || presence('AWS_LIVENESS_ASSUME_ROLE_ARN'),
+    awsAssumeRoleExternalIdConfigured: presence('KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID')
+      || presence('AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID'),
+    awsStsSessionNamePrefixConfigured:
+      String(process.env.KYC_AWS_LIVENESS_STS_SESSION_NAME_PREFIX || '').trim() === 'leaf-liveness',
+    awsCredentialSource,
+    awsBaseCredentialsConfigured,
+    faceCompareProvider,
+    faceServiceConfigured,
+    awsCompareFacesConfigured,
+    awsCompareApproveThreshold,
+    awsCompareReviewThreshold,
+    awsCompareApproveThresholdValid,
+    awsCompareThresholdsValid,
+    awsCostGuardEnabled: envBool('KYC_AWS_COST_GUARD_ENABLED', false),
+    awsCostLimitsValid,
+    awsCostRetentionValid,
+    awsCostOperationRetentionDays,
+    awsCompareResultPersistenceValid,
+    awsCostTimeZoneUtc:
+      String(process.env.KYC_AWS_COST_TIME_ZONE || '').trim().toUpperCase() === 'UTC',
+    canonicalFaceCompareConfigured: awsCompareFacesConfigured || (
+      ['leaf_face_compare_service', 'biometric-face-service'].includes(faceCompareProvider)
+      && faceServiceConfigured
+    ),
     cnhFaceBiometricsConfigured: envBool('ENABLE_CNH_FACE_BIOMETRICS', false),
-    requireTrustedBiometricMatch: envBool('KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH', false)
+    legacyCnhEmbeddingDisabled: !envBool('ENABLE_CNH_FACE_BIOMETRICS', false),
+    requireTrustedBiometricMatch: envBool('KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH', false),
+    onlineGateEnabled: envBool('DAILY_KYC_ONLINE_GATE_ENABLED', false),
+    adaptiveCadenceEnabled,
+    activeTripIndexEnabled: envBool('ENABLE_ACTIVE_TRIP_INDEX', true),
+    strictReadinessRequired: strictReadiness.required,
+    strictReadinessTriggers: strictReadiness.triggers,
+    activeTripAuthorityMode,
+    activeTripAuthorityReady,
+    activeTripAuthorityAttestation: acceptRideAuthority.attestation,
+    trustPolicyVersion,
+    cadenceHours: {
+      new: newMaxAgeHours,
+      observed: observedMaxAgeHours,
+      trusted: trustedMaxAgeHours
+    },
+    trustPromotionRequirements: {
+      observedMinDistinctSuccessDays,
+      trustedMinAgeDays,
+      trustedMinSuccessCount,
+      trustedMinDistinctSuccessDays
+    },
+    trustPromotionRequirementsValid,
+    approvedAdaptiveCadencePolicyValid,
+    trustedRandomAuditPercent: Number.isFinite(randomAuditPercent)
+      ? Math.min(100, Math.max(0, randomAuditPercent))
+      : 10,
+    trustedRandomAuditPercentValid:
+      Number.isFinite(randomAuditPercent)
+      && randomAuditPercent > 0
+      && randomAuditPercent <= 100,
+    verificationDuringActiveRide: false,
+    canonicalReferenceImageCompare: true,
+    canonicalReferenceImageMode
   };
 }
 
@@ -102,14 +387,16 @@ function buildSocketSection() {
   };
 }
 
-function buildRoleReadiness(health) {
+async function buildRoleReadiness(health) {
   const runtimeRole = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
   const enforceRoleReadiness =
     String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production' ||
     envBool('HEALTH_ENFORCE_ROLE_READINESS', false);
   const firebase = buildFirebaseSection();
   const push = buildPushSection();
-  const kyc = buildKycSection();
+  const redisAuthorityAttestation = await collectRedisAuthorityAttestation();
+  const acceptRideAuthority = buildAcceptRideAuthoritySection(redisAuthorityAttestation);
+  const kyc = buildKycSection(redisAuthorityAttestation);
   const maps = buildMapsSection();
   const socket = buildSocketSection();
   const pilotAccess = getPublicPilotAccessSnapshot();
@@ -126,11 +413,40 @@ function buildRoleReadiness(health) {
     ),
     mapsConfigured: runtimeRole !== 'gateway' || maps.backendOnly,
     fcmConfigured: runtimeRole !== 'gateway' || push.fcmConfigured,
-    kycStrict: runtimeRole !== 'gateway' || (
+    redisAcceptAuthority: runtimeRole !== 'gateway'
+      || (
+        acceptRideAuthority.valid
+        && (
+          (!acceptRideAuthority.required && !kyc.strictReadinessRequired)
+          || acceptRideAuthority.ready
+        )
+      ),
+    kycStrict: runtimeRole !== 'gateway' || !kyc.strictReadinessRequired || (
       kyc.productionBiometricsEnabled &&
+      kyc.strictProductionMode &&
       kyc.awsLivenessConfigured &&
-      kyc.faceServiceConfigured &&
+      kyc.awsLivenessCredentialsEnabled &&
+      kyc.awsLivenessIdempotentRetryValid &&
+      kyc.awsAssumeRoleConfigured &&
+      kyc.awsAssumeRoleExternalIdConfigured &&
+      kyc.awsStsSessionNamePrefixConfigured &&
+      kyc.awsBaseCredentialsConfigured &&
+      kyc.canonicalFaceCompareConfigured &&
+      kyc.awsCompareThresholdsValid &&
+      kyc.awsCostGuardEnabled &&
+      kyc.awsCostLimitsValid &&
+      kyc.awsCostRetentionValid &&
+      kyc.awsCompareResultPersistenceValid &&
+      kyc.awsCostTimeZoneUtc &&
+      (kyc.faceCompareProvider !== 'aws_rekognition_compare_faces' || kyc.legacyCnhEmbeddingDisabled) &&
       kyc.requireTrustedBiometricMatch &&
+      kyc.onlineGateEnabled &&
+      kyc.adaptiveCadenceEnabled &&
+      kyc.activeTripIndexEnabled &&
+      kyc.trustPromotionRequirementsValid &&
+      kyc.approvedAdaptiveCadencePolicyValid &&
+      kyc.trustedRandomAuditPercentValid &&
+      kyc.canonicalReferenceImageMode === 'inline_bytes' &&
       !envBool('MOBILE_FACE_EMBEDDING_ENABLED', true)
     ),
     pilotPassengerCohortConfigured: !pilotAccess.pilotControlled || pilotAccess.passengerCohortConfigured,
@@ -155,7 +471,7 @@ function buildRoleReadiness(health) {
   };
 }
 
-function buildRuntimeFlagsPayload() {
+async function buildRuntimeFlagsPayload() {
   const appReview = envBool('APP_REVIEW', false);
   const wooviEnvironment = String(process.env.WOOVI_ENVIRONMENT || '').trim().toLowerCase();
   const wooviBaseUrl = String(process.env.WOOVI_BASE_URL || '').trim();
@@ -185,6 +501,10 @@ function buildRuntimeFlagsPayload() {
   if (authTestOtpBypassEnabled) blockers.push('AUTH_TEST_OTP_BYPASS_ENABLED=true');
   if (authReviewOtpBypassEnabled) blockers.push('AUTH_REVIEW_OTP_BYPASS_ENABLED=true');
 
+  const redisAuthorityAttestation = await collectRedisAuthorityAttestation();
+  const acceptRideAuthority = buildAcceptRideAuthoritySection(redisAuthorityAttestation);
+  const kyc = buildKycSection(redisAuthorityAttestation);
+
   return {
     success: true,
     timestamp: new Date().toISOString(),
@@ -202,7 +522,8 @@ function buildRuntimeFlagsPayload() {
     },
     firebase: buildFirebaseSection(),
     push: buildPushSection(),
-    kyc: buildKycSection(),
+    acceptRideAuthority,
+    kyc,
     maps: buildMapsSection(),
     pricing: {
       demandPressureMode: String(process.env.PRICING_DEMAND_PRESSURE_MODE || 'dry_run')
@@ -295,7 +616,7 @@ router.get('/health/quick', async (req, res) => {
 router.get('/health/readiness', async (req, res) => {
   try {
     const health = await healthCheckService.quickCheck();
-    const roleReadiness = buildRoleReadiness(health);
+    const roleReadiness = await buildRoleReadiness(health);
 
     if (roleReadiness.ready) {
       res.status(200).json({
@@ -336,12 +657,12 @@ router.get('/health/liveness', (req, res) => {
  * GET /health/runtime-flags
  * Diagnóstico seguro de flags de runtime para execução de testes real-sandbox.
  */
-router.get('/health/runtime-flags', (req, res) => {
-  res.status(200).json(buildRuntimeFlagsPayload());
+router.get('/health/runtime-flags', async (req, res) => {
+  res.status(200).json(await buildRuntimeFlagsPayload());
 });
 
-router.get('/api/health/runtime-flags', (req, res) => {
-  res.status(200).json(buildRuntimeFlagsPayload());
+router.get('/api/health/runtime-flags', async (req, res) => {
+  res.status(200).json(await buildRuntimeFlagsPayload());
 });
 
 module.exports = router;

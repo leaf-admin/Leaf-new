@@ -77,6 +77,8 @@ describe('dashboard driver quick approval boundary', () => {
     expect(reviewSource).toContain('await recomputeDriverActivationStatus(driverId)');
     expect(reviewSource).toContain("action: 'driver.document_review'");
     expect(reviewSource).toContain("resource: 'driver_document'");
+    expect(reviewSource).toContain('driver_activation/${driverId}/documents/${normalizedDocumentType}/status');
+    expect(reviewSource).toContain("emit('driverDocumentStatusUpdated'");
     expect(reviewSource).not.toContain('const allApproved =');
     expect(reviewSource).not.toContain('approvedAt: new Date().toISOString(),');
   });

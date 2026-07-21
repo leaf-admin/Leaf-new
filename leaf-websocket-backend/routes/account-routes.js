@@ -173,6 +173,28 @@ const PROFILE_DERIVED_FORBIDDEN_FIELDS = new Set([
   'faceCompareResult'
 ]);
 
+const PROFILE_IMMUTABLE_AFTER_CREATION_FIELDS = new Set([
+  'role',
+  'user_role',
+  'accountType',
+  'usertype',
+  'userType',
+  'mobile',
+  'phone',
+  'phoneNumber',
+  'phoneValidated',
+  'onboardingCompleted',
+  'profileComplete'
+]);
+
+const PROFILE_ROLE_FIELDS = [
+  'role',
+  'user_role',
+  'accountType',
+  'usertype',
+  'userType'
+];
+
 const FIRESTORE_PROTECTED_FIELDS = new Set([
   'status',
   'accountDisabled',
@@ -193,6 +215,51 @@ function normalizeUserType(value) {
   if (normalized === 'passenger') return 'customer';
   if (normalized === 'customer' || normalized === 'driver') return normalized;
   return null;
+}
+
+function isIncompleteOtpBootstrapProfile(profile) {
+  return Boolean(
+    profile &&
+      String(profile.createdVia || '').trim().toLowerCase() === 'otp_verify' &&
+      profile.profileComplete === false &&
+      profile.onboardingCompleted === false
+  );
+}
+
+function resolveExplicitProfileRole(input = {}) {
+  const suppliedRoles = PROFILE_ROLE_FIELDS
+    .filter((field) => Object.prototype.hasOwnProperty.call(input, field))
+    .map((field) => ({ field, value: input[field], role: normalizeUserType(input[field]) }));
+
+  if (suppliedRoles.length === 0) {
+    return { role: null, error: 'missing', fields: [] };
+  }
+
+  const invalidFields = suppliedRoles.filter(({ role }) => !role).map(({ field }) => field);
+  if (invalidFields.length > 0) {
+    return { role: null, error: 'invalid', fields: invalidFields };
+  }
+
+  const distinctRoles = [...new Set(suppliedRoles.map(({ role }) => role))];
+  if (distinctRoles.length !== 1) {
+    return {
+      role: null,
+      error: 'conflict',
+      fields: suppliedRoles.map(({ field }) => field)
+    };
+  }
+
+  return { role: distinctRoles[0], error: null, fields: [] };
+}
+
+function findMissingProfileCompletionConsents(input, role) {
+  const missingConsents = [];
+  if (input.acceptTerms !== true) missingConsents.push('acceptTerms');
+  if (input.acceptPrivacy !== true) missingConsents.push('acceptPrivacy');
+  if (role === 'driver' && input.consentBackgroundCheck !== true) {
+    missingConsents.push('consentBackgroundCheck');
+  }
+  return missingConsents;
 }
 
 function splitName(fullName) {
@@ -231,6 +298,36 @@ function findForbiddenProfileFields(input = {}) {
 
   return Object.keys(input)
     .filter((key) => PROFILE_DERIVED_FORBIDDEN_FIELDS.has(key))
+    .sort();
+}
+
+function findImmutableProfileFields(input = {}, existingProfile = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return [];
+  }
+
+  const existingRole = normalizeUserType(
+    existingProfile.userType ||
+      existingProfile.usertype ||
+      existingProfile.role ||
+      existingProfile.user_role ||
+      existingProfile.accountType
+  );
+  const existingPhone = normalizePhone(
+    existingProfile.phoneNumber || existingProfile.phone || existingProfile.mobile
+  );
+
+  return Object.keys(input)
+    .filter((key) => PROFILE_IMMUTABLE_AFTER_CREATION_FIELDS.has(key))
+    .filter((key) => {
+      if (PROFILE_ROLE_FIELDS.includes(key)) {
+        return normalizeUserType(input[key]) !== existingRole;
+      }
+      if (key === 'mobile' || key === 'phone' || key === 'phoneNumber') {
+        return normalizePhone(input[key]) !== existingPhone;
+      }
+      return input[key] !== existingProfile[key];
+    })
     .sort();
 }
 
@@ -305,8 +402,10 @@ function composeProfileRecord(userId, existingProfile = {}, incomingProfile = {}
     normalizeUserType(
       mergedInput.userType ||
         mergedInput.usertype ||
+        existingProfile.role ||
         tokenClaims.userType ||
-        tokenClaims.usertype
+        tokenClaims.usertype ||
+        tokenClaims.role
     ) || 'customer';
 
   const rawName =
@@ -418,6 +517,26 @@ async function mirrorProfileToRealtimeDB(userId, profile) {
   }
 }
 
+async function projectCanonicalDriverRoleToRealtimeDB(userId, profile) {
+  const canonicalRole = normalizeUserType(
+    profile?.usertype ||
+      profile?.userType ||
+      profile?.role ||
+      profile?.user_role ||
+      profile?.accountType
+  );
+
+  if (canonicalRole !== 'driver') {
+    return;
+  }
+
+  await admin.database().ref(`users/${userId}`).update({
+    usertype: canonicalRole,
+    userType: canonicalRole,
+    role: canonicalRole
+  });
+}
+
 async function removeRealtimeProfile(userId) {
   try {
     const db = admin.database();
@@ -516,15 +635,81 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
     }
 
     const existingResult = await resolveAccountProfile(userId, req.user);
+    const isFirstProfileCompletion =
+      !existingResult.profile || isIncompleteOtpBootstrapProfile(existingResult.profile);
+    const immutableFields = findImmutableProfileFields(
+      incomingProfile,
+      existingResult.profile || {}
+    );
+    if (!isFirstProfileCompletion && immutableFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'PROFILE_IDENTITY_FIELD_IMMUTABLE',
+        message: 'Papel da conta, telefone e conclusão do onboarding não podem ser alterados pelo perfil.',
+        immutableFields
+      });
+    }
+
     const sanitizedPatch = sanitizeProfilePatch(incomingProfile);
+    let baseProfile = existingResult.profile || {};
+    if (isFirstProfileCompletion) {
+      const explicitRole = resolveExplicitProfileRole(incomingProfile);
+      if (explicitRole.error) {
+        return res.status(400).json({
+          success: false,
+          code: 'PROFILE_ROLE_REQUIRED_FOR_COMPLETION',
+          message: 'Informe explicitamente um único papel válido para concluir o perfil.',
+          invalidRoleFields: explicitRole.fields
+        });
+      }
+
+      const missingConsents = findMissingProfileCompletionConsents(
+        incomingProfile,
+        explicitRole.role
+      );
+      if (missingConsents.length > 0) {
+        return res.status(400).json({
+          success: false,
+          code: 'PROFILE_REQUIRED_CONSENTS_MISSING',
+          message: 'As permissões obrigatórias devem ser concedidas para concluir o perfil.',
+          missingConsents
+        });
+      }
+
+      const tokenPhone = String(req.user?.phone_number || '').trim();
+      const verifiedPhone = tokenPhone || String(
+        baseProfile.phoneNumber || baseProfile.phone || baseProfile.mobile || ''
+      ).trim();
+      sanitizedPatch.usertype = explicitRole.role;
+      sanitizedPatch.userType = explicitRole.role;
+      sanitizedPatch.mobile = verifiedPhone;
+      sanitizedPatch.phone = verifiedPhone;
+      sanitizedPatch.phoneNumber = verifiedPhone;
+      sanitizedPatch.phoneValidated = Boolean(verifiedPhone);
+      sanitizedPatch.onboardingCompleted = true;
+      sanitizedPatch.profileComplete = true;
+      sanitizedPatch.acceptTerms = true;
+      sanitizedPatch.acceptPrivacy = true;
+
+      if (explicitRole.role === 'driver') {
+        sanitizedPatch.consentBackgroundCheck = true;
+        baseProfile = {
+          ...baseProfile,
+          approved: false,
+          isApproved: false,
+          canGoOnline: false
+        };
+      }
+    }
     const nextProfile = composeProfileRecord(
       userId,
-      existingResult.profile || {},
+      baseProfile,
       sanitizedPatch,
       req.user
     );
 
     await admin.firestore().collection('users').doc(userId).set(nextProfile, { merge: true });
+    await projectCanonicalDriverRoleToRealtimeDB(userId, nextProfile);
     await mirrorProfileToRealtimeDB(userId, nextProfile);
     const storedDoc = await admin.firestore().collection('users').doc(userId).get();
     const responseProfile = composeProfileRecord(

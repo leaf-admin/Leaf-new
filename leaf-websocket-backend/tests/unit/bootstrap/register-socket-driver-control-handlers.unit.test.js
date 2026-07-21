@@ -114,6 +114,8 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
   let io;
   let redis;
   let idempotencyService;
+  let enforceSubscriptionForOnline;
+  let enforceDailyKYCForOnline;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -143,6 +145,8 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
       cacheResult: jest.fn().mockResolvedValue(undefined),
       releaseInflight: jest.fn().mockResolvedValue(undefined),
     };
+    enforceSubscriptionForOnline = jest.fn().mockResolvedValue({ allowed: true });
+    enforceDailyKYCForOnline = jest.fn().mockResolvedValue({ allowed: true });
 
     registerSocketDriverControlHandlers({
       socket,
@@ -152,6 +156,8 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
       },
       logStructured: jest.fn(),
       idempotencyService,
+      enforceSubscriptionForOnline,
+      enforceDailyKYCForOnline,
     });
   });
 
@@ -342,6 +348,96 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
         driverId: 'driver_1',
         isOnline: true,
         dispatchEligible: true,
+      })
+    );
+  });
+
+  it('keeps a driver offline and outside dispatch while a random KYC audit is pending', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'OFFLINE',
+      isOnline: 'false',
+      dispatchEligible: 'true',
+    });
+    enforceDailyKYCForOnline.mockResolvedValueOnce({
+      allowed: false,
+      code: 'KYC_TRUST_RANDOM_AUDIT_REQUIRED',
+      reason: 'Validacao aleatoria de identidade necessaria.',
+      requirement: 'LIVENESS_REQUIRED',
+      challenge: { challengeId: 'kyc_random_audit_1' },
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    const transaction = redis.multi.mock.results.at(-1).value;
+    expect(transaction.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        status: 'OFFLINE',
+        isOnline: 'false',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'KYC_TRUST_RANDOM_AUDIT_REQUIRED',
+      })
+    );
+    expect(transaction.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        code: 'KYC_TRUST_RANDOM_AUDIT_REQUIRED',
+        challengeId: 'kyc_random_audit_1',
+      })
+    );
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+  });
+
+  it('preserves active-ride continuity when the KYC gate sees a race', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    enforceDailyKYCForOnline.mockResolvedValueOnce({
+      allowed: true,
+      deferred: true,
+      continuityOnly: true,
+      activeTripId: 'booking_race_1',
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'IN_PROGRESS',
+      isOnline: 'true',
+      dispatchEligible: 'false',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(redis.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        status: 'IN_PROGRESS',
+        isOnline: 'true',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        activeTripId: 'booking_race_1',
+      })
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({
+        code: 'IN_TRIP_KYC_DEFERRED',
+        kycDeferred: true,
+        activeTripId: 'booking_race_1',
       })
     );
   });

@@ -66,7 +66,7 @@ jest.mock('../../../utils/trace-validator', () => ({
 }));
 
 jest.mock('../../../utils/active-trip-index', () => ({
-  clearActiveTripForDriver: jest.fn().mockResolvedValue(undefined)
+  clearActiveTripForDriver: jest.fn().mockResolvedValue(true)
 }));
 
 jest.mock('../../../services/trip-location-persistence-service', () => ({

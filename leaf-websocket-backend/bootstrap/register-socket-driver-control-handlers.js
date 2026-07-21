@@ -568,6 +568,25 @@ function registerSocketDriverControlHandlers({
                 if (typeof enforceDailyKYCForOnline === 'function') {
                     const kycGate = await enforceDailyKYCForOnline(driverId);
                     if (!kycGate?.allowed) {
+                        const checkedAt = new Date().toISOString();
+                        await redis
+                            .multi()
+                            .hset(driverKey, {
+                                driverId,
+                                status: 'OFFLINE',
+                                isOnline: 'false',
+                                dispatchEligible: 'false',
+                                dispatchEligibilityCode: kycGate?.code || 'KYC_REQUIRED',
+                                dispatchEligibilityCheckedAt: checkedAt,
+                                kycRecheckPendingAfterTrip: kycGate?.retryRequired === true
+                                    ? 'true'
+                                    : 'false',
+                                updatedAt: checkedAt
+                            })
+                            .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
+                            .zrem('driver_locations', driverId)
+                            .srem('online_drivers', driverId)
+                            .exec();
                         socket.emit('driverStatusError', {
                             success: false,
                             error: kycGate?.reason || 'Validacao facial obrigatoria para ficar online.',
@@ -577,6 +596,34 @@ function registerSocketDriverControlHandlers({
                             requirement: kycGate?.requirement || 'LIVENESS_REQUIRED',
                             challengeId: kycGate?.challenge?.challengeId || null,
                             challenge: kycGate?.challenge || null
+                        });
+                        return;
+                    }
+                    if (kycGate?.continuityOnly || kycGate?.deferred) {
+                        const checkedAt = new Date().toISOString();
+                        const activeTripId = kycGate?.activeTripId || existingDriverState?.activeTripId || null;
+                        await redis.hset(driverKey, {
+                            driverId,
+                            status: existingDriverState?.status || 'IN_TRIP',
+                            isOnline: 'true',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            kycRecheckPendingAfterTrip: 'true',
+                            ...(activeTripId ? { activeTripId: String(activeTripId) } : {}),
+                            updatedAt: checkedAt
+                        });
+                        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+                        socket.emit('driverStatusUpdated', {
+                            success: true,
+                            driverId,
+                            status: existingDriverState?.status || 'IN_TRIP',
+                            isOnline: true,
+                            dispatchEligible: false,
+                            code: 'IN_TRIP_KYC_DEFERRED',
+                            kycDeferred: true,
+                            activeTripId,
+                            checkedAt
                         });
                         return;
                     }

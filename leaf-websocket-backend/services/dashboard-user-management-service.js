@@ -119,6 +119,41 @@ async function readUser(userId) {
   };
 }
 
+async function assertDriverIdentityNotPermanentlyBlocked(driverId) {
+  const safeDriverId = normalizeId(driverId);
+  if (!safeDriverId) {
+    throw new DashboardUserManagementError('driverId invalido', 400, 'INVALID_DRIVER_ID');
+  }
+
+  let snapshot;
+  try {
+    snapshot = await admin.firestore()
+      .collection('driver_identity_enforcement')
+      .doc(safeDriverId)
+      .get();
+  } catch (error) {
+    throw new DashboardUserManagementError(
+      'Nao foi possivel validar o bloqueio canonico de identidade.',
+      503,
+      'KYC_IDENTITY_ENFORCEMENT_UNAVAILABLE'
+    );
+  }
+
+  const enforcement = snapshot.exists ? (snapshot.data() || {}) : null;
+  const permanentlyBlocked = enforcement?.active === true && (
+    enforcement?.permanent === true ||
+    String(enforcement?.status || '').toUpperCase() === 'PERMANENTLY_BLOCKED'
+  );
+  if (permanentlyBlocked) {
+    throw new DashboardUserManagementError(
+      'Conta bloqueada permanentemente por fraude de identidade confirmada.',
+      423,
+      'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK'
+    );
+  }
+  return enforcement;
+}
+
 async function clearDriverRuntimeState(userId, status, reasonCode) {
   let redis = null;
   try {
@@ -300,6 +335,9 @@ async function updateUserOperationalStatus(userId, payload = {}, options = {}) {
   }
 
   const record = await readUser(userId);
+  if (status === 'active' && record.userType === 'driver') {
+    await assertDriverIdentityNotPermanentlyBlocked(record.userId);
+  }
   const operator = options.operator || {};
   const { updates, expiresAt, reasonCode } = buildOperationalUpdates(status, record.userType, record.data, {
     reason: payload.reason,
@@ -489,6 +527,7 @@ module.exports = {
   DashboardUserManagementError,
   updateUserOperationalStatus,
   requestDriverDocument,
+  assertDriverIdentityNotPermanentlyBlocked,
   resolveDriverReactivationState,
   sanitizeDocumentType,
   OPERATIONAL_STATUSES,

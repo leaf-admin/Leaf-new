@@ -191,6 +191,69 @@ class FirebaseStorageService {
   }
 
   /**
+   * Baixa um objeto pelo caminho canônico do bucket, sem URL assinada e sem
+   * fallback para estruturas legadas de documento.
+   */
+  async downloadStoragePath(filePath, options = {}) {
+    const safePath = String(filePath || '').trim();
+    if (!safePath || safePath.startsWith('/') || safePath.includes('..')) {
+      const error = new Error('Caminho do Firebase Storage inválido');
+      error.code = 'FIREBASE_STORAGE_PATH_INVALID';
+      throw error;
+    }
+    if (!this.storage || typeof this.storage.bucket !== 'function') {
+      const error = new Error('Firebase Storage não inicializado');
+      error.code = 'FIREBASE_STORAGE_UNAVAILABLE';
+      throw error;
+    }
+
+    const bucketName = String(
+      options.bucketName
+      || process.env.FIREBASE_STORAGE_BUCKET
+      || 'leaf-reactnative.firebasestorage.app'
+    ).trim();
+    const requestedGeneration = String(options.generation || '').trim();
+    if (requestedGeneration && !/^\d+$/.test(requestedGeneration)) {
+      const error = new Error('Generation do Firebase Storage invalida');
+      error.code = 'FIREBASE_STORAGE_GENERATION_INVALID';
+      throw error;
+    }
+    const storageFile = this.storage.bucket(bucketName).file(
+      safePath,
+      requestedGeneration ? { generation: requestedGeneration } : undefined
+    );
+    const [downloadResult, metadataResult] = await Promise.all([
+      storageFile.download(),
+      storageFile.getMetadata()
+    ]);
+    const buffer = downloadResult?.[0];
+    const metadata = metadataResult?.[0] || {};
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+      const error = new Error('Objeto do Firebase Storage está vazio');
+      error.code = 'FIREBASE_STORAGE_OBJECT_EMPTY';
+      throw error;
+    }
+    const actualGeneration = String(metadata.generation || '').trim();
+    if (requestedGeneration && actualGeneration !== requestedGeneration) {
+      const error = new Error('Generation do Firebase Storage diverge da aprovacao canonica');
+      error.code = 'FIREBASE_STORAGE_GENERATION_MISMATCH';
+      throw error;
+    }
+    if (options.includeMetadata === true) {
+      return {
+        buffer,
+        metadata: {
+          generation: actualGeneration,
+          size: String(metadata.size || buffer.length),
+          contentType: metadata.contentType || null,
+          md5Hash: metadata.md5Hash || null
+        }
+      };
+    }
+    return buffer;
+  }
+
+  /**
    * Baixa arquivo usando Firebase Admin SDK
    * @param {string} fileUrl - URL do Firebase Storage
    * @returns {Promise<Buffer>} Buffer do arquivo

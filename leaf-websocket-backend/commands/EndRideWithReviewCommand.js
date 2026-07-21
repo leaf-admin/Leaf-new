@@ -33,6 +33,21 @@ function createNoopSpan() {
   };
 }
 
+async function applyDeferredIdentityReverification(driverId, context = {}) {
+  try {
+    const kycPolicyService = require('../services/kyc-policy-service');
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') return;
+    await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
+  } catch (error) {
+    logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos encerramento em revisao', {
+      service: 'end-ride-with-review-command',
+      bookingId: context.tripId || null,
+      driverId,
+      error: error.message
+    });
+  }
+}
+
 class EndRideWithReviewCommand extends Command {
   constructor(data) {
     super(data);
@@ -194,7 +209,23 @@ class EndRideWithReviewCommand extends Command {
           `ride_excluded_drivers:${this.bookingId}`
         );
         await redis.hdel('bookings:active', this.bookingId);
-        await clearActiveTripForDriver(redis, driverId, this.bookingId);
+        const activeTripCleared = await clearActiveTripForDriver(
+          redis,
+          driverId,
+          this.bookingId
+        );
+        if (activeTripCleared) {
+          await applyDeferredIdentityReverification(driverId, {
+            source: 'ride_early_ended_review',
+            tripId: this.bookingId
+          });
+        } else {
+          logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida em review', {
+            service: 'end-ride-with-review-command',
+            bookingId: this.bookingId,
+            driverId
+          });
+        }
 
         setImmediate(async () => {
           try {

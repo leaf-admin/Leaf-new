@@ -18,6 +18,7 @@ const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const traceContext = require('../utils/trace-context');
+const { trimRedisStreamSafely } = require('../utils/redis-stream-safe-retention');
 
 class WorkerManager {
     constructor(options = {}) {
@@ -29,6 +30,29 @@ class WorkerManager {
         this.maxRetries = options.maxRetries || 3;
         this.retryBackoff = options.retryBackoff || [1000, 2000, 5000]; // ms
         this.dlqStreamName = options.dlqStreamName || 'ride_events_dlq';
+        this.dlqMaxLen = Math.max(
+            1000,
+            Number.parseInt(
+                options.dlqMaxLen || process.env.WORKER_DLQ_MAXLEN || '10000',
+                10
+            ) || 10000
+        );
+        this.safeTrimThreshold = Math.max(
+            100000,
+            Number.parseInt(
+                options.safeTrimThreshold || process.env.WORKER_STREAM_SAFE_TRIM_THRESHOLD || '500000',
+                10
+            ) || 500000
+        );
+        this.safeTrimCheckEveryAcks = Math.max(
+            100,
+            Number.parseInt(
+                options.safeTrimCheckEveryAcks || process.env.WORKER_STREAM_TRIM_CHECK_EVERY_ACKS || '5000',
+                10
+            ) || 5000
+        );
+        this.acksSinceSafeTrimCheck = 0;
+        this.safeTrimInFlight = false;
         this.redis = null;
         this.blockingRedis = null;
         this.isRunning = false;
@@ -112,8 +136,13 @@ class WorkerManager {
 
             // Criar DLQ stream se não existir
             try {
-                await this.redis.xadd(this.dlqStreamName, '*', 'init', 'true');
-                await this.redis.del(this.dlqStreamName); // Limpar entrada de teste
+                const sentinelId = await this.redis.xadd(
+                    this.dlqStreamName,
+                    '*',
+                    'init',
+                    'true'
+                );
+                await this.redis.xdel(this.dlqStreamName, sentinelId);
             } catch (error) {
                 // Ignorar
             }
@@ -347,6 +376,9 @@ class WorkerManager {
 
             await this.redis.xadd(
                 this.dlqStreamName,
+                'MAXLEN',
+                '~',
+                String(this.dlqMaxLen),
                 '*',
                 ...Object.entries(dlqData).flat().map(v => String(v))
             );
@@ -369,6 +401,50 @@ class WorkerManager {
             });
             return { success: false, dlq: false };
         }
+    }
+
+    async acknowledgeEvent(eventId) {
+        await this.redis.xack(this.streamName, this.groupName, eventId);
+        this.acksSinceSafeTrimCheck += 1;
+        if (
+            this.safeTrimInFlight
+            || this.acksSinceSafeTrimCheck < this.safeTrimCheckEveryAcks
+        ) {
+            return;
+        }
+
+        this.acksSinceSafeTrimCheck = 0;
+        this.safeTrimInFlight = true;
+        setImmediate(() => {
+            trimRedisStreamSafely(
+                this.redis,
+                this.streamName,
+                this.safeTrimThreshold
+            ).then((retention) => {
+                if (
+                    retention.currentLength > this.safeTrimThreshold
+                    && retention.trimmed === 0
+                ) {
+                    logStructured('warn', 'Stream acima do limiar sem corte seguro', {
+                        service: 'worker-manager',
+                        streamName: this.streamName,
+                        groupName: this.groupName,
+                        currentLength: retention.currentLength,
+                        threshold: this.safeTrimThreshold,
+                        reason: retention.reason
+                    });
+                }
+            }).catch((error) => {
+                logStructured('warn', 'Falha no trim seguro do stream do worker', {
+                    service: 'worker-manager',
+                    streamName: this.streamName,
+                    groupName: this.groupName,
+                    error: error.message
+                });
+            }).finally(() => {
+                this.safeTrimInFlight = false;
+            });
+        });
     }
 
     parseStreamFields(fields = []) {
@@ -430,7 +506,7 @@ class WorkerManager {
                     const processResult = await this.processWithRetry(eventId, eventData);
 
                     if (processResult.success || processResult.skipped || processResult.dlq) {
-                        await this.redis.xack(this.streamName, this.groupName, eventId);
+                        await this.acknowledgeEvent(eventId);
                         totalAcked += 1;
                     }
 
@@ -500,10 +576,10 @@ class WorkerManager {
 
                 // ACK apenas se processado com sucesso ou pulado
                 if (result.success || result.skipped) {
-                    await this.redis.xack(this.streamName, this.groupName, eventId);
+                    await this.acknowledgeEvent(eventId);
                 } else if (result.dlq) {
                     // Se foi para DLQ, também fazer ACK (já foi movido)
-                    await this.redis.xack(this.streamName, this.groupName, eventId);
+                    await this.acknowledgeEvent(eventId);
                 }
                 // Se falhou mas não foi para DLQ, não fazer ACK (será reprocessado)
             }

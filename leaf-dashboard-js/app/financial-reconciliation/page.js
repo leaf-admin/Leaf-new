@@ -6,7 +6,6 @@ import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
-import ConfirmActionDialog from "@/src/components/ui/ConfirmActionDialog";
 import { EmptyState, ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 
@@ -134,13 +133,11 @@ export default function FinancialReconciliationPage() {
   const [reports, setReports] = useState([]);
   const [summary, setSummary] = useState(null);
   const [selectedRideId, setSelectedRideId] = useState("");
-  const [detailExpanded, setDetailExpanded] = useState(false);
   const [detail, setDetail] = useState(null);
   const [lastRun, setLastRun] = useState(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [running, setRunning] = useState(false);
-  const [pendingRun, setPendingRun] = useState(null);
   const [error, setError] = useState("");
 
   const filters = useMemo(() => ({
@@ -151,31 +148,6 @@ export default function FinancialReconciliationPage() {
     includeTestData: includeTestData ? "true" : "",
     limit,
   }), [code, includeTestData, limit, rideId, severity, status]);
-
-  const manualRunPreview = useMemo(() => {
-    const requestedRideId = rideId.trim();
-    const visibleReportCount = reports.length;
-
-    return {
-      rideId: requestedRideId,
-      payload: {
-        limit,
-        includeTestData,
-        rideId: requestedRideId || undefined,
-      },
-      scope: requestedRideId
-        ? `Corrida específica ${requestedRideId}`
-        : `Lote de até ${limit} corridas elegíveis pelo backend`,
-      period: requestedRideId
-        ? "Corrida informada, sem janela temporal"
-        : "Pagamentos elegíveis no backend, sem período explícito no endpoint",
-      estimatedTotal: requestedRideId
-        ? "1 corrida"
-        : visibleReportCount > 0
-          ? `${visibleReportCount} relatório(s) visível(is); execução limitada a ${limit}`
-          : `Até ${limit} corridas; total final resolvido pelo backend`,
-    };
-  }, [includeTestData, limit, reports.length, rideId]);
 
   const loadReports = async () => {
     try {
@@ -211,25 +183,21 @@ export default function FinancialReconciliationPage() {
     }
   };
 
-  const requestReconciliation = () => {
-    setError("");
-    setPendingRun(manualRunPreview);
-  };
-
-  const executeReconciliation = async () => {
-    if (!pendingRun) return;
-
-    const request = pendingRun;
+  const runReconciliation = async () => {
     try {
       setRunning(true);
       setError("");
-      const response = request.rideId
-        ? await leafAPI.runFinancialReconciliationRide(request.rideId)
-        : await leafAPI.runFinancialReconciliation(request.payload);
+      const payload = {
+        limit,
+        includeTestData,
+        rideId: rideId.trim() || undefined,
+      };
+      const response = rideId.trim()
+        ? await leafAPI.runFinancialReconciliationRide(rideId.trim())
+        : await leafAPI.runFinancialReconciliation(payload);
       setLastRun(response);
       await loadReports();
       if (selectedRideId) await loadDetail(selectedRideId);
-      setPendingRun(null);
     } catch (err) {
       setError(err?.message || "Falha ao executar reconciliação");
     } finally {
@@ -267,6 +235,9 @@ export default function FinancialReconciliationPage() {
           <div className="filters">
             <button type="button" onClick={loadReports} disabled={loading || running}>
               {loading ? "Atualizando..." : "Atualizar"}
+            </button>
+            <button type="button" onClick={runReconciliation} disabled={running} className="button-secondary">
+              {running ? "Reconciliando..." : "Rodar reconciliação"}
             </button>
           </div>
         </header>
@@ -326,258 +297,154 @@ export default function FinancialReconciliationPage() {
           </div>
         </Panel>
 
-        <Panel
-          title="Exceções financeiras"
-          subtitle="Workspace principal para priorizar divergências e abrir a inspeção de cada corrida."
-          className="panel-span-full"
-        >
-          {loading ? <LoadingState message="Carregando relatórios financeiros..." /> : null}
-          {!loading && reports.length === 0 ? <EmptyState message="Nenhuma divergência financeira encontrada para os filtros atuais." /> : null}
-          {!loading && reports.length > 0 ? (
-            <div
-              className="table-shell table-shell-tall"
-              role="region"
-              tabIndex={0}
-              aria-label="Relatórios de reconciliação financeira"
-            >
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>Corrida</th>
-                    <th>Status</th>
-                    <th>Severidade</th>
-                    <th>Issues</th>
-                    <th>Checado em</th>
-                    <th>Ação</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.map((report) => (
-                    <tr key={report.id || report.rideId}>
-                      <td>
-                        <code>{report.rideId}</code>
-                        {report.testData ? <span className="table-muted">Massa de teste</span> : null}
-                      </td>
-                      <td><span className={statusClass(report)}>{statusLabel(report)}</span></td>
-                      <td><span className={severityTone[report.severity] || "meta-badge"}>{report.severity || "info"}</span></td>
-                      <td>{report.issues?.length || 0}</td>
-                      <td>{formatDate(report.checkedAtIso || report.checkedAt)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="button-secondary"
-                          onClick={() => {
-                            setSelectedRideId(report.rideId);
-                            setDetailExpanded(true);
-                          }}
-                        >
-                          Abrir detalhe
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </Panel>
-
-        <details
-          className="technical-details"
-          open={detailExpanded}
-          onToggle={(event) => setDetailExpanded(event.currentTarget.open)}
-        >
-          <summary>
-            Detalhes financeiros avançados{selectedRideId ? ` · ${selectedRideId}` : ""}
-          </summary>
-          <div className="technical-details-inner">
-            <section className="grid">
-              <Panel
-                title="Fluxo do dinheiro"
-                subtitle="Pagamento antecipado, holding, split, ledger, saldo e saque em uma leitura única."
-              >
-                <div className="metric-list">
-                  {moneyFlowChecklist.map((item) => (
-                    <div className="row" key={item.label}>
-                      <div className="label">
-                        <span className={item.status === "ok" ? "status-ok" : "status-warn"}>{item.label}</span>
-                        <small>{item.detail}</small>
-                      </div>
-                      <div className="value">{item.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-
-              <Panel
-                title="Detalhe da corrida"
-                subtitle={selectedRideId ? selectedRideId : "Selecione uma corrida"}
-                actions={selectedRideId ? (
-                  <button type="button" className="button-secondary" onClick={() => loadDetail(selectedRideId)} disabled={detailLoading}>
-                    Recarregar
-                  </button>
-                ) : null}
-              >
-                {detailLoading ? <LoadingState message="Carregando detalhe..." /> : null}
-                {!detailLoading && !selectedRideId ? <EmptyState message="Selecione um relatório para abrir o detalhe financeiro." /> : null}
-                {!detailLoading && selectedRideId ? (
-                  <div className="section-stack">
-                    <KeyValueGrid
-                      data={{
-                        status: statusLabel(selectedReport),
-                        severity: selectedReport?.severity || "-",
-                        checkedAt: formatDate(selectedReport?.checkedAtIso || selectedReport?.checkedAt),
-                        paymentAmount: formatMoneyCents(selectedReport?.totals?.paymentAmountCents),
-                        distributionTotal: formatMoneyCents(selectedReport?.totals?.distributionTotalCents),
-                        passengerGross: formatMoneyCents(selectedReport?.totals?.passengerGrossCents),
-                        driverNetAmount: formatMoneyCents(selectedReport?.totals?.driverNetAmountCents),
-                        operationalFee: formatMoneyCents(selectedReport?.totals?.operationalFeeCents),
-                        wooviFee: formatMoneyCents(selectedReport?.totals?.wooviFeeCents),
-                        ledgerEvents: selectedReport?.totals?.ledgerEventCount || detail?.ledgerEvents?.length || 0,
-                      }}
-                      labels={{
-                        status: "Status",
-                        severity: "Severidade",
-                        checkedAt: "Última checagem",
-                        paymentAmount: "Pagamento",
-                        distributionTotal: "Distribuição",
-                        passengerGross: "Bruto passageiro",
-                        driverNetAmount: "Líquido motorista",
-                        operationalFee: "Taxa operacional Leaf",
-                        wooviFee: "Taxa Woovi",
-                        ledgerEvents: "Eventos ledger",
-                      }}
-                    />
-                    {selectedReport?.issues?.length ? (
-                      <div
-                        className="table-shell table-shell-tight"
-                        role="region"
-                        tabIndex={0}
-                        aria-label="Divergências do relatório financeiro selecionado"
-                      >
-                        <table className="table table-compact">
-                          <tbody>
-                            {selectedReport.issues.map((issue, index) => (
-                              <tr key={`${issue?.code || "issue"}-${index}`}>
-                                <td><span className={severityTone[issue?.severity] || "meta-badge"}>{issue?.severity || "info"}</span></td>
-                                <td>{issueText(issue)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <p className="text-muted">Sem issues no relatório selecionado.</p>
-                    )}
-                    <TechnicalDetails
-                      title="Ver documentos financeiros e eventos"
-                      data={{
-                        report: detail?.report || null,
-                        ledgerEvents: detail?.ledgerEvents || [],
-                        sourceDocuments: detail?.sourceDocuments || {},
-                      }}
-                    />
+        <section className="grid">
+          <Panel
+            title="Fluxo do dinheiro"
+            subtitle="Pagamento antecipado, holding, split, ledger, saldo e saque em uma leitura única."
+          >
+            <div className="metric-list">
+              {moneyFlowChecklist.map((item) => (
+                <div className="row" key={item.label}>
+                  <div className="label">
+                    <span className={item.status === "ok" ? "status-ok" : "status-warn"}>{item.label}</span>
+                    <small>{item.detail}</small>
                   </div>
-                ) : null}
-              </Panel>
-            </section>
-          </div>
-        </details>
-
-        <details className="technical-details">
-          <summary>Execução manual · avançado</summary>
-          <div className="technical-details-inner">
-            <Panel
-              title="Reexecutar verificação"
-              subtitle="Gera ou atualiza relatórios técnicos; não altera valores ou regras financeiras."
-              className="panel-span-full"
-            >
-              <KeyValueGrid
-                data={{
-                  scope: manualRunPreview.scope,
-                  period: manualRunPreview.period,
-                  estimatedTotal: manualRunPreview.estimatedTotal,
-                  includeTestData: manualRunPreview.payload.includeTestData ? "Sim" : "Não",
-                }}
-                labels={{
-                  scope: "Escopo",
-                  period: "Período",
-                  estimatedTotal: "Total estimado",
-                  includeTestData: "Massa de teste",
-                }}
-              />
-              <p className="text-muted">
-                A execução lê os registros financeiros e atualiza o relatório de reconciliação. Taxa, split,
-                saldo, refund, saque e política financeira permanecem inalterados.
-              </p>
-              <div className="panel-actions">
-                <button type="button" className="button-secondary" onClick={requestReconciliation} disabled={running}>
-                  {running ? "Reconciliando..." : "Revisar e executar"}
-                </button>
-              </div>
-
-              {lastRun ? (
-                <div className="section-stack">
-                  <h3>Última execução</h3>
-                  <KeyValueGrid
-                    data={{
-                      success: lastRun.success,
-                      scannedRideCount: lastRun.scannedRideCount ?? lastRun.summary?.scannedRideCount,
-                      reconciledRideCount: lastRun.reconciledRideCount ?? lastRun.summary?.reconciledRideCount,
-                      divergentRideCount: lastRun.divergentRideCount ?? lastRun.summary?.divergentRideCount,
-                      failedRideCount: lastRun.failedRideCount ?? lastRun.summary?.failedRideCount,
-                      skippedTestRideCount: lastRun.skippedTestRideCount ?? lastRun.summary?.skippedTestRideCount,
-                    }}
-                    labels={{
-                      success: "Resultado",
-                      scannedRideCount: "Escaneadas",
-                      reconciledRideCount: "Reconciliadas",
-                      divergentRideCount: "Divergentes",
-                      failedRideCount: "Falhas",
-                      skippedTestRideCount: "Testes ignorados",
-                    }}
-                  />
+                  <div className="value">{item.value}</div>
                 </div>
-              ) : null}
-            </Panel>
-          </div>
-        </details>
+              ))}
+            </div>
+          </Panel>
 
-        <ConfirmActionDialog
-          open={Boolean(pendingRun)}
-          title="Confirmar execução manual"
-          description="A ação reexecuta a verificação e atualiza o relatório técnico de reconciliação."
-          confirmLabel={running ? "Executando..." : "Executar verificação"}
-          tone="warning"
-          busy={running}
-          onConfirm={executeReconciliation}
-          onCancel={() => {
-            setPendingRun(null);
-            setError("");
-          }}
-        >
-          <div className="section-stack">
+          <Panel title="Relatórios" subtitle="Últimos resultados gravados pelo ledger">
+            {loading ? <LoadingState message="Carregando relatórios financeiros..." /> : null}
+            {!loading && reports.length === 0 ? <EmptyState message="Nenhuma divergência financeira encontrada para os filtros atuais." /> : null}
+            {!loading && reports.length > 0 ? (
+              <div className="table-shell table-shell-tall">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Corrida</th>
+                      <th>Status</th>
+                      <th>Severidade</th>
+                      <th>Issues</th>
+                      <th>Checado em</th>
+                      <th>Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reports.map((report) => (
+                      <tr key={report.id || report.rideId}>
+                        <td>
+                          <code>{report.rideId}</code>
+                          {report.testData ? <span className="table-muted">Massa de teste</span> : null}
+                        </td>
+                        <td><span className={statusClass(report)}>{statusLabel(report)}</span></td>
+                        <td><span className={severityTone[report.severity] || "meta-badge"}>{report.severity || "info"}</span></td>
+                        <td>{report.issues?.length || 0}</td>
+                        <td>{formatDate(report.checkedAtIso || report.checkedAt)}</td>
+                        <td>
+                          <button type="button" className="button-secondary" onClick={() => setSelectedRideId(report.rideId)}>
+                            Ver
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </Panel>
+
+          <Panel
+            title="Detalhe da corrida"
+            subtitle={selectedRideId ? selectedRideId : "Selecione uma corrida"}
+            actions={selectedRideId ? (
+              <button type="button" className="button-secondary" onClick={() => loadDetail(selectedRideId)} disabled={detailLoading}>
+                Recarregar
+              </button>
+            ) : null}
+          >
+            {detailLoading ? <LoadingState message="Carregando detalhe..." /> : null}
+            {!detailLoading && !selectedRideId ? <EmptyState message="Selecione um relatório para abrir o detalhe financeiro." /> : null}
+            {!detailLoading && selectedRideId ? (
+              <div className="section-stack">
+                <KeyValueGrid
+                  data={{
+                    status: statusLabel(selectedReport),
+                    severity: selectedReport?.severity || "-",
+                    checkedAt: formatDate(selectedReport?.checkedAtIso || selectedReport?.checkedAt),
+                    paymentAmount: formatMoneyCents(selectedReport?.totals?.paymentAmountCents),
+                    distributionTotal: formatMoneyCents(selectedReport?.totals?.distributionTotalCents),
+                    passengerGross: formatMoneyCents(selectedReport?.totals?.passengerGrossCents),
+                    driverNetAmount: formatMoneyCents(selectedReport?.totals?.driverNetAmountCents),
+                    operationalFee: formatMoneyCents(selectedReport?.totals?.operationalFeeCents),
+                    wooviFee: formatMoneyCents(selectedReport?.totals?.wooviFeeCents),
+                    ledgerEvents: selectedReport?.totals?.ledgerEventCount || detail?.ledgerEvents?.length || 0,
+                  }}
+                  labels={{
+                    status: "Status",
+                    severity: "Severidade",
+                    checkedAt: "Última checagem",
+                    paymentAmount: "Pagamento",
+                    distributionTotal: "Distribuição",
+                    passengerGross: "Bruto passageiro",
+                    driverNetAmount: "Líquido motorista",
+                    operationalFee: "Taxa operacional Leaf",
+                    wooviFee: "Taxa Woovi",
+                    ledgerEvents: "Eventos ledger",
+                  }}
+                />
+                {selectedReport?.issues?.length ? (
+                  <div className="table-shell table-shell-tight">
+                    <table className="table table-compact">
+                      <tbody>
+                        {selectedReport.issues.map((issue, index) => (
+                          <tr key={`${issue?.code || "issue"}-${index}`}>
+                            <td><span className={severityTone[issue?.severity] || "meta-badge"}>{issue?.severity || "info"}</span></td>
+                            <td>{issueText(issue)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-muted">Sem issues no relatório selecionado.</p>
+                )}
+                <TechnicalDetails
+                  title="Ver documentos financeiros e eventos"
+                  data={{
+                    report: detail?.report || null,
+                    ledgerEvents: detail?.ledgerEvents || [],
+                    sourceDocuments: detail?.sourceDocuments || {},
+                  }}
+                />
+              </div>
+            ) : null}
+          </Panel>
+        </section>
+
+        {lastRun ? (
+          <Panel title="Última execução" className="panel-span-full">
             <KeyValueGrid
               data={{
-                scope: pendingRun?.scope,
-                period: pendingRun?.period,
-                estimatedTotal: pendingRun?.estimatedTotal,
-                includeTestData: pendingRun?.payload?.includeTestData ? "Sim" : "Não",
+                success: lastRun.success,
+                scannedRideCount: lastRun.scannedRideCount ?? lastRun.summary?.scannedRideCount,
+                reconciledRideCount: lastRun.reconciledRideCount ?? lastRun.summary?.reconciledRideCount,
+                divergentRideCount: lastRun.divergentRideCount ?? lastRun.summary?.divergentRideCount,
+                failedRideCount: lastRun.failedRideCount ?? lastRun.summary?.failedRideCount,
+                skippedTestRideCount: lastRun.skippedTestRideCount ?? lastRun.summary?.skippedTestRideCount,
               }}
               labels={{
-                scope: "Escopo",
-                period: "Período",
-                estimatedTotal: "Total estimado",
-                includeTestData: "Massa de teste",
+                success: "Resultado",
+                scannedRideCount: "Escaneadas",
+                reconciledRideCount: "Reconciliadas",
+                divergentRideCount: "Divergentes",
+                failedRideCount: "Falhas",
+                skippedTestRideCount: "Testes ignorados",
               }}
             />
-            <p className="text-muted">
-              Consequência: os registros financeiros são lidos novamente e o relatório da corrida é gravado ou
-              atualizado. A ação não altera taxa, split, saldo, refund, saque nem política financeira.
-            </p>
-            <ErrorText message={error} />
-          </div>
-        </ConfirmActionDialog>
+          </Panel>
+        ) : null}
 
         <ErrorText message={error} />
       </main>

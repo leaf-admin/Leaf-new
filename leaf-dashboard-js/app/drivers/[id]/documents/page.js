@@ -6,7 +6,7 @@ import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
-import ConfirmActionDialog from "@/src/components/ui/ConfirmActionDialog";
+import KycIdentityReviewPanel from "@/src/components/kyc/KycIdentityReviewPanel";
 
 const DOCUMENT_REJECTION_REASON_OPTIONS = {
   cnh: [
@@ -34,6 +34,7 @@ const DOCUMENT_LABELS = {
 };
 
 const OPERATIONAL_DOCUMENT_TYPES = new Set(["cnh", "crlv", "antecedentes_criminais"]);
+const MIN_IDENTITY_RECONCILIATION_REASON_LENGTH = 20;
 
 const DOCUMENT_STATUS_LABELS = {
   approved: "Aprovado",
@@ -75,6 +76,30 @@ function formatDateTime(value) {
   return parsed.toLocaleString("pt-BR");
 }
 
+function isValidCivilDate(year, month, day) {
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day;
+}
+
+function formatDateOnly(value) {
+  if (!value) return "-";
+
+  const raw = String(value).trim();
+  const isoDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/);
+  const brDate = raw.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  const parts = isoDate
+    ? { year: Number(isoDate[1]), month: Number(isoDate[2]), day: Number(isoDate[3]) }
+    : brDate
+      ? { year: Number(brDate[3]), month: Number(brDate[2]), day: Number(brDate[1]) }
+      : null;
+
+  if (!parts || !isValidCivilDate(parts.year, parts.month, parts.day)) return "-";
+
+  return `${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}/${parts.year}`;
+}
+
 function normalizeDocumentType(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -109,17 +134,22 @@ function documentStatusTone(doc) {
   return "status-warn";
 }
 
-function formatFileSize(size) {
-  const bytes = Number(size || 0);
-  if (!Number.isFinite(bytes) || bytes <= 0) return "-";
-  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function getSupportTicketId(ticket = {}) {
+  return String(ticket.id || ticket.ticketId || "").trim();
 }
 
-function formatDocumentRequestMessage(result) {
-  if (result?.push?.success) return "Atualização solicitada e push enviado ao motorista.";
-  if (result?.push?.skipped) return "Atualização solicitada sem envio de push.";
-  return "Atualização solicitada; o backend não confirmou a entrega do push.";
+function listPendingIdentityReviewTickets(response, driverId) {
+  const payload = response?.data || response || {};
+  const tickets = Array.isArray(payload?.tickets) ? payload.tickets : [];
+  const safeDriverId = String(driverId || "").trim();
+  return tickets.filter((ticket) => {
+    const metadata = ticket?.metadata || {};
+    const ticketDriverId = String(ticket?.userId || ticket?.user?.id || "").trim();
+    return getSupportTicketId(ticket) &&
+      (!ticketDriverId || ticketDriverId === safeDriverId) &&
+      String(metadata.identityReviewLinkStatus || "").trim().toLowerCase() === "pending" &&
+      Boolean(String(metadata.kycEvidenceId || "").trim());
+  });
 }
 
 export default function DriverDocumentsPage({ params }) {
@@ -129,16 +159,23 @@ export default function DriverDocumentsPage({ params }) {
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [reviewingType, setReviewingType] = useState(null);
-  const [requestingDocumentType, setRequestingDocumentType] = useState(null);
   const [vehicleBusy, setVehicleBusy] = useState(false);
   const [uploadingBackgroundDoc, setUploadingBackgroundDoc] = useState(false);
   const [backgroundDocFile, setBackgroundDocFile] = useState(null);
-  const [pendingAction, setPendingAction] = useState(null);
-  const [rejectionReasonDraft, setRejectionReasonDraft] = useState("");
-  const [documentRequestReasonDraft, setDocumentRequestReasonDraft] = useState("");
+  const [selectedRejectionReasons, setSelectedRejectionReasons] = useState({});
   const [showRatingReviews, setShowRatingReviews] = useState(false);
   const [docSearch, setDocSearch] = useState("");
   const [docStatusFilter, setDocStatusFilter] = useState("all");
+  const [identityReviews, setIdentityReviews] = useState([]);
+  const [selectedIdentityReviewId, setSelectedIdentityReviewId] = useState("");
+  const [identityReviewBusy, setIdentityReviewBusy] = useState("");
+  const [identityReviewError, setIdentityReviewError] = useState("");
+  const [identityEvidenceUrls, setIdentityEvidenceUrls] = useState({ cnh: "", selfie: "" });
+  const [pendingIdentityReviewTickets, setPendingIdentityReviewTickets] = useState([]);
+  const [selectedPendingIdentityTicketId, setSelectedPendingIdentityTicketId] = useState("");
+  const [identityReconciliationReason, setIdentityReconciliationReason] = useState("");
+  const [identityReconciliationBusy, setIdentityReconciliationBusy] = useState(false);
+  const [identityReconciliationError, setIdentityReconciliationError] = useState("");
   const [vehicleForm, setVehicleForm] = useState({
     userVehicleId: "",
     category: "plus",
@@ -147,10 +184,36 @@ export default function DriverDocumentsPage({ params }) {
     acceptPlusWithElite: true,
   });
 
+  const busy = Boolean(reviewingType) || vehicleBusy || uploadingBackgroundDoc;
+
   const load = async () => {
     if (!id) return;
     const response = await leafAPI.getDriverDocuments(id);
     setDocuments(response?.data || response);
+  };
+
+  const loadIdentityReviews = async () => {
+    if (!id) return;
+    const response = await leafAPI.getDriverKycIdentityReviews(id);
+    const payload = response?.data || response || {};
+    setIdentityReviews(Array.isArray(payload?.cases) ? payload.cases : []);
+    setIdentityReviewError("");
+  };
+
+  const loadPendingIdentityReviewTickets = async () => {
+    if (!id) return;
+    const response = await leafAPI.getSupportTickets(
+      { userId: id, limit: 100 },
+      { scope: "operational" },
+    );
+    const pendingTickets = listPendingIdentityReviewTickets(response, id);
+    setPendingIdentityReviewTickets(pendingTickets);
+    setSelectedPendingIdentityTicketId((current) => (
+      pendingTickets.some((ticket) => getSupportTicketId(ticket) === current)
+        ? current
+        : getSupportTicketId(pendingTickets[0])
+    ));
+    setIdentityReconciliationError("");
   };
 
   useEffect(() => {
@@ -158,8 +221,32 @@ export default function DriverDocumentsPage({ params }) {
     const run = async () => {
       if (!id) return;
       try {
-        const response = await leafAPI.getDriverDocuments(id);
-        if (mounted) setDocuments(response?.data || response);
+        const [documentsResult, reviewsResult, pendingTicketsResult] = await Promise.allSettled([
+          leafAPI.getDriverDocuments(id),
+          leafAPI.getDriverKycIdentityReviews(id),
+          leafAPI.getSupportTickets(
+            { userId: id, limit: 100 },
+            { scope: "operational" },
+          ),
+        ]);
+        if (!mounted) return;
+        if (documentsResult.status === "rejected") throw documentsResult.reason;
+        setDocuments(documentsResult.value?.data || documentsResult.value);
+        if (reviewsResult.status === "fulfilled") {
+          const reviewPayload = reviewsResult.value?.data || reviewsResult.value || {};
+          setIdentityReviews(Array.isArray(reviewPayload?.cases) ? reviewPayload.cases : []);
+        } else {
+          setIdentityReviewError(reviewsResult.reason?.message || "Falha ao carregar casos de identidade");
+        }
+        if (pendingTicketsResult.status === "fulfilled") {
+          const pendingTickets = listPendingIdentityReviewTickets(pendingTicketsResult.value, id);
+          setPendingIdentityReviewTickets(pendingTickets);
+          setSelectedPendingIdentityTicketId(getSupportTicketId(pendingTickets[0]));
+        } else {
+          setIdentityReconciliationError(
+            pendingTicketsResult.reason?.message || "Falha ao verificar chamados KYC pendentes",
+          );
+        }
       } catch (err) {
         if (mounted) setError(err?.message || "Falha ao carregar documentos");
       }
@@ -169,6 +256,26 @@ export default function DriverDocumentsPage({ params }) {
       mounted = false;
     };
   }, [id]);
+
+  useEffect(() => () => {
+    Object.values(identityEvidenceUrls).forEach((url) => {
+      if (url) URL.revokeObjectURL(url);
+    });
+  }, [identityEvidenceUrls]);
+
+  useEffect(() => {
+    if (identityReviews.length === 0) {
+      setSelectedIdentityReviewId("");
+      return;
+    }
+    if (!identityReviews.some((item) => item?.caseId === selectedIdentityReviewId)) {
+      setSelectedIdentityReviewId(identityReviews[0]?.caseId || "");
+    }
+  }, [identityReviews, selectedIdentityReviewId]);
+
+  useEffect(() => {
+    setIdentityEvidenceUrls({ cnh: "", selfie: "" });
+  }, [selectedIdentityReviewId]);
 
   useEffect(() => {
     const config = documents?.vehicleConfig;
@@ -189,26 +296,27 @@ export default function DriverDocumentsPage({ params }) {
     }));
   }, [documents]);
 
-  const requestDocumentReview = (doc, action) => {
-    const normalizedType = normalizeDocumentType(doc?.type);
-    if (!normalizedType) return;
-    setError("");
-    setActionMessage("");
-    setRejectionReasonDraft("");
-    setPendingAction({
-      type: "document-review",
-      action,
-      documentType: normalizedType,
-      doc,
-    });
+  const resolveRejectionReason = (documentType) => {
+    const selected = String(selectedRejectionReasons?.[documentType] || "").trim();
+    if (selected && selected !== "__custom__") {
+      return selected;
+    }
+
+    const options = getReasonOptions(documentType);
+    if (options.length > 0 && !selected) {
+      return "";
+    }
+
+    const customReason = window.prompt("Motivo da rejeição:");
+    return String(customReason || "").trim();
   };
 
-  const reviewSingle = async (documentType, action, reason = "") => {
+  const reviewSingle = async (documentType, action) => {
     const normalizedType = String(documentType || "").toLowerCase();
-    const normalizedReason = String(reason || "").trim();
+    const reason = action === "reject" ? resolveRejectionReason(normalizedType) : "";
 
-    if (action === "reject" && !normalizedReason) {
-      setError("Informe o motivo da rejeição antes de confirmar.");
+    if (action === "reject" && !reason) {
+      setError("Selecione um motivo padrão de rejeição ou informe um motivo personalizado.");
       return;
     }
 
@@ -216,13 +324,11 @@ export default function DriverDocumentsPage({ params }) {
       setError("");
       setActionMessage("");
       setReviewingType(normalizedType);
-      await leafAPI.reviewDriverDocument(id, normalizedType, action, normalizedReason);
+      await leafAPI.reviewDriverDocument(id, normalizedType, action, reason || "");
       setActionMessage(
         `${resolveDocumentLabel(normalizedType)} ${action === "approve" ? "aprovado" : "rejeitado"} com sucesso.`,
       );
       await load();
-      setPendingAction(null);
-      setRejectionReasonDraft("");
     } catch (err) {
       setError(err?.message || "Falha ao revisar documento");
     } finally {
@@ -230,79 +336,25 @@ export default function DriverDocumentsPage({ params }) {
     }
   };
 
-  const requestDocumentUpdate = (doc) => {
-    const documentType = normalizeDocumentType(doc?.type);
-    if (!documentType) return;
-    const defaultReason = doc?.rejectionReason || doc?.requestReason ||
-      "Precisamos que você envie uma versão atualizada deste documento no app.";
-    setError("");
-    setActionMessage("");
-    setDocumentRequestReasonDraft(defaultReason);
-    setPendingAction({
-      type: "document-request",
-      documentType,
-      doc,
-    });
-  };
-
-  const sendDocumentUpdateRequest = async (documentType, reason) => {
-    const normalizedType = normalizeDocumentType(documentType);
-    const normalizedReason = String(reason || "").trim();
-    if (!normalizedType || !normalizedReason) {
-      setError("Informe a mensagem que será enviada ao motorista.");
-      return;
-    }
-
-    try {
-      setRequestingDocumentType(normalizedType);
-      setError("");
-      setActionMessage("");
-      const result = await leafAPI.requestDriverDocument(id, normalizedType, {
-        reason: normalizedReason,
-        sendPush: true,
-      });
-      setActionMessage(formatDocumentRequestMessage(result));
-      await load();
-      setPendingAction(null);
-      setDocumentRequestReasonDraft("");
-    } catch (err) {
-      setError(err?.message || "Falha ao solicitar atualização do documento");
-    } finally {
-      setRequestingDocumentType(null);
-    }
-  };
-
-  const requestVehicleConfigSave = () => {
+  const saveVehicleConfig = async () => {
     if (!vehicleForm.userVehicleId) {
       setError("Selecione um veículo para configurar.");
       return;
     }
 
-    const selectedVehicle = vehicleList.find((vehicle) => vehicle.userVehicleId === vehicleForm.userVehicleId) || null;
-    setError("");
-    setActionMessage("");
-    setPendingAction({
-      type: "vehicle-config",
-      vehicle: selectedVehicle,
-      payload: {
+    try {
+      setVehicleBusy(true);
+      setError("");
+      setActionMessage("");
+      await leafAPI.updateDriverVehicleConfig(id, {
         userVehicleId: vehicleForm.userVehicleId,
         category: vehicleForm.category,
         vehicleStatus: vehicleForm.vehicleStatus,
         setActive: vehicleForm.setActive,
         acceptPlusWithElite: vehicleForm.acceptPlusWithElite,
-      },
-    });
-  };
-
-  const saveVehicleConfig = async (payload) => {
-    try {
-      setVehicleBusy(true);
-      setError("");
-      setActionMessage("");
-      await leafAPI.updateDriverVehicleConfig(id, payload);
+      });
       setActionMessage("Configuração de veículo atualizada.");
       await load();
-      setPendingAction(null);
     } catch (err) {
       setError(err?.message || "Falha ao atualizar configuração de veículo");
     } finally {
@@ -310,53 +362,24 @@ export default function DriverDocumentsPage({ params }) {
     }
   };
 
-  const requestBackgroundDocumentUpload = () => {
+  const uploadBackgroundDocument = async () => {
     if (!backgroundDocFile) {
       setError("Selecione um arquivo PDF para anexar a certidão de antecedentes.");
       return;
     }
 
-    setError("");
-    setActionMessage("");
-    setPendingAction({
-      type: "background-upload",
-      file: backgroundDocFile,
-    });
-  };
-
-  const uploadBackgroundDocument = async (file) => {
     try {
       setUploadingBackgroundDoc(true);
       setError("");
       setActionMessage("");
-      await leafAPI.uploadDriverDocument(id, "antecedentes_criminais", file);
+      await leafAPI.uploadDriverDocument(id, "antecedentes_criminais", backgroundDocFile);
       setBackgroundDocFile(null);
       setActionMessage("Certidão de antecedentes anexada com sucesso.");
       await load();
-      setPendingAction(null);
     } catch (err) {
       setError(err?.message || "Falha ao anexar certidão de antecedentes");
     } finally {
       setUploadingBackgroundDoc(false);
-    }
-  };
-
-  const confirmPendingAction = () => {
-    if (pendingAction?.type === "document-review") {
-      const reason = pendingAction.action === "reject" ? rejectionReasonDraft : "";
-      reviewSingle(pendingAction.documentType, pendingAction.action, reason);
-      return;
-    }
-    if (pendingAction?.type === "document-request") {
-      sendDocumentUpdateRequest(pendingAction.documentType, documentRequestReasonDraft);
-      return;
-    }
-    if (pendingAction?.type === "vehicle-config") {
-      saveVehicleConfig(pendingAction.payload);
-      return;
-    }
-    if (pendingAction?.type === "background-upload") {
-      uploadBackgroundDocument(pendingAction.file);
     }
   };
 
@@ -406,49 +429,143 @@ export default function DriverDocumentsPage({ params }) {
     : [];
   const backgroundCheckDoc = documents?.documents?.antecedentes_criminais || null;
   const backgroundCheckUrl = resolveDocumentUrl(backgroundCheckDoc || {});
-  const documentsRequiringAttention = docsList.filter((doc) => {
-    const status = resolveDocumentStatus(doc);
-    return status !== "approved" || isDocumentRequested(doc);
-  }).length;
-  const mutationBusy = Boolean(reviewingType) || Boolean(requestingDocumentType) || vehicleBusy || uploadingBackgroundDoc;
-  const pendingDocument = ["document-review", "document-request"].includes(pendingAction?.type)
-    ? pendingAction.doc
-    : null;
-  const pendingDocumentAction = pendingAction?.type === "document-review" ? pendingAction.action : "";
-  const pendingVehicle = pendingAction?.type === "vehicle-config" ? pendingAction.vehicle : null;
-  const pendingDialogBusy = pendingAction?.type === "document-review"
-    ? Boolean(reviewingType)
-    : pendingAction?.type === "document-request"
-      ? Boolean(requestingDocumentType)
-    : pendingAction?.type === "vehicle-config"
-      ? vehicleBusy
-      : uploadingBackgroundDoc;
-  const pendingDialogTone = pendingAction?.type === "document-review" && pendingDocumentAction === "approve"
-    ? "warning"
-    : ["background-upload", "document-request"].includes(pendingAction?.type)
-      ? "warning"
-      : "danger";
-  const pendingDialogTitle = pendingAction?.type === "document-review"
-    ? `${pendingDocumentAction === "approve" ? "Aprovar" : "Rejeitar"} ${resolveDocumentLabel(pendingAction.documentType)}`
-    : pendingAction?.type === "document-request"
-      ? `Solicitar ${resolveDocumentLabel(pendingAction.documentType)}`
-    : pendingAction?.type === "vehicle-config"
-      ? "Confirmar veículo e categoria"
-      : "Confirmar anexo da certidão";
-  const pendingDialogDescription = pendingAction?.type === "document-review"
-    ? "Revise o motorista, o arquivo e a consequência desta decisão documental."
-    : pendingAction?.type === "document-request"
-      ? "Revise a mensagem antes de solicitar uma nova versão pelo app e tentar notificar o motorista."
-    : pendingAction?.type === "vehicle-config"
-      ? "Esta alteração muda a configuração operacional usada pelo perfil do motorista."
-      : "O PDF será anexado à ficha e seguirá para revisão; o upload não aprova o documento.";
-  const pendingConfirmLabel = pendingAction?.type === "document-review"
-    ? pendingDocumentAction === "approve" ? "Confirmar aprovação" : "Confirmar rejeição"
-    : pendingAction?.type === "document-request"
-      ? "Solicitar atualização"
-    : pendingAction?.type === "vehicle-config"
-      ? "Salvar configuração"
-      : "Anexar documento";
+
+  const selectedIdentityReview = identityReviews.find(
+    (item) => item?.caseId === selectedIdentityReviewId,
+  ) || identityReviews[0] || null;
+  const selectedIdentityEvidence = selectedIdentityReview?.evidence ||
+    selectedIdentityReview?.evidenceSummary || {};
+  const selectedPendingIdentityTicket = pendingIdentityReviewTickets.find(
+    (ticket) => getSupportTicketId(ticket) === selectedPendingIdentityTicketId,
+  ) || pendingIdentityReviewTickets[0] || null;
+
+  const reconcileIdentityReviewTicket = async () => {
+    const ticketId = getSupportTicketId(selectedPendingIdentityTicket);
+    const evidenceId = String(selectedPendingIdentityTicket?.metadata?.kycEvidenceId || "").trim();
+    const reason = identityReconciliationReason.trim();
+    if (!ticketId || !evidenceId || reason.length < MIN_IDENTITY_RECONCILIATION_REASON_LENGTH) return;
+
+    try {
+      setIdentityReconciliationBusy(true);
+      setIdentityReconciliationError("");
+      const response = await leafAPI.reconcileDriverKycIdentityReview(id, {
+        ticketId,
+        evidenceId,
+        reason,
+      });
+      const reconciledCase = response?.data?.case || response?.case || null;
+      setPendingIdentityReviewTickets((current) => (
+        current.filter((ticket) => getSupportTicketId(ticket) !== ticketId)
+      ));
+      setSelectedPendingIdentityTicketId("");
+      setIdentityReconciliationReason("");
+      if (reconciledCase?.caseId) {
+        setSelectedIdentityReviewId(reconciledCase.caseId);
+      }
+      setActionMessage("Chamado KYC vinculado ao caso de revisão de identidade.");
+
+      const refreshResults = await Promise.allSettled([
+        loadIdentityReviews(),
+        loadPendingIdentityReviewTickets(),
+      ]);
+      if (refreshResults.some((result) => result.status === "rejected")) {
+        setIdentityReconciliationError(
+          "O vínculo foi concluído, mas o painel não conseguiu atualizar todos os dados. Recarregue a página.",
+        );
+      }
+    } catch (err) {
+      setIdentityReconciliationError(err?.message || "Falha ao vincular chamado KYC ao caso");
+    } finally {
+      setIdentityReconciliationBusy(false);
+    }
+  };
+
+  const loadIdentityEvidence = async ({ ticketId, justification }) => {
+    if (!selectedIdentityReview?.caseId) return;
+    try {
+      setIdentityReviewBusy("load_evidence");
+      setIdentityReviewError("");
+      const context = {
+        ticketId,
+        justification,
+        evidenceBindingHash: selectedIdentityReview.evidenceBindingHash,
+      };
+      const [cnhFile, selfieFile] = await Promise.all([
+        leafAPI.getDriverKycIdentityEvidence(id, selectedIdentityReview.caseId, "cnh", context),
+        leafAPI.getDriverKycIdentityEvidence(id, selectedIdentityReview.caseId, "selfie", context),
+      ]);
+      setIdentityEvidenceUrls({
+        cnh: URL.createObjectURL(cnhFile.blob),
+        selfie: URL.createObjectURL(selfieFile.blob),
+      });
+    } catch (err) {
+      setIdentityReviewError(err?.message || "Falha ao carregar evidências restritas");
+    } finally {
+      setIdentityReviewBusy("");
+    }
+  };
+
+  const startIdentityReview = async ({ ticketId, justification }) => {
+    if (!selectedIdentityReview?.caseId) return;
+    try {
+      setIdentityReviewBusy("start_review");
+      setIdentityReviewError("");
+      await leafAPI.startDriverKycIdentityReview(id, selectedIdentityReview.caseId, {
+        ticketId,
+        reason: justification,
+        evidenceBindingHash: selectedIdentityReview.evidenceBindingHash,
+      });
+      setActionMessage("Análise de identidade iniciada e auditada.");
+      try {
+        await loadIdentityReviews();
+      } catch {
+        setIdentityReviewError(
+          "A análise foi iniciada, mas o painel não conseguiu atualizar o caso. Recarregue a página.",
+        );
+      }
+    } catch (err) {
+      setIdentityReviewError(err?.message || "Falha ao iniciar análise de identidade");
+    } finally {
+      setIdentityReviewBusy("");
+    }
+  };
+
+  const decideIdentityReview = async (decision, {
+    ticketId,
+    justification,
+    confirmationPhrase = "",
+  }) => {
+    if (!selectedIdentityReview?.caseId) return;
+    const busyAction = decision === "CONFIRMED_FRAUD" ? "permanent_block" : "authorize_retry";
+    try {
+      setIdentityReviewBusy(busyAction);
+      setIdentityReviewError("");
+      await leafAPI.decideDriverKycIdentityReview(id, selectedIdentityReview.caseId, {
+        ticketId,
+        reason: justification,
+        evidenceBindingHash: selectedIdentityReview.evidenceBindingHash,
+        decision,
+        explicitDecision: true,
+        confirmPermanentBlock: decision === "CONFIRMED_FRAUD",
+        confirmationPhrase,
+      });
+      setActionMessage(
+        decision === "CONFIRMED_FRAUD"
+          ? "Fraude confirmada e bloqueio permanente aplicado."
+          : "Falso positivo registrado; uma nova tentativa limpa foi autorizada.",
+      );
+      const refreshResults = await Promise.allSettled([load(), loadIdentityReviews()]);
+      if (refreshResults.some((result) => result.status === "rejected")) {
+        setIdentityReviewError(
+          "A decisão foi concluída, mas o painel não conseguiu atualizar todos os dados. Recarregue a página.",
+        );
+      }
+    } catch (err) {
+      setIdentityReviewError(err?.message || "Falha ao concluir análise de identidade");
+    } finally {
+      setIdentityReviewBusy("");
+    }
+  };
 
   return (
     <ProtectedRoute>
@@ -477,10 +594,6 @@ export default function DriverDocumentsPage({ params }) {
               rating: averageRating,
               status: documents?.driver?.status || "pending",
               aprovado: documents?.driver?.approved || false,
-              kycStatus,
-              kycBloqueado: kyc.blocked || false,
-              kycNeedsReview: kyc.needsReview || false,
-              documentosAtencao: documentsRequiringAttention,
             }}
             labels={{
               id: "ID",
@@ -495,13 +608,13 @@ export default function DriverDocumentsPage({ params }) {
               rating: "Rating",
               status: "Status",
               aprovado: "Aprovado",
-              kycStatus: "Status KYC",
-              kycBloqueado: "KYC bloqueado",
-              kycNeedsReview: "KYC precisa revisão",
-              documentosAtencao: "Documentos que exigem atenção",
             }}
             valueFormatter={(key, value) => {
-              if (key === "dataNascimento" || key === "dataCadastro") {
+              if (key === "dataNascimento") {
+                return formatDateOnly(value);
+              }
+
+              if (key === "dataCadastro") {
                 return formatDateTime(value);
               }
 
@@ -547,12 +660,8 @@ export default function DriverDocumentsPage({ params }) {
           <TechnicalDetails title="Ver payload técnico do motorista" data={documents?.driver || {}} />
         </section>
 
-        <details className="driver-background-disclosure">
-          <summary>
-            Certidão de antecedentes · {formatDocumentStatus(backgroundCheckDoc || {})}
-          </summary>
-          <section className="card">
-            <h2>Certidão de antecedentes</h2>
+        <section className="card">
+          <h2>Certidão de antecedentes</h2>
           <div className="filters" style={{ display: "grid", gap: 6 }}>
             <p>
               <strong>Status:</strong>{" "}
@@ -590,19 +699,14 @@ export default function DriverDocumentsPage({ params }) {
                 setBackgroundDocFile(nextFile);
               }}
             />
-            <button
-              type="button"
-              onClick={requestBackgroundDocumentUpload}
-              disabled={mutationBusy || !backgroundDocFile}
-            >
+            <button onClick={uploadBackgroundDocument} disabled={busy || uploadingBackgroundDoc || !backgroundDocFile}>
               {uploadingBackgroundDoc ? "Enviando..." : "Anexar certidão (PDF)"}
             </button>
           </div>
           <p className="text-muted" style={{ marginTop: 8 }}>
             Documento anexado aqui fica disponível para revisão junto com CNH/CRLV.
           </p>
-          </section>
-        </details>
+        </section>
 
         <section className="card">
           <h2>KYC (Onboarding + Diário)</h2>
@@ -632,12 +736,148 @@ export default function DriverDocumentsPage({ params }) {
           </div>
         </section>
 
-        <details className="driver-vehicle-disclosure">
-          <summary>
-            Veículo e categoria · {vehicleForm.category} · {vehicleForm.vehicleStatus}
-          </summary>
+        {pendingIdentityReviewTickets.length > 0 ? (
+          <section className="card" aria-labelledby="pending-identity-review-title">
+            <div className="section-stack">
+              <div>
+                <span className="status-warn">Vínculo pendente</span>
+                <h2 id="pending-identity-review-title" style={{ marginBottom: 4 }}>
+                  Chamado KYC ainda não vinculado
+                </h2>
+                <p className="text-muted" style={{ margin: 0 }}>
+                  O chamado foi preservado no suporte, mas precisa ser reconciliado com a evidência exata antes da análise.
+                </p>
+              </div>
+
+              {pendingIdentityReviewTickets.length > 1 ? (
+                <label className="form-field">
+                  Chamado pendente
+                  <select
+                    value={getSupportTicketId(selectedPendingIdentityTicket)}
+                    onChange={(event) => setSelectedPendingIdentityTicketId(event.target.value)}
+                    disabled={identityReconciliationBusy}
+                  >
+                    {pendingIdentityReviewTickets.map((ticket) => (
+                      <option key={getSupportTicketId(ticket)} value={getSupportTicketId(ticket)}>
+                        {getSupportTicketId(ticket)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <p style={{ margin: 0 }}>
+                  <strong>Chamado:</strong> {getSupportTicketId(selectedPendingIdentityTicket)}
+                </p>
+              )}
+
+              <label className="form-field">
+                Justificativa da reconciliação
+                <textarea
+                  name="identityReviewReconciliationReason"
+                  value={identityReconciliationReason}
+                  onChange={(event) => setIdentityReconciliationReason(event.target.value)}
+                  minLength={MIN_IDENTITY_RECONCILIATION_REASON_LENGTH}
+                  placeholder="Explique por que este chamado deve ser vinculado à evidência registrada."
+                  disabled={identityReconciliationBusy}
+                  required
+                />
+                <span className="text-muted" style={{ margin: 0 }}>
+                  Mínimo de {MIN_IDENTITY_RECONCILIATION_REASON_LENGTH} caracteres ·{" "}
+                  {identityReconciliationReason.trim().length} informados
+                </span>
+              </label>
+
+              {identityReconciliationError ? (
+                <p className="error-banner" role="alert">{identityReconciliationError}</p>
+              ) : null}
+
+              <div>
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={reconcileIdentityReviewTicket}
+                  disabled={
+                    identityReconciliationBusy ||
+                    identityReconciliationReason.trim().length < MIN_IDENTITY_RECONCILIATION_REASON_LENGTH
+                  }
+                >
+                  {identityReconciliationBusy ? "Vinculando chamado..." : "Vincular chamado ao caso"}
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : identityReconciliationError ? (
+          <p className="error-banner" role="alert">{identityReconciliationError}</p>
+        ) : null}
+
+        {identityReviews.length > 1 ? (
           <section className="card">
-            <h2>Configuração de Veículo e Categoria</h2>
+            <label className="form-field">
+              Caso de revisão de identidade
+              <select
+                value={selectedIdentityReview?.caseId || ""}
+                onChange={(event) => setSelectedIdentityReviewId(event.target.value)}
+              >
+                {identityReviews.map((reviewCase) => (
+                  <option key={reviewCase.caseId} value={reviewCase.caseId}>
+                    {reviewCase.caseId} · {reviewCase.status || "OPEN"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </section>
+        ) : null}
+
+        {selectedIdentityReview ? (
+          <KycIdentityReviewPanel
+            key={selectedIdentityReview.caseId}
+            driverId={id}
+            driverName={documents?.driver?.name || ""}
+            incidentId={selectedIdentityReview.caseId}
+            attemptId={selectedIdentityEvidence.evidenceId || ""}
+            approvedCnhPortraitUrl={identityEvidenceUrls.cnh}
+            failedReferenceImageUrl={identityEvidenceUrls.selfie}
+            reviewStatus={selectedIdentityReview.status || "OPEN"}
+            evidence={{
+              ...selectedIdentityEvidence,
+              incidentId: selectedIdentityReview.caseId,
+              attemptId: selectedIdentityEvidence.evidenceId || "",
+              providerDecision: selectedIdentityEvidence.decision ||
+                selectedIdentityEvidence.faceCompare?.decision ||
+                "reject",
+              similarity: selectedIdentityEvidence.similarityScore ??
+                selectedIdentityEvidence.faceCompare?.similarityScore,
+              threshold: selectedIdentityEvidence.threshold ??
+                selectedIdentityEvidence.faceCompare?.threshold,
+              createdAt: selectedIdentityEvidence.faceCompare?.comparedAt ||
+                selectedIdentityReview.createdAt ||
+                selectedIdentityEvidence.createdAt,
+              expiresAt: selectedIdentityReview.evidenceExpiresAt ||
+                selectedIdentityEvidence.expiresAt ||
+                selectedIdentityEvidence.retainUntil ||
+                selectedIdentityReview.evidenceAccess?.retainUntil,
+            }}
+            retentionExpiresAt={
+              selectedIdentityReview.evidenceExpiresAt ||
+              selectedIdentityEvidence.expiresAt ||
+              selectedIdentityEvidence.retainUntil ||
+              selectedIdentityReview.evidenceAccess?.retainUntil ||
+              ""
+            }
+            initialTicketId={selectedIdentityReview.ticketId || selectedIdentityReview.ticketIds?.[0] || ""}
+            busyAction={identityReviewBusy}
+            actionError={identityReviewError}
+            onLoadEvidence={loadIdentityEvidence}
+            onStartReview={startIdentityReview}
+            onAuthorizeRetry={(payload) => decideIdentityReview("FALSE_POSITIVE", payload)}
+            onConfirmPermanentBlock={(payload) => decideIdentityReview("CONFIRMED_FRAUD", payload)}
+          />
+        ) : identityReviewError ? (
+          <p className="error-banner" role="alert">{identityReviewError}</p>
+        ) : null}
+
+        <section className="card">
+          <h2>Configuração de Veículo e Categoria</h2>
           {vehicleList.length === 0 ? (
             <p>Nenhum veículo encontrado para este motorista.</p>
           ) : (
@@ -709,48 +949,48 @@ export default function DriverDocumentsPage({ params }) {
               </label>
 
               <div>
-                <button type="button" onClick={requestVehicleConfigSave} disabled={mutationBusy}>
+                <button onClick={saveVehicleConfig} disabled={vehicleBusy || busy}>
                   {vehicleBusy ? "Salvando..." : "Salvar Configuração"}
                 </button>
               </div>
             </div>
           )}
-          </section>
-        </details>
+        </section>
 
-        <details className="driver-documents-disclosure" open>
-          <summary>Documentos operacionais · {documentsRequiringAttention} exigindo atenção</summary>
-          <section className="grid">
-            <article className="card">
-              <h2>Filtros de documentos</h2>
-              <div className="filters">
-                <input
-                  placeholder="Buscar por tipo ou arquivo"
-                  value={docSearch}
-                  onChange={(e) => setDocSearch(e.target.value)}
-                />
-                <select
-                  value={docStatusFilter}
-                  onChange={(e) => setDocStatusFilter(e.target.value)}
-                >
-                  <option value="all">Todos os status</option>
-                  <option value="requested">Solicitado</option>
-                  <option value="pending">Pendente</option>
-                  <option value="approved">Aprovado</option>
-                  <option value="rejected">Rejeitado</option>
-                </select>
-              </div>
-            </article>
-          </section>
+        <section className="grid">
+          <article className="card">
+            <h2>Filtros de documentos</h2>
+            <div className="filters">
+              <input
+                placeholder="Buscar por tipo ou arquivo"
+                value={docSearch}
+                onChange={(e) => setDocSearch(e.target.value)}
+              />
+              <select
+                value={docStatusFilter}
+                onChange={(e) => setDocStatusFilter(e.target.value)}
+              >
+                <option value="all">Todos os status</option>
+                <option value="requested">Solicitado</option>
+                <option value="pending">Pendente</option>
+                <option value="approved">Aprovado</option>
+                <option value="rejected">Rejeitado</option>
+              </select>
+            </div>
+          </article>
+        </section>
 
-          <section className="grid list-scroll list-scroll-tall">
+        <section className="grid list-scroll list-scroll-tall">
           {filteredDocsList.length === 0 ? (
             <article className="card">
               <p>Nenhum documento encontrado.</p>
             </article>
           ) : (
             filteredDocsList.map((doc, idx) => {
+              const normalizedType = String(doc.type || "documento").toLowerCase();
               const docUrl = resolveDocumentUrl(doc);
+              const reasonOptions = getReasonOptions(normalizedType);
+              const currentReasonSelection = selectedRejectionReasons[normalizedType] || "";
 
               return (
                 <article className="card" key={`${doc.type}-${idx}`}>
@@ -764,10 +1004,35 @@ export default function DriverDocumentsPage({ params }) {
                   {doc.requestReason ? <p>Motivo da solicitação: {doc.requestReason}</p> : null}
                   {doc.rejectionReason ? <p className="error">{doc.rejectionReason}</p> : null}
 
+                  {reasonOptions.length > 0 ? (
+                    <div style={{ marginTop: 10 }}>
+                      <label>
+                        Motivo padrão de rejeição
+                        <select
+                          value={currentReasonSelection}
+                          onChange={(e) => {
+                            const nextValue = e.target.value;
+                            setSelectedRejectionReasons((prev) => ({
+                              ...prev,
+                              [normalizedType]: nextValue,
+                            }));
+                          }}
+                        >
+                          <option value="">Selecione um motivo</option>
+                          {reasonOptions.map((reason) => (
+                            <option key={reason} value={reason}>
+                              {reason}
+                            </option>
+                          ))}
+                          <option value="__custom__">Outro motivo (digitar)</option>
+                        </select>
+                      </label>
+                    </div>
+                  ) : null}
+
                   <div className="filters">
                     <button
                       type="button"
-                      className="primary-action"
                       disabled={!docUrl}
                       onClick={() => {
                         if (!docUrl) return;
@@ -776,208 +1041,24 @@ export default function DriverDocumentsPage({ params }) {
                     >
                       {docUrl ? "Visualizar documento" : "Sem arquivo para visualizar"}
                     </button>
-                    <details className="driver-document-actions-disclosure">
-                      <summary>Decidir sobre o documento</summary>
-                      <div>
-                        <button
-                          type="button"
-                          disabled={mutationBusy}
-                          onClick={() => requestDocumentReview(doc, "approve")}
-                        >
-                          Aprovar documento
-                        </button>
-                        <button
-                          type="button"
-                          className="button-danger"
-                          disabled={mutationBusy}
-                          onClick={() => requestDocumentReview(doc, "reject")}
-                        >
-                          Rejeitar documento
-                        </button>
-                        <button
-                          type="button"
-                          disabled={mutationBusy}
-                          onClick={() => requestDocumentUpdate(doc)}
-                        >
-                          Solicitar atualização
-                        </button>
-                      </div>
-                    </details>
+                    <button
+                      disabled={reviewingType === normalizedType || busy}
+                      onClick={() => reviewSingle(normalizedType, "approve")}
+                    >
+                      Aprovar doc
+                    </button>
+                    <button
+                      disabled={reviewingType === normalizedType || busy}
+                      onClick={() => reviewSingle(normalizedType, "reject")}
+                    >
+                      Rejeitar doc
+                    </button>
                   </div>
                 </article>
               );
             })
           )}
-          </section>
-        </details>
-
-        <ConfirmActionDialog
-          open={Boolean(pendingAction)}
-          title={pendingDialogTitle}
-          description={pendingDialogDescription}
-          confirmLabel={pendingConfirmLabel}
-          tone={pendingDialogTone}
-          busy={pendingDialogBusy}
-          onConfirm={confirmPendingAction}
-          onCancel={() => {
-            setPendingAction(null);
-            setRejectionReasonDraft("");
-            setDocumentRequestReasonDraft("");
-            setError("");
-          }}
-        >
-          {pendingAction?.type === "document-review" ? (
-            <div className="section-stack">
-              <KeyValueGrid
-                data={{
-                  motorista: documents?.driver?.name || id,
-                  motoristaId: documents?.driver?.id || id,
-                  documento: resolveDocumentLabel(pendingAction.documentType),
-                  arquivo: pendingDocument?.fileName || (resolveDocumentUrl(pendingDocument || {}) ? "arquivo disponível" : "arquivo não informado"),
-                  statusAtual: formatDocumentStatus(pendingDocument || {}),
-                }}
-                labels={{
-                  motorista: "Motorista",
-                  motoristaId: "ID do motorista",
-                  documento: "Documento revisado",
-                  arquivo: "Arquivo revisado",
-                  statusAtual: "Status atual",
-                }}
-                maxItems={5}
-              />
-              <p>
-                <strong>Consequência:</strong>{" "}
-                {pendingDocumentAction === "approve"
-                  ? "Registra somente este documento como aprovado. Elegibilidade e KYC continuam governados pelo backend."
-                  : "Registra este documento como rejeitado com o motivo informado. Elegibilidade e KYC continuam governados pelo backend."}
-              </p>
-              {pendingDocumentAction === "reject" ? (
-                <div className="section-stack">
-                  {getReasonOptions(pendingAction.documentType).length > 0 ? (
-                    <label className="form-field">
-                      Motivo sugerido
-                      <select
-                        value={getReasonOptions(pendingAction.documentType).includes(rejectionReasonDraft) ? rejectionReasonDraft : ""}
-                        onChange={(event) => setRejectionReasonDraft(event.target.value)}
-                      >
-                        <option value="">Escolha um motivo ou escreva abaixo</option>
-                        {getReasonOptions(pendingAction.documentType).map((reason) => (
-                          <option key={reason} value={reason}>{reason}</option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  <label className="form-field">
-                    Motivo obrigatório da rejeição
-                    <textarea
-                      rows={4}
-                      value={rejectionReasonDraft}
-                      onChange={(event) => setRejectionReasonDraft(event.target.value)}
-                      placeholder="Explique objetivamente o que precisa ser corrigido."
-                      required
-                      aria-required="true"
-                    />
-                  </label>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {pendingAction?.type === "document-request" ? (
-            <div className="section-stack">
-              <KeyValueGrid
-                data={{
-                  motorista: documents?.driver?.name || id,
-                  motoristaId: documents?.driver?.id || id,
-                  documento: resolveDocumentLabel(pendingAction.documentType),
-                  statusAtual: formatDocumentStatus(pendingDocument || {}),
-                  canal: "App do motorista + tentativa de push",
-                }}
-                labels={{
-                  motorista: "Motorista",
-                  motoristaId: "ID do motorista",
-                  documento: "Documento solicitado",
-                  statusAtual: "Status atual",
-                  canal: "Canal",
-                }}
-                maxItems={5}
-              />
-              <label className="form-field">
-                Mensagem obrigatória para o motorista
-                <textarea
-                  rows={4}
-                  value={documentRequestReasonDraft}
-                  onChange={(event) => setDocumentRequestReasonDraft(event.target.value)}
-                  placeholder="Explique objetivamente qual documento precisa ser enviado ou corrigido."
-                  required
-                  aria-required="true"
-                />
-              </label>
-              <p>
-                <strong>Consequência:</strong> abre uma solicitação de atualização e tenta notificar o motorista;
-                não aprova, rejeita ou altera a política KYC.
-              </p>
-            </div>
-          ) : null}
-
-          {pendingAction?.type === "vehicle-config" ? (
-            <KeyValueGrid
-              data={{
-                motorista: documents?.driver?.name || id,
-                veiculo: pendingVehicle
-                  ? `${pendingVehicle.plate || "Sem placa"} · ${pendingVehicle.brand || "-"} ${pendingVehicle.model || ""}`
-                  : pendingAction.payload?.userVehicleId || "-",
-                categoria: pendingAction.payload?.category || "-",
-                status: pendingAction.payload?.vehicleStatus || "-",
-                ativarNoPerfil: pendingAction.payload?.setActive ? "sim" : "não",
-                eliteRecebePlus: pendingAction.payload?.acceptPlusWithElite ? "sim" : "não",
-              }}
-              labels={{
-                motorista: "Motorista",
-                veiculo: "Veículo",
-                categoria: "Categoria",
-                status: "Status resultante",
-                ativarNoPerfil: "Ativar no perfil",
-                eliteRecebePlus: "Elite recebe Plus",
-              }}
-              maxItems={6}
-            />
-          ) : null}
-
-          {pendingAction?.type === "vehicle-config" ? (
-            <p>
-              <strong>Consequência:</strong> Atualiza veículo, categoria e disponibilidade configurada; o backend
-              mantém as guardas de trabalho e KYC.
-            </p>
-          ) : null}
-
-          {pendingAction?.type === "background-upload" ? (
-            <KeyValueGrid
-              data={{
-                motorista: documents?.driver?.name || id,
-                documento: "Certidão de antecedentes",
-                arquivo: pendingAction.file?.name || "-",
-                tamanho: formatFileSize(pendingAction.file?.size),
-              }}
-              labels={{
-                motorista: "Motorista",
-                documento: "Documento",
-                arquivo: "Arquivo",
-                tamanho: "Tamanho",
-              }}
-              maxItems={4}
-            />
-          ) : null}
-
-          {pendingAction?.type === "background-upload" ? (
-            <p>
-              <strong>Consequência:</strong> Anexa o PDF à ficha para revisão. O upload não aprova a certidão nem
-              altera a política KYC.
-            </p>
-          ) : null}
-
-          {pendingAction && error ? <p className="error">{error}</p> : null}
-        </ConfirmActionDialog>
+        </section>
 
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         {error ? <p className="error">{error}</p> : null}

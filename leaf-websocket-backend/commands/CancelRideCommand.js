@@ -479,11 +479,23 @@ class CancelRideCommand extends Command {
                 await redis.hdel('bookings:active', this.bookingId);
                 await pricingH3ReadModelService.clearBookingSnapshot(redis, this.bookingId).catch(() => null);
                 if (driverId) {
-                    await clearActiveTripForDriver(redis, driverId, this.bookingId);
-                    await applyDeferredIdentityReverification(driverId, {
-                        source: 'ride_canceled',
-                        tripId: this.bookingId
-                    });
+                    const activeTripCleared = await clearActiveTripForDriver(
+                        redis,
+                        driverId,
+                        this.bookingId
+                    );
+                    if (activeTripCleared) {
+                        await applyDeferredIdentityReverification(driverId, {
+                            source: 'ride_canceled',
+                            tripId: this.bookingId
+                        });
+                    } else {
+                        logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida cancelada', {
+                            service: 'cancel-ride-command',
+                            bookingId: this.bookingId,
+                            driverId
+                        });
+                    }
                     const refreshedDriverState = await redis.hgetall(`driver:${driverId}`);
                     const driverLat = Number(refreshedDriverState?.lat);
                     const driverLng = Number(refreshedDriverState?.lng);

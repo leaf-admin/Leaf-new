@@ -7,6 +7,9 @@ const { logStructured, logError } = require('../utils/logger');
 const { metrics: runtimeMetrics } = require('../utils/prometheus-metrics');
 const driverActivationStateService = require('./driver-activation-state-service');
 const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
+const {
+  buildApprovedCrlvVehicleLinkUpdates
+} = require('./driver-crlv-vehicle-link-service');
 
 const MEI_DOCUMENTS_ENABLED =
   String(process.env.ENABLE_DRIVER_MEI_DOCUMENTS || 'false').toLowerCase() === 'true';
@@ -577,7 +580,20 @@ async function updateDocumentState({
     fileType: userDocumentPayload.fileType || metadata?.fileType || null
   };
 
+  const crlvVehicleLink = safeType === 'crlv' && normalizedStatus === 'approved'
+    ? await buildApprovedCrlvVehicleLinkUpdates({
+      db,
+      driverId: safeDriverId,
+      crlvData: normalizedDocumentData,
+      submissionId: safeSubmissionId,
+      extractionSource,
+      model,
+      updatedAt: statusUpdatedAt
+    })
+    : null;
+
   await db.ref().update({
+    ...(crlvVehicleLink?.updates || {}),
     [activationDocPath]: basePayload,
     [activationHistoryPath]: historyPayload,
     [userDocumentPath]: userDocumentPayload,
@@ -586,6 +602,22 @@ async function updateDocumentState({
     [`driver_documents_index/${safeType}/rejected/${safeDriverId}`]: reviewStatus === 'rejected' ? indexPayload : null,
     [`driver_activation/${safeDriverId}/updatedAt`]: statusUpdatedAt
   });
+
+  if (crlvVehicleLink) {
+    runtimeMetrics.recordRealtimeUpdate(
+      'driver_activation',
+      crlvVehicleLink.createdLink ? 'crlv_vehicle_link_created' : 'crlv_vehicle_link_reused'
+    );
+    logStructured('info', 'CRLV aprovado materializado no cadastro canonico de veiculo', {
+      service: 'driver-activation-queue',
+      driverId: safeDriverId,
+      submissionId: safeSubmissionId,
+      vehicleId: crlvVehicleLink.vehicleId,
+      userVehicleId: crlvVehicleLink.userVehicleId,
+      createdCatalog: crlvVehicleLink.createdCatalog,
+      createdLink: crlvVehicleLink.createdLink
+    });
+  }
 
   await adjustDocumentIndexCounters(db, safeType, previousReviewStatus, reviewStatus);
 
@@ -621,7 +653,8 @@ async function updateDocumentState({
   return {
     eventPayload,
     aggregatedStatus,
-    documentPayload: basePayload
+    documentPayload: basePayload,
+    vehicleLink: crlvVehicleLink
   };
 }
 
