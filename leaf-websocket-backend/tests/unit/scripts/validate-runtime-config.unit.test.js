@@ -39,6 +39,35 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
     LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval'
   };
+  const strictKycProdEnv = {
+    KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true',
+    KYC_STRICT_PRODUCTION_MODE: 'true',
+    KYC_AWS_LIVENESS_ENABLED: 'true',
+    KYC_AWS_LIVENESS_CREDENTIALS_ENABLED: 'true',
+    KYC_AWS_LIVENESS_ASSUME_ROLE_ARN: 'arn:aws:iam::123456789012:role/leaf-liveness',
+    KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID: 'external-binding',
+    KYC_AWS_LIVENESS_STS_SESSION_NAME_PREFIX: 'leaf-liveness',
+    KYC_AWS_CREDENTIAL_SOURCE: 'static',
+    AWS_ACCESS_KEY_ID: 'test-access-key',
+    AWS_SECRET_ACCESS_KEY: 'test-secret-key',
+    KYC_FACE_COMPARE_PROVIDER: 'aws_rekognition_compare_faces',
+    KYC_AWS_COMPARE_FACES_ENABLED: 'true',
+    KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS: '1',
+    KYC_AWS_COMPARE_RESULT_PERSIST_MAX_ATTEMPTS: '3',
+    ENABLE_CNH_FACE_BIOMETRICS: 'false',
+    MOBILE_FACE_EMBEDDING_ENABLED: 'false',
+    MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK: 'false',
+    KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
+    KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false',
+    KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false',
+    KYC_TRUST_CADENCE_ENABLED: 'true',
+    DAILY_KYC_ONLINE_GATE_ENABLED: 'true',
+    KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction',
+    REDIS_CRITICAL_AUTHORITY_ATTESTATION_ENABLED: 'true',
+    REDIS_CRITICAL_DATASET_QUARANTINE_ENABLED: 'true',
+    REDIS_CRITICAL_DATASET_GENERATION: 'prod-test-generation',
+    KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '10'
+  };
 
   it('blocks a full production profile without formal broad-launch approval', () => {
     const result = runValidator({
@@ -329,15 +358,19 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
   });
 
   it('allows production deploy with the bundled Woovi webhook public-key verifier', () => {
-    const result = runValidator(baseProdEnv);
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv
+    });
 
     expect(result.status).toBe(0);
     expect(result.report.ok).toBe(true);
     expect(result.report.summary.blockers).toEqual([]);
     expect(result.report.diagnostics.redisCriticalAuthority).toEqual(
       expect.objectContaining({
-        required: false,
-        mode: null,
+        required: true,
+        requiredForKycStrict: true,
+        mode: 'redis_noeviction',
         modeValid: true
       })
     );
@@ -466,6 +499,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
   it('allows production deploy with a configured public-key verifier and strict flags', () => {
     const result = runValidator({
       ...baseProdEnv,
+      ...strictKycProdEnv,
       WOOVI_WEBHOOK_PUBLIC_KEY: 'public-key-placeholder',
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
@@ -491,8 +525,13 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       WOOVI_API_TOKEN: 'woovi-token',
       LEAF_PIX_KEY: 'pix-key',
       CORS_ORIGIN: 'https://api.leaf.example',
+      KYC_AWS_COST_GUARD_ENABLED: 'true',
+      KYC_AWS_COST_DAILY_LIMIT_USD: '2.50',
+      KYC_AWS_COST_MONTHLY_LIMIT_USD: '50.00',
+      KYC_AWS_COST_TIME_ZONE: 'UTC',
       LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
       LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval',
+      ...strictKycProdEnv,
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'false',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'true',
       WOOVI_WEBHOOK_PROVIDER_VERIFICATION_REQUIRED: 'true'
@@ -683,6 +722,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
   it('warns when production gateway disables the Socket.IO Redis adapter requirement', () => {
     const result = runValidator({
       ...baseProdEnv,
+      ...strictKycProdEnv,
       WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',
@@ -789,6 +829,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
   it('reports firebase diagnostics with all vars configured', () => {
     const result = runValidator({
       ...baseProdEnv,
+      ...strictKycProdEnv,
       WOOVI_WEBHOOK_SIGNATURE_SECRET: 'woovi-secret',
       WOOVI_WEBHOOK_REQUIRE_SIGNATURE: 'true',
       WOOVI_WEBHOOK_ALLOW_UNSIGNED: 'false',

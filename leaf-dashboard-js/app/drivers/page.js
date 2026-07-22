@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
@@ -19,7 +20,17 @@ const statusTone = {
 };
 const DRIVERS_REFRESH_MS = 120000;
 
-export default function DriversPage() {
+function DriversPageContent() {
+  const searchParams = useSearchParams();
+  const kycPersistenceScope = String(searchParams.get("kycScope") || "")
+    .trim()
+    .toLowerCase() === "sandbox"
+    ? "sandbox"
+    : "operational";
+  const kycRequestContext = useMemo(
+    () => ({ scope: kycPersistenceScope }),
+    [kycPersistenceScope],
+  );
   const [applications, setApplications] = useState([]);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
@@ -32,7 +43,7 @@ export default function DriversPage() {
     setLoading(true);
     setError("");
     try {
-      const response = await leafAPI.getDrivers(page, 20, status, search);
+      const response = await leafAPI.getDrivers(page, 20, status, search, kycRequestContext);
       setApplications(response?.applications || []);
       setSummary(response?.summary || null);
     } catch (err) {
@@ -56,7 +67,7 @@ export default function DriversPage() {
       clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, status, search]);
+  }, [page, status, search, kycRequestContext]);
 
   const counters = useMemo(() => {
     const base = { all: applications.length, pending: 0, approved: 0, rejected: 0 };
@@ -93,7 +104,10 @@ export default function DriversPage() {
               <option value="approved">Aprovados</option>
               <option value="rejected">Rejeitados</option>
             </select>
-            <Link href="/drivers/review-queue">Fila de Documentos</Link>
+            <Link href={kycPersistenceScope === "sandbox" ? "/drivers/review-queue?kycScope=sandbox" : "/drivers/review-queue"}>Fila de Documentos</Link>
+            <Link href={kycPersistenceScope === "sandbox" ? "/drivers" : "/drivers?kycScope=sandbox"}>
+              {kycPersistenceScope === "sandbox" ? "Voltar ao operacional" : "Abrir sandbox"}
+            </Link>
           </div>
         </header>
 
@@ -189,5 +203,13 @@ export default function DriversPage() {
         <ErrorText message={error} />
       </main>
     </ProtectedRoute>
+  );
+}
+
+export default function DriversPage() {
+  return (
+    <Suspense fallback={<LoadingState message="Carregando motoristas..." />}>
+      <DriversPageContent />
+    </Suspense>
   );
 }

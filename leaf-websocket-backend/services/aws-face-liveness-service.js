@@ -7,7 +7,7 @@ const {
 const { STSClient, AssumeRoleCommand } = require('@aws-sdk/client-sts');
 const redisPool = require('../utils/redis-pool');
 const {
-  ACTIVE_TRIP_LEASE_UNTIL_FIELD,
+  ACTIVE_TRIP_LEASE_UNTIL_FIELD = 'activeTripLeaseUntilMs',
   activeTripKey,
   identityVerificationKey
 } = require('../utils/active-trip-index');
@@ -33,6 +33,12 @@ if raw then
     return redis.error_reply('KYC_ATTEMPT_STATE_INVALID')
   end
   state = decoded
+  if
+    state.persistenceNamespace ~= ARGV[14]
+    or state.financialContextIdHash ~= ARGV[15]
+  then
+    return redis.error_reply('KYC_ATTEMPT_PERSISTENCE_BINDING_MISMATCH')
+  end
 end
 
 local reservations = state.attemptReservations
@@ -43,10 +49,24 @@ for _, reservation in ipairs(reservations) do
   end
 end
 
+for _, reservation in ipairs(reservations) do
+  if
+    reservation.status == 'committed'
+    and reservation.sessionId
+    and reservation.metadataPersisted ~= true
+  then
+    return cjson.encode({
+      status = 'committed',
+      token = reservation.token,
+      sessionId = reservation.sessionId,
+      state = state
+    })
+  end
+end
+
 local nowEpochMs = tonumber(ARGV[10])
 local retryDelayMs = tonumber(ARGV[11]) * 1000
 local retryWindowMs = tonumber(ARGV[12]) * 1000
-local reservationsChanged = false
 for _, reservation in ipairs(reservations) do
   if reservation.status == 'reserved' then
     local createdAtEpochMs = tonumber(reservation.createdAtEpochMs)
@@ -62,7 +82,9 @@ for _, reservation in ipairs(reservations) do
     end
     reservation.status = 'dispatch_unknown_expired'
     reservation.resolvedAt = ARGV[7]
-    reservationsChanged = true
+    state.attemptReservations = reservations
+    redis.call('SET', KEYS[1], cjson.encode(state), 'EX', tonumber(ARGV[6]))
+    return cjson.encode({ status = 'dispatch_unknown_expired', state = state })
   end
 end
 
@@ -104,10 +126,6 @@ if
     )
   )
 then
-  if reservationsChanged then
-    state.attemptReservations = reservations
-    redis.call('SET', KEYS[1], cjson.encode(state), 'EX', tonumber(ARGV[6]))
-  end
   return cjson.encode({ status = 'exhausted', state = state })
 end
 
@@ -131,6 +149,8 @@ state.recoveryAllowanceTotal = recoveryAllowanceTotal
 state.recoveryAllowanceRemaining = recoveryAllowanceRemaining
 state.recoveryAllowanceConsumed = recoveryAllowanceConsumed
 state.effectiveMax = maxAttempts + (recoveryAllowanceValid and recoveryAllowanceTotal or 0)
+state.persistenceNamespace = ARGV[14]
+state.financialContextIdHash = ARGV[15]
 
 table.insert(reservations, {
   token = ARGV[8],
@@ -159,14 +179,22 @@ end
 
 local reservations = state.attemptReservations
 if type(reservations) ~= 'table' then reservations = {} end
+local bindingOk, recoveryMetadata = pcall(cjson.decode, ARGV[5])
+if not bindingOk or type(recoveryMetadata) ~= 'table' then
+  return redis.error_reply('KYC_ATTEMPT_RECOVERY_METADATA_INVALID')
+end
 local found = false
 for _, reservation in ipairs(reservations) do
   if reservation.token == ARGV[1] then
     found = true
-    if reservation.status == 'reserved' then
+    if
+      reservation.status == 'reserved'
+      or reservation.status == 'dispatch_unknown_expired'
+    then
       reservation.status = 'committed'
       reservation.sessionId = ARGV[2]
       reservation.committedAt = ARGV[3]
+      reservation.recoveryMetadata = recoveryMetadata
     end
   end
 end
@@ -177,6 +205,58 @@ state.lastSessionId = ARGV[2]
 local encoded = cjson.encode(state)
 redis.call('SET', KEYS[1], encoded, 'EX', tonumber(ARGV[4]))
 return cjson.encode({ status = 'committed', state = state })
+`;
+
+const ATTEMPT_RECOVERY_BIND_SCRIPT = `
+-- leaf_aws_liveness_attempt_recovery_bind_v1
+local raw = redis.call('GET', KEYS[1])
+if not raw then return cjson.encode({ status = 'missing' }) end
+local ok, state = pcall(cjson.decode, raw)
+if not ok or type(state) ~= 'table' then
+  return redis.error_reply('KYC_ATTEMPT_STATE_INVALID')
+end
+local metadataOk, recoveryMetadata = pcall(cjson.decode, ARGV[2])
+if not metadataOk or type(recoveryMetadata) ~= 'table' then
+  return redis.error_reply('KYC_ATTEMPT_RECOVERY_METADATA_INVALID')
+end
+
+local reservations = state.attemptReservations
+if type(reservations) ~= 'table' then reservations = {} end
+for _, reservation in ipairs(reservations) do
+  if reservation.token == ARGV[1] and reservation.status == 'reserved' then
+    reservation.recoveryMetadata = recoveryMetadata
+    state.attemptReservations = reservations
+    redis.call('SET', KEYS[1], cjson.encode(state), 'EX', tonumber(ARGV[3]))
+    return cjson.encode({ status = 'bound', state = state })
+  end
+end
+return cjson.encode({ status = 'missing', state = state })
+`;
+
+const ATTEMPT_METADATA_PERSISTED_SCRIPT = `
+-- leaf_aws_liveness_attempt_metadata_persisted_v1
+local raw = redis.call('GET', KEYS[1])
+if not raw then return cjson.encode({ status = 'missing' }) end
+local ok, state = pcall(cjson.decode, raw)
+if not ok or type(state) ~= 'table' then
+  return redis.error_reply('KYC_ATTEMPT_STATE_INVALID')
+end
+
+local reservations = state.attemptReservations
+if type(reservations) ~= 'table' then reservations = {} end
+for _, reservation in ipairs(reservations) do
+  if reservation.token == ARGV[1] and reservation.sessionId == ARGV[2] then
+    if reservation.status ~= 'committed' then
+      return cjson.encode({ status = 'state_invalid', state = state })
+    end
+    reservation.metadataPersisted = true
+    reservation.metadataPersistedAt = ARGV[3]
+    state.attemptReservations = reservations
+    redis.call('SET', KEYS[1], cjson.encode(state), 'EX', tonumber(ARGV[4]))
+    return cjson.encode({ status = 'persisted', state = state })
+  end
+end
+return cjson.encode({ status = 'missing', state = state })
 `;
 
 const ATTEMPT_ROLLBACK_SCRIPT = `
@@ -274,6 +354,8 @@ if
   state.userId ~= ARGV[1]
   or state.attemptScope ~= ARGV[3]
   or state.lastSessionId ~= ARGV[4]
+  or state.persistenceNamespace ~= ARGV[9]
+  or state.financialContextIdHash ~= ARGV[10]
 then
   return cjson.encode({ status = 'attempt_binding_mismatch' })
 end
@@ -418,6 +500,12 @@ if raw then
     return redis.error_reply('KYC_ATTEMPT_STATE_INVALID')
   end
   state = decoded
+  if
+    state.persistenceNamespace ~= ARGV[15]
+    or state.financialContextIdHash ~= ARGV[16]
+  then
+    return redis.error_reply('KYC_ATTEMPT_PERSISTENCE_BINDING_MISMATCH')
+  end
 end
 
 local processed = state.processedResults
@@ -444,6 +532,8 @@ state.maxAttempts = tonumber(ARGV[4])
 state.estimatedUnitCostUsd = tonumber(ARGV[5])
 state.windowSeconds = tonumber(ARGV[6])
 state.idempotentReplay = false
+state.persistenceNamespace = ARGV[15]
+state.financialContextIdHash = ARGV[16]
 
 local reservations = state.attemptReservations
 if type(reservations) ~= 'table' then reservations = {} end
@@ -738,6 +828,14 @@ class AwsFaceLivenessService {
       300,
       604800
     );
+    // A sessao do provider continua valida apenas ate `sessionTtlSeconds`.
+    // O binding local precisa sobreviver pela janela inteira de tentativas para
+    // que `expiresAt` continue sendo uma prova duravel de terminalizacao antes
+    // de qualquer nova reserva paga.
+    this.sessionBindingTtlSeconds = Math.max(
+      this.sessionTtlSeconds,
+      this.attemptWindowSeconds
+    );
     this.idempotentRetryDelaySeconds = this.parseIntValue(
       process.env.KYC_AWS_LIVENESS_IDEMPOTENT_RETRY_DELAY_SECONDS || '2',
       2,
@@ -870,6 +968,7 @@ class AwsFaceLivenessService {
       region: this.region,
       confidenceThreshold: this.confidenceThreshold,
       sessionTtlSeconds: this.sessionTtlSeconds,
+      sessionBindingTtlSeconds: this.sessionBindingTtlSeconds,
       auditImagesLimit: this.auditImagesLimit,
       challengeType: this.challengeType,
       hasOutputBucket: Boolean(this.outputBucket),
@@ -956,7 +1055,10 @@ class AwsFaceLivenessService {
 
   getMaxAttemptsForScope(attemptScope) {
     const scope = this.normalizeAttemptScope(attemptScope);
-    if (scope.startsWith('manual_review_retry_')) {
+    if (
+      scope.startsWith('manual_review_retry_')
+      || scope.startsWith('orphan_hold_retry_')
+    ) {
       return 1;
     }
     if (scope === 'withdrawal') {
@@ -1005,7 +1107,9 @@ class AwsFaceLivenessService {
     userId,
     sessionId,
     requirement = null,
-    attemptScope = null
+    attemptScope = null,
+    persistenceNamespace,
+    financialContextId
   } = {}) {
     const safeUserId = String(userId || '').trim();
     const safeSessionId = String(sessionId || '').trim();
@@ -1016,10 +1120,16 @@ class AwsFaceLivenessService {
     }
 
     const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    const binding = this.resolveAttemptPersistenceBinding({
+      persistenceNamespace,
+      financialContextId
+    });
     const attemptKey = this.buildAttemptRedisKey({
       userId: safeUserId,
       requirement,
-      attemptScope: scope
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
     });
     const sessionIdHash = crypto
       .createHash('sha256')
@@ -1027,7 +1137,7 @@ class AwsFaceLivenessService {
       .digest('hex');
     const grantId = crypto
       .createHash('sha256')
-      .update(`${safeUserId}:${scope}:${sessionIdHash}:provider_reference_image_incomplete_v1`)
+      .update(`${safeUserId}:${scope}:${binding.namespace}:${binding.contextIdHash}:${sessionIdHash}:provider_reference_image_incomplete_v1`)
       .digest('hex');
 
     try {
@@ -1053,7 +1163,9 @@ class AwsFaceLivenessService {
         sessionIdHash,
         grantId,
         new Date().toISOString(),
-        this.providerRecoveryMaxCredits
+        this.providerRecoveryMaxCredits,
+        binding.namespace,
+        binding.contextIdHash
       );
       const result = raw && typeof raw === 'object' ? raw : JSON.parse(raw || '{}');
       if (result?.status === 'active_trip') {
@@ -1137,11 +1249,35 @@ class AwsFaceLivenessService {
     }
   }
 
-  buildAttemptRedisKey({ userId, requirement = null, attemptScope = null } = {}) {
+  resolveAttemptPersistenceBinding({ persistenceNamespace, financialContextId } = {}) {
+    const namespace = String(persistenceNamespace || '').trim().toLowerCase();
+    const contextId = String(financialContextId || '').trim();
+    if (!['operational', 'sandbox'].includes(namespace) || !contextId) {
+      const error = new Error('Binding de persistencia da tentativa AWS liveness e obrigatorio');
+      error.code = 'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_REQUIRED';
+      throw error;
+    }
+    return {
+      namespace,
+      contextIdHash: crypto.createHash('sha256').update(contextId).digest('hex')
+    };
+  }
+
+  buildAttemptRedisKey({
+    userId,
+    requirement = null,
+    attemptScope = null,
+    persistenceNamespace,
+    financialContextId
+  } = {}) {
     const safeUserId = String(userId || '').trim();
     const safeScope = this.resolveAttemptScope({ requirement, attemptScope });
     if (!safeUserId) return null;
-    return `${this.redisAttemptPrefix}${safeUserId}:${safeScope}`;
+    const binding = this.resolveAttemptPersistenceBinding({
+      persistenceNamespace,
+      financialContextId
+    });
+    return `${this.redisAttemptPrefix}${safeUserId}:${safeScope}:${binding.namespace}:${binding.contextIdHash.slice(0, 24)}`;
   }
 
   async runRedisScript(script, key, args, { code, operation, userId = null } = {}) {
@@ -1169,9 +1305,25 @@ class AwsFaceLivenessService {
     }
   }
 
-  async reserveAttempt({ userId, requirement = null, attemptScope = null } = {}) {
+  async reserveAttempt({
+    userId,
+    requirement = null,
+    attemptScope = null,
+    persistenceNamespace,
+    financialContextId
+  } = {}) {
     const scope = this.resolveAttemptScope({ requirement, attemptScope });
-    const key = this.buildAttemptRedisKey({ userId, requirement, attemptScope: scope });
+    const binding = this.resolveAttemptPersistenceBinding({
+      persistenceNamespace,
+      financialContextId
+    });
+    const key = this.buildAttemptRedisKey({
+      userId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
+    });
     if (!key) return null;
 
     const maxAttempts = this.getMaxAttemptsForScope(scope);
@@ -1180,7 +1332,9 @@ class AwsFaceLivenessService {
       token: crypto.randomUUID(),
       userId,
       requirement,
-      attemptScope: scope
+      attemptScope: scope,
+      persistenceNamespace: binding.namespace,
+      financialContextId
     };
     const now = new Date();
     const nowIso = now.toISOString();
@@ -1200,7 +1354,9 @@ class AwsFaceLivenessService {
         now.getTime(),
         this.idempotentRetryDelaySeconds,
         this.idempotentRetryWindowSeconds,
-        this.providerRecoveryMaxCredits
+        this.providerRecoveryMaxCredits,
+        binding.namespace,
+        binding.contextIdHash
       ],
       {
         code: 'KYC_AWS_LIVENESS_ATTEMPT_RESERVE_FAILED',
@@ -1209,9 +1365,16 @@ class AwsFaceLivenessService {
       }
     );
 
-    if (result?.status === 'in_flight') {
+    if (['in_flight', 'dispatch_unknown_expired'].includes(result?.status)) {
       const error = new Error('Uma tentativa AWS liveness anterior tem resultado de dispatch desconhecido');
       error.code = 'KYC_AWS_LIVENESS_DISPATCH_OUTCOME_UNKNOWN';
+      error.attemptState = result.state || null;
+      throw error;
+    }
+    if (result?.status === 'committed') {
+      const error = new Error('Uma sessao AWS liveness paga precisa ser retomada');
+      error.code = 'KYC_AWS_LIVENESS_COMMITTED_SESSION_RECOVERY_REQUIRED';
+      error.providerDispatched = true;
       error.attemptState = result.state || null;
       throw error;
     }
@@ -1246,8 +1409,13 @@ class AwsFaceLivenessService {
     };
   }
 
-  async commitAttemptReservation(reservation, sessionId) {
+  async commitAttemptReservation(reservation, sessionId, recoveryMetadata) {
     if (!reservation) return null;
+    if (!recoveryMetadata || typeof recoveryMetadata !== 'object') {
+      const error = new Error('Binding de recuperacao da sessao AWS liveness e obrigatorio');
+      error.code = 'KYC_AWS_LIVENESS_RECOVERY_BINDING_REQUIRED';
+      throw error;
+    }
     const result = await this.runRedisScript(
       ATTEMPT_COMMIT_SCRIPT,
       reservation.key,
@@ -1255,7 +1423,8 @@ class AwsFaceLivenessService {
         reservation.token,
         sessionId,
         new Date().toISOString(),
-        this.attemptWindowSeconds
+        this.attemptWindowSeconds,
+        JSON.stringify(recoveryMetadata)
       ],
       {
         code: 'KYC_AWS_LIVENESS_ATTEMPT_COMMIT_FAILED',
@@ -1266,6 +1435,55 @@ class AwsFaceLivenessService {
     if (result?.status !== 'committed' || !result.state) {
       const error = new Error('Reserva de tentativa de liveness nao encontrada');
       error.code = 'KYC_AWS_LIVENESS_ATTEMPT_RESERVATION_LOST';
+      throw error;
+    }
+    return result.state;
+  }
+
+  async bindAttemptRecoveryMetadata(reservation, recoveryMetadata) {
+    if (!reservation || !recoveryMetadata || typeof recoveryMetadata !== 'object') {
+      const error = new Error('Binding pre-dispatch da sessao AWS liveness e obrigatorio');
+      error.code = 'KYC_AWS_LIVENESS_RECOVERY_BINDING_REQUIRED';
+      throw error;
+    }
+    const result = await this.runRedisScript(
+      ATTEMPT_RECOVERY_BIND_SCRIPT,
+      reservation.key,
+      [reservation.token, JSON.stringify(recoveryMetadata), this.attemptWindowSeconds],
+      {
+        code: 'KYC_AWS_LIVENESS_RECOVERY_BINDING_COMMIT_FAILED',
+        operation: 'bind_attempt_recovery_metadata',
+        userId: reservation.userId
+      }
+    );
+    if (result?.status !== 'bound' || !result.state) {
+      const error = new Error('Reserva da tentativa nao aceitou o binding pre-dispatch');
+      error.code = 'KYC_AWS_LIVENESS_RECOVERY_BINDING_COMMIT_FAILED';
+      throw error;
+    }
+    return result.state;
+  }
+
+  async markAttemptMetadataPersisted(reservation, sessionId) {
+    if (!reservation) return null;
+    const result = await this.runRedisScript(
+      ATTEMPT_METADATA_PERSISTED_SCRIPT,
+      reservation.key,
+      [
+        reservation.token,
+        sessionId,
+        new Date().toISOString(),
+        this.attemptWindowSeconds
+      ],
+      {
+        code: 'KYC_AWS_LIVENESS_METADATA_BINDING_COMMIT_FAILED',
+        operation: 'commit_session_metadata_binding',
+        userId: reservation.userId
+      }
+    );
+    if (result?.status !== 'persisted' || !result.state) {
+      const error = new Error('Binding persistido da sessao AWS nao foi confirmado');
+      error.code = 'KYC_AWS_LIVENESS_METADATA_BINDING_COMMIT_FAILED';
       throw error;
     }
     return result.state;
@@ -1285,10 +1503,26 @@ class AwsFaceLivenessService {
     );
   }
 
-  async getAttemptState({ userId, requirement = null, attemptScope = null } = {}) {
+  async getAttemptState({
+    userId,
+    requirement = null,
+    attemptScope = null,
+    persistenceNamespace,
+    financialContextId
+  } = {}) {
     const scope = this.resolveAttemptScope({ requirement, attemptScope });
     const maxAttempts = this.getMaxAttemptsForScope(scope);
-    const key = this.buildAttemptRedisKey({ userId, requirement, attemptScope: scope });
+    const binding = this.resolveAttemptPersistenceBinding({
+      persistenceNamespace,
+      financialContextId
+    });
+    const key = this.buildAttemptRedisKey({
+      userId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
+    });
     if (!key) return null;
 
     try {
@@ -1299,6 +1533,7 @@ class AwsFaceLivenessService {
           userId,
           requirement: requirement || 'LIVENESS_REQUIRED',
           attemptScope: scope,
+          persistenceNamespace: binding.namespace,
           started: 0,
           failed: 0,
           passed: 0,
@@ -1317,6 +1552,14 @@ class AwsFaceLivenessService {
         };
       }
       const parsed = JSON.parse(raw);
+      if (
+        parsed.persistenceNamespace !== binding.namespace
+        || parsed.financialContextIdHash !== binding.contextIdHash
+      ) {
+        const mismatch = new Error('Estado de tentativas pertence a outro contexto de persistencia');
+        mismatch.code = 'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_MISMATCH';
+        throw mismatch;
+      }
       const started = Number(parsed.started || 0);
       const storedMaxAttempts = Number(parsed.maxAttempts || maxAttempts);
       const estimatedUnitCostUsd = Number(
@@ -1327,6 +1570,7 @@ class AwsFaceLivenessService {
         userId,
         requirement: parsed.requirement || requirement || 'LIVENESS_REQUIRED',
         attemptScope: parsed.attemptScope || scope,
+        persistenceNamespace: binding.namespace,
         started,
         failed: Number(parsed.failed || 0),
         passed: Number(parsed.passed || 0),
@@ -1348,19 +1592,44 @@ class AwsFaceLivenessService {
         service: 'aws-face-liveness-service',
         userId
       });
+      if (error?.code === 'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_MISMATCH') {
+        throw error;
+      }
       return null;
     }
   }
 
-  async saveAttemptState({ userId, requirement = null, attemptScope = null, state }) {
-    const key = this.buildAttemptRedisKey({ userId, requirement, attemptScope });
+  async saveAttemptState({
+    userId,
+    requirement = null,
+    attemptScope = null,
+    persistenceNamespace,
+    financialContextId,
+    state
+  }) {
+    const binding = this.resolveAttemptPersistenceBinding({
+      persistenceNamespace,
+      financialContextId
+    });
+    const key = this.buildAttemptRedisKey({
+      userId,
+      requirement,
+      attemptScope,
+      persistenceNamespace,
+      financialContextId
+    });
     if (!key || !state) return null;
+    const persistedState = {
+      ...state,
+      persistenceNamespace: binding.namespace,
+      financialContextIdHash: binding.contextIdHash
+    };
 
     try {
       const redis = redisPool.getConnection();
       await redis.set(
         key,
-        JSON.stringify(state),
+        JSON.stringify(persistedState),
         'EX',
         this.attemptWindowSeconds
       );
@@ -1370,13 +1639,25 @@ class AwsFaceLivenessService {
         userId
       });
     }
-    return state;
+    return persistedState;
   }
 
-  async assertCanCreateSession({ userId, requirement = null, attemptScope = null } = {}) {
+  async assertCanCreateSession({
+    userId,
+    requirement = null,
+    attemptScope = null,
+    persistenceNamespace,
+    financialContextId
+  } = {}) {
     const scope = this.resolveAttemptScope({ requirement, attemptScope });
     const maxAttempts = this.getMaxAttemptsForScope(scope);
-    const state = await this.getAttemptState({ userId, requirement, attemptScope: scope });
+    const state = await this.getAttemptState({
+      userId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
+    });
     if (!state) return null;
 
     const started = Number(state.started || 0);
@@ -1407,10 +1688,23 @@ class AwsFaceLivenessService {
     return state;
   }
 
-  async recordAttemptStarted({ userId, requirement = null, attemptScope = null, sessionId = null } = {}) {
+  async recordAttemptStarted({
+    userId,
+    requirement = null,
+    attemptScope = null,
+    sessionId = null,
+    persistenceNamespace,
+    financialContextId
+  } = {}) {
     const scope = this.resolveAttemptScope({ requirement, attemptScope });
     const maxAttempts = this.getMaxAttemptsForScope(scope);
-    const state = await this.getAttemptState({ userId, requirement, attemptScope: scope });
+    const state = await this.getAttemptState({
+      userId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
+    });
     if (!state) return null;
 
     const nextState = {
@@ -1426,14 +1720,40 @@ class AwsFaceLivenessService {
       lastStartedAt: new Date().toISOString()
     };
 
-    await this.saveAttemptState({ userId, requirement, attemptScope: scope, state: nextState });
+    await this.saveAttemptState({
+      userId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId,
+      state: nextState
+    });
     return nextState;
   }
 
-  async recordAttemptResult({ userId, requirement = null, attemptScope = null, sessionId = null, status = null, livenessPassed = false } = {}) {
+  async recordAttemptResult({
+    userId,
+    requirement = null,
+    attemptScope = null,
+    sessionId = null,
+    status = null,
+    livenessPassed = false,
+    persistenceNamespace,
+    financialContextId
+  } = {}) {
     const scope = this.resolveAttemptScope({ requirement, attemptScope });
     const maxAttempts = this.getMaxAttemptsForScope(scope);
-    const key = this.buildAttemptRedisKey({ userId, requirement, attemptScope: scope });
+    const binding = this.resolveAttemptPersistenceBinding({
+      persistenceNamespace,
+      financialContextId
+    });
+    const key = this.buildAttemptRedisKey({
+      userId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
+    });
     if (!key || !sessionId) return null;
 
     const now = new Date().toISOString();
@@ -1455,7 +1775,9 @@ class AwsFaceLivenessService {
         now,
         this.softBlockOnAttemptsExhausted ? '1' : '0',
         PROCESSED_RESULT_LIMIT,
-        Math.max(this.attemptWindowSeconds, this.sessionTtlSeconds)
+        Math.max(this.attemptWindowSeconds, this.sessionTtlSeconds),
+        binding.namespace,
+        binding.contextIdHash
       ],
       {
         code: 'KYC_AWS_LIVENESS_ATTEMPT_RESULT_FAILED',
@@ -1478,7 +1800,7 @@ class AwsFaceLivenessService {
         this.buildSessionRedisKey(sessionId),
         JSON.stringify(metadata),
         'EX',
-        this.sessionTtlSeconds
+        this.sessionBindingTtlSeconds
       );
       if (stored !== 'OK') {
         throw new Error('Redis nao confirmou persistencia da metadata AWS liveness');
@@ -1516,6 +1838,8 @@ class AwsFaceLivenessService {
     userId,
     expectedChallengeId,
     expectedRequirement,
+    expectedPersistenceNamespace,
+    expectedFinancialContextId,
     allowAbandoned = false,
     allowExpired = false
   } = {}) {
@@ -1601,6 +1925,24 @@ class AwsFaceLivenessService {
       error.code = 'AWS_LIVENESS_SESSION_REQUIREMENT_MISMATCH';
       throw error;
     }
+    if (expectedPersistenceNamespace !== undefined) {
+      const expectedNamespace = String(expectedPersistenceNamespace || '').trim();
+      const actualNamespace = String(metadata.persistenceNamespace || '').trim();
+      if (!expectedNamespace || actualNamespace !== expectedNamespace) {
+        const error = new Error('Namespace de persistencia nao corresponde a sessao AWS');
+        error.code = 'AWS_LIVENESS_SESSION_PERSISTENCE_SCOPE_MISMATCH';
+        throw error;
+      }
+    }
+    if (expectedFinancialContextId !== undefined) {
+      const expectedContextId = String(expectedFinancialContextId || '').trim();
+      const actualContextId = String(metadata.financialContextId || '').trim();
+      if (!expectedContextId || actualContextId !== expectedContextId) {
+        const error = new Error('Contexto financeiro nao corresponde a sessao AWS');
+        error.code = 'AWS_LIVENESS_SESSION_FINANCIAL_CONTEXT_MISMATCH';
+        throw error;
+      }
+    }
     if (
       this.costGuard?.isEnabled?.()
       && (
@@ -1634,7 +1976,7 @@ class AwsFaceLivenessService {
         status || 'UNKNOWN',
         Number(confidence || 0),
         livenessPassed === true ? '1' : '0',
-        this.sessionTtlSeconds,
+        this.sessionBindingTtlSeconds,
         referenceImageAvailable === true ? '1' : '0',
         referenceImageFaceDetected === true ? '1' : '0',
         Math.max(0, Number(referenceImageByteLength || 0)),
@@ -1673,7 +2015,7 @@ class AwsFaceLivenessService {
         PROVIDER_NAME,
         abandonedAt,
         String(providerStatus || 'UNKNOWN').toUpperCase(),
-        String(this.sessionTtlSeconds)
+        String(this.sessionBindingTtlSeconds)
       );
       const result = raw && typeof raw === 'object' ? raw : JSON.parse(raw || '{}');
       if (result.status === 'missing') {
@@ -1867,12 +2209,401 @@ class AwsFaceLivenessService {
     };
   }
 
+  buildCreatedSessionResponse(sessionId, metadata, attemptState, { idempotentResume = false } = {}) {
+    return {
+      success: true,
+      provider: PROVIDER_NAME,
+      region: this.region,
+      sessionId,
+      attemptScope: metadata.attemptScope,
+      challengeType: metadata.challengeType || this.challengeType,
+      expiresAt: metadata.expiresAt,
+      confidenceThreshold: this.confidenceThreshold,
+      attempt: attemptState?.started || null,
+      maxAttempts: attemptState?.maxAttempts || this.getMaxAttemptsForScope(metadata.attemptScope),
+      estimatedUnitCostUsd: this.estimatedUnitCostUsd,
+      status: 'CREATED',
+      ...(idempotentResume ? { idempotentResume: true } : {})
+    };
+  }
+
+  buildRecoveryBindingFingerprint(metadata = {}) {
+    return JSON.stringify([
+      metadata.provider || null,
+      metadata.userId || null,
+      metadata.challengeId || null,
+      metadata.requirement || null,
+      metadata.attemptScope || null,
+      metadata.persistenceNamespace || null,
+      metadata.financialContextId || null,
+      metadata.costGuardOperationId || null,
+      metadata.createdAt || null,
+      metadata.expiresAt || null
+    ]);
+  }
+
+  async readCommittedSessionRecovery({
+    userId,
+    requirement,
+    attemptScope,
+    persistenceNamespace,
+    financialContextId
+  }) {
+    const binding = this.resolveAttemptPersistenceBinding({
+      persistenceNamespace,
+      financialContextId
+    });
+    const key = this.buildAttemptRedisKey({
+      userId,
+      requirement,
+      attemptScope,
+      persistenceNamespace,
+      financialContextId
+    });
+    try {
+      const redis = redisPool.getConnection();
+      const raw = await redis.get(key);
+      if (!raw) return null;
+      const state = JSON.parse(raw);
+      if (
+        state?.userId !== userId
+        || state?.attemptScope !== attemptScope
+        || String(state?.requirement || '') !== String(requirement || 'LIVENESS_REQUIRED')
+        || state?.persistenceNamespace !== binding.namespace
+        || state?.financialContextIdHash !== binding.contextIdHash
+      ) {
+        const error = new Error('Estado da tentativa nao corresponde ao binding solicitado');
+        error.code = 'KYC_AWS_LIVENESS_RECOVERY_BINDING_MISMATCH';
+        throw error;
+      }
+      const reservations = Array.isArray(state.attemptReservations)
+        ? state.attemptReservations
+        : [];
+      const reservation = [...reservations].reverse().find((candidate) => (
+        ['reserved', 'dispatch_unknown_expired', 'committed'].includes(candidate?.status)
+        && candidate?.metadataPersisted !== true
+        && candidate?.recoveryMetadata
+      ));
+      return reservation ? { key, state, reservation } : null;
+    } catch (error) {
+      if (error?.code === 'KYC_AWS_LIVENESS_RECOVERY_BINDING_MISMATCH') throw error;
+      const wrapped = new Error('Estado duravel da sessao AWS nao pode ser recuperado');
+      wrapped.code = 'KYC_AWS_LIVENESS_RECOVERY_STATE_UNAVAILABLE';
+      wrapped.cause = error;
+      throw wrapped;
+    }
+  }
+
+  async readPersistedSessionExpiryProof({
+    userId,
+    sessionId,
+    requirement,
+    attemptScope,
+    persistenceNamespace,
+    financialContextId
+  }) {
+    const binding = this.resolveAttemptPersistenceBinding({
+      persistenceNamespace,
+      financialContextId
+    });
+    const key = this.buildAttemptRedisKey({
+      userId,
+      requirement,
+      attemptScope,
+      persistenceNamespace,
+      financialContextId
+    });
+    try {
+      const redis = redisPool.getConnection();
+      const raw = await redis.get(key);
+      if (!raw) return null;
+      const state = JSON.parse(raw);
+      if (
+        state?.userId !== userId
+        || state?.attemptScope !== attemptScope
+        || String(state?.requirement || '') !== String(requirement || 'LIVENESS_REQUIRED')
+        || state?.persistenceNamespace !== binding.namespace
+        || state?.financialContextIdHash !== binding.contextIdHash
+        || state?.lastSessionId !== sessionId
+      ) {
+        const error = new Error('Prova de expiracao nao corresponde ao binding solicitado');
+        error.code = 'KYC_AWS_LIVENESS_EXPIRED_PROOF_BINDING_MISMATCH';
+        throw error;
+      }
+      const reservations = Array.isArray(state.attemptReservations)
+        ? state.attemptReservations
+        : [];
+      const reservation = [...reservations].reverse().find((candidate) => (
+        candidate?.status === 'committed'
+        && candidate?.metadataPersisted === true
+        && candidate?.sessionId === sessionId
+        && candidate?.recoveryMetadata
+      ));
+      return reservation ? { key, state, reservation } : null;
+    } catch (error) {
+      if (error?.code === 'KYC_AWS_LIVENESS_EXPIRED_PROOF_BINDING_MISMATCH') throw error;
+      const wrapped = new Error('Prova duravel de expiracao da sessao AWS esta indisponivel');
+      wrapped.code = 'KYC_AWS_LIVENESS_EXPIRED_PROOF_UNAVAILABLE';
+      wrapped.cause = error;
+      throw wrapped;
+    }
+  }
+
+  async recoverExpiredSessionMetadata({
+    userId,
+    sessionId,
+    challengeId = null,
+    requirement = null,
+    attemptScope = null,
+    persistenceNamespace = null,
+    financialContextId = null
+  } = {}) {
+    const safeUserId = String(userId || '').trim();
+    const safeSessionId = String(sessionId || '').trim();
+    const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    if (!safeUserId || !safeSessionId) return null;
+
+    const proof = await this.readPersistedSessionExpiryProof({
+      userId: safeUserId,
+      sessionId: safeSessionId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
+    });
+    if (!proof) return null;
+
+    const { reservation } = proof;
+    const metadata = reservation.recoveryMetadata;
+    if (
+      !reservation.token
+      || metadata?.costGuardOperationId !== reservation.token
+    ) {
+      const error = new Error('Prova de expiracao diverge da operacao de custo');
+      error.code = 'KYC_AWS_LIVENESS_EXPIRED_PROOF_BINDING_MISMATCH';
+      throw error;
+    }
+    this.assertBoundSessionMetadata(metadata, {
+      userId: safeUserId,
+      expectedChallengeId: challengeId,
+      expectedRequirement: requirement,
+      expectedPersistenceNamespace: persistenceNamespace,
+      expectedFinancialContextId: financialContextId,
+      allowExpired: true
+    });
+    const expiresAtMs = Date.parse(metadata.expiresAt || '');
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs > Date.now()) {
+      const error = new Error('Sessao AWS ainda nao possui prova canonica de expiracao');
+      error.code = 'KYC_AWS_LIVENESS_EXPIRED_PROOF_NOT_TERMINAL';
+      throw error;
+    }
+    if (
+      !this.costGuard?.isEnabled?.()
+      || typeof this.costGuard.assertRecoverableLivenessSession !== 'function'
+    ) {
+      const error = new Error('Cost guard canonico e obrigatorio para recuperar a prova de expiracao');
+      error.code = 'KYC_AWS_COST_GUARD_REQUIRED';
+      throw error;
+    }
+
+    await this.costGuard.assertRecoverableLivenessSession(reservation.token, {
+      userId: safeUserId,
+      sessionId: safeSessionId
+    });
+    await this.saveSessionMetadata(safeSessionId, metadata);
+
+    logStructured('info', 'Prova canonica de expiracao AWS liveness restaurada', {
+      service: 'aws-face-liveness-service',
+      userId: safeUserId,
+      sessionHash: crypto.createHash('sha256').update(safeSessionId).digest('hex'),
+      attemptScope: scope
+    });
+    return {
+      sessionId: safeSessionId,
+      sessionMetadata: metadata,
+      expired: true
+    };
+  }
+
+  async recoverCommittedSession({
+    userId,
+    challengeId = null,
+    requirement = null,
+    attemptScope = null,
+    verificationWindowToken = null,
+    persistenceNamespace = null,
+    financialContextId = null
+  } = {}) {
+    const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    const recovery = await this.readCommittedSessionRecovery({
+      userId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
+    });
+    if (!recovery) return null;
+
+    const { key, reservation } = recovery;
+    const metadata = reservation.recoveryMetadata;
+    const failRecovery = (message, code) => {
+      const error = new Error(message);
+      error.code = code;
+      error.providerDispatched = true;
+      throw error;
+    };
+
+    if (!metadata || typeof metadata !== 'object') {
+      failRecovery(
+        'Binding duravel da sessao AWS paga nao foi encontrado',
+        'KYC_AWS_LIVENESS_RECOVERY_BINDING_REQUIRED'
+      );
+    }
+    if (
+      !reservation.token
+      || metadata.attemptScope !== scope
+      || (metadata.costGuardOperationId || null) !== (
+        this.costGuard?.isEnabled?.() ? reservation.token : null
+      )
+    ) {
+      failRecovery(
+        'Binding duravel da sessao AWS paga diverge da tentativa',
+        'KYC_AWS_LIVENESS_RECOVERY_BINDING_MISMATCH'
+      );
+    }
+
+    if (!this.costGuard?.isEnabled?.() && reservation.status === 'reserved') {
+      return null;
+    }
+
+    try {
+      this.assertBoundSessionMetadata(metadata, {
+        userId,
+        expectedChallengeId: challengeId,
+        expectedRequirement: requirement,
+        expectedPersistenceNamespace: persistenceNamespace,
+        expectedFinancialContextId: financialContextId
+      });
+      if (
+        !this.costGuard?.isEnabled?.()
+        || typeof this.costGuard.recoverCompletedLivenessSession !== 'function'
+      ) {
+        failRecovery(
+          'Circuit breaker nao suporta recuperar a sessao paga',
+          'KYC_AWS_COST_GUARD_REQUIRED'
+        );
+      }
+    } catch (error) {
+      error.providerDispatched = true;
+      throw error;
+    }
+
+    let sessionId;
+    try {
+      const recoveredCostOperation = await this.costGuard.recoverCompletedLivenessSession(
+        reservation.token,
+        {
+          userId,
+          recoveryBinding: this.buildRecoveryBindingFingerprint(metadata)
+        }
+      );
+      sessionId = String(recoveredCostOperation?.sessionId || '').trim();
+      if (
+        !sessionId
+        || (
+          reservation.sessionId
+          && String(reservation.sessionId).trim() !== sessionId
+        )
+      ) {
+        failRecovery(
+          'SessionId recuperado diverge da tentativa paga',
+          'KYC_AWS_LIVENESS_RECOVERY_BINDING_MISMATCH'
+        );
+      }
+      if (reservation.status !== 'committed') {
+        await this.commitAttemptReservation({
+          ...reservation,
+          key,
+          userId
+        }, sessionId, metadata);
+      }
+    } catch (error) {
+      if (
+        error?.code === 'KYC_AWS_LIVENESS_DISPATCH_OUTCOME_UNKNOWN'
+        && reservation.status === 'reserved'
+        && !reservation.sessionId
+      ) {
+        return null;
+      }
+      error.providerDispatched = true;
+      throw error;
+    }
+
+    const reboundMetadata = {
+      ...metadata,
+      verificationWindowToken: typeof verificationWindowToken === 'string'
+        && verificationWindowToken.trim()
+        ? verificationWindowToken.trim()
+        : metadata.verificationWindowToken
+    };
+    try {
+      await this.saveSessionMetadata(sessionId, reboundMetadata);
+      await this.markAttemptMetadataPersisted({
+        ...reservation,
+        key,
+        userId
+      }, sessionId);
+      if (typeof this.costGuard.markLivenessMetadataPersisted === 'function') {
+        await this.costGuard.markLivenessMetadataPersisted(
+          reservation.token,
+          sessionId
+        ).catch((error) => {
+          logError(error, 'Falha ao limpar recovery handle AWS apos persistir metadata', {
+            service: 'aws-face-liveness-service',
+            userId,
+            sessionId
+          });
+        });
+      }
+    } catch (error) {
+      error.providerDispatched = true;
+      throw error;
+    }
+    const attemptState = await this.getAttemptState({
+      userId,
+      requirement,
+      attemptScope: scope,
+      persistenceNamespace,
+      financialContextId
+    });
+
+    logStructured('info', 'Sessao AWS Face Liveness retomada sem novo dispatch', {
+      service: 'aws-face-liveness-service',
+      userId,
+      sessionId,
+      attemptScope: scope
+    });
+    return {
+      sessionId,
+      sessionMetadata: reboundMetadata,
+      attemptState,
+      response: this.buildCreatedSessionResponse(
+        sessionId,
+        reboundMetadata,
+        attemptState,
+        { idempotentResume: true }
+      )
+    };
+  }
+
   async createSession({
     userId = null,
     challengeId = null,
     requirement = null,
     attemptScope = null,
-    verificationWindowToken = null
+    verificationWindowToken = null,
+    persistenceNamespace = null,
+    financialContextId = null
   } = {}) {
     this.assertEnabled();
     if (typeof userId !== 'string' || !userId.trim()) {
@@ -1881,6 +2612,22 @@ class AwsFaceLivenessService {
       throw error;
     }
     userId = userId.trim();
+    const normalizedPersistenceNamespace = String(persistenceNamespace || '').trim().toLowerCase();
+    const normalizedFinancialContextId = String(financialContextId || '').trim();
+    const hasPersistenceBinding = Boolean(
+      normalizedPersistenceNamespace || normalizedFinancialContextId
+    );
+    if (
+      hasPersistenceBinding
+      && (
+        !['operational', 'sandbox'].includes(normalizedPersistenceNamespace)
+        || !normalizedFinancialContextId
+      )
+    ) {
+      const error = new Error('Binding de persistencia KYC invalido');
+      error.code = 'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_INVALID';
+      throw error;
+    }
     const strictProductionBiometrics = String(
       process.env.KYC_PRODUCTION_BIOMETRICS_ENABLED || 'false'
     ).toLowerCase() === 'true';
@@ -1891,23 +2638,65 @@ class AwsFaceLivenessService {
       error.code = 'AWS_LIVENESS_S3_OUTPUT_UNSUPPORTED';
       throw error;
     }
+    if (!hasPersistenceBinding) {
+      const error = new Error('Binding de persistencia KYC obrigatorio');
+      error.code = 'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_REQUIRED';
+      throw error;
+    }
     const scope = this.resolveAttemptScope({ requirement, attemptScope });
+    const recoveredSession = await this.recoverCommittedSession({
+      userId,
+      challengeId,
+      requirement,
+      attemptScope: scope,
+      verificationWindowToken,
+      persistenceNamespace: normalizedPersistenceNamespace,
+      financialContextId: normalizedFinancialContextId
+    });
+    if (recoveredSession) return recoveredSession.response;
     const attemptReservation = await this.reserveAttempt({
       userId,
       requirement,
-      attemptScope: scope
+      attemptScope: scope,
+      persistenceNamespace: normalizedPersistenceNamespace,
+      financialContextId: normalizedFinancialContextId
     });
 
     const clientRequestToken = attemptReservation.token;
+    const startedAt = Date.now();
     let costGuardReservation = null;
+    let metadata = null;
     try {
       costGuardReservation = await this.costGuard.reserveLivenessBundle({
         userId,
         operationId: clientRequestToken,
         required: strictProductionBiometrics
       });
+      metadata = {
+        provider: PROVIDER_NAME,
+        userId,
+        challengeId: challengeId || null,
+        requirement: requirement || null,
+        attemptScope: scope,
+        verificationWindowToken: typeof verificationWindowToken === 'string'
+          && verificationWindowToken.trim()
+          ? verificationWindowToken.trim()
+          : null,
+        persistenceNamespace: normalizedPersistenceNamespace,
+        financialContextId: normalizedFinancialContextId,
+        costGuardOperationId: costGuardReservation?.operationId || null,
+        challengeType: this.challengeType,
+        createdAt: new Date(startedAt).toISOString(),
+        expiresAt: new Date(startedAt + (this.sessionTtlSeconds * 1000)).toISOString()
+      };
+      await this.bindAttemptRecoveryMetadata(attemptReservation, metadata);
     } catch (error) {
-      await this.rollbackAttemptReservation(attemptReservation).catch(() => null);
+      await Promise.all([
+        this.rollbackAttemptReservation(attemptReservation),
+        costGuardReservation?.operationId
+          ? this.costGuard.rollbackBeforeDispatch(costGuardReservation.operationId)
+          : Promise.resolve(false)
+      ]).catch(() => null);
       throw error;
     }
 
@@ -1928,7 +2717,6 @@ class AwsFaceLivenessService {
       };
     }
 
-    const startedAt = Date.now();
     let response = null;
     let providerDispatched = false;
     try {
@@ -1970,31 +2758,40 @@ class AwsFaceLivenessService {
     }
     const sessionId = response.SessionId;
 
-    const metadata = {
-      provider: PROVIDER_NAME,
-      userId: userId || null,
-      challengeId: challengeId || null,
-      requirement: requirement || null,
-      attemptScope: scope,
-      verificationWindowToken: typeof verificationWindowToken === 'string' && verificationWindowToken.trim()
-        ? verificationWindowToken.trim()
-        : null,
-      costGuardOperationId: costGuardReservation?.operationId || null,
-      challengeType: this.challengeType,
-      createdAt: new Date().toISOString(),
-      expiresAt: new Date(startedAt + (this.sessionTtlSeconds * 1000)).toISOString()
-    };
-
     let attemptState = null;
     try {
       if (costGuardReservation?.operationId) {
         await this.costGuard.markLivenessCompleted(
           costGuardReservation.operationId,
-          sessionId
+          sessionId,
+          {
+            recoveryBinding: this.buildRecoveryBindingFingerprint(metadata),
+            recoveryExpiresAt: metadata.expiresAt
+          }
         );
       }
-      attemptState = await this.commitAttemptReservation(attemptReservation, sessionId);
+      attemptState = await this.commitAttemptReservation(
+        attemptReservation,
+        sessionId,
+        metadata
+      );
       await this.saveSessionMetadata(sessionId, metadata);
+      attemptState = await this.markAttemptMetadataPersisted(
+        attemptReservation,
+        sessionId
+      );
+      if (typeof this.costGuard.markLivenessMetadataPersisted === 'function') {
+        await this.costGuard.markLivenessMetadataPersisted(
+          costGuardReservation?.operationId,
+          sessionId
+        ).catch((error) => {
+          logError(error, 'Falha ao limpar recovery handle AWS apos persistir metadata', {
+            service: 'aws-face-liveness-service',
+            userId,
+            sessionId
+          });
+        });
+      }
     } catch (error) {
       error.providerDispatched = true;
       logError(error, 'Sessao AWS criada sem conclusao do binding local; tentativa paga preservada', {
@@ -2017,20 +2814,7 @@ class AwsFaceLivenessService {
       estimatedUnitCostUsd: this.estimatedUnitCostUsd
     });
 
-    return {
-      success: true,
-      provider: PROVIDER_NAME,
-      region: this.region,
-      sessionId,
-      attemptScope: scope,
-      challengeType: this.challengeType,
-      expiresAt: metadata.expiresAt,
-      confidenceThreshold: this.confidenceThreshold,
-      attempt: attemptState?.started || null,
-      maxAttempts: attemptState?.maxAttempts || this.getMaxAttemptsForScope(scope),
-      estimatedUnitCostUsd: this.estimatedUnitCostUsd,
-      status: 'CREATED'
-    };
+    return this.buildCreatedSessionResponse(sessionId, metadata, attemptState);
   }
 
   async getSessionResult({
@@ -2188,7 +2972,9 @@ class AwsFaceLivenessService {
         attemptScope: metadata?.attemptScope || null,
         sessionId,
         status,
-        livenessPassed
+        livenessPassed,
+        persistenceNamespace: metadata?.persistenceNamespace || null,
+        financialContextId: metadata?.financialContextId || null
       });
 
       const terminalMetadata = await this.persistTerminalSessionMetadata(sessionId, {

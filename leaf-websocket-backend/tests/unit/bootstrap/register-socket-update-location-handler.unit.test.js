@@ -22,6 +22,34 @@ const driverEligibilityService = require('../../../services/driver-eligibility-s
 const activeTripIndex = require('../../../utils/active-trip-index');
 const registerSocketUpdateLocationHandler = require('../../../bootstrap/register-socket-update-location-handler');
 
+const FORBIDDEN_MOBILE_KYC_FIELDS = new Set([
+  'challenge',
+  'score',
+  'signals',
+  'metadata',
+  'attemptState',
+  'supportTicketId',
+  'envelope',
+  'financialEnvelope',
+  'costEnvelope',
+  'estimatedUnitCostUsd',
+  'estimatedCostUsd',
+]);
+
+function findForbiddenMobileKycPaths(value, path = '$') {
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findForbiddenMobileKycPaths(item, `${path}[${index}]`));
+  }
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    const nestedPath = `${path}.${key}`;
+    return [
+      ...(FORBIDDEN_MOBILE_KYC_FIELDS.has(key) ? [nestedPath] : []),
+      ...findForbiddenMobileKycPaths(nestedValue, nestedPath),
+    ];
+  });
+}
+
 const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
 const flushSocketHandler = async () => {
   for (let index = 0; index < 10; index += 1) {
@@ -147,7 +175,25 @@ describe('registerSocketUpdateLocationHandler', () => {
     harness.enforceDailyKYCForOnline.mockResolvedValue({
       allowed: false,
       code: 'KYC_REQUIRED',
-      reason: 'identity gate pending'
+      reason: 'internal provider diagnostic',
+      requirement: 'LIVENESS_REQUIRED',
+      challenge: {
+        challengeId: 'challenge_location_1',
+        score: 88,
+        signals: [{ code: 'INTERNAL_SIGNAL' }],
+        metadata: { attemptState: { started: 4 } },
+        envelope: { estimatedUnitCostUsd: 0.115 },
+        supportTicketId: 'ticket_location_internal'
+      },
+      score: 88,
+      signals: [{ code: 'INTERNAL_SIGNAL' }],
+      metadata: { provider: 'internal-provider' },
+      attemptState: { started: 4 },
+      costEnvelope: { estimatedCostUsd: 0.115 },
+      supportTicketId: 'ticket_location_internal',
+      reviewAvailable: false,
+      reviewCaseId: 'case_location_1',
+      evidenceId: 'evidence_location_1'
     });
 
     await harness.handlers.updateLocation({
@@ -177,6 +223,24 @@ describe('registerSocketUpdateLocationHandler', () => {
       'driver:driver_1',
       expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
     );
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        reviewAvailable: false
+      })
+    );
+    const publicKycPayload = harness.socket.emit.mock.calls.find(
+      ([eventName, payload]) => eventName === 'driverStatusError' && payload?.kycRequired === true
+    )?.[1];
+    expect(publicKycPayload).toEqual(expect.objectContaining({
+      error: 'Verificação facial necessária para ficar online.',
+      reason: 'Verificação facial necessária para ficar online.',
+      challengeId: 'challenge_location_1',
+      requirement: 'LIVENESS_REQUIRED'
+    }));
+    expect(publicKycPayload).not.toHaveProperty('reviewCaseId');
+    expect(publicKycPayload).not.toHaveProperty('evidenceId');
+    expect(findForbiddenMobileKycPaths(publicKycPayload)).toEqual([]);
   });
 
   it('marks batched location sync as rejected when driver is not eligible', async () => {

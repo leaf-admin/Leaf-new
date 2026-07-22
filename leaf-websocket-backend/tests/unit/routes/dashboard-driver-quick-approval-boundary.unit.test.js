@@ -55,22 +55,61 @@ describe('dashboard driver quick approval boundary', () => {
     expect(source).toContain("router.get('/api/reports/export/:reportId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES)");
   });
 
-  it('uses short-lived signed URLs for dashboard document uploads', () => {
+  it('stores integrity-bound dashboard uploads without returning provider URLs', () => {
     const uploadStart = source.indexOf("'/api/drivers/:driverId/documents/:documentType/upload'");
     const uploadEnd = source.indexOf("router.post('/api/drivers/:driverId/vehicle/config'", uploadStart);
     const uploadSource = source.slice(uploadStart, uploadEnd);
 
     expect(uploadStart).toBeGreaterThan(-1);
     expect(uploadEnd).toBeGreaterThan(uploadStart);
-    expect(source).toContain('DRIVER_DOCUMENT_SIGNED_URL_TTL_MS');
-    expect(uploadSource).toContain('const signedUrlExpiresAt = new Date(Date.now() + DRIVER_DOCUMENT_SIGNED_URL_TTL_MS)');
-    expect(uploadSource).toContain('expires: signedUrlExpiresAt');
-    expect(uploadSource).toContain('fileUrlExpiresAt: signedUrlExpiresAt.toISOString()');
-    expect(uploadSource).not.toContain('2035-01-01');
+    expect(uploadSource).toContain('requireRole(DASHBOARD_KYC_REVIEW_ROLES)');
+    expect(uploadSource).toContain('const [storedMetadata] = await storageFile.getMetadata()');
+    expect(uploadSource).toContain('storageGeneration');
+    expect(uploadSource).toContain('documentSha256: sha256Buffer(req.file.buffer)');
+    expect(uploadSource).toContain('contentAvailable: true');
+    expect(uploadSource).not.toContain('getSignedUrl');
+    expect(uploadSource).not.toContain('fileUrl:');
+    expect(uploadSource).not.toContain('fileUrlExpiresAt');
+  });
+
+  it('streams the current document through an authenticated and audited Leaf boundary', () => {
+    const routeStart = source.indexOf("'/api/drivers/:driverId/documents/:documentType/content'");
+    const routeEnd = source.indexOf("function dashboardActivationDocumentReviewError", routeStart);
+    const routeSource = source.slice(routeStart, routeEnd);
+
+    expect(routeStart).toBeGreaterThan(-1);
+    expect(routeEnd).toBeGreaterThan(routeStart);
+    expect(routeSource).toContain('authenticateJWT');
+    expect(routeSource).toContain('requireRole(DASHBOARD_KYC_REVIEW_ROLES)');
+    expect(routeSource).toContain('downloadStoragePath(filePath');
+    expect(routeSource).toContain('includeMetadata: true');
+    expect(routeSource).toContain('resolveDashboardKycRuntime(req, driverId)');
+    expect(routeSource).toContain('isCanonicalDashboardDocumentPath(driverId, documentType, filePath)');
+    expect(routeSource).toContain('customMetadata.driverId');
+    expect(routeSource).toContain("action: 'driver.document_content_view'");
+    expect(routeSource).toContain('await auditService.requireEvent({');
+    expect(routeSource).toContain("'Cache-Control': 'private, no-store, max-age=0'");
+    expect(routeSource).toContain("'X-Content-Type-Options': 'nosniff'");
+    expect(routeSource).not.toContain('document.fileUrl');
+  });
+
+  it('does not project persisted provider URLs in driver document metadata', () => {
+    expect(source).toContain('projectDashboardDocumentMetadata(application.documents || {})');
+    expect(source).toContain('DASHBOARD_DOCUMENT_PROVIDER_URL_KEYS');
+  });
+
+  it('keeps the document review queue on the restricted KYC role', () => {
+    const queueStart = source.indexOf("'/api/drivers/documents/review-queue'");
+    const queueEnd = source.indexOf("'/api/drivers/:driverId/documents/:documentType/upload'", queueStart);
+    const queueSource = source.slice(queueStart, queueEnd);
+
+    expect(queueStart).toBeGreaterThan(-1);
+    expect(queueSource).toContain('requireRole(DASHBOARD_KYC_REVIEW_ROLES)');
+    expect(queueSource).not.toContain('requireRole(DASHBOARD_OPERATION_ROLES)');
   });
 
   it('does not promote a driver account from an individual document review alone', () => {
-    const reviewStart = source.indexOf("router.post('/api/drivers/:driverId/documents/:documentType/review'");
+    const reviewStart = source.indexOf("'/api/drivers/:driverId/documents/:documentType/review'");
     const reviewEnd = source.indexOf("router.get('/api/drivers/:driverId/documents'", reviewStart);
     const reviewSource = source.slice(reviewStart, reviewEnd);
 

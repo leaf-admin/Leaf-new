@@ -546,6 +546,46 @@ describe('driver-identity-trust-service', () => {
       .toBeLessThan(mockReleaseIdentityVerificationWindow.mock.invocationCallOrder[0]);
   });
 
+  test('hard-fails gate errors even when production biometrics are disabled', async () => {
+    const gateError = new Error('Firestore unavailable during KYC approval gate');
+    gateError.code = 'KYC_APPROVAL_STORE_UNAVAILABLE';
+    const kycPolicyService = {
+      requireApprovedKyc: jest.fn(async () => {
+        throw gateError;
+      }),
+      getStepUpChallenge: jest.fn(async () => null),
+      getOrCreateStepUpChallenge: jest.fn()
+    };
+    const resolveBiometricPolicy = jest.fn(() => ({
+      productionBiometricsEnabled: false,
+      trustedMatchProviders: []
+    }));
+    const harness = createHarness({
+      env: { KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false' },
+      kycPolicyService,
+      resolveBiometricPolicy
+    });
+
+    const result = await harness.service.evaluateOnlineGate('driver-biometric-flag-disabled');
+
+    expect(resolveBiometricPolicy).toHaveBeenCalledWith(expect.objectContaining({
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false'
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      allowed: false,
+      code: 'KYC_CHECK_FAILED',
+      dispatchBlockPersisted: true
+    }));
+    expect(result).not.toHaveProperty('providerDormant');
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver-biometric-flag-disabled',
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'KYC_CHECK_FAILED'
+      })
+    );
+  });
+
   test('retains the KYC window when the fail-closed dispatch seal cannot be persisted', async () => {
     const redis = createRedis();
     redis.hset.mockRejectedValue(new Error('Redis write failed'));
@@ -955,6 +995,139 @@ describe('driver-identity-trust-service', () => {
         code: 'KYC_CANONICAL_EVIDENCE_REVOKED'
       })
     );
+  });
+
+  test('durably links private review evidence to the exact canonical identity failure', async () => {
+    const harness = createHarness();
+    const driverId = 'driver-review-binding';
+    const referenceImageSha256 = 'd'.repeat(64);
+    const failure = await harness.service.recordCanonicalFailure(driverId, {
+      awsSessionId: 'session-review-binding',
+      reason: 'identity_reverification_failed',
+      decision: 'reject',
+      similarityScore: 0.2,
+      referenceImageSha256
+    });
+    const reviewEvidenceId = 'private-review-evidence-1';
+    harness.firestore.documents.set(
+      `${harness.service.failedEvidenceCollection}/${reviewEvidenceId}`,
+      {
+        evidenceId: reviewEvidenceId,
+        driverId,
+        state: 'available',
+        decision: 'reject',
+        referenceImageSha256
+      }
+    );
+
+    await expect(harness.service.linkReviewEvidenceToCanonicalFailure(driverId, {
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    })).resolves.toMatchObject({
+      success: true,
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    });
+    await expect(harness.service.linkReviewEvidenceToCanonicalFailure(driverId, {
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    })).resolves.toMatchObject({
+      success: true,
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    });
+    expect(harness.firestore.documents.get(
+      `${harness.service.stateCollection}/${driverId}`
+    )).toEqual(expect.objectContaining({
+      lastFailure: expect.objectContaining({ reviewEvidenceId })
+    }));
+    const linkedFailure = harness.firestore.documents.get(
+      `${harness.service.stateCollection}/${driverId}/evidence/${failure.evidenceId}`
+    );
+    expect(linkedFailure).toEqual(expect.objectContaining({ reviewEvidenceId }));
+    expect(harness.service.restoreRejectedIdentityVerification(
+      driverId,
+      failure.evidenceId,
+      linkedFailure,
+      { challengeId: null, requirement: null }
+    )).toEqual(expect.objectContaining({ reviewEvidenceId }));
+  });
+
+  test('rejects a review evidence link whose captured face hash diverges', async () => {
+    const harness = createHarness();
+    const driverId = 'driver-review-binding-invalid';
+    const failure = await harness.service.recordCanonicalFailure(driverId, {
+      awsSessionId: 'session-review-binding-invalid',
+      reason: 'canonical_face_compare_failed',
+      decision: 'reject',
+      similarityScore: 0.2,
+      referenceImageSha256: 'e'.repeat(64)
+    });
+    const reviewEvidenceId = 'private-review-evidence-invalid';
+    harness.firestore.documents.set(
+      `${harness.service.failedEvidenceCollection}/${reviewEvidenceId}`,
+      {
+        evidenceId: reviewEvidenceId,
+        driverId,
+        state: 'available',
+        decision: 'reject',
+        referenceImageSha256: 'f'.repeat(64)
+      }
+    );
+
+    await expect(harness.service.linkReviewEvidenceToCanonicalFailure(driverId, {
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    })).rejects.toMatchObject({ code: 'KYC_REVIEW_EVIDENCE_BINDING_INVALID' });
+    expect(harness.firestore.documents.get(
+      `${harness.service.stateCollection}/${driverId}`
+    )?.lastFailure?.reviewEvidenceId).toBeUndefined();
+  });
+
+  test('restores only a session-bound canonical rejection for crash reconciliation', async () => {
+    const harness = createHarness();
+    const driverId = 'driver-rejected-reconciliation';
+    const sessionId = 'session-rejected-reconciliation';
+    const challengeId = 'idrev_rejected_reconciliation';
+    const result = await harness.service.recordCanonicalFailure(driverId, {
+      awsSessionId: sessionId,
+      sourcePath: 'server_side_aws_reference_compare',
+      reason: 'identity_reverification_failed',
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      decision: 'reject',
+      similarityScore: 0.2,
+      referenceImageSha256: 'a'.repeat(64)
+    });
+    const storedEvidence = harness.firestore.documents.get(
+      `driver_identity_trust/${driverId}/evidence/${result.evidenceId}`
+    );
+
+    expect(harness.service.restoreRejectedIdentityVerification(
+      driverId,
+      result.evidenceId,
+      storedEvidence,
+      { challengeId, requirement: 'IDENTITY_REVERIFICATION' }
+    )).toEqual(expect.objectContaining({
+      success: false,
+      userId: driverId,
+      isMatch: false,
+      evidenceId: result.evidenceId,
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION'
+    }));
+    expect(harness.service.restoreRejectedIdentityVerification(
+      driverId,
+      result.evidenceId,
+      storedEvidence,
+      { challengeId: 'idrev_other', requirement: 'IDENTITY_REVERIFICATION' }
+    )).toBeNull();
+    expect(harness.service.restoreRejectedIdentityVerification(
+      driverId,
+      result.evidenceId,
+      { ...storedEvidence, referenceImageSha256: null },
+      { challengeId, requirement: 'IDENTITY_REVERIFICATION' }
+    )).toBeNull();
   });
 
   test('preserves the legacy ACTIVE decision while the provider rollout is explicitly dormant', async () => {

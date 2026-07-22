@@ -119,6 +119,10 @@ class PaymentRuntimeProfileService {
       loadedAt: 0,
       profiles: []
     };
+    this.profileLoadState = {
+      status: 'cold',
+      error: null
+    };
   }
 
   buildDefaultProfile() {
@@ -171,6 +175,10 @@ class PaymentRuntimeProfileService {
     const firestore = firebaseConfig.getFirestore();
     if (!firestore) {
       this.cache = { loadedAt: now, profiles: [] };
+      this.profileLoadState = {
+        status: 'unavailable',
+        error: 'firestore_unavailable'
+      };
       return [];
     }
 
@@ -187,6 +195,10 @@ class PaymentRuntimeProfileService {
         source: 'firestore'
       }));
       this.cache = { loadedAt: now, profiles };
+      this.profileLoadState = {
+        status: 'ok',
+        error: null
+      };
       return profiles;
     } catch (error) {
       logStructured('warn', 'Falha ao carregar perfis de pagamento; usando perfil padrão', {
@@ -194,6 +206,10 @@ class PaymentRuntimeProfileService {
         error: error.message
       });
       this.cache = { loadedAt: now, profiles: [] };
+      this.profileLoadState = {
+        status: 'error',
+        error: error.message || 'profile_lookup_failed'
+      };
       return [];
     }
   }
@@ -239,10 +255,9 @@ class PaymentRuntimeProfileService {
 
   async resolveProfile(context = {}) {
     const defaultProfile = this.buildDefaultProfile();
-    const profiles = [
-      ...this.buildEnvAllowlistProfiles(),
-      ...(await this.loadFirestoreProfiles())
-    ];
+    const envProfiles = this.buildEnvAllowlistProfiles();
+    const firestoreProfiles = await this.loadFirestoreProfiles();
+    const profiles = [...envProfiles, ...firestoreProfiles];
 
     const matches = profiles
       .filter((profile) => this.profileMatches(profile, context))
@@ -253,6 +268,10 @@ class PaymentRuntimeProfileService {
       });
 
     const selected = matches[0] || defaultProfile;
+    const classificationUnavailable = (
+      selected === defaultProfile &&
+      this.profileLoadState.status !== 'ok'
+    );
     const environment = normalizeEnvironment(selected.environment);
     const wooviConfig = selected.wooviConfig || getWooviConfig({
       environment,
@@ -277,6 +296,8 @@ class PaymentRuntimeProfileService {
       startsAtIso: toIso(selected.startsAtIso || selected.startsAt),
       priority: Number(selected.priority || 0),
       testUserSandbox: selected.testUserSandbox === true,
+      classificationUnavailable,
+      classificationStatus: this.profileLoadState.status,
       wooviConfig
     };
   }

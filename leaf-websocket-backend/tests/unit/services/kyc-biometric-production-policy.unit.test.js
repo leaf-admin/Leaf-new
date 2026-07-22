@@ -174,6 +174,21 @@ describe('kyc biometric production policy', () => {
     );
   });
 
+  test('blocks CompareFaces SDK retries because the provider has no idempotency token', () => {
+    const result = evaluateProductionReadiness({
+      NODE_ENV: 'production',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true',
+      KYC_FACE_COMPARE_PROVIDER: 'aws_rekognition_compare_faces',
+      KYC_AWS_COMPARE_FACES_ENABLED: 'true',
+      KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS: '2'
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.blockers).toContain(
+      'KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS=1 obrigatório para impedir cobrança duplicada sem idempotency token.'
+    );
+  });
+
   test('blocks strict biometric activation without explicit Firestore positive authority', () => {
     const result = evaluateProductionReadiness({
       NODE_ENV: 'production',

@@ -12,7 +12,7 @@ const {
 const { publishSupportEvent } = require('../services/support-realtime-publisher');
 const { serializeSupportTicket } = require('../services/support-visibility-policy');
 const supportTicketService = require('../services/support-ticket-service');
-const kycIdentityReviewWorkflowService = require('../services/kyc-identity-review-workflow-service');
+const { resolveKycRuntimeForUser } = require('../services/kyc-runtime-scope-service');
 const {
     resolveRidePersistenceScope,
     resolveUserPersistenceScope,
@@ -102,7 +102,9 @@ function isPersistenceBoundaryError(error) {
     return (
         code.startsWith('PERSISTENCE_') ||
         code.startsWith('FINANCIAL_') ||
-        code.startsWith('SANDBOX_')
+        code.startsWith('SANDBOX_') ||
+        code.startsWith('KYC_RUNTIME_') ||
+        code.startsWith('KYC_SANDBOX_')
     );
 }
 
@@ -426,6 +428,18 @@ function registerSocketSafetySupportHandlers({
 
             const userId = authz.userId;
             const senderType = authz.senderType;
+            const persistenceContext = await resolveUserPersistenceScope({
+                userId,
+                phone: authz.identity.phone || authz.identity.phoneNumber || null,
+                actor: authz.identity
+            });
+            if (persistenceContext.namespace === 'sandbox') {
+                socket.emit('support:chat:error', {
+                    error: 'O chat não está disponível neste ambiente de validação.',
+                    code: 'KYC_SANDBOX_SUPPORT_CHAT_ISOLATION_REQUIRED'
+                });
+                return;
+            }
 
             logStructured('info', 'Nova mensagem no chat de suporte', {
                 service: 'server',
@@ -537,6 +551,40 @@ function registerSocketSafetySupportHandlers({
             }
 
             const identityReviewScope = resolveIdentityReviewTicketScope(data, identity);
+            let identityReviewWorkflowService = null;
+            if (identityReviewScope?.kycEvidenceId) {
+                const kycRuntime = await resolveKycRuntimeForUser({
+                    userId: identity.userId,
+                    phone: identity.phone || identity.phoneNumber || null,
+                    actor: identity,
+                    expectedPersistenceContext: persistenceContext
+                });
+                identityReviewWorkflowService = kycRuntime.workflow;
+
+                const existingReview = await identityReviewWorkflowService
+                    .resumeExistingCaseRequest({
+                        driverId: identity.userId,
+                        evidenceId: identityReviewScope.kycEvidenceId,
+                        requestedBy: {
+                            uid: identity.userId,
+                            email: identity.email || null,
+                            type: 'driver'
+                        }
+                    });
+                if (existingReview?.case?.caseId && existingReview?.ticket?.id) {
+                    const publicTicket = serializeSupportTicket(existingReview.ticket, { isAgent: false });
+                    socket.emit('supportTicketCreated', {
+                        success: true,
+                        ticketId: existingReview.ticket.id,
+                        reviewCaseId: existingReview.case.caseId,
+                        identityReviewRegistered: true,
+                        idempotentReplay: true,
+                        message: 'Solicitacao de analise ja registrada',
+                        data: publicTicket
+                    });
+                    return;
+                }
+            }
 
             const { ticket, queue } = await supportQueueService.createSupportTicket({
                 subject: data.subject || `${type} support request`,
@@ -568,7 +616,7 @@ function registerSocketSafetySupportHandlers({
                 for (let attempt = 1; attempt <= 2 && !identityReviewCase; attempt += 1) {
                     identityReviewLinkAttempts = attempt;
                     try {
-                        const reviewResult = await kycIdentityReviewWorkflowService.openCaseFromTicket({
+                        const reviewResult = await identityReviewWorkflowService.openCaseFromTicket({
                             driverId: identity.userId,
                             evidenceId: identityReviewScope.kycEvidenceId,
                             ticketId: ticket.id,

@@ -377,7 +377,16 @@ describe('KycIdentityReviewCaseService', () => {
     const replay = await harness.service.decideCase(input);
 
     expect(result.case.status).toBe(CASE_STATUSES.FALSE_POSITIVE);
-    expect(result.enforcement).toBeNull();
+    expect(result.enforcement).toEqual(expect.objectContaining({
+      driverId: 'driver_1',
+      status: 'FALSE_POSITIVE_RETRY_AUTHORIZED',
+      active: true,
+      permanent: false,
+      caseId: opened.case.caseId,
+      retryAllowed: true,
+      retryAttempts: 1,
+      identityApproved: false
+    }));
     expect(result.retryAuthorization).toEqual(expect.objectContaining({
       driverId: 'driver_1',
       status: 'AVAILABLE',
@@ -395,7 +404,9 @@ describe('KycIdentityReviewCaseService', () => {
     }));
     expect(replay.idempotentReplay).toBe(true);
     expect(replay.retryAuthorization).toEqual(result.retryAuthorization);
-    expect(harness.firestore.documents.has('driver_identity_enforcement/driver_1')).toBe(false);
+    expect(replay.enforcement).toEqual(result.enforcement);
+    expect(harness.firestore.documents.get('driver_identity_enforcement/driver_1'))
+      .toEqual(result.enforcement);
     expect(harness.runOutsideActiveTrip).not.toHaveBeenCalled();
   });
 

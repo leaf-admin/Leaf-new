@@ -880,7 +880,7 @@ class IntegratedKYCService {
             attempts: 1,
             source: verificationMode
           });
-        } else if (isMatch && options.recoverBlocked === true) {
+        } else if (isMatch && !skipStatusSideEffects && options.recoverBlocked === true) {
           await kycDriverStatusService.processVerificationResult(userId, {
             success: true,
             isMatch: true,
@@ -931,7 +931,7 @@ class IntegratedKYCService {
         }
       };
 
-      if (isMatch) {
+      if (isMatch && options.writeVerificationCache !== false) {
         const cacheKey = `kyc_verification:${userId}`;
         const cachePayload = JSON.stringify({
           success: true,

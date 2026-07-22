@@ -99,6 +99,36 @@ async function buildKycAuthHeaders({ json = true } = {}) {
   return headers;
 }
 
+function buildKycFailureResult(response, payload = {}, fallbackMessage) {
+  const data = payload && typeof payload === 'object' ? payload : {};
+  const statusCandidate = Number(response?.status ?? data.status);
+  const reviewAvailable = typeof data.reviewAvailable === 'boolean'
+    ? data.reviewAvailable
+    : undefined;
+
+  return {
+    success: false,
+    error: data.error || data.message || fallbackMessage || 'Não foi possível concluir a validação.',
+    code: data.code || '',
+    status: Number.isFinite(statusCandidate) ? statusCandidate : null,
+    retryAt: data.retryAt || null,
+    retryable: typeof data.retryable === 'boolean' ? data.retryable : undefined,
+    challengeId: data.challengeId || null,
+    requirement: data.requirement || null,
+    evidenceId: data.evidenceId || null,
+    reviewCaseId: data.reviewCaseId || null,
+    ...(reviewAvailable === undefined ? {} : { reviewAvailable }),
+  };
+}
+
+function buildKycCaughtFailure(error, fallbackMessage) {
+  return buildKycFailureResult(
+    { status: error?.status },
+    error,
+    error?.message || fallbackMessage,
+  );
+}
+
 class KYCService {
   getAwsProviderName() {
     return 'aws_rekognition_face_liveness';
@@ -113,7 +143,11 @@ class KYCService {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível preparar a validação agora.',
+        );
       }
       return {
         success: true,
@@ -121,10 +155,7 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao consultar provider de liveness:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return buildKycCaughtFailure(error, 'Não foi possível consultar a validação agora.');
     }
   }
 
@@ -171,7 +202,11 @@ class KYCService {
 
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível preparar a validação agora.',
+        );
       }
 
       return {
@@ -180,17 +215,22 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao criar sessão AWS liveness:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return buildKycCaughtFailure(error, 'Não foi possível preparar a validação agora.');
     }
   }
 
-  async getAwsLivenessCredentials(driverId) {
+  async getAwsLivenessCredentials(driverId, sessionId) {
     try {
+      const safeSessionId = String(sessionId || '').trim();
+      if (!safeSessionId) {
+        return buildKycFailureResult(
+          { status: 400 },
+          { code: 'AWS_LIVENESS_CREDENTIALS_SESSION_BINDING_REQUIRED' },
+          'Não foi possível preparar a validação agora.',
+        );
+      }
       const backendUrl = getSelfHostedApiUrl(
-        `/api/kyc/liveness/aws/credentials?userId=${encodeURIComponent(driverId)}`
+        `/api/kyc/liveness/aws/credentials?userId=${encodeURIComponent(driverId)}&sessionId=${encodeURIComponent(safeSessionId)}`
       );
       const response = await fetch(backendUrl, {
         method: 'GET',
@@ -199,7 +239,11 @@ class KYCService {
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível preparar a validação agora.',
+        );
       }
 
       return {
@@ -208,10 +252,7 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao buscar credenciais AWS liveness:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return buildKycCaughtFailure(error, 'Não foi possível preparar a validação agora.');
     }
   }
 
@@ -227,7 +268,11 @@ class KYCService {
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível confirmar a validação agora.',
+        );
       }
 
       return {
@@ -236,10 +281,40 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao buscar resultado AWS liveness:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return buildKycCaughtFailure(error, 'Não foi possível confirmar a validação agora.');
+    }
+  }
+
+  async abandonAwsLivenessSession(driverId, sessionId) {
+    try {
+      const safeSessionId = String(sessionId || '').trim();
+      if (!safeSessionId) {
+        return buildKycFailureResult(
+          { status: 400 },
+          { code: 'AWS_LIVENESS_SESSION_ID_REQUIRED' },
+          'Não foi possível encerrar a validação agora.',
+        );
+      }
+      const backendUrl = getSelfHostedApiUrl(
+        `/api/kyc/liveness/aws/session/${encodeURIComponent(safeSessionId)}/abandon`,
+      );
+      const response = await fetch(backendUrl, {
+        method: 'POST',
+        headers: await buildKycAuthHeaders(),
+        body: JSON.stringify({ userId: driverId }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível encerrar a validação agora.',
+        );
+      }
+      return { success: true, data: result };
+    } catch (error) {
+      Logger.error('❌ Erro ao encerrar sessão AWS liveness:', error);
+      return buildKycCaughtFailure(error, 'Não foi possível encerrar a validação agora.');
     }
   }
 
@@ -432,8 +507,15 @@ class KYCService {
       const allowRawSelfieFallback = options?.allowRawSelfieFallback === true;
       const serverSideFallbackOnDeviceEmbeddingUnavailable =
         options?.serverSideFallbackOnDeviceEmbeddingUnavailable === true;
-      const preferServerSideSelfieVerification =
-        options?.preferServerSideSelfieVerification === true;
+
+      if (awsSessionId) {
+        return this.verifyDriverWithAwsReference(driverId, {
+          ...options,
+          awsSessionId,
+          challengeId,
+          requirement,
+        });
+      }
 
       let similarity = null;
       let threshold = null;
@@ -442,15 +524,6 @@ class KYCService {
       let anchorSignatureHash = null;
       let deviceEmbeddingPayload = null;
       let effectiveVerificationMode = verificationMode;
-
-      if (awsSessionId && selfieImageUri && preferServerSideSelfieVerification) {
-        return this.verifyDriverServerSideSelfie(driverId, selfieImageUri, {
-          ...options,
-          awsSessionId,
-          challengeId,
-          requirement,
-        });
-      }
 
       if (!useAwsSessionOnly) {
         let signatureSourceUri = selfieImageUri;
@@ -560,7 +633,11 @@ class KYCService {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Erro ${response.status}: ${response.statusText}`);
+        return buildKycFailureResult(
+          response,
+          errorData,
+          'Não foi possível concluir a validação agora.',
+        );
       }
 
       const result = await response.json();
@@ -572,10 +649,56 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao verificar identidade:', error);
+      return buildKycCaughtFailure(error, 'Não foi possível concluir a validação agora.');
+    }
+  }
+
+  async verifyDriverWithAwsReference(driverId, options = {}) {
+    try {
+      const awsSessionId = String(options?.awsSessionId || '').trim();
+      if (!awsSessionId) {
+        return buildKycFailureResult(
+          { status: 400 },
+          { code: 'KYC_AWS_LIVENESS_SESSION_REQUIRED' },
+          'Inicie uma nova validação facial.',
+        );
+      }
+
+      const formData = new FormData();
+      formData.append('userId', driverId);
+      formData.append('awsSessionId', awsSessionId);
+      if (options?.challengeId) {
+        formData.append('challengeId', options.challengeId);
+      }
+      if (options?.requirement) {
+        formData.append('requirement', options.requirement);
+      }
+      if (options?.forceRecheck === true) {
+        formData.append('forceRecheck', 'true');
+      }
+
+      const backendUrl = getSelfHostedApiUrl('/api/kyc/verify-driver/server-side-selfie');
+      const response = await fetch(backendUrl, {
+        method: 'POST',
+        headers: await buildKycAuthHeaders({ json: false }),
+        body: formData,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível concluir a validação agora.',
+        );
+      }
+
       return {
-        success: false,
-        error: error.message,
+        success: true,
+        data: result,
       };
+    } catch (error) {
+      Logger.error('❌ Erro na comparação canônica pós-liveness:', error);
+      return buildKycCaughtFailure(error, 'Não foi possível concluir a validação agora.');
     }
   }
 
@@ -617,7 +740,11 @@ class KYCService {
 
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(result.error || `Erro ${response.status}: ${response.statusText}`);
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível concluir a validação agora.',
+        );
       }
 
       Logger.log('✅ Verificação server-side concluída:', result);
@@ -627,10 +754,7 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao verificar identidade no backend:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return buildKycCaughtFailure(error, 'Não foi possível concluir a validação agora.');
     }
   }
 }

@@ -9,10 +9,12 @@ const mockVerifyIdToken = jest.fn();
 const mockStorageFileSave = jest.fn();
 const mockStorageFileGetSignedUrl = jest.fn();
 const mockStorageFileGetMetadata = jest.fn();
+const mockStorageFileDelete = jest.fn();
 const mockStorageFile = jest.fn(() => ({
   save: mockStorageFileSave,
   getMetadata: mockStorageFileGetMetadata,
-  getSignedUrl: mockStorageFileGetSignedUrl
+  getSignedUrl: mockStorageFileGetSignedUrl,
+  delete: mockStorageFileDelete
 }));
 const mockStorageBucket = jest.fn(() => ({
   file: mockStorageFile
@@ -58,9 +60,25 @@ const mockRealtimeDb = {
 const mockQueueEnqueue = jest.fn();
 const mockSetConsentBackgroundCheck = jest.fn();
 const mockRecomputeDriverActivationStatus = jest.fn();
+const mockCommitDocumentSubmissionState = jest.fn(async ({
+  driverId,
+  documentType,
+  activationDocument,
+  userDocument,
+  updatedAt
+}) => mockRootUpdate({
+  [`driver_activation/${driverId}/documents/${documentType}`]: activationDocument,
+  [`driver_activation/${driverId}/documents_history/${activationDocument.submissionId}`]: activationDocument,
+  [`driver_activation/${driverId}/updatedAt`]: updatedAt,
+  [`users/${driverId}/documents/${documentType}`]: userDocument
+}));
 const mockSyncDriverApplication = jest.fn();
 const mockRecordRealtimeUpdate = jest.fn();
 const mockAssertCnhUploadAllowed = jest.fn();
+const mockClaimVerificationWindow = jest.fn();
+const mockRenewVerificationWindow = jest.fn();
+const mockReleaseVerificationWindow = jest.fn();
+const mockMarkCanonicalDocumentPending = jest.fn();
 
 jest.mock('firebase-admin', () => ({
   apps: ['mock-app'],
@@ -89,15 +107,31 @@ jest.mock('../../../services/driver-document-analysis-queue', () => ({
     const normalized = String(value || '').trim().toLowerCase();
     return ['cnh', 'crlv'].includes(normalized) ? normalized : null;
   },
-  recomputeDriverActivationStatus: (...args) => mockRecomputeDriverActivationStatus(...args)
+  recomputeDriverActivationStatus: (...args) => mockRecomputeDriverActivationStatus(...args),
+  commitDocumentSubmissionState: (...args) => mockCommitDocumentSubmissionState(...args)
 }));
 
 jest.mock('../../../services/driver-application-service', () => ({
   syncDriverApplication: (...args) => mockSyncDriverApplication(...args)
 }));
 
-jest.mock('../../../services/kyc-identity-review-workflow-service', () => ({
-  assertCnhUploadAllowed: (...args) => mockAssertCnhUploadAllowed(...args)
+jest.mock('../../../services/canonical-driver-document-approval-service', () => ({
+  markPending: (...args) => mockMarkCanonicalDocumentPending(...args),
+  sha256Buffer: (buffer) => require('crypto').createHash('sha256').update(buffer).digest('hex')
+}));
+
+jest.mock('../../../services/kyc-runtime-scope-service', () => ({
+  resolveKycRuntimeForUser: jest.fn(async () => ({
+    namespace: 'sandbox',
+    trust: {
+      claimVerificationWindow: (...args) => mockClaimVerificationWindow(...args),
+      renewVerificationWindow: (...args) => mockRenewVerificationWindow(...args),
+      releaseVerificationWindow: (...args) => mockReleaseVerificationWindow(...args)
+    },
+    workflow: {
+      assertCnhUploadAllowed: (...args) => mockAssertCnhUploadAllowed(...args)
+    }
+  }))
 }));
 
 jest.mock('../../../utils/prometheus-metrics', () => ({
@@ -169,6 +203,15 @@ describe('driver activation routes document upload storage boundary', () => {
     mockStorageFileSave.mockResolvedValue(undefined);
     mockStorageFileGetMetadata.mockResolvedValue([{ generation: '1700000000000001' }]);
     mockStorageFileGetSignedUrl.mockResolvedValue(['https://storage.leaf.test/driver-activation/driver-1/crlv.pdf']);
+    mockStorageFileDelete.mockResolvedValue(undefined);
+    mockClaimVerificationWindow.mockResolvedValue({
+      acquired: true,
+      key: 'kyc-window-driver-1',
+      token: 'kyc-window-token'
+    });
+    mockRenewVerificationWindow.mockResolvedValue(true);
+    mockReleaseVerificationWindow.mockResolvedValue(true);
+    mockMarkCanonicalDocumentPending.mockResolvedValue({ status: 'pending' });
     mockRecomputeDriverActivationStatus.mockResolvedValue({ canGoOnline: false });
     mockSetConsentBackgroundCheck.mockResolvedValue({ canGoOnline: false });
     mockSyncDriverApplication.mockResolvedValue(undefined);
@@ -292,11 +335,51 @@ describe('driver activation routes document upload storage boundary', () => {
     expect(mockQueueEnqueue).not.toHaveBeenCalled();
   });
 
+  it('resolves the authoritative KYC runtime before allowing a CNH upload', async () => {
+    const { resolveKycRuntimeForUser } = require('../../../services/kyc-runtime-scope-service');
+
+    const response = await uploadCnh();
+
+    expect(response.status).toBe(202);
+    expect(resolveKycRuntimeForUser).toHaveBeenCalledWith({
+      userId: 'driver-1',
+      actor: { uid: 'driver-1', id: 'driver-1', role: 'driver' }
+    });
+    expect(mockClaimVerificationWindow).toHaveBeenCalledWith('driver-1', {
+      scope: 'canonical_cnh_replacement'
+    });
+    expect(mockAssertCnhUploadAllowed).toHaveBeenCalledTimes(2);
+    expect(mockAssertCnhUploadAllowed).toHaveBeenCalledWith('driver-1');
+    expect(mockRenewVerificationWindow).toHaveBeenCalled();
+    expect(mockReleaseVerificationWindow).toHaveBeenCalledWith(expect.objectContaining({
+      token: 'kyc-window-token'
+    }));
+  });
+
+  it('deletes the uploaded CNH when a review hold appears before canonical commit', async () => {
+    mockAssertCnhUploadAllowed
+      .mockResolvedValueOnce({ allowed: true })
+      .mockRejectedValueOnce(Object.assign(new Error('hold won the race'), {
+        code: 'KYC_IDENTITY_REVIEW_HOLD'
+      }));
+
+    const response = await uploadCnh();
+
+    expect(response.status).toBe(423);
+    expect(response.body.code).toBe('KYC_IDENTITY_REVIEW_HOLD');
+    expect(mockStorageFileSave).toHaveBeenCalledTimes(1);
+    expect(mockStorageFileDelete).toHaveBeenCalledWith({ ignoreNotFound: true });
+    expect(mockMarkCanonicalDocumentPending).not.toHaveBeenCalled();
+    expect(mockRootUpdate).not.toHaveBeenCalled();
+    expect(mockQueueEnqueue).not.toHaveBeenCalled();
+  });
+
   it('does not apply the CNH identity-review guard to a CRLV upload', async () => {
     const response = await uploadCrlv();
 
     expect(response.status).toBe(202);
     expect(mockAssertCnhUploadAllowed).not.toHaveBeenCalled();
+    expect(mockClaimVerificationWindow).not.toHaveBeenCalled();
   });
 
   it('fails closed before queueing analysis when Firebase Storage omits a signed URL', async () => {
@@ -346,6 +429,23 @@ describe('driver activation routes document upload storage boundary', () => {
         })
       })
     );
+    expect(mockCommitDocumentSubmissionState).toHaveBeenCalledWith(expect.objectContaining({
+      db: mockRealtimeDb,
+      driverId: 'driver-1',
+      documentType: 'crlv',
+      activationDocument: expect.objectContaining({
+        submissionId: expect.any(String),
+        filePath: expect.stringContaining('driver-activation/driver-1/crlv/'),
+        documentSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        storageGeneration: '1700000000000001'
+      }),
+      userDocument: expect.objectContaining({
+        lastSubmissionId: expect.any(String),
+        filePath: expect.stringContaining('driver-activation/driver-1/crlv/'),
+        documentSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        storageGeneration: '1700000000000001'
+      })
+    }));
     expect(mockQueueEnqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         driverId: 'driver-1',

@@ -411,6 +411,15 @@ async function resolveDriverActivationState({
     );
   }
 
+  if (!kycApproval.approved) {
+    return buildStatePayload(DRIVER_ACTIVATION_STATES.PRE_REGISTERED, {
+      ...meta,
+      reason: kycApproval.pending
+        ? 'KYC do motorista em analise ou aguardando aprovacao.'
+        : 'KYC do motorista ainda nao aprovado.'
+    });
+  }
+
   if (!liveness.passed) {
     return buildStatePayload(DRIVER_ACTIVATION_STATES.APPROVED_NEEDS_LIVENESS, {
       ...meta,

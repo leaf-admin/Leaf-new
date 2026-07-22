@@ -3,9 +3,56 @@ const { logError } = require('../utils/logger');
 
 const PERIOD_COLLECTION = 'kyc_aws_cost_guard_periods';
 const OPERATION_COLLECTION = 'kyc_aws_cost_guard_operations';
+const COMPARE_PROVIDER_INPUT_FAILURE_CODES = new Set([
+  'AWS_COMPARE_FACES_INVALID_PARAMETER',
+  'AWS_COMPARE_FACES_CNH_FACE_NOT_DETECTED',
+  'AWS_COMPARE_FACES_LIVENESS_FACE_NOT_DETECTED'
+]);
 
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function encryptRecoverySessionId(operationId, sessionId) {
+  const key = crypto.createHash('sha256')
+    .update(`leaf:kyc:aws:liveness:recovery:v1:${operationId}`)
+    .digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(String(sessionId), 'utf8'),
+    cipher.final()
+  ]);
+  return {
+    version: 1,
+    algorithm: 'aes-256-gcm',
+    iv: iv.toString('base64url'),
+    ciphertext: ciphertext.toString('base64url'),
+    authTag: cipher.getAuthTag().toString('base64url')
+  };
+}
+
+function decryptRecoverySessionId(operationId, encrypted = {}) {
+  if (
+    encrypted?.version !== 1
+    || encrypted?.algorithm !== 'aes-256-gcm'
+    || !encrypted?.iv
+    || !encrypted?.ciphertext
+    || !encrypted?.authTag
+  ) return '';
+  const key = crypto.createHash('sha256')
+    .update(`leaf:kyc:aws:liveness:recovery:v1:${operationId}`)
+    .digest();
+  const decipher = crypto.createDecipheriv(
+    'aes-256-gcm',
+    key,
+    Buffer.from(encrypted.iv, 'base64url')
+  );
+  decipher.setAuthTag(Buffer.from(encrypted.authTag, 'base64url'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encrypted.ciphertext, 'base64url')),
+    decipher.final()
+  ]).toString('utf8');
 }
 
 function readBoolean(value, fallback = false) {
@@ -44,12 +91,12 @@ class AwsKycCostGuardService {
       this.env.KYC_AWS_COMPARE_FACES_ESTIMATED_UNIT_COST_USD || '0.001'
     );
     const compareAttempts = Number.parseInt(
-      this.env.KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS || '2',
+      this.env.KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS || '1',
       10
     );
     this.compareMaxAttempts = Number.isFinite(compareAttempts)
       ? Math.min(5, Math.max(1, compareAttempts))
-      : 2;
+      : 1;
     const retentionDays = Number.parseInt(
       this.env.KYC_AWS_COST_OPERATION_RETENTION_DAYS || '35',
       10
@@ -353,18 +400,176 @@ class AwsKycCostGuardService {
     });
   }
 
-  async markLivenessCompleted(operationId, sessionId) {
+  async markLivenessCompleted(operationId, sessionId, {
+    recoveryBinding = null,
+    recoveryExpiresAt = null
+  } = {}) {
     if (!this.isEnabled()) return null;
+    const safeSessionId = String(sessionId || '').trim();
+    const safeRecoveryBinding = String(recoveryBinding || '').trim();
+    const recoveryExpiresAtMs = recoveryExpiresAt ? Date.parse(recoveryExpiresAt) : Number.NaN;
+    const hasRecoveryBinding = Boolean(safeRecoveryBinding || recoveryExpiresAt);
+    if (
+      !safeSessionId
+      || (
+        hasRecoveryBinding
+        && (!safeRecoveryBinding || !Number.isFinite(recoveryExpiresAtMs))
+      )
+    ) {
+      throw createError(
+        'Binding de recuperacao da sessao AWS KYC e invalido',
+        'KYC_AWS_COST_OPERATION_MISMATCH'
+      );
+    }
     return this.updateOperation(operationId, (current) => {
-      if (current.livenessStatus === 'completed') return { result: current };
+      if (current.livenessStatus === 'completed') {
+        if (current.livenessSessionIdHash !== sha256(safeSessionId)) {
+          throw createError(
+            'Sessao AWS diverge da operacao de custo concluida',
+            'KYC_AWS_COST_OPERATION_MISMATCH'
+          );
+        }
+        return { result: current };
+      }
       if (current.livenessStatus !== 'dispatched') {
         throw createError('Liveness nao foi despachado no guard de custo', 'KYC_AWS_COST_OPERATION_STATE_INVALID');
       }
       const next = {
         ...current,
         livenessStatus: 'completed',
-        livenessSessionIdHash: sha256(sessionId),
+        livenessSessionIdHash: sha256(safeSessionId),
+        ...(hasRecoveryBinding
+          ? {
+            livenessRecoverySession: encryptRecoverySessionId(operationId, safeSessionId),
+            livenessRecoveryBindingHash: sha256(safeRecoveryBinding),
+            livenessRecoveryExpiresAt: new Date(recoveryExpiresAtMs).toISOString()
+          }
+          : {}),
         livenessCompletedAt: this.now().toISOString(),
+        updatedAt: this.now().toISOString()
+      };
+      return { next, result: next };
+    });
+  }
+
+  async assertRecoverableLivenessSession(operationId, { userId, sessionId } = {}) {
+    if (!this.isEnabled()) {
+      throw createError(
+        'Circuit breaker de custo AWS KYC indisponivel para recuperar a sessao',
+        'KYC_AWS_COST_GUARD_REQUIRED'
+      );
+    }
+    const safeUserId = String(userId || '').trim();
+    const safeSessionId = String(sessionId || '').trim();
+    if (!safeUserId || !safeSessionId) {
+      throw createError(
+        'Binding da sessao AWS KYC e obrigatorio para recuperacao',
+        'KYC_AWS_COST_OPERATION_MISMATCH'
+      );
+    }
+    return this.updateOperation(operationId, (current) => {
+      if (
+        current.kind !== 'liveness_compare_bundle'
+        || current.userIdHash !== sha256(safeUserId)
+        || current.livenessStatus !== 'completed'
+        || current.livenessSessionIdHash !== sha256(safeSessionId)
+      ) {
+        throw createError(
+          'Sessao AWS diverge da operacao de custo concluida',
+          'KYC_AWS_COST_OPERATION_MISMATCH'
+        );
+      }
+      return {
+        result: {
+          operationId: String(operationId || '').trim(),
+          livenessStatus: current.livenessStatus,
+          sessionIdHash: current.livenessSessionIdHash
+        }
+      };
+    });
+  }
+
+  async recoverCompletedLivenessSession(operationId, { userId, recoveryBinding } = {}) {
+    if (!this.isEnabled()) {
+      throw createError(
+        'Circuit breaker de custo AWS KYC indisponivel para recuperar a sessao',
+        'KYC_AWS_COST_GUARD_REQUIRED'
+      );
+    }
+    const safeUserId = String(userId || '').trim();
+    const safeRecoveryBinding = String(recoveryBinding || '').trim();
+    if (!safeUserId || !safeRecoveryBinding) {
+      throw createError(
+        'Binding da sessao AWS KYC e obrigatorio para recuperacao',
+        'KYC_AWS_COST_OPERATION_MISMATCH'
+      );
+    }
+    return this.updateOperation(operationId, (current) => {
+      if (current.userIdHash !== sha256(safeUserId)) {
+        throw createError(
+          'Usuario diverge da operacao de custo AWS KYC',
+          'KYC_AWS_COST_OPERATION_MISMATCH'
+        );
+      }
+      if (current.livenessStatus !== 'completed') {
+        throw createError(
+          'Resultado do dispatch AWS liveness ainda e desconhecido',
+          'KYC_AWS_LIVENESS_DISPATCH_OUTCOME_UNKNOWN'
+        );
+      }
+      let sessionId = '';
+      try {
+        sessionId = decryptRecoverySessionId(
+          String(operationId || '').trim(),
+          current.livenessRecoverySession
+        ).trim();
+      } catch (error) {
+        sessionId = '';
+      }
+      const expiresAtMs = Date.parse(current.livenessRecoveryExpiresAt || '');
+      if (
+        !sessionId
+        || current.livenessSessionIdHash !== sha256(sessionId)
+        || current.livenessRecoveryBindingHash !== sha256(safeRecoveryBinding)
+      ) {
+        throw createError(
+          'Binding recuperavel da sessao AWS diverge da operacao de custo',
+          'KYC_AWS_COST_OPERATION_MISMATCH'
+        );
+      }
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= this.now().getTime()) {
+        throw createError(
+          'Sessao AWS recuperavel expirou',
+          'KYC_AWS_LIVENESS_RECOVERY_EXPIRED'
+        );
+      }
+      return { result: { operationId: String(operationId).trim(), sessionId } };
+    });
+  }
+
+  async markLivenessMetadataPersisted(operationId, sessionId) {
+    if (!this.isEnabled()) return null;
+    const safeSessionId = String(sessionId || '').trim();
+    return this.updateOperation(operationId, (current) => {
+      if (
+        current.livenessStatus !== 'completed'
+        || !safeSessionId
+        || current.livenessSessionIdHash !== sha256(safeSessionId)
+      ) {
+        throw createError(
+          'Sessao AWS diverge ao concluir a recuperacao de metadata',
+          'KYC_AWS_COST_OPERATION_MISMATCH'
+        );
+      }
+      if (current.livenessMetadataPersistedAt && !current.livenessRecoverySession) {
+        return { result: current };
+      }
+      const next = {
+        ...current,
+        livenessRecoverySession: null,
+        livenessRecoveryBindingHash: null,
+        livenessRecoveryExpiresAt: null,
+        livenessMetadataPersistedAt: this.now().toISOString(),
         updatedAt: this.now().toISOString()
       };
       return { next, result: next };
@@ -401,6 +606,59 @@ class AwsKycCostGuardService {
         updatedAt: this.now().toISOString()
       };
       return { next, result: { claimed: true, replay: false } };
+    });
+  }
+
+  async markCompareProviderInputFailed(operationId, compareFingerprint, failure = {}) {
+    if (!this.isEnabled()) return null;
+    const fingerprintHash = sha256(compareFingerprint);
+    const failureCode = String(failure.code || '').trim();
+    const providerCode = String(failure.providerCode || '').trim();
+
+    if (
+      !COMPARE_PROVIDER_INPUT_FAILURE_CODES.has(failureCode)
+      || providerCode !== 'InvalidParameterException'
+    ) {
+      throw createError(
+        'Falha CompareFaces nao qualifica como rejeicao de entrada do provider',
+        'KYC_AWS_COMPARE_PROVIDER_INPUT_FAILURE_INVALID'
+      );
+    }
+
+    return this.updateOperation(operationId, (current) => {
+      if (
+        current.compareStatus === 'failed_provider_input'
+        && current.compareFingerprintHash === fingerprintHash
+        && current.compareFailure?.code === failureCode
+        && current.compareFailure?.providerCode === providerCode
+      ) {
+        return { result: current };
+      }
+      if (
+        current.compareStatus !== 'dispatched'
+        || current.compareFingerprintHash !== fingerprintHash
+        || current.compareResult
+      ) {
+        throw createError(
+          'Dispatch CompareFaces nao corresponde a falha do provider',
+          'KYC_AWS_COST_OPERATION_STATE_INVALID'
+        );
+      }
+
+      const failedAt = this.now().toISOString();
+      const next = {
+        ...current,
+        compareStatus: 'failed_provider_input',
+        compareFailure: {
+          code: failureCode,
+          providerCode,
+          retryable: false,
+          failedAt
+        },
+        compareFailedAt: failedAt,
+        updatedAt: failedAt
+      };
+      return { next, result: next };
     });
   }
 

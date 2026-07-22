@@ -122,6 +122,19 @@ describe('account deletion route', () => {
   });
 
   it('allows normal account profile updates without derived driver lifecycle fields', async () => {
+    mockUserDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        uid: 'review-user',
+        usertype: 'customer',
+        userType: 'customer',
+        phone: '+5521102938475',
+        phoneNumber: '+5521102938475',
+        onboardingCompleted: true,
+        profileComplete: true,
+      }),
+    });
+
     const response = await request(createApp())
       .put('/api/account/profile')
       .set('Authorization', 'Bearer firebase-token')

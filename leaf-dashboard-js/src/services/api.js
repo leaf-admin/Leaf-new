@@ -471,14 +471,14 @@ class LeafApiService {
     return this.request("/alerts/stats");
   }
 
-  async getDrivers(page = 1, limit = 20, status = "all", search = "") {
+  async getDrivers(page = 1, limit = 20, status = "all", search = "", context = {}) {
     const params = new URLSearchParams({
       page: String(page),
       limit: String(limit),
     });
     if (status !== "all") params.append("status", status);
     if (search) params.append("search", search);
-    return this.request(`/drivers/applications?${params.toString()}`);
+    return this.requestKyc(`/drivers/applications?${params.toString()}`, {}, context);
   }
 
   async getUsers(params = {}) {
@@ -506,21 +506,82 @@ class LeafApiService {
     return this.request(`/drivers/${driverId}/complete`);
   }
 
-  async getDriverDocuments(driverId) {
-    return this.request(`/drivers/${driverId}/documents`);
+  async getDriverDocuments(driverId, context = {}) {
+    return this.requestKyc(`/drivers/${driverId}/documents`, {}, context);
   }
 
-  async getDriverKycIdentityReviews(driverId) {
-    return this.request(`/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews`);
+  async getDriverDocumentFile(driverId, documentType, context = {}) {
+    return this.requestKycFile(
+      `/drivers/${encodeURIComponent(driverId)}/documents/${encodeURIComponent(documentType)}/content`,
+      {
+        headers: {
+          Accept: "application/pdf,image/*,application/octet-stream",
+        },
+      },
+      context,
+    );
   }
 
-  async reconcileDriverKycIdentityReview(driverId, payload = {}) {
-    return this.request(
+  resolveKycScope(context = {}) {
+    const rawScope = typeof context === "string" ? context : context?.scope;
+    const normalized = String(rawScope || "operational").trim().toLowerCase();
+    if (normalized === "operational" || normalized === "sandbox") return normalized;
+    throw new Error(`Escopo KYC inválido: ${normalized}`);
+  }
+
+  buildScopedKycRequest(endpoint, options = {}, context = {}) {
+    const scope = this.resolveKycScope(context);
+    if (scope !== "sandbox") return { endpoint, options };
+    const separator = endpoint.includes("?") ? "&" : "?";
+    return {
+      endpoint: `${endpoint}${separator}scope=sandbox`,
+      options: {
+        ...options,
+        headers: {
+          ...(options.headers || {}),
+          "X-Leaf-KYC-Scope": "sandbox",
+        },
+      },
+    };
+  }
+
+  async requestKyc(endpoint, options = {}, context = {}) {
+    const request = this.buildScopedKycRequest(endpoint, options, context);
+    return this.request(request.endpoint, request.options);
+  }
+
+  async requestKycFile(endpoint, options = {}, context = {}) {
+    const request = this.buildScopedKycRequest(endpoint, options, context);
+    return this.requestFile(request.endpoint, request.options);
+  }
+
+  async getDriverKycIdentityReviews(driverId, context = {}) {
+    return this.requestKyc(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews`,
+      {},
+      context,
+    );
+  }
+
+  async authorizeDriverKycOrphanHoldRecovery(driverId, payload = {}, context = {}) {
+    return this.requestKyc(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/orphan-identity-hold/recovery`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      context,
+    );
+  }
+
+  async reconcileDriverKycIdentityReview(driverId, payload = {}, context = {}) {
+    return this.requestKyc(
       `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/reconcile`,
       {
         method: "POST",
         body: JSON.stringify(payload),
       },
+      context,
     );
   }
 
@@ -528,9 +589,9 @@ class LeafApiService {
     driverId,
     caseId,
     evidenceKind,
-    { ticketId, justification, evidenceBindingHash } = {},
+    { ticketId, justification, evidenceBindingHash, scope } = {},
   ) {
-    return this.requestFile(
+    return this.requestKycFile(
       `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceKind)}`,
       {
         method: "POST",
@@ -544,30 +605,33 @@ class LeafApiService {
           evidenceBindingHash,
         }),
       },
+      { scope },
     );
   }
 
-  async startDriverKycIdentityReview(driverId, caseId, payload = {}) {
-    return this.request(
+  async startDriverKycIdentityReview(driverId, caseId, payload = {}, context = {}) {
+    return this.requestKyc(
       `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/start`,
       {
         method: "POST",
         body: JSON.stringify(payload),
       },
+      context,
     );
   }
 
-  async decideDriverKycIdentityReview(driverId, caseId, payload = {}) {
-    return this.request(
+  async decideDriverKycIdentityReview(driverId, caseId, payload = {}, context = {}) {
+    return this.requestKyc(
       `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/decision`,
       {
         method: "POST",
         body: JSON.stringify(payload),
       },
+      context,
     );
   }
 
-  async getDriverDocumentReviewQueue(params = {}) {
+  async getDriverDocumentReviewQueue(params = {}, context = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
@@ -575,7 +639,11 @@ class LeafApiService {
       }
     });
     const suffix = query.toString();
-    return this.request(`/drivers/documents/review-queue${suffix ? `?${suffix}` : ""}`);
+    return this.requestKyc(
+      `/drivers/documents/review-queue${suffix ? `?${suffix}` : ""}`,
+      {},
+      context,
+    );
   }
 
   async updateDriverVehicleConfig(driverId, payload = {}) {
@@ -599,31 +667,39 @@ class LeafApiService {
     });
   }
 
-  async reviewDriverDocument(driverId, documentType, action, rejectionReason = "") {
-    return this.request(`/drivers/${driverId}/documents/${documentType}/review`, {
-      method: "POST",
-      body: JSON.stringify({
-        action,
-        rejectionReason,
-        reviewedBy: "admin",
-      }),
-    });
+  async reviewDriverDocument(driverId, documentType, action, rejectionReason = "", context = {}) {
+    return this.requestKyc(
+      `/drivers/${driverId}/documents/${documentType}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          rejectionReason,
+          reviewedBy: "admin",
+        }),
+      },
+      context,
+    );
   }
 
-  async uploadDriverDocument(driverId, documentType, file) {
+  async uploadDriverDocument(driverId, documentType, file, context = {}) {
     const formData = new FormData();
     formData.append("file", file);
-    return this.request(`/drivers/${driverId}/documents/${documentType}/upload`, {
-      method: "POST",
-      body: formData,
-    });
+    return this.requestKyc(
+      `/drivers/${driverId}/documents/${documentType}/upload`,
+      {
+        method: "POST",
+        body: formData,
+      },
+      context,
+    );
   }
 
-  async requestDriverDocument(driverId, documentType, payload = {}) {
-    return this.request(`/drivers/${driverId}/documents/${documentType}/request`, {
+  async requestDriverDocument(driverId, documentType, payload = {}, context = {}) {
+    return this.requestKyc(`/drivers/${driverId}/documents/${documentType}/request`, {
       method: "POST",
       body: JSON.stringify(payload),
-    });
+    }, context);
   }
 
   async getMetricsHistory(startDate, endDate, granularity = "hour") {

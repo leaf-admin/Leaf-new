@@ -25,10 +25,14 @@ argument. The Firebase token must belong to the exact UID in
 
 The command exits `0` only when all evidence is green:
 
-- authenticated `GET /api/kyc/liveness/provider` reports AWS Liveness enabled
-  in `us-east-1`, temporary-role credentials, no S3 output and cost guard;
-- authenticated `GET /api/kyc/biometrics/readiness` reports strict AWS
-  Liveness + CompareFaces readiness and the approved thresholds;
+- authenticated `GET /api/kyc/liveness/provider` reports only the minimum
+  mobile contract required to start AWS Liveness (provider, enabled state and
+  temporary-role credential readiness), without policy or cost details;
+- authenticated `GET /api/kyc/biometrics/readiness` reports only the safe
+  aggregate readiness result; the backend evaluates strict AWS Liveness +
+  CompareFaces policy, thresholds and provider configuration internally;
+- the preflight process independently inspects that configuration inside the
+  deployed backend runtime, while its report records only a boolean result;
 - `GET /health/runtime-flags` reports live `redis_noeviction` authority,
   online gate/cadence enabled and no verification during an active ride;
 - protected `GET /api/driver-status/:driverId` proves the driver is offline,

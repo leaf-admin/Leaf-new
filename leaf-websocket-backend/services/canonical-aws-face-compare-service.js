@@ -59,6 +59,37 @@ function createError(message, code) {
   return error;
 }
 
+function normalizeReferenceImageBoundingBox(value) {
+  const width = Number(value?.width);
+  const height = Number(value?.height);
+  const left = Number(value?.left);
+  const top = Number(value?.top);
+  const coordinates = [width, height, left, top];
+
+  if (
+    !coordinates.every(Number.isFinite)
+    || width <= 0
+    || height <= 0
+    || width > 1.001
+    || height > 1.001
+  ) {
+    return null;
+  }
+
+  const visibleLeft = Math.max(0, left);
+  const visibleTop = Math.max(0, top);
+  const visibleRight = Math.min(1, left + width);
+  const visibleBottom = Math.min(1, top + height);
+  if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) return null;
+
+  return {
+    width: visibleRight - visibleLeft,
+    height: visibleBottom - visibleTop,
+    left: visibleLeft,
+    top: visibleTop
+  };
+}
+
 function applyHardFailDecision(result, approveThreshold) {
   const similarityScore = Number(result?.similarityScore);
   const isMatch = Number.isFinite(similarityScore) && similarityScore >= approveThreshold;
@@ -101,7 +132,7 @@ class CanonicalAwsFaceCompareService {
     );
     this.sdkMaxAttempts = readInteger(
       options.sdkMaxAttempts ?? this.env.KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS,
-      2,
+      1,
       1,
       5
     );
@@ -194,6 +225,15 @@ class CanonicalAwsFaceCompareService {
       throw createError(
         'Custo estimado AWS CompareFaces invalido',
         'AWS_COMPARE_FACES_COST_CONFIG_INVALID'
+      );
+    }
+    if (
+      readBoolean(this.env.KYC_PRODUCTION_BIOMETRICS_ENABLED, false)
+      && this.sdkMaxAttempts !== 1
+    ) {
+      throw createError(
+        'Retry automatico do AWS CompareFaces deve permanecer desabilitado em producao',
+        'AWS_COMPARE_FACES_SDK_RETRY_UNSAFE'
       );
     }
     if (
@@ -311,7 +351,12 @@ class CanonicalAwsFaceCompareService {
     const status = String(liveness.status || '').trim().toUpperCase();
     const confidence = Number(liveness.confidence);
     const threshold = Number(liveness.threshold);
+    const referenceImageBytesAvailable = Buffer.isBuffer(livenessReferenceImageBuffer)
+      && livenessReferenceImageBuffer.length > 0;
     const referenceImageSha256 = sha256(livenessReferenceImageBuffer);
+    const referenceImageBoundingBox = normalizeReferenceImageBoundingBox(
+      liveness.referenceImageBoundingBox
+    );
 
     if (
       provider !== LIVENESS_PROVIDER
@@ -321,6 +366,7 @@ class CanonicalAwsFaceCompareService {
       || !Number.isFinite(confidence)
       || !Number.isFinite(threshold)
       || confidence < threshold
+      || !referenceImageBytesAvailable
     ) {
       throw createError(
         'Referencia facial exige sessao AWS Liveness aprovada',
@@ -345,11 +391,15 @@ class CanonicalAwsFaceCompareService {
       livenessPassed: true,
       confidence,
       threshold,
-      referenceImageSha256
+      referenceImageSha256,
+      providerBoundsPresent: Boolean(referenceImageBoundingBox),
+      referenceImageFaceBoundsSha256: referenceImageBoundingBox
+        ? sha256(JSON.stringify(referenceImageBoundingBox))
+        : null
     };
   }
 
-  normalizeProviderError(error) {
+  normalizeProviderError(error, { livenessFaceDetected = false } = {}) {
     const providerCode = String(error?.name || error?.code || '').trim();
     const errorMap = {
       AccessDeniedException: ['AWS_COMPARE_FACES_ACCESS_DENIED', false],
@@ -360,7 +410,14 @@ class CanonicalAwsFaceCompareService {
       ThrottlingException: ['AWS_COMPARE_FACES_THROTTLED', true],
       InternalServerError: ['AWS_COMPARE_FACES_PROVIDER_UNAVAILABLE', true]
     };
-    const [code, retryable] = errorMap[providerCode] || ['AWS_COMPARE_FACES_FAILED', true];
+    let [code, retryable] = errorMap[providerCode] || ['AWS_COMPARE_FACES_FAILED', true];
+    if (providerCode === 'InvalidParameterException' && livenessFaceDetected) {
+      code = 'AWS_COMPARE_FACES_CNH_FACE_NOT_DETECTED';
+      retryable = false;
+    } else if (providerCode === 'InvalidParameterException') {
+      code = 'AWS_COMPARE_FACES_LIVENESS_FACE_NOT_DETECTED';
+      retryable = true;
+    }
     const normalized = createError('Falha ao executar comparacao facial AWS', code);
     normalized.providerCode = providerCode || null;
     normalized.retryable = retryable;
@@ -376,6 +433,28 @@ class CanonicalAwsFaceCompareService {
           operationId,
           compareFingerprint,
           normalizedResult
+        );
+      } catch (error) {
+        lastError = error;
+        const retryable = error?.code === 'KYC_AWS_COST_GUARD_UNAVAILABLE';
+        if (!retryable || attempt >= this.resultPersistenceMaxAttempts) throw error;
+        await new Promise((resolve) => setTimeout(resolve, attempt * 25));
+      }
+    }
+    throw lastError;
+  }
+
+  async persistProviderInputFailure(operationId, compareFingerprint, normalizedError) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= this.resultPersistenceMaxAttempts; attempt += 1) {
+      try {
+        return await this.costGuard.markCompareProviderInputFailed(
+          operationId,
+          compareFingerprint,
+          {
+            code: normalizedError.code,
+            providerCode: normalizedError.providerCode
+          }
         );
       } catch (error) {
         lastError = error;
@@ -450,7 +529,17 @@ class CanonicalAwsFaceCompareService {
         providerCode: error?.name || error?.code || null,
         durationMs: Date.now() - startedAt
       });
-      throw this.normalizeProviderError(error);
+      const normalizedError = this.normalizeProviderError(error, {
+        livenessFaceDetected: Boolean(livenessBinding.referenceImageFaceBoundsSha256)
+      });
+      if (normalizedError.providerCode === 'InvalidParameterException') {
+        await this.persistProviderInputFailure(
+          liveness.costGuardOperationId,
+          compareFingerprint,
+          normalizedError
+        );
+      }
+      throw normalizedError;
     }
 
     const matches = Array.isArray(response?.FaceMatches) ? response.FaceMatches : [];

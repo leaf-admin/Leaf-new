@@ -10,6 +10,34 @@ jest.mock('../../../utils/active-trip-index', () => ({
 const activeTripIndex = require('../../../utils/active-trip-index');
 const registerSocketDriverHeartbeatHandler = require('../../../bootstrap/register-socket-driver-heartbeat-handler');
 
+const FORBIDDEN_MOBILE_KYC_FIELDS = new Set([
+  'challenge',
+  'score',
+  'signals',
+  'metadata',
+  'attemptState',
+  'supportTicketId',
+  'envelope',
+  'financialEnvelope',
+  'costEnvelope',
+  'estimatedUnitCostUsd',
+  'estimatedCostUsd',
+]);
+
+function findForbiddenMobileKycPaths(value, path = '$') {
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findForbiddenMobileKycPaths(item, `${path}[${index}]`));
+  }
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    const nestedPath = `${path}.${key}`;
+    return [
+      ...(FORBIDDEN_MOBILE_KYC_FIELDS.has(key) ? [nestedPath] : []),
+      ...findForbiddenMobileKycPaths(nestedValue, nestedPath),
+    ];
+  });
+}
+
 function createSocket() {
   const handlers = new Map();
   return {
@@ -40,7 +68,25 @@ describe('register-socket-driver-heartbeat-handler', () => {
     const enforceDailyKYCForOnline = jest.fn().mockResolvedValue({
       allowed: false,
       code: 'KYC_REQUIRED',
-      reason: 'identity gate pending',
+      reason: 'internal provider diagnostic',
+      requirement: 'IDENTITY_REVERIFICATION',
+      challenge: {
+        challengeId: 'challenge_heartbeat_1',
+        score: 62,
+        signals: ['INTERNAL_SIGNAL'],
+        metadata: { attemptState: { started: 2 } },
+        envelope: { estimatedCostUsd: 0.115 },
+        supportTicketId: 'ticket_heartbeat_internal',
+      },
+      score: 62,
+      signals: ['INTERNAL_SIGNAL'],
+      metadata: { provider: 'internal-provider' },
+      attemptState: { started: 2 },
+      financialEnvelope: { estimatedUnitCostUsd: 0.115 },
+      supportTicketId: 'ticket_heartbeat_internal',
+      reviewAvailable: true,
+      reviewCaseId: 'case_heartbeat_1',
+      evidenceId: 'evidence_heartbeat_1',
     });
 
     registerSocketDriverHeartbeatHandler({
@@ -75,6 +121,24 @@ describe('register-socket-driver-heartbeat-handler', () => {
       'driver:driver_1',
       expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
     );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        reviewAvailable: true,
+        reviewCaseId: 'case_heartbeat_1',
+        evidenceId: 'evidence_heartbeat_1',
+      })
+    );
+    const publicKycPayload = socket.emit.mock.calls.find(
+      ([eventName, payload]) => eventName === 'driverStatusError' && payload?.kycRequired === true
+    )?.[1];
+    expect(publicKycPayload).toEqual(expect.objectContaining({
+      error: 'Verificação facial necessária para ficar online.',
+      reason: 'Verificação facial necessária para ficar online.',
+      challengeId: 'challenge_heartbeat_1',
+      requirement: 'IDENTITY_REVERIFICATION',
+    }));
+    expect(findForbiddenMobileKycPaths(publicKycPayload)).toEqual([]);
   });
 
   it('keeps a backend-indexed active ride outside paid KYC gates', async () => {

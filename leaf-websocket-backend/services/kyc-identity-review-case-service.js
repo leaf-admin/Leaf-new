@@ -1,4 +1,10 @@
 const crypto = require('crypto');
+const {
+  resolveKycPersistenceScope,
+  buildScopedPersistenceEnvelope,
+  assertStoredRecordMatchesScope,
+  assertScopedResourceName
+} = require('./sandbox-persistence-context');
 
 const CASE_STATUSES = Object.freeze({
   OPEN: 'OPEN',
@@ -257,16 +263,42 @@ class KycIdentityReviewCaseService {
       );
     });
     this.now = options.now || (() => new Date());
-    this.collections = {
-      ...DEFAULT_COLLECTIONS,
-      ...(options.collections || {})
+    this.persistenceScope = resolveKycPersistenceScope(options.persistenceContext || {}, {
+      allowLegacyOperational: true,
+      allowExplicitSandboxAccess: options.allowExplicitSandboxAccess === true
+    });
+    const expectedCollections = {
+      cases: this.persistenceScope.collections.kycIdentityReviewCases,
+      enforcement: this.persistenceScope.collections.driverIdentityEnforcement,
+      retryAuthorizations: this.persistenceScope.collections.kycIdentityRetryAuthorizations,
+      audit: this.persistenceScope.collections.kycIdentityReviewAudit
     };
+    this.collections = Object.fromEntries(
+      Object.entries(expectedCollections).map(([key, expected]) => [
+        key,
+        assertScopedResourceName({
+          scopeInput: this.persistenceScope,
+          actual: options.collections?.[key] || expected,
+          expected,
+          resource: `Colecao KYC ${key}`
+        })
+      ])
+    );
     this.evidenceRetentionMs = Number.isFinite(options.evidenceRetentionMs)
       ? options.evidenceRetentionMs
       : 30 * 24 * 60 * 60 * 1000;
     this.retryAuthorizationTtlMs = Number.isFinite(options.retryAuthorizationTtlMs)
       ? options.retryAuthorizationTtlMs
       : 7 * 24 * 60 * 60 * 1000;
+  }
+
+  persistenceEnvelope(record = null) {
+    return buildScopedPersistenceEnvelope(this.persistenceScope, { record });
+  }
+
+  assertRecordScope(record) {
+    assertStoredRecordMatchesScope(record, this.persistenceScope);
+    return record;
   }
 
   firestore() {
@@ -304,7 +336,8 @@ class KycIdentityReviewCaseService {
   async getCase(caseId) {
     const safeCaseId = requiredString(caseId, 'caseId');
     const snapshot = await this.caseRef(this.firestore(), safeCaseId).get();
-    return snapshot.exists ? (snapshot.data() || null) : null;
+    if (!snapshot.exists) return null;
+    return this.assertRecordScope(snapshot.data() || {});
   }
 
   assertTicketLinked(caseRecord, ticketId) {
@@ -368,6 +401,7 @@ class KycIdentityReviewCaseService {
     details = {}
   }) {
     return {
+      ...this.persistenceEnvelope(caseRecord),
       schemaVersion: 1,
       caseId: caseRecord.caseId,
       driverId: caseRecord.driverId,
@@ -411,6 +445,7 @@ class KycIdentityReviewCaseService {
       const snapshot = await transaction.get(caseRef);
       if (snapshot.exists) {
         const current = snapshot.data() || {};
+        this.assertRecordScope(current);
         if (
           current.driverId !== safeDriverId ||
           current.evidenceBindingHash !== evidenceBindingHash
@@ -460,6 +495,7 @@ class KycIdentityReviewCaseService {
         ? Math.min(policyRetainUntilMs, evidenceExpiresAtMs)
         : policyRetainUntilMs;
       const reviewCase = {
+        ...this.persistenceEnvelope(),
         schemaVersion: 1,
         caseId,
         driverId: safeDriverId,
@@ -519,6 +555,7 @@ class KycIdentityReviewCaseService {
       throw domainError('KYC_IDENTITY_REVIEW_CASE_NOT_FOUND', 'Caso KYC nao encontrado');
     }
     const preflightCase = currentSnapshot.data() || {};
+    this.assertRecordScope(preflightCase);
     const safeTicketId = this.assertTicketLinked(preflightCase, ticketId);
     const safeEvidenceHash = this.assertEvidenceHash(preflightCase, evidenceBindingHash);
     const actor = await this.assertAuthorizedReviewer({
@@ -534,6 +571,7 @@ class KycIdentityReviewCaseService {
         throw domainError('KYC_IDENTITY_REVIEW_CASE_NOT_FOUND', 'Caso KYC nao encontrado');
       }
       const current = snapshot.data() || {};
+      this.assertRecordScope(current);
       this.assertTicketLinked(current, safeTicketId);
       this.assertEvidenceHash(current, safeEvidenceHash);
 
@@ -686,6 +724,7 @@ class KycIdentityReviewCaseService {
       throw domainError('KYC_IDENTITY_REVIEW_CASE_NOT_FOUND', 'Caso KYC nao encontrado');
     }
     const preflightCase = currentSnapshot.data() || {};
+    this.assertRecordScope(preflightCase);
     const safeTicketId = this.assertTicketLinked(preflightCase, ticketId);
     const safeEvidenceHash = this.assertEvidenceHash(preflightCase, evidenceBindingHash);
     const actor = await this.assertAuthorizedReviewer({
@@ -729,6 +768,7 @@ class KycIdentityReviewCaseService {
     const nowIso = now.toISOString();
     const preflight = await caseRef.get();
     const preflightRecord = preflight.exists ? (preflight.data() || {}) : {};
+    if (preflight.exists) this.assertRecordScope(preflightRecord);
     const enforcementRef = firestore.collection(this.collections.enforcement).doc(
       preflightRecord.driverId || 'missing-driver'
     );
@@ -744,6 +784,9 @@ class KycIdentityReviewCaseService {
         throw domainError('KYC_IDENTITY_REVIEW_CASE_NOT_FOUND', 'Caso KYC nao encontrado');
       }
       const current = caseSnapshot.data() || {};
+      this.assertRecordScope(current);
+      if (enforcementSnapshot.exists) this.assertRecordScope(enforcementSnapshot.data() || {});
+      if (retrySnapshot.exists) this.assertRecordScope(retrySnapshot.data() || {});
       this.assertTicketLinked(current, safeTicketId);
       this.assertEvidenceHash(current, safeEvidenceHash);
 
@@ -814,6 +857,7 @@ class KycIdentityReviewCaseService {
           ? previousEnforcement.corroboratingCaseIds
           : [];
         enforcement = {
+          ...this.persistenceEnvelope(current),
           schemaVersion: 1,
           driverId: current.driverId,
           status: 'PERMANENTLY_BLOCKED',
@@ -837,7 +881,30 @@ class KycIdentityReviewCaseService {
         };
         transaction.set(enforcementRef, enforcement, { merge: false });
       } else {
+        const previousEnforcement = enforcement || {};
+        enforcement = {
+          ...this.persistenceEnvelope(current),
+          schemaVersion: 1,
+          driverId: current.driverId,
+          status: 'FALSE_POSITIVE_RETRY_AUTHORIZED',
+          active: true,
+          permanent: false,
+          reasonCode: 'FALSE_POSITIVE_REVIEW',
+          revision: Number(previousEnforcement.revision || 0) + 1,
+          caseId: safeCaseId,
+          latestCaseId: safeCaseId,
+          ticketId: safeTicketId,
+          evidenceBindingHash: safeEvidenceHash,
+          retryAllowed: true,
+          retryAttempts: 1,
+          identityApproved: false,
+          decidedBy: actor,
+          decisionReason: safeReason,
+          decidedAt: previousEnforcement.decidedAt || nowIso,
+          updatedAt: nowIso
+        };
         retryAuthorization = {
+          ...this.persistenceEnvelope(current),
           schemaVersion: 1,
           authorizationId: safeCaseId,
           caseId: safeCaseId,
@@ -862,6 +929,7 @@ class KycIdentityReviewCaseService {
           },
           identityApproved: false
         };
+        transaction.set(enforcementRef, enforcement, { merge: false });
         transaction.set(retryRef, retryAuthorization, { merge: false });
       }
 
@@ -917,6 +985,7 @@ class KycIdentityReviewCaseService {
       throw domainError('KYC_IDENTITY_REVIEW_CASE_NOT_FOUND', 'Caso KYC nao encontrado');
     }
     const current = snapshot.data() || {};
+    this.assertRecordScope(current);
     const safeTicketId = this.assertTicketLinked(current, ticketId);
     const safeEvidenceHash = this.assertEvidenceHash(current, evidenceBindingHash);
     const actor = await this.assertAuthorizedReviewer({
@@ -944,6 +1013,7 @@ class KycIdentityReviewCaseService {
         throw domainError('KYC_IDENTITY_REVIEW_CASE_NOT_FOUND', 'Caso KYC nao encontrado');
       }
       const latest = latestSnapshot.data() || {};
+      this.assertRecordScope(latest);
       this.assertTicketLinked(latest, safeTicketId);
       this.assertEvidenceHash(latest, safeEvidenceHash);
       const revision = Number(latest.auditRevision || 0) + 1;
@@ -1003,6 +1073,7 @@ class KycIdentityReviewCaseService {
       throw domainError('KYC_IDENTITY_REVIEW_CASE_NOT_FOUND', 'Caso KYC nao encontrado');
     }
     const preflight = snapshot.data() || {};
+    this.assertRecordScope(preflight);
     const safeTicketId = this.assertTicketLinked(preflight, ticketId);
     const safeEvidenceHash = this.assertEvidenceHash(preflight, evidenceBindingHash);
     const actor = await this.assertAuthorizedReviewer({
@@ -1018,6 +1089,7 @@ class KycIdentityReviewCaseService {
         throw domainError('KYC_IDENTITY_REVIEW_CASE_NOT_FOUND', 'Caso KYC nao encontrado');
       }
       const current = latestSnapshot.data() || {};
+      this.assertRecordScope(current);
       this.assertTicketLinked(current, safeTicketId);
       this.assertEvidenceHash(current, safeEvidenceHash);
       if (current.status === CASE_STATUSES.CLOSED) {
@@ -1061,8 +1133,22 @@ class KycIdentityReviewCaseService {
   }
 }
 
+function createScopedKycIdentityReviewCaseService(persistenceContext, options = {}) {
+  if (!persistenceContext || typeof persistenceContext !== 'object') {
+    throw domainError(
+      'KYC_IDENTITY_REVIEW_PERSISTENCE_CONTEXT_REQUIRED',
+      'Contexto de persistencia obrigatorio para factory de revisao KYC'
+    );
+  }
+  return new KycIdentityReviewCaseService({
+    ...options,
+    persistenceContext
+  });
+}
+
 module.exports = {
   KycIdentityReviewCaseService,
+  createScopedKycIdentityReviewCaseService,
   CASE_STATUSES,
   REVIEW_DECISIONS,
   DEFAULT_COLLECTIONS,

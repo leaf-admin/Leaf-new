@@ -1,6 +1,12 @@
 const crypto = require('crypto');
 const firebaseConfig = require('../firebase-config');
 const auditService = require('./audit-service');
+const {
+  resolveKycPersistenceScope,
+  buildScopedPersistenceEnvelope,
+  assertStoredRecordMatchesScope,
+  assertScopedResourceName
+} = require('./sandbox-persistence-context');
 
 const COLLECTION_NAME = 'kyc_failed_biometric_evidence';
 const STORAGE_PREFIX = 'restricted/kyc-failed-biometric-evidence/v1';
@@ -107,8 +113,25 @@ class KycFailedBiometricEvidenceService {
     this.auditService = options.auditService || auditService;
     this.now = options.now || (() => new Date());
     this.idGenerator = options.idGenerator || defaultEvidenceId;
-    this.collectionName = options.collectionName || COLLECTION_NAME;
-    this.storagePrefix = options.storagePrefix || STORAGE_PREFIX;
+    this.persistenceScope = resolveKycPersistenceScope(options.persistenceContext || {}, {
+      allowLegacyOperational: true,
+      allowExplicitSandboxAccess: options.allowExplicitSandboxAccess === true
+    });
+    const expectedCollectionName = this.persistenceScope.collections.kycFailedBiometricEvidence;
+    const expectedStoragePrefix = this.persistenceScope.kycResources
+      .failedBiometricEvidenceStoragePrefix;
+    this.collectionName = assertScopedResourceName({
+      scopeInput: this.persistenceScope,
+      actual: options.collectionName || expectedCollectionName,
+      expected: expectedCollectionName,
+      resource: 'Colecao de evidencias biometricas'
+    });
+    this.storagePrefix = assertScopedResourceName({
+      scopeInput: this.persistenceScope,
+      actual: options.storagePrefix || expectedStoragePrefix,
+      expected: expectedStoragePrefix,
+      resource: 'Prefixo Storage de evidencias biometricas'
+    });
     this.retentionDays = Number.isInteger(options.retentionDays)
       ? options.retentionDays
       : RETENTION_DAYS;
@@ -117,6 +140,15 @@ class KycFailedBiometricEvidenceService {
       || this.env.FIREBASE_STORAGE_BUCKET
       || 'leaf-reactnative.firebasestorage.app'
     ).trim();
+  }
+
+  persistenceEnvelope(record = null) {
+    return buildScopedPersistenceEnvelope(this.persistenceScope, { record });
+  }
+
+  assertRecordScope(record) {
+    assertStoredRecordMatchesScope(record, this.persistenceScope);
+    return record;
   }
 
   getFirestore() {
@@ -293,7 +325,17 @@ class KycFailedBiometricEvidenceService {
         'KYC_FAILED_EVIDENCE_AUDIT_UNAVAILABLE'
       );
     }
-    const result = await this.auditService.logEvent(eventData);
+    const { scopeRecord = null, ...auditEvent } = eventData || {};
+    const envelope = this.persistenceEnvelope(scopeRecord);
+    const result = await this.auditService.logEvent({
+      ...auditEvent,
+      ...envelope,
+      details: {
+        ...(auditEvent.details || {}),
+        financialNamespace: envelope.financialNamespace,
+        financialContextId: envelope.financialContextId
+      }
+    });
     if (!result?.success) {
       throw createError(
         'Nao foi possivel auditar a operacao de evidencia biometrica',
@@ -305,6 +347,7 @@ class KycFailedBiometricEvidenceService {
 
   async captureRejectedComparisonEvidence(input = {}) {
     const normalized = this.validateCaptureInput(input);
+    const envelope = this.persistenceEnvelope();
     const evidenceId = String(this.idGenerator()).trim();
     if (!EVIDENCE_ID_PATTERN.test(evidenceId)) {
       throw createError(
@@ -337,7 +380,9 @@ class KycFailedBiometricEvidenceService {
             classification: 'restricted_kyc_failed_biometric_evidence',
             evidenceId,
             sha256: normalized.imageSha256,
-            expiresAt: expiresAt.toISOString()
+            expiresAt: expiresAt.toISOString(),
+            financialNamespace: envelope.financialNamespace,
+            financialContextId: envelope.financialContextId
           }
         }
       });
@@ -352,6 +397,7 @@ class KycFailedBiometricEvidenceService {
       }
 
       const metadata = {
+        ...envelope,
         schemaVersion: SCHEMA_VERSION,
         evidenceId,
         driverId: normalized.driverId,
@@ -390,6 +436,7 @@ class KycFailedBiometricEvidenceService {
       metadataPersisted = true;
 
       await this.recordAudit({
+        scopeRecord: metadata,
         userId: normalized.driverId,
         action: 'KYC_FAILED_BIOMETRIC_EVIDENCE_CAPTURED',
         resource: 'kyc_failed_biometric_evidence',
@@ -435,6 +482,7 @@ class KycFailedBiometricEvidenceService {
       throw createError('Evidencia biometrica nao encontrada', 'KYC_FAILED_EVIDENCE_NOT_FOUND');
     }
     const metadata = snapshot.data() || null;
+    this.assertRecordScope(metadata);
     if (!includeExpired) this.assertActive(metadata);
     return metadata;
   }
@@ -455,6 +503,7 @@ class KycFailedBiometricEvidenceService {
         throw createError('Evidencia biometrica nao encontrada', 'KYC_FAILED_EVIDENCE_NOT_FOUND');
       }
       const current = snapshot.data() || {};
+      this.assertRecordScope(current);
       this.assertActive(current);
       const result = updater(current);
       if (result?.unchanged === true) return { ...current, idempotentReplay: true };
@@ -519,6 +568,7 @@ class KycFailedBiometricEvidenceService {
     });
 
     await this.recordAudit({
+      scopeRecord: updated,
       userId: safeActorId,
       action: 'KYC_FAILED_BIOMETRIC_EVIDENCE_TICKET_LINKED',
       resource: 'kyc_failed_biometric_evidence',
@@ -608,6 +658,7 @@ class KycFailedBiometricEvidenceService {
     }
 
     await this.recordAudit({
+      scopeRecord: metadata,
       userId: safeActorId,
       action: 'KYC_FAILED_BIOMETRIC_EVIDENCE_READ_ACCESS_GRANTED',
       resource: 'kyc_failed_biometric_evidence',
@@ -706,6 +757,7 @@ class KycFailedBiometricEvidenceService {
     });
 
     await this.recordAudit({
+      scopeRecord: updated,
       userId: safeActorId,
       action: 'KYC_FAILED_BIOMETRIC_EVIDENCE_REVIEW_RECORDED',
       resource: 'kyc_failed_biometric_evidence',
@@ -751,6 +803,7 @@ class KycFailedBiometricEvidenceService {
     }
 
     await this.recordAudit({
+      scopeRecord: metadata,
       userId: safeActorId,
       action: 'KYC_FAILED_BIOMETRIC_EVIDENCE_DELETION_AUTHORIZED',
       resource: 'kyc_failed_biometric_evidence',
@@ -790,8 +843,23 @@ class KycFailedBiometricEvidenceService {
 
 const singleton = new KycFailedBiometricEvidenceService();
 
+function createScopedKycFailedBiometricEvidenceService(persistenceContext, options = {}) {
+  if (!persistenceContext || typeof persistenceContext !== 'object') {
+    throw createError(
+      'Contexto de persistencia obrigatorio para factory KYC',
+      'KYC_FAILED_EVIDENCE_PERSISTENCE_CONTEXT_REQUIRED'
+    );
+  }
+  return new KycFailedBiometricEvidenceService({
+    ...options,
+    persistenceContext
+  });
+}
+
 module.exports = singleton;
 module.exports.KycFailedBiometricEvidenceService = KycFailedBiometricEvidenceService;
+module.exports.createScopedKycFailedBiometricEvidenceService =
+  createScopedKycFailedBiometricEvidenceService;
 module.exports.REVIEW_OUTCOMES = REVIEW_OUTCOMES;
 module.exports.constants = Object.freeze({
   COLLECTION_NAME,

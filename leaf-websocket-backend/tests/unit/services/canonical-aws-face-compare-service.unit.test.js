@@ -41,7 +41,13 @@ function buildRequest(overrides = {}) {
       status: 'SUCCEEDED',
       livenessPassed: true,
       confidence: 99.4,
-      threshold: 80
+      threshold: 80,
+      referenceImageBoundingBox: {
+        width: 0.42,
+        height: 0.58,
+        left: 0.29,
+        top: 0.18
+      }
     },
     ...overrides
   };
@@ -119,7 +125,9 @@ describe('canonical-aws-face-compare-service', () => {
       sessionIdHash: sha256(`${request.driverId}:${request.liveness.sessionId}`),
       status: 'SUCCEEDED',
       livenessPassed: true,
-      referenceImageSha256: sha256(request.livenessReferenceImageBuffer)
+      referenceImageSha256: sha256(request.livenessReferenceImageBuffer),
+      providerBoundsPresent: true,
+      referenceImageFaceBoundsSha256: expect.stringMatching(/^[a-f0-9]{64}$/)
     }));
     expect(result.liveness).not.toHaveProperty('sessionId');
   });
@@ -164,6 +172,18 @@ describe('canonical-aws-face-compare-service', () => {
       isMatch: false,
       needsReview: false
     }));
+  });
+
+  test('blocks automatic CompareFaces SDK retries in production biometrics', async () => {
+    const service = createService(jest.fn(), {
+      sdkMaxAttempts: 2,
+      env: {
+        KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true'
+      }
+    });
+
+    await expect(service.verifyApprovedCnhAgainstLiveness(buildRequest()))
+      .rejects.toMatchObject({ code: 'AWS_COMPARE_FACES_SDK_RETRY_UNSAFE' });
   });
 
   test('rejects when AWS returns no match at or above the provider query threshold', async () => {
@@ -311,6 +331,63 @@ describe('canonical-aws-face-compare-service', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  test('dispatches CompareFaces without provider bounds when the canonical liveness binding is valid', async () => {
+    const send = jest.fn().mockResolvedValue({
+      FaceMatches: [{ Similarity: 98.2 }],
+      UnmatchedFaces: []
+    });
+    const service = createService(send);
+    const request = buildRequest();
+
+    const result = await service.verifyApprovedCnhAgainstLiveness({
+      ...request,
+      liveness: {
+        ...request.liveness,
+        referenceImageBoundingBox: null
+      }
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].input.TargetImage.Bytes)
+      .toBe(request.livenessReferenceImageBuffer);
+    expect(result).toEqual(expect.objectContaining({
+      success: true,
+      isMatch: true,
+      decision: 'approve'
+    }));
+    expect(result.liveness).toEqual(expect.objectContaining({
+      providerBoundsPresent: false,
+      referenceImageFaceBoundsSha256: null,
+      referenceImageSha256: sha256(request.livenessReferenceImageBuffer)
+    }));
+  });
+
+  test.each([
+    [
+      'empty reference bytes',
+      { livenessReferenceImageBuffer: Buffer.alloc(0) },
+      'AWS_COMPARE_FACES_LIVENESS_IMAGE_REQUIRED'
+    ],
+    [
+      'non-success liveness status',
+      {
+        liveness: {
+          ...buildRequest().liveness,
+          status: 'FAILED',
+          referenceImageBoundingBox: null
+        }
+      },
+      'AWS_COMPARE_FACES_LIVENESS_BINDING_INVALID'
+    ]
+  ])('does not dispatch CompareFaces with %s', async (_case, override, expectedCode) => {
+    const send = jest.fn();
+    const service = createService(send);
+
+    await expect(service.verifyApprovedCnhAgainstLiveness(buildRequest(override)))
+      .rejects.toMatchObject({ code: expectedCode });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   test('fails closed on invalid provider thresholds before AWS', async () => {
     const send = jest.fn();
     const service = createService(send, {
@@ -349,6 +426,76 @@ describe('canonical-aws-face-compare-service', () => {
     const serializedLog = JSON.stringify(logError.mock.calls);
     expect(serializedLog).not.toContain('current-cnh.pdf');
     expect(serializedLog).not.toContain('aws-session-secret-1');
+  });
+
+  test('persists InvalidParameterException as a guarded provider-input failure', async () => {
+    const providerError = new Error('Request has invalid parameters');
+    providerError.name = 'InvalidParameterException';
+    const send = jest.fn().mockRejectedValue(providerError);
+    const costGuard = {
+      isEnabled: jest.fn(() => true),
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      claimCompareDispatch: jest.fn(async () => ({ claimed: true, replay: false })),
+      completeCompare: jest.fn(),
+      markCompareProviderInputFailed: jest.fn(async () => ({
+        compareStatus: 'failed_provider_input'
+      }))
+    };
+    const service = createService(send, { costGuard });
+    const request = buildRequest();
+    request.liveness.costGuardOperationId = 'cost-operation-invalid-parameter';
+
+    await expect(service.verifyApprovedCnhAgainstLiveness(request))
+      .rejects.toMatchObject({
+        code: 'AWS_COMPARE_FACES_CNH_FACE_NOT_DETECTED',
+        providerCode: 'InvalidParameterException',
+        retryable: false
+      });
+
+    expect(costGuard.markCompareProviderInputFailed).toHaveBeenCalledWith(
+      'cost-operation-invalid-parameter',
+      expect.any(String),
+      {
+        code: 'AWS_COMPARE_FACES_CNH_FACE_NOT_DETECTED',
+        providerCode: 'InvalidParameterException'
+      }
+    );
+    expect(costGuard.completeCompare).not.toHaveBeenCalled();
+  });
+
+  test('classifies InvalidParameter without provider bounds as a recoverable liveness artifact failure', async () => {
+    const providerError = new Error('Target image has no detectable face');
+    providerError.name = 'InvalidParameterException';
+    const send = jest.fn().mockRejectedValue(providerError);
+    const costGuard = {
+      isEnabled: jest.fn(() => true),
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      claimCompareDispatch: jest.fn(async () => ({ claimed: true, replay: false })),
+      completeCompare: jest.fn(),
+      markCompareProviderInputFailed: jest.fn(async () => ({
+        compareStatus: 'failed_provider_input'
+      }))
+    };
+    const service = createService(send, { costGuard });
+    const request = buildRequest();
+    request.liveness.costGuardOperationId = 'cost-operation-liveness-no-face';
+    request.liveness.referenceImageBoundingBox = null;
+
+    await expect(service.verifyApprovedCnhAgainstLiveness(request))
+      .rejects.toMatchObject({
+        code: 'AWS_COMPARE_FACES_LIVENESS_FACE_NOT_DETECTED',
+        providerCode: 'InvalidParameterException',
+        retryable: true
+      });
+    expect(costGuard.markCompareProviderInputFailed).toHaveBeenCalledWith(
+      'cost-operation-liveness-no-face',
+      expect.any(String),
+      {
+        code: 'AWS_COMPARE_FACES_LIVENESS_FACE_NOT_DETECTED',
+        providerCode: 'InvalidParameterException'
+      }
+    );
+    expect(costGuard.completeCompare).not.toHaveBeenCalled();
   });
 
   test('logs only normalized comparison metadata and never raw bindings', async () => {

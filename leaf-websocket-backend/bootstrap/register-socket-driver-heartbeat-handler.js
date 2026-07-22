@@ -11,6 +11,9 @@ const {
     renewActiveTripForDriver,
     resolveActiveTripForDriver
 } = require('../utils/active-trip-index');
+const {
+    buildPublicDriverKycSocketPayload
+} = require('../utils/driver-kyc-socket-projection');
 
 const parseTimestampMs = (rawValue) => {
     if (!rawValue) return 0;
@@ -171,15 +174,10 @@ function registerSocketDriverHeartbeatHandler({
                             dispatchEligibilityCode: dailyKYC.code || 'KYC_REQUIRED',
                             dispatchEligibilityCheckedAt: new Date().toISOString()
                         });
-                        socket.emit('driverStatusError', {
-                            error: 'Verificação facial diária necessária para ficar online.',
-                            reason: dailyKYC.reason,
-                            code: dailyKYC.code,
-                            kycRequired: true,
-                            requirement: dailyKYC.requirement || 'LIVENESS_REQUIRED',
-                            challengeId: dailyKYC.challenge?.challengeId || null,
-                            challenge: dailyKYC.challenge || null
-                        });
+                        socket.emit('driverStatusError', buildPublicDriverKycSocketPayload(
+                            dailyKYC,
+                            { message: 'Verificação facial necessária para ficar online.' }
+                        ));
                         return;
                     }
                     if (dailyKYC.continuityOnly === true || dailyKYC.deferred === true) {
@@ -194,7 +192,7 @@ function registerSocketDriverHeartbeatHandler({
                     });
                     socket.emit('driverStatusError', {
                         error: 'Não foi possível validar KYC agora. Tente novamente.',
-                        reason: kycError.message,
+                        reason: 'Não foi possível validar KYC agora. Tente novamente.',
                         code: 'kycCheckFailed',
                         kycRequired: true
                     });
@@ -234,15 +232,10 @@ function registerSocketDriverHeartbeatHandler({
                             : 'false',
                         updatedAt: checkedAt
                     });
-                    socket.emit('driverStatusError', {
-                        error: postTripKyc?.reason || 'Validacao facial necessaria para voltar a receber corridas.',
-                        reason: postTripKyc?.reason,
-                        code: postTripKyc?.code || 'KYC_REQUIRED',
-                        kycRequired: true,
-                        requirement: postTripKyc?.requirement || 'LIVENESS_REQUIRED',
-                        challengeId: postTripKyc?.challenge?.challengeId || null,
-                        challenge: postTripKyc?.challenge || null
-                    });
+                    socket.emit('driverStatusError', buildPublicDriverKycSocketPayload(
+                        postTripKyc,
+                        { message: 'Validação facial necessária para voltar a receber corridas.' }
+                    ));
                     return;
                 }
                 if (postTripKyc.continuityOnly === true || postTripKyc.deferred === true) {

@@ -22,7 +22,14 @@ const PERSISTENCE_COLLECTIONS = Object.freeze({
     incidents: 'ops_incidents',
     tripLocationChunks: 'trip_location_chunks',
     tripLocationSummaries: 'trip_location_summaries',
-    auditLogs: 'audit_logs'
+    auditLogs: 'audit_logs',
+    kycFailedBiometricEvidence: 'kyc_failed_biometric_evidence',
+    kycIdentityReviewCases: 'kyc_identity_review_cases',
+    driverIdentityEnforcement: 'driver_identity_enforcement',
+    kycIdentityRetryAuthorizations: 'kyc_identity_retry_authorizations',
+    kycIdentityReviewAudit: 'kyc_identity_review_audit',
+    driverIdentityTrust: 'driver_identity_trust',
+    kycStepUpChallenges: 'kyc_stepup_challenges'
   }),
   sandbox: Object.freeze({
     chatMessages: 'sandbox_chat_messages',
@@ -37,7 +44,41 @@ const PERSISTENCE_COLLECTIONS = Object.freeze({
     incidents: 'sandbox_ops_incidents',
     tripLocationChunks: 'sandbox_trip_location_chunks',
     tripLocationSummaries: 'sandbox_trip_location_summaries',
-    auditLogs: 'sandbox_audit_logs'
+    auditLogs: 'sandbox_audit_logs',
+    kycFailedBiometricEvidence: 'sandbox_kyc_failed_biometric_evidence',
+    kycIdentityReviewCases: 'sandbox_kyc_identity_review_cases',
+    driverIdentityEnforcement: 'sandbox_driver_identity_enforcement',
+    kycIdentityRetryAuthorizations: 'sandbox_kyc_identity_retry_authorizations',
+    kycIdentityReviewAudit: 'sandbox_kyc_identity_review_audit',
+    driverIdentityTrust: 'sandbox_driver_identity_trust',
+    kycStepUpChallenges: 'sandbox_kyc_stepup_challenges'
+  })
+});
+
+const KYC_PERSISTENCE_RESOURCES = Object.freeze({
+  operational: Object.freeze({
+    failedBiometricEvidenceStoragePrefix: 'restricted/kyc-failed-biometric-evidence/v1',
+    identityTrustEvidenceCollection: 'evidence',
+    identityTrustStateCachePrefix: 'kyc:identity-trust:state:',
+    identityTrustRandomAuditPrefix: 'kyc:identity-trust:random-audit:',
+    identityTrustCanonicalSessionClaimPrefix: 'kyc:identity-trust:session-claim:',
+    identityTrustCompatibilityVerificationPrefix: 'kyc_verification:',
+    identityTrustDriverHashPrefix: 'driver:',
+    identityTrustStepUpChallengePrefix: 'kyc:stepup:challenge:',
+    identityTrustStepUpActivePrefix: 'kyc:stepup:active:',
+    identityTrustStepUpCreateLockPrefix: 'kyc:stepup:create-lock:'
+  }),
+  sandbox: Object.freeze({
+    failedBiometricEvidenceStoragePrefix: 'restricted/sandbox/kyc-failed-biometric-evidence/v1',
+    identityTrustEvidenceCollection: 'evidence',
+    identityTrustStateCachePrefix: 'sandbox:kyc:identity-trust:state:',
+    identityTrustRandomAuditPrefix: 'sandbox:kyc:identity-trust:random-audit:',
+    identityTrustCanonicalSessionClaimPrefix: 'sandbox:kyc:identity-trust:session-claim:',
+    identityTrustCompatibilityVerificationPrefix: 'sandbox:kyc_verification:',
+    identityTrustDriverHashPrefix: 'sandbox:driver:',
+    identityTrustStepUpChallengePrefix: 'sandbox:kyc:stepup:challenge:',
+    identityTrustStepUpActivePrefix: 'sandbox:kyc:stepup:active:',
+    identityTrustStepUpCreateLockPrefix: 'sandbox:kyc:stepup:create-lock:'
   })
 });
 
@@ -133,14 +174,16 @@ function assertEnvelopeMatchesContext(input = {}, financialContext) {
 }
 
 function buildScope(financialContext, { source = 'financial_context', explicitSandboxAccess = false } = {}) {
+  const namespace = financialContext?.namespace || 'sandbox';
   return Object.freeze({
-    namespace: financialContext?.namespace || 'sandbox',
+    namespace,
     classification: financialContext?.classification || 'sandbox_explicit_access',
     financialContext: financialContext || null,
     financialContextId: financialContext?.contextId || null,
     explicitSandboxAccess,
     source,
-    collections: PERSISTENCE_COLLECTIONS[financialContext?.namespace || 'sandbox']
+    collections: PERSISTENCE_COLLECTIONS[namespace],
+    kycResources: KYC_PERSISTENCE_RESOURCES[namespace]
   });
 }
 
@@ -316,8 +359,60 @@ function assertStoredRecordMatchesScope(record = {}, scopeInput = {}) {
   return recordContextResult.ok ? recordContextResult.context : null;
 }
 
+function resolveKycPersistenceScope(input = {}, options = {}) {
+  return resolvePersistenceScope(input, {
+    allowLegacyOperational: options.allowLegacyOperational !== false,
+    allowExplicitSandboxAccess: options.allowExplicitSandboxAccess === true
+  });
+}
+
+function buildScopedPersistenceEnvelope(scopeInput = {}, { record = null } = {}) {
+  const scope = resolveKycPersistenceScope(scopeInput, {
+    allowLegacyOperational: true,
+    allowExplicitSandboxAccess: true
+  });
+  let financialContext = scope.financialContext;
+
+  if (record) {
+    const recordFinancialContext = assertStoredRecordMatchesScope(record, scope);
+    if (!financialContext) financialContext = recordFinancialContext;
+  }
+  if (!financialContext) {
+    throw new SandboxPersistenceContextError(
+      'SANDBOX_PERSISTENCE_CONTEXT_REQUIRED',
+      'Gravacao sandbox exige contexto financeiro selado'
+    );
+  }
+
+  return Object.freeze({
+    financialContext,
+    financialNamespace: financialContext.namespace,
+    financialContextId: financialContext.contextId,
+    providerEnvironment: financialContext.providerEnvironment,
+    paymentProfileId: financialContext.paymentProfileId || null,
+    testUserSandbox: financialContext.testUserSandbox === true
+  });
+}
+
+function assertScopedResourceName({ scopeInput = {}, actual, expected, resource }) {
+  const scope = resolveKycPersistenceScope(scopeInput, {
+    allowLegacyOperational: true,
+    allowExplicitSandboxAccess: true
+  });
+  const normalizedActual = normalizeText(actual);
+  const normalizedExpected = normalizeText(expected);
+  if (!normalizedActual || normalizedActual !== normalizedExpected) {
+    throw new SandboxPersistenceContextError(
+      'KYC_PERSISTENCE_RESOURCE_MISMATCH',
+      `${resource || 'Recurso KYC'} diverge do namespace ${scope.namespace}`
+    );
+  }
+  return normalizedActual;
+}
+
 module.exports = {
   PERSISTENCE_COLLECTIONS,
+  KYC_PERSISTENCE_RESOURCES,
   SandboxPersistenceContextError,
   resolvePersistenceScope,
   resolveRidePersistenceScope,
@@ -325,5 +420,8 @@ module.exports = {
   assertUserSharesPersistenceScope,
   assertRideParticipantsSharePersistenceScope,
   createExplicitSandboxAccessScope,
-  assertStoredRecordMatchesScope
+  assertStoredRecordMatchesScope,
+  resolveKycPersistenceScope,
+  buildScopedPersistenceEnvelope,
+  assertScopedResourceName
 };

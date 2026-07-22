@@ -46,6 +46,7 @@ describe('PaymentRuntimeProfileService', () => {
 
     expect(profile.profileId).toBe('env-default');
     expect(profile.environment).toBe('production');
+    expect(profile.classificationUnavailable).toBe(true);
     expect(profile.wooviConfig.apiToken).toBe('production-token');
   });
 
@@ -62,6 +63,7 @@ describe('PaymentRuntimeProfileService', () => {
 
     expect(profile.profileId).toBe('env-sandbox-allowlist');
     expect(profile.environment).toBe('sandbox');
+    expect(profile.classificationUnavailable).toBe(false);
     expect(profile.wooviConfig.apiToken).toBe('sandbox-token');
     expect(profile.wooviConfig.baseUrl).toContain('sandbox');
   });

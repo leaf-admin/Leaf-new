@@ -128,7 +128,7 @@ const QueueWorker = require('./services/queue-worker');
 // ==================== IMPORTAÇÕES FASE 10: OTIMIZAÇÕES E MONITORAMENTO ====================
 const metricsCollector = require('./services/metrics-collector');
 const queueMonitoringRoutes = require('./routes/queue-monitoring');
-const driverIdentityTrustService = require('./services/driver-identity-trust-service');
+const { resolveKycRuntimeForUser } = require('./services/kyc-runtime-scope-service');
 const kycPolicyService = require('./services/kyc-policy-service');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
 // ============================================================================================
@@ -577,26 +577,65 @@ async function enforceSubscriptionForOnline(driverId) {
 }
 
 async function enforceDailyKYCForOnline(driverId) {
-    // A fonte duravel para obrigacoes adiadas e a RTDB. Esta leitura nao chama
-    // nenhum provedor pago e garante que a revalidacao so volte apos a corrida.
-    const deferredResult = await kycPolicyService
-        .applyDeferredIdentityReverificationIfSafe(driverId, {
-            source: 'online_gate_retry'
-        });
-    if (
-        deferredResult?.deferred === true
-        && !deferredResult?.activeTripId
-        && deferredResult?.code
-    ) {
+    const kycRuntime = await resolveKycRuntimeForUser({
+        userId: driverId,
+        actor: { uid: driverId, id: driverId, role: 'driver' }
+    });
+
+    // RTDB is a legacy operational source. It must never project an
+    // operational review hold into an authoritatively sandbox-scoped driver.
+    if (kycRuntime.namespace === 'operational') {
+        const deferredResult = await kycPolicyService
+            .applyDeferredIdentityReverificationIfSafe(driverId, {
+                source: 'online_gate_retry'
+            });
+        if (
+            deferredResult?.deferred === true
+            && !deferredResult?.activeTripId
+            && deferredResult?.code
+        ) {
+            return {
+                allowed: false,
+                retryRequired: true,
+                reason: 'A validacao de identidade pendente sera retomada antes de ficar online.',
+                code: deferredResult.code,
+                requirement: 'IDENTITY_REVERIFICATION'
+            };
+        }
+    }
+
+    const identityReviewGate = await kycRuntime.workflow
+        .assertKycOperationAllowed(driverId);
+    if (identityReviewGate?.identityReviewHold === true) {
+        const reviewCaseId = typeof identityReviewGate.holdCaseId === 'string'
+            && identityReviewGate.holdCaseId.trim()
+            ? identityReviewGate.holdCaseId.trim()
+            : null;
+        const evidenceId = typeof identityReviewGate.holdEvidenceId === 'string'
+            && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(identityReviewGate.holdEvidenceId.trim())
+            ? identityReviewGate.holdEvidenceId.trim()
+            : null;
+        const hasTraceableReview = Boolean(
+            (reviewCaseId || evidenceId) && identityReviewGate.reviewAvailable !== false
+        );
         return {
             allowed: false,
-            retryRequired: true,
-            reason: 'A validacao de identidade pendente sera retomada antes de ficar online.',
-            code: deferredResult.code,
-            requirement: 'IDENTITY_REVERIFICATION'
+            retryRequired: false,
+            reason: reviewCaseId
+                ? 'Sua identidade esta sendo analisada. Avisaremos quando houver uma atualizacao.'
+                : hasTraceableReview
+                    ? 'Nao foi possivel confirmar sua identidade. Voce pode solicitar uma analise.'
+                    : 'Precisamos liberar uma nova tentativa. Fale com o suporte.',
+            code: hasTraceableReview
+                ? 'KYC_IDENTITY_REVIEW_HOLD'
+                : 'KYC_IDENTITY_RECOVERY_REQUIRED',
+            requirement: 'IDENTITY_REVERIFICATION',
+            reviewAvailable: hasTraceableReview,
+            reviewCaseId,
+            evidenceId
         };
     }
-    return driverIdentityTrustService.evaluateOnlineGate(driverId);
+    return kycRuntime.trust.evaluateOnlineGate(driverId);
 }
 
 async function findAvailableDriversForPickup(pickupLocation, options = {}) {

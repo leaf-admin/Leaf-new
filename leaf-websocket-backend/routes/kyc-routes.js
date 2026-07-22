@@ -5,9 +5,11 @@ const IntegratedKYCService = require('../services/IntegratedKYCService');
 const AwsFaceLivenessService = require('../services/aws-face-liveness-service');
 const CanonicalAwsFaceCompareService = require('../services/canonical-aws-face-compare-service');
 const kycPolicyService = require('../services/kyc-policy-service');
-const driverIdentityTrustService = require('../services/driver-identity-trust-service');
-const failedBiometricEvidenceService = require('../services/kyc-failed-biometric-evidence-service');
-const kycIdentityReviewWorkflowService = require('../services/kyc-identity-review-workflow-service');
+const { resolveKycRuntimeForUser } = require('../services/kyc-runtime-scope-service');
+const {
+  assertStoredRecordMatchesScope,
+  buildScopedPersistenceEnvelope
+} = require('../services/sandbox-persistence-context');
 const canonicalDriverDocumentApprovalService = require('../services/canonical-driver-document-approval-service');
 const { evaluateProductionReadiness } = require('../services/kyc-biometric-production-policy');
 const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
@@ -36,6 +38,156 @@ function withoutSensitiveBiometricPayload(payload = {}) {
   return safePayload;
 }
 
+function buildPublicCanonicalCompareResult(payload = {}, overrides = {}) {
+  const source = {
+    ...(payload && typeof payload === 'object' ? payload : {}),
+    ...(overrides && typeof overrides === 'object' ? overrides : {})
+  };
+  const result = {
+    success: source.success === true
+  };
+  const booleanFields = [
+    'isMatch',
+    'needsReview',
+    'retryable',
+    'idempotentReconciliation'
+  ];
+  const resourceFields = [
+    'code',
+    'error',
+    'requirement',
+    'challengeId'
+  ];
+  const reviewCaseId = typeof source.reviewCaseId === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(source.reviewCaseId.trim())
+    ? source.reviewCaseId.trim()
+    : null;
+  const evidenceId = typeof source.evidenceId === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(source.evidenceId.trim())
+    ? source.evidenceId.trim()
+    : null;
+  const hasPublicReview = source.reviewAvailable === true && Boolean(reviewCaseId || evidenceId);
+
+  for (const field of booleanFields) {
+    if (typeof source[field] === 'boolean') {
+      result[field] = source[field];
+    }
+  }
+  for (const field of resourceFields) {
+    if (source[field] === null || typeof source[field] === 'string') {
+      result[field] = source[field];
+    }
+  }
+  if (typeof source.reviewAvailable === 'boolean') {
+    result.reviewAvailable = hasPublicReview;
+  }
+  if (hasPublicReview && reviewCaseId) {
+    result.reviewCaseId = reviewCaseId;
+  }
+  if (hasPublicReview && evidenceId) {
+    result.evidenceId = evidenceId;
+  }
+
+  return result;
+}
+
+function resolvePublicAwsLivenessCredentialsFailure(code) {
+  if (code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP') {
+    return {
+      error: 'A validação deve ser feita fora de uma corrida.',
+      retryable: true
+    };
+  }
+  if (code === 'AWS_LIVENESS_SESSION_ABANDONED') {
+    return {
+      error: 'Esta sessão foi encerrada. Inicie uma nova validação.',
+      retryable: false
+    };
+  }
+  if (['AWS_LIVENESS_SESSION_METADATA_REQUIRED', 'AWS_LIVENESS_SESSION_EXPIRED'].includes(code)) {
+    return {
+      error: 'Esta sessão expirou. Inicie uma nova validação.',
+      retryable: false
+    };
+  }
+  if ([
+    'AWS_LIVENESS_CREDENTIALS_SESSION_BINDING_REQUIRED',
+    'AWS_LIVENESS_SESSION_USER_MISMATCH',
+    'AccessDenied',
+    'AccessDeniedException',
+    'ValidationError',
+    'ValidationException'
+  ].includes(code)) {
+    return {
+      error: 'Não foi possível usar esta sessão de validação.',
+      retryable: false
+    };
+  }
+  return {
+    error: 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.',
+    retryable: true
+  };
+}
+
+function resolvePublicCanonicalConflictFailure(code, { stateUnavailable = false } = {}) {
+  if (code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP') {
+    return {
+      error: 'A validação deve ser feita fora de uma corrida.',
+      retryable: true
+    };
+  }
+  if (code === 'KYC_VERIFICATION_LEASE_LOST') {
+    return {
+      error: 'Não foi possível confirmar esta validação. Tente novamente em alguns instantes.',
+      retryable: true
+    };
+  }
+  if (code === 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE') {
+    return {
+      error: 'Esta solicitação foi substituída por uma validação mais recente.',
+      retryable: false
+    };
+  }
+  if (code === 'AWS_LIVENESS_SESSION_ABANDONED') {
+    return {
+      error: 'Esta sessão foi encerrada. Inicie uma nova validação.',
+      retryable: false
+    };
+  }
+  if (code === 'KYC_IDENTITY_REVIEW_HOLD') {
+    return {
+      error: 'Sua identidade está sendo analisada. Avisaremos quando houver uma atualização.',
+      retryable: false
+    };
+  }
+  if (code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK') {
+    return {
+      error: 'Esta conta não pode usar o modo motorista.',
+      retryable: false
+    };
+  }
+  if ([
+    'KYC_CANONICAL_EVIDENCE_HASH_CONFLICT',
+    'KYC_CANONICAL_CHALLENGE_BINDING_INVALID',
+    'KYC_CANONICAL_CHALLENGE_NOT_FOUND'
+  ].includes(code)) {
+    return {
+      error: 'Não foi possível confirmar esta validação com segurança.',
+      retryable: false
+    };
+  }
+  if (stateUnavailable) {
+    return {
+      error: 'A validação está temporariamente indisponível. Tente novamente em alguns minutos.',
+      retryable: true
+    };
+  }
+  return {
+    error: 'Não foi possível confirmar esta validação agora.',
+    retryable: false
+  };
+}
+
 function normalizeLivenessAttemptScope(value) {
   const normalized = String(value || 'general')
     .trim()
@@ -46,9 +198,39 @@ function normalizeLivenessAttemptScope(value) {
   return normalized || 'general';
 }
 
+function sendIdentityReviewGateResponse(res, identityReviewGate = {}) {
+  const reviewCaseId = typeof identityReviewGate.holdCaseId === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(identityReviewGate.holdCaseId.trim())
+    ? identityReviewGate.holdCaseId.trim()
+    : null;
+  const evidenceId = typeof identityReviewGate.holdEvidenceId === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(identityReviewGate.holdEvidenceId.trim())
+    ? identityReviewGate.holdEvidenceId.trim()
+    : null;
+  const hasTraceableReview = Boolean(
+    (reviewCaseId || evidenceId) && identityReviewGate.reviewAvailable === true
+  );
+
+  return res.status(423).json({
+    success: false,
+    error: hasTraceableReview && reviewCaseId
+      ? 'Sua identidade esta sendo analisada. Avisaremos quando houver uma atualizacao.'
+      : hasTraceableReview
+        ? 'Nao foi possivel confirmar sua identidade. Voce pode solicitar uma analise.'
+        : 'Precisamos liberar uma nova tentativa. Fale com o suporte.',
+    code: hasTraceableReview
+      ? 'KYC_IDENTITY_REVIEW_HOLD'
+      : 'KYC_IDENTITY_RECOVERY_REQUIRED',
+    reviewAvailable: hasTraceableReview,
+    ...(hasTraceableReview && reviewCaseId ? { reviewCaseId } : {}),
+    ...(hasTraceableReview && evidenceId ? { evidenceId } : {})
+  });
+}
+
 async function persistIdentityMismatchHold(driverId, {
   evidenceId = null,
-  decision = 'reject'
+  decision = 'reject',
+  persistenceScope = null
 } = {}) {
   const firestore = firebaseConfig?.getFirestore?.();
   if (!firestore) {
@@ -56,11 +238,21 @@ async function persistIdentityMismatchHold(driverId, {
     error.code = 'KYC_IDENTITY_REVIEW_STORE_UNAVAILABLE';
     throw error;
   }
-  const ref = firestore.collection('driver_identity_enforcement').doc(driverId);
+  if (!persistenceScope?.collections?.driverIdentityEnforcement) {
+    const error = new Error('Escopo de persistencia KYC indisponivel');
+    error.code = 'KYC_PERSISTENCE_SCOPE_REQUIRED';
+    throw error;
+  }
+  const ref = firestore
+    .collection(persistenceScope.collections.driverIdentityEnforcement)
+    .doc(driverId);
   const nowIso = new Date().toISOString();
   return firestore.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     const current = snapshot.exists ? (snapshot.data() || {}) : {};
+    if (snapshot.exists) {
+      assertStoredRecordMatchesScope(current, persistenceScope);
+    }
     if (
       current.active === true &&
       (current.permanent === true || String(current.status || '').toUpperCase() === 'PERMANENTLY_BLOCKED')
@@ -69,6 +261,9 @@ async function persistIdentityMismatchHold(driverId, {
     }
     const next = {
       ...current,
+      ...buildScopedPersistenceEnvelope(persistenceScope, {
+        record: snapshot.exists ? current : null
+      }),
       schemaVersion: 1,
       driverId,
       status: 'IDENTITY_MISMATCH_HOLD',
@@ -82,9 +277,56 @@ async function persistIdentityMismatchHold(driverId, {
       createdAt: current.createdAt || nowIso,
       updatedAt: nowIso
     };
+    [
+      'caseId',
+      'ticketId',
+      'evidenceBindingHash',
+      'recoveryId',
+      'failureEvidenceId',
+      'resultEvidenceId',
+      'retryAuthorizationId',
+      'retryAuthorizationKind',
+      'retryConsumedAt',
+      'primaryCaseId',
+      'latestCaseId',
+      'corroboratingCaseIds'
+    ].forEach((field) => {
+      delete next[field];
+    });
+    next.evidenceId = evidenceId || null;
     transaction.set(ref, next, { merge: false });
     return next;
   });
+}
+
+function resolveRequestKycRuntime(req, userId) {
+  return resolveKycRuntimeForUser({
+    userId,
+    phone: req?.authenticatedUser?.phoneNumber || req?.firebaseUser?.phone_number || null,
+    actor: req?.authenticatedUser || req?.firebaseUser || null
+  });
+}
+
+function getKycSessionPersistenceBinding(kycRuntime) {
+  const persistenceNamespace = String(kycRuntime?.scope?.namespace || '').trim();
+  const financialContextId = String(kycRuntime?.scope?.financialContextId || '').trim();
+  if (!['operational', 'sandbox'].includes(persistenceNamespace) || !financialContextId) {
+    const error = new Error('Escopo KYC nao pode ser vinculado a sessao AWS');
+    error.code = 'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_REQUIRED';
+    throw error;
+  }
+  return {
+    persistenceNamespace,
+    financialContextId
+  };
+}
+
+function getExpectedKycSessionPersistenceBinding(kycRuntime) {
+  const binding = getKycSessionPersistenceBinding(kycRuntime);
+  return {
+    expectedPersistenceNamespace: binding.persistenceNamespace,
+    expectedFinancialContextId: binding.financialContextId
+  };
 }
 
 function isIdentityReverificationRequest({ challengeId = null, requirement = null } = {}) {
@@ -105,7 +347,10 @@ function resolveLivenessAttemptScope({
 
   if (isIdentityReverificationRequest({ challengeId, requirement })) {
     const reviewScope = normalizeLivenessAttemptScope(authorizedAttemptScope || '');
-    if (reviewScope.startsWith('manual_review_retry_')) {
+    if (
+      reviewScope.startsWith('manual_review_retry_')
+      || reviewScope.startsWith('orphan_hold_retry_')
+    ) {
       return reviewScope;
     }
     return 'identity_reverification';
@@ -118,6 +363,129 @@ function resolveLivenessAttemptScope({
   return source !== 'general'
     ? source
     : normalizeLivenessAttemptScope(requirement || 'general');
+}
+
+function assertPersistedRetrySessionResumable({
+  userId,
+  challengeId,
+  requirement,
+  attemptScope,
+  attemptState,
+  sessionMetadata
+} = {}) {
+  const sessionId = typeof attemptState?.lastSessionId === 'string'
+    ? attemptState.lastSessionId.trim()
+    : '';
+  if (!sessionId) {
+    const error = new Error('A sessao anterior nao foi encontrada para retomada');
+    error.code = 'KYC_IDENTITY_RETRY_RESUME_SESSION_NOT_FOUND';
+    throw error;
+  }
+  if (
+    attemptState?.userId !== userId
+    || sessionMetadata?.userId !== userId
+    || attemptState?.requirement !== requirement
+    || attemptState?.attemptScope !== attemptScope
+    || sessionMetadata?.attemptScope !== attemptScope
+  ) {
+    const error = new Error('A sessao anterior nao corresponde a esta autorizacao');
+    error.code = 'KYC_IDENTITY_RETRY_RESUME_BINDING_INVALID';
+    throw error;
+  }
+  if (
+    (sessionMetadata?.challengeId || null) !== (challengeId || null)
+    || (sessionMetadata?.requirement || null) !== (requirement || null)
+  ) {
+    const error = new Error('A sessao anterior pertence a outro desafio');
+    error.code = 'KYC_IDENTITY_RETRY_RESUME_CHALLENGE_INVALID';
+    throw error;
+  }
+
+  const providerStatuses = [
+    sessionMetadata?.status,
+    sessionMetadata?.lastStatus,
+    attemptState?.lastStatus
+  ]
+    .map((status) => String(status || '').trim().toUpperCase())
+    .filter(Boolean);
+  const providerStatus = providerStatuses[0] || 'CREATED';
+  const completedSuccessfully = providerStatus === 'SUCCEEDED'
+    && sessionMetadata?.livenessPassed === true;
+  if (
+    (sessionMetadata?.completedAt && !completedSuccessfully)
+    || sessionMetadata?.abandonedAt
+    || providerStatuses.some((status) => (
+      !['CREATED', 'IN_PROGRESS', 'SUCCEEDED'].includes(status)
+      || (status === 'SUCCEEDED' && !completedSuccessfully)
+    ))
+  ) {
+    const error = new Error('A sessao anterior ja foi encerrada e nao pode ser retomada');
+    error.code = 'KYC_IDENTITY_RETRY_RESUME_SESSION_TERMINAL';
+    throw error;
+  }
+
+  const verificationWindowToken = typeof sessionMetadata?.verificationWindowToken === 'string'
+    ? sessionMetadata.verificationWindowToken.trim()
+    : '';
+  if (!verificationWindowToken) {
+    const error = new Error('A sessao anterior perdeu o vinculo da janela de verificacao');
+    error.code = 'KYC_IDENTITY_RETRY_RESUME_WINDOW_BINDING_REQUIRED';
+    throw error;
+  }
+  return {
+    sessionId,
+    verificationWindowToken,
+    status: providerStatus,
+    completed: completedSuccessfully,
+    livenessPassed: completedSuccessfully
+  };
+}
+
+function buildResumedLivenessSessionResponse({
+  provider,
+  sessionId,
+  sessionMetadata,
+  config
+} = {}) {
+  const status = String(
+    sessionMetadata.status || sessionMetadata.lastStatus || 'CREATED'
+  ).trim().toUpperCase();
+  const completedSuccessfully = status === 'SUCCEEDED'
+    && sessionMetadata.livenessPassed === true;
+  return buildPublicLivenessSessionResponse({
+    provider,
+    region: config.region,
+    sessionId,
+    challengeType: sessionMetadata.challengeType || config.challengeType,
+    expiresAt: sessionMetadata.expiresAt,
+    status,
+    ...(completedSuccessfully
+      ? { completed: true, livenessPassed: true }
+      : {})
+  });
+}
+
+function buildPublicLivenessSessionResponse(payload = {}) {
+  const response = { success: true };
+  for (const field of [
+    'provider',
+    'region',
+    'sessionId',
+    'challengeType',
+    'expiresAt',
+    'status'
+  ]) {
+    if (typeof payload[field] === 'string' && payload[field].trim()) {
+      response[field] = payload[field].trim();
+    }
+  }
+  if (typeof payload.completed === 'boolean') {
+    response.completed = payload.completed;
+  }
+  if (payload.completed === true && typeof payload.livenessPassed === 'boolean') {
+    response.livenessPassed = payload.livenessPassed;
+  }
+  return response;
 }
 
 function createIdentityLeaseHeartbeat(renew, intervalMs = 10 * 1000) {
@@ -183,27 +551,68 @@ function requiresCanonicalVerificationRoute({
 function sendCanonicalRouteRequired(res) {
   return res.status(409).json({
     success: false,
-    error: 'Esta validacao deve usar a comparacao canonica server-side',
+    error: 'Inicie uma nova validacao de identidade pelo aplicativo.',
     code: 'KYC_CANONICAL_ROUTE_REQUIRED',
     endpoint: '/api/kyc/verify-driver/server-side-selfie'
   });
 }
 
-function sendRedisCriticalAuthorityUnavailable(res, error) {
-  if (error?.code !== 'REDIS_CRITICAL_AUTHORITY_NOT_READY') return null;
-  return res.status(503).json({
+function sendSandboxLegacyRouteDisabled(res) {
+  return res.status(409).json({
     success: false,
-    error: 'Serviço de verificação temporariamente indisponível. Tente novamente.',
-    code: 'REDIS_CRITICAL_AUTHORITY_NOT_READY',
-    retryable: true
+    error: 'Esta etapa antiga nao esta disponivel para sua conta de teste. Use o fluxo atual de validacao.',
+    code: 'KYC_SANDBOX_LEGACY_ROUTE_DISABLED'
   });
 }
 
-async function softBlockLivenessAttemptsExhausted({ userId, challengeId = null, attemptState = null, source = 'kyc_route', attemptScope = null } = {}) {
+async function requireOperationalLegacyKycRoute(req, res, next) {
+  try {
+    const userId = String(
+      req?.authenticatedUser?.uid || req?.firebaseUser?.uid || ''
+    ).trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Sua sessao expirou. Entre novamente para continuar.',
+        code: 'KYC_AUTHENTICATED_USER_REQUIRED'
+      });
+    }
+    const kycRuntime = await resolveRequestKycRuntime(req, userId);
+    if (kycRuntime.namespace === 'sandbox') {
+      return sendSandboxLegacyRouteDisabled(res);
+    }
+    req.legacyKycRuntime = kycRuntime;
+    return next();
+  } catch (error) {
+    logError(error, 'Falha ao classificar runtime antes de rota KYC legada', {
+      service: 'kyc-routes-routes'
+    });
+    return res.status(503).json({
+      success: false,
+      error: 'Nao foi possivel preparar esta etapa agora. Tente novamente em alguns minutos.',
+      code: 'KYC_RUNTIME_SCOPE_UNAVAILABLE'
+    });
+  }
+}
+
+async function softBlockLivenessAttemptsExhausted({
+  userId,
+  challengeId = null,
+  attemptState = null,
+  source = 'kyc_route',
+  attemptScope = null,
+  kycRuntime = null
+} = {}) {
   if (!userId) return null;
 
   try {
-    return await kycPolicyService.markDriverForLivenessAttemptsExhausted({
+    const policyService = kycRuntime?.policyService || kycPolicyService;
+    if (typeof policyService.markDriverForLivenessAttemptsExhausted !== 'function') {
+      const error = new Error('Politica scoped de limite KYC indisponivel');
+      error.code = 'KYC_LIVENESS_ATTEMPT_POLICY_UNAVAILABLE';
+      throw error;
+    }
+    return await policyService.markDriverForLivenessAttemptsExhausted({
       driverId: userId,
       challengeId,
       attemptState: attemptState || {},
@@ -375,17 +784,21 @@ class KYCRoutes {
 
     this.router.get('/liveness/provider', requireFirebaseUser, async (_req, res) => {
       try {
+        const config = this.awsLivenessService.getConfigSummary();
         return res.json({
           success: true,
           provider: this.awsLivenessService.getProviderName(),
-          config: this.awsLivenessService.getConfigSummary()
+          config: {
+            enabled: config.enabled === true,
+            credentialsEnabled: config.credentialsEnabled === true,
+            hasAssumeRoleArn: config.hasAssumeRoleArn === true
+          }
         });
       } catch (error) {
         logError(error, 'Erro ao consultar provider de liveness', { service: 'kyc-routes-routes' });
         return res.status(500).json({
           success: false,
-          error: 'Erro interno do servidor',
-          details: error.message
+          error: 'Erro interno do servidor'
         });
       }
     });
@@ -393,25 +806,23 @@ class KYCRoutes {
     this.router.get('/biometrics/readiness', requireFirebaseUser, async (_req, res) => {
       try {
         const readiness = evaluateProductionReadiness(process.env);
-        return res.status(readiness.ok ? 200 : 503).json({
-          success: readiness.ok,
-          ...readiness,
-          awsLiveness: this.awsLivenessService.getConfigSummary(),
-          awsFaceCompare: this.awsFaceCompareService.getConfigSummary(),
-          biometricFaceService: {
-            configured: Boolean(
-              String(process.env.BIOMETRIC_FACE_SERVICE_URL || '').trim()
-              && String(process.env.BIOMETRIC_FACE_SERVICE_API_KEY || '').trim()
-            ),
-            urlConfigured: Boolean(String(process.env.BIOMETRIC_FACE_SERVICE_URL || '').trim())
-          }
+        const ready = readiness.ok === true
+          && readiness.enabled === true
+          && readiness.policy?.productionRuntime === true
+          && readiness.policy?.productionBiometricsEnabled === true
+          && readiness.policy?.strictProductionMode === true;
+        return res.status(ready ? 200 : 503).json({
+          success: ready,
+          ready,
+          code: ready ? 'KYC_BIOMETRICS_READY' : 'KYC_BIOMETRICS_NOT_READY'
         });
       } catch (error) {
         logError(error, 'Erro ao consultar prontidão biométrica', { service: 'kyc-routes-routes' });
         return res.status(500).json({
           success: false,
-          error: 'Erro interno do servidor',
-          details: error.message
+          ready: false,
+          code: 'KYC_BIOMETRICS_READINESS_UNAVAILABLE',
+          error: 'Erro interno do servidor'
         });
       }
     });
@@ -425,6 +836,7 @@ class KYCRoutes {
       let retainVerificationWindow = false;
       let cleanRetryAuthorizationClaim = null;
       let cleanRetrySessionCreated = false;
+      let kycRuntime = null;
       try {
         const { userId, challengeId, requirement } = req.body || {};
         if (!userId || typeof userId !== 'string') {
@@ -435,16 +847,20 @@ class KYCRoutes {
           });
         }
 
-        const identityReviewGate = await kycIdentityReviewWorkflowService
+        kycRuntime = await resolveRequestKycRuntime(req, userId);
+        const {
+          trustService,
+          workflowService,
+          policyService
+        } = kycRuntime;
+
+        const identityReviewGate = await workflowService
           .assertKycOperationAllowed(userId);
-        if (identityReviewGate.identityReviewHold) {
-          return res.status(423).json({
-            success: false,
-            error: 'Sua solicitacao de analise de identidade esta em andamento.',
-            code: 'KYC_IDENTITY_REVIEW_HOLD',
-            reviewAvailable: true,
-            reviewCaseId: identityReviewGate.holdCaseId || null
-          });
+        if (
+          identityReviewGate.identityReviewHold
+          && identityReviewGate.retrySessionResumeCandidate !== true
+        ) {
+          return sendIdentityReviewGateResponse(res, identityReviewGate);
         }
 
         const effectiveChallengeId = typeof challengeId === 'string' && challengeId.trim()
@@ -452,6 +868,7 @@ class KYCRoutes {
           : null;
         let challenge = null;
         let authorizedAttemptScope = null;
+        let identityChallengeAlreadyValidating = false;
         let effectiveRequirement = typeof requirement === 'string' && requirement.trim()
           ? requirement.trim()
           : null;
@@ -461,7 +878,7 @@ class KYCRoutes {
         });
 
         if (effectiveChallengeId && !isIdentityReverification) {
-          challenge = await kycPolicyService.getStepUpChallenge(effectiveChallengeId, userId);
+          challenge = await policyService.getStepUpChallenge(effectiveChallengeId, userId);
           if (!challenge) {
             return res.status(404).json({
               success: false,
@@ -471,14 +888,24 @@ class KYCRoutes {
           }
           effectiveRequirement = challenge.requirement || effectiveRequirement || 'VERIFY_REQUIRED';
         } else if (isIdentityReverification) {
-          const identityState = await Promise.resolve(
-            firebaseConfig?.getFromRealtimeDB?.(`users/${userId}/identityReverification`)
-          ).catch(() => null);
+          const identityState = kycRuntime.namespace === 'sandbox'
+            ? await policyService.getStepUpChallenge(effectiveChallengeId, userId)
+            : await Promise.resolve(
+              firebaseConfig?.getFromRealtimeDB?.(`users/${userId}/identityReverification`)
+            ).catch(() => null);
+          identityChallengeAlreadyValidating = identityState?.status === 'validating';
           const identityChallengeIsActive = Boolean(
             effectiveChallengeId
-            && identityState?.challengeId === effectiveChallengeId
+            && (identityState?.challengeId || null) === effectiveChallengeId
             && identityState?.requirement === 'IDENTITY_REVERIFICATION'
-            && ['requested', 'failed'].includes(identityState?.status)
+            && (
+              (
+                kycRuntime.namespace === 'sandbox'
+                  ? identityState?.status === 'pending'
+                  : ['requested', 'failed'].includes(identityState?.status)
+              )
+              || identityChallengeAlreadyValidating
+            )
           );
           if (!identityChallengeIsActive) {
             return res.status(404).json({
@@ -487,14 +914,21 @@ class KYCRoutes {
               code: 'KYC_IDENTITY_REVERIFICATION_NOT_ACTIVE'
             });
           }
-          const candidateAttemptScope = normalizeLivenessAttemptScope(identityState?.attemptScope || '');
-          authorizedAttemptScope = candidateAttemptScope.startsWith('manual_review_retry_')
+          const candidateAttemptScope = normalizeLivenessAttemptScope(
+            identityState?.attemptScope || identityState?.metadata?.attemptScope || ''
+          );
+          authorizedAttemptScope = (
+            candidateAttemptScope.startsWith('manual_review_retry_')
+            || candidateAttemptScope.startsWith('orphan_hold_retry_')
+          )
             ? candidateAttemptScope
             : null;
           effectiveRequirement = 'IDENTITY_REVERIFICATION';
         } else {
-          const firstAccessPolicy = await kycPolicyService.requiresFirstAccessLiveness(userId)
-            .catch(() => ({ required: false }));
+          const firstAccessPolicy = kycRuntime.namespace === 'sandbox'
+            ? { required: false }
+            : await policyService.requiresFirstAccessLiveness(userId)
+              .catch(() => ({ required: false }));
           if (firstAccessPolicy?.required === true) {
             effectiveRequirement = 'LIVENESS_REQUIRED';
           } else {
@@ -506,16 +940,193 @@ class KYCRoutes {
           }
         }
 
-        await this.canonicalDriverDocumentApprovalService.requireApprovedCnh(userId);
-
         const attemptScope = resolveLivenessAttemptScope({
           challenge,
           challengeId: effectiveChallengeId,
           requirement: effectiveRequirement,
           authorizedAttemptScope
         });
+        const requiresDurableRetryAuthorization = (
+          attemptScope.startsWith('manual_review_retry_')
+          || attemptScope.startsWith('orphan_hold_retry_')
+          || identityReviewGate.cleanRetryAuthorized === true
+        );
+        if (
+          identityReviewGate.cleanRetryAuthorized === true
+          && !(
+            attemptScope.startsWith('manual_review_retry_')
+            || attemptScope.startsWith('orphan_hold_retry_')
+          )
+        ) {
+          const error = new Error('A nova tentativa perdeu o vinculo de autorizacao');
+          error.code = 'KYC_IDENTITY_RETRY_BINDING_REQUIRED';
+          throw error;
+        }
 
-        verificationWindowClaim = await driverIdentityTrustService.claimVerificationWindow(userId, {
+        if (
+          identityReviewGate.retrySessionResumeCandidate === true
+          && !requiresDurableRetryAuthorization
+        ) {
+          const error = new Error('A retomada perdeu o vinculo de autorizacao');
+          error.code = 'KYC_IDENTITY_RETRY_BINDING_REQUIRED';
+          throw error;
+        }
+        if (typeof this.awsLivenessService.getAttemptState !== 'function') {
+          const error = new Error('Estado duravel da tentativa indisponivel');
+          error.code = 'KYC_IDENTITY_RETRY_RESUME_STATE_UNAVAILABLE';
+          throw error;
+        }
+        const attemptState = await this.awsLivenessService.getAttemptState({
+          userId,
+          requirement: effectiveRequirement,
+          attemptScope,
+          ...getKycSessionPersistenceBinding(kycRuntime)
+        });
+        const persistedSessionId = typeof attemptState?.lastSessionId === 'string'
+          ? attemptState.lastSessionId.trim()
+          : '';
+        const terminalSessionCodes = new Set([
+          'KYC_IDENTITY_RETRY_RESUME_SESSION_TERMINAL',
+          'AWS_LIVENESS_SESSION_ABANDONED',
+          'AWS_LIVENESS_SESSION_EXPIRED'
+        ]);
+        let persistedSessionIsTerminal = false;
+
+        if (persistedSessionId) {
+          let sessionMetadata = null;
+          try {
+            sessionMetadata = await this.awsLivenessService
+              .getSessionMetadata(persistedSessionId);
+          } catch (metadataError) {
+            if (
+              !requiresDurableRetryAuthorization
+              && terminalSessionCodes.has(metadataError?.code)
+            ) {
+              persistedSessionIsTerminal = true;
+            } else {
+              throw metadataError;
+            }
+          }
+          if (
+            !sessionMetadata
+            && !persistedSessionIsTerminal
+            && typeof this.awsLivenessService.recoverCommittedSession === 'function'
+          ) {
+            verificationWindowClaim = await trustService.claimVerificationWindow(userId, {
+              scope: 'aws_liveness_session_recovery'
+            });
+            if (!verificationWindowClaim.acquired) {
+              return res.status(409).json({
+                success: false,
+                error: 'Outra validacao de identidade ja esta em andamento',
+                code: 'KYC_VERIFICATION_IN_PROGRESS'
+              });
+            }
+            let recovered = await this.awsLivenessService.recoverCommittedSession({
+              userId,
+              challengeId: effectiveChallengeId,
+              requirement: effectiveRequirement,
+              attemptScope,
+              verificationWindowToken: verificationWindowClaim.token,
+              ...getKycSessionPersistenceBinding(kycRuntime)
+            });
+            if (
+              !recovered
+              && typeof this.awsLivenessService.recoverExpiredSessionMetadata === 'function'
+            ) {
+              recovered = await this.awsLivenessService.recoverExpiredSessionMetadata({
+                userId,
+                sessionId: persistedSessionId,
+                challengeId: effectiveChallengeId,
+                requirement: effectiveRequirement,
+                attemptScope,
+                ...getKycSessionPersistenceBinding(kycRuntime)
+              });
+            }
+            if (recovered?.sessionId !== persistedSessionId) {
+              const error = new Error('A sessao paga nao pode ser retomada com seguranca');
+              error.code = 'KYC_IDENTITY_RETRY_RESUME_SESSION_NOT_FOUND';
+              error.providerDispatched = true;
+              throw error;
+            }
+            sessionMetadata = recovered.sessionMetadata;
+          }
+
+          let resumableSession = null;
+          if (sessionMetadata && !persistedSessionIsTerminal) {
+            try {
+              this.awsLivenessService.assertBoundSessionMetadata(sessionMetadata, {
+                userId,
+                expectedChallengeId: effectiveChallengeId,
+                expectedRequirement: effectiveRequirement,
+                ...getExpectedKycSessionPersistenceBinding(kycRuntime)
+              });
+              resumableSession = assertPersistedRetrySessionResumable({
+                userId,
+                challengeId: effectiveChallengeId,
+                requirement: effectiveRequirement,
+                attemptScope,
+                attemptState,
+                sessionMetadata
+              });
+            } catch (resumeError) {
+              if (
+                !requiresDurableRetryAuthorization
+                && terminalSessionCodes.has(resumeError?.code)
+              ) {
+                persistedSessionIsTerminal = true;
+              } else {
+                throw resumeError;
+              }
+            }
+          }
+
+          if (resumableSession) {
+            if (!verificationWindowClaim) {
+              verificationWindowClaim = await trustService.claimVerificationWindow(userId, {
+                token: resumableSession.verificationWindowToken,
+                scope: 'aws_liveness_session_resume'
+              });
+              if (!verificationWindowClaim.acquired) {
+                return res.status(409).json({
+                  success: false,
+                  error: 'Outra validacao de identidade ja esta em andamento',
+                  code: 'KYC_VERIFICATION_IN_PROGRESS'
+                });
+              }
+            }
+            retainVerificationWindow = true;
+            if (requiresDurableRetryAuthorization) {
+              await workflowService.resumeCleanRetryAuthorization(
+                userId,
+                attemptScope,
+                resumableSession.sessionId
+              );
+            }
+            return res.status(200).json(buildResumedLivenessSessionResponse({
+              provider: this.awsLivenessService.getProviderName(),
+              sessionId: resumableSession.sessionId,
+              sessionMetadata,
+              config: this.awsLivenessService.getConfigSummary()
+            }));
+          }
+        }
+
+        if (verificationWindowClaim && persistedSessionIsTerminal) {
+          await trustService.releaseVerificationWindow(verificationWindowClaim);
+          verificationWindowClaim = null;
+        }
+
+        if (
+          identityReviewGate.retrySessionResumeCandidate === true
+          || (identityChallengeAlreadyValidating && !persistedSessionIsTerminal)
+        ) {
+          const error = new Error('A sessao anterior nao foi encontrada para retomada');
+          error.code = 'KYC_IDENTITY_RETRY_RESUME_SESSION_NOT_FOUND';
+          throw error;
+        }
+
+        verificationWindowClaim = await trustService.claimVerificationWindow(userId, {
           scope: 'aws_liveness_session'
         });
         if (!verificationWindowClaim.acquired) {
@@ -527,10 +1138,12 @@ class KYCRoutes {
         }
 
         if (isIdentityReverification) {
-          const startedResult = await kycPolicyService.recordIdentityReverificationStarted(userId, {
-            challengeId: effectiveChallengeId,
-            requirement: 'IDENTITY_REVERIFICATION'
-          });
+          const startedResult = typeof policyService.recordIdentityReverificationStarted === 'function'
+            ? await policyService.recordIdentityReverificationStarted(userId, {
+              challengeId: effectiveChallengeId,
+              requirement: 'IDENTITY_REVERIFICATION'
+            })
+            : { success: true, recorded: true };
           if (startedResult?.recorded !== true) {
             return res.status(409).json({
               success: false,
@@ -540,36 +1153,44 @@ class KYCRoutes {
           }
         }
 
-        cleanRetryAuthorizationClaim = await kycIdentityReviewWorkflowService
+        cleanRetryAuthorizationClaim = await workflowService
           .claimCleanRetryAuthorization(userId, attemptScope);
+        if (requiresDurableRetryAuthorization && !cleanRetryAuthorizationClaim) {
+          const error = new Error('A autorizacao desta nova tentativa nao esta disponivel');
+          error.code = 'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED';
+          throw error;
+        }
 
         const session = await this.awsLivenessService.createSession({
           userId,
           challengeId: effectiveChallengeId,
           requirement: effectiveRequirement,
           attemptScope,
-          verificationWindowToken: verificationWindowClaim.token
+          verificationWindowToken: verificationWindowClaim.token,
+          ...getKycSessionPersistenceBinding(kycRuntime)
         });
         cleanRetrySessionCreated = true;
         if (cleanRetryAuthorizationClaim) {
-          await kycIdentityReviewWorkflowService.consumeCleanRetryAuthorization(
+          await workflowService.consumeCleanRetryAuthorization(
             cleanRetryAuthorizationClaim,
             session.sessionId
           );
         }
         retainVerificationWindow = true;
 
-        return res.status(201).json({
-          success: true,
-          ...session
-        });
+        const publicSessionConfig = this.awsLivenessService.getConfigSummary();
+        return res.status(201).json(buildPublicLivenessSessionResponse({
+          ...session,
+          provider: this.awsLivenessService.getProviderName(),
+          region: publicSessionConfig.region
+        }));
       } catch (error) {
         if (
           cleanRetryAuthorizationClaim
           && !cleanRetrySessionCreated
           && error?.providerDispatched !== true
         ) {
-          await kycIdentityReviewWorkflowService.releaseCleanRetryAuthorization(
+          await kycRuntime.workflowService.releaseCleanRetryAuthorization(
             cleanRetryAuthorizationClaim,
             { reason: error?.code || 'session_creation_failed_before_provider_dispatch' }
           ).catch((releaseError) => {
@@ -580,41 +1201,65 @@ class KYCRoutes {
             });
           });
         }
-        const authorityUnavailable = sendRedisCriticalAuthorityUnavailable(res, error);
-        if (authorityUnavailable) return authorityUnavailable;
         const isDisabled = error?.code === 'AWS_LIVENESS_DISABLED';
         const attemptsExhausted = error?.code === 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED';
         const activeTripDeferred = error?.code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP';
         const verificationBusy = error?.code === 'KYC_VERIFICATION_IN_PROGRESS';
+        const retryResumeUnavailable = String(error?.code || '')
+          .startsWith('KYC_IDENTITY_RETRY_RESUME_')
+          || [
+            'KYC_IDENTITY_REVIEW_RETRY_RESUME_NOT_AVAILABLE',
+            'KYC_IDENTITY_REVIEW_RETRY_SESSION_BINDING_INVALID',
+            'KYC_IDENTITY_REVIEW_RETRY_ENFORCEMENT_INVALID',
+            'AWS_LIVENESS_SESSION_METADATA_REQUIRED',
+            'AWS_LIVENESS_SESSION_METADATA_INVALID',
+            'AWS_LIVENESS_SESSION_EXPIRED',
+            'AWS_LIVENESS_SESSION_ABANDONED',
+            'AWS_LIVENESS_SESSION_USER_MISMATCH',
+            'AWS_LIVENESS_SESSION_PROVIDER_MISMATCH',
+            'AWS_LIVENESS_SESSION_ATTEMPT_SCOPE_INVALID',
+            'AWS_LIVENESS_SESSION_CHALLENGE_MISMATCH',
+            'AWS_LIVENESS_SESSION_REQUIREMENT_MISMATCH',
+            'AWS_LIVENESS_SESSION_PERSISTENCE_SCOPE_MISMATCH',
+            'AWS_LIVENESS_SESSION_FINANCIAL_CONTEXT_MISMATCH'
+          ].includes(error?.code);
         const stateUnavailable = [
           'KYC_REVERIFY_STATE_UNAVAILABLE',
           'KYC_IDENTITY_REVIEW_STORE_UNAVAILABLE',
-          'KYC_TRUST_STORE_UNAVAILABLE'
-        ].includes(error?.code);
-        const dispatchOutcomeUnknown = error?.code === 'KYC_AWS_LIVENESS_DISPATCH_OUTCOME_UNKNOWN';
-        const unsupportedS3Output = error?.code === 'AWS_LIVENESS_S3_OUTPUT_UNSUPPORTED';
-        const costGuardUnavailable = new Set([
+          'KYC_TRUST_STORE_UNAVAILABLE',
+          'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE',
+          'KYC_RUNTIME_SERVICE_UNAVAILABLE',
+          'KYC_RUNTIME_SERVICE_SCOPE_MISMATCH',
+          'KYC_RUNTIME_SANDBOX_CONTEXT_REQUIRED',
+          'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_REQUIRED',
+          'KYC_AWS_LIVENESS_COMMITTED_SESSION_RECOVERY_REQUIRED',
+          'KYC_AWS_LIVENESS_RECOVERY_BINDING_REQUIRED',
+          'KYC_AWS_LIVENESS_RECOVERY_BINDING_MISMATCH',
+          'KYC_AWS_LIVENESS_RECOVERY_BINDING_COMMIT_FAILED',
+          'KYC_AWS_LIVENESS_RECOVERY_EXPIRED',
+          'KYC_AWS_LIVENESS_RECOVERY_STATE_UNAVAILABLE',
+          'KYC_AWS_LIVENESS_EXPIRED_PROOF_BINDING_MISMATCH',
+          'KYC_AWS_LIVENESS_EXPIRED_PROOF_NOT_TERMINAL',
+          'KYC_AWS_LIVENESS_EXPIRED_PROOF_UNAVAILABLE',
+          'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_MISMATCH',
+          'KYC_AWS_LIVENESS_METADATA_BINDING_COMMIT_FAILED',
           'KYC_AWS_COST_GUARD_REQUIRED',
-          'KYC_AWS_COST_GUARD_CONFIG_INVALID',
           'KYC_AWS_COST_GUARD_UNAVAILABLE',
-          'KYC_AWS_COST_BUDGET_EXHAUSTED'
-        ]).has(error?.code);
-        const canonicalCnhMissing = [
-          'KYC_CANONICAL_APPROVED_CNH_REQUIRED',
-          'KYC_CANONICAL_DOCUMENT_REUPLOAD_REQUIRED'
-        ].includes(error?.code);
+          'KYC_AWS_COST_OPERATION_NOT_FOUND',
+          'KYC_AWS_COST_OPERATION_MISMATCH',
+          'KYC_AWS_COST_OPERATION_STATE_INVALID',
+          'KYC_IDENTITY_RETRY_BINDING_REQUIRED',
+          'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED'
+        ].includes(error?.code)
+          || String(error?.code || '').startsWith('PERSISTENCE_');
         const identityPermanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
         const statusCode = identityPermanentlyBlocked
           ? 423
           : attemptsExhausted
           ? 423
-          : ((activeTripDeferred || verificationBusy || canonicalCnhMissing)
+          : ((activeTripDeferred || verificationBusy || retryResumeUnavailable)
             ? 409
-            : ((isDisabled
-              || stateUnavailable
-              || unsupportedS3Output
-              || costGuardUnavailable
-              || dispatchOutcomeUnknown) ? 503 : 500));
+            : ((isDisabled || stateUnavailable) ? 503 : 500));
         let softBlock = null;
         if (attemptsExhausted && error.attemptState?.softBlocked === true) {
           softBlock = await softBlockLivenessAttemptsExhausted({
@@ -622,24 +1267,33 @@ class KYCRoutes {
             challengeId: req.body?.challengeId || null,
             attemptState: error.attemptState || null,
             source: 'create_liveness_session_guard',
-            attemptScope: error.attemptState?.attemptScope || null
+            attemptScope: error.attemptState?.attemptScope || null,
+            kycRuntime
           });
         }
         logError(error, 'Erro ao criar sessão AWS liveness', { service: 'kyc-routes-routes' });
+        const publicError = identityPermanentlyBlocked
+          ? 'Esta conta nao pode usar o modo motorista.'
+          : attemptsExhausted
+            ? 'Nao foi possivel iniciar outra validacao agora. Fale com o suporte.'
+            : retryResumeUnavailable
+              ? 'Sua sessao anterior nao esta mais disponivel. Fale com o suporte para liberar uma nova tentativa.'
+              : stateUnavailable
+                ? 'Nao foi possivel preparar a validacao com seguranca agora. Tente novamente em alguns minutos.'
+                : (activeTripDeferred
+                  ? 'A validacao deve ser feita fora de uma corrida.'
+                  : (verificationBusy
+                    ? 'Outra validacao de identidade ja esta em andamento.'
+                    : 'Nao foi possivel preparar a validacao agora. Tente novamente.'));
         return res.status(statusCode).json({
           success: false,
-          error: identityPermanentlyBlocked
-            ? 'Esta conta nao pode usar o modo motorista.'
-            : error.message,
+          error: publicError,
           code: error.code || 'KYC_AWS_LIVENESS_SESSION_ERROR',
-          softBlocked: Boolean(softBlock?.softBlocked),
-          supportTicketId: softBlock?.supportTicketId || null,
-          attemptState: error.attemptState || null,
-          retryAt: error.retryAt || null
+          supportTicketId: softBlock?.supportTicketId || null
         });
       } finally {
         if (verificationWindowClaim?.acquired && !retainVerificationWindow) {
-          await driverIdentityTrustService
+          await kycRuntime?.trustService
             .releaseVerificationWindow(verificationWindowClaim)
             .catch(() => null);
         }
@@ -674,10 +1328,25 @@ class KYCRoutes {
           });
         }
 
-        await driverIdentityTrustService.assertVerificationOutsideActiveTrip(userId);
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        await kycRuntime.trustService.assertVerificationOutsideActiveTrip(userId);
+        const sessionMetadata = await this.awsLivenessService.getSessionMetadata(sessionId);
+        this.awsLivenessService.assertBoundSessionMetadata(sessionMetadata, {
+          userId,
+          ...getExpectedKycSessionPersistenceBinding(kycRuntime),
+          allowAbandoned: true,
+          allowExpired: true
+        });
         const result = await this.awsLivenessService.abandonSession({
           sessionId,
           userId
+        });
+        await kycRuntime.workflowService.finalizeCleanRetryAuthorization({
+          driverId: userId,
+          attemptScope: sessionMetadata?.attemptScope || null,
+          sessionId,
+          outcome: 'ABORTED',
+          reason: 'user_abandoned_liveness_session'
         });
 
         return res.json({
@@ -686,8 +1355,6 @@ class KYCRoutes {
           sessionId: result.sessionId
         });
       } catch (error) {
-        const authorityUnavailable = sendRedisCriticalAuthorityUnavailable(res, error);
-        if (authorityUnavailable) return authorityUnavailable;
         const code = error?.code || error?.name || 'KYC_AWS_LIVENESS_ABANDON_ERROR';
         const clientErrorCodes = new Set([
           'AWS_LIVENESS_SESSION_ID_REQUIRED',
@@ -743,12 +1410,17 @@ class KYCRoutes {
       async (req, res) => {
       let verificationWindowClaim = null;
       let retainVerificationWindow = false;
+      let kycRuntime = null;
       try {
         const { sessionId } = req.params;
         const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+        kycRuntime = await resolveRequestKycRuntime(req, userId);
         const sessionMetadata = await this.awsLivenessService.getSessionMetadata(sessionId);
-        this.awsLivenessService.assertBoundSessionMetadata(sessionMetadata, { userId });
-        verificationWindowClaim = await driverIdentityTrustService.claimVerificationWindow(userId, {
+        this.awsLivenessService.assertBoundSessionMetadata(sessionMetadata, {
+          userId,
+          ...getExpectedKycSessionPersistenceBinding(kycRuntime)
+        });
+        verificationWindowClaim = await kycRuntime.trustService.claimVerificationWindow(userId, {
           token: sessionMetadata.verificationWindowToken || null,
           scope: 'aws_liveness_poll'
         });
@@ -765,33 +1437,33 @@ class KYCRoutes {
           userId,
           requireBoundMetadata: true
         });
-        let softBlock = null;
         if (
           result?.completed === true
           && result?.livenessPassed !== true
           && result?.attemptState?.softBlocked === true
           && result?.attemptState?.justExhausted === true
         ) {
-          softBlock = await softBlockLivenessAttemptsExhausted({
+          await softBlockLivenessAttemptsExhausted({
             userId,
             challengeId: result?.challengeId || null,
             attemptState: result.attemptState,
             source: 'get_liveness_result',
-            attemptScope: result?.attemptScope || result?.attemptState?.attemptScope || null
+            attemptScope: result?.attemptScope || result?.attemptState?.attemptScope || null,
+            kycRuntime
           });
         }
         if (result?.completed === true && result?.livenessPassed !== true) {
           retainVerificationWindow = false;
         }
 
-        return res.json({
-          success: true,
+        return res.json(buildPublicLivenessSessionResponse({
           ...result,
-          softBlocked: Boolean(softBlock?.softBlocked)
-        });
+          provider: this.awsLivenessService.getProviderName(),
+          region: this.awsLivenessService.getConfigSummary().region,
+          challengeType: sessionMetadata.challengeType || null,
+          expiresAt: sessionMetadata.expiresAt || null
+        }));
       } catch (error) {
-        const authorityUnavailable = sendRedisCriticalAuthorityUnavailable(res, error);
-        if (authorityUnavailable) return authorityUnavailable;
         const code = error?.code || error?.name || 'KYC_AWS_LIVENESS_RESULT_ERROR';
         let statusCode = 500;
         if (code === 'AWS_LIVENESS_DISABLED') statusCode = 503;
@@ -803,14 +1475,21 @@ class KYCRoutes {
         if (code === 'ValidationException') statusCode = 400;
 
         logError(error, 'Erro ao consultar resultado AWS liveness', { service: 'kyc-routes-routes' });
+        const publicError = code === 'AWS_LIVENESS_SESSION_ABANDONED'
+          ? 'Esta sessao foi encerrada. Inicie uma nova validacao.'
+          : (code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP'
+            ? 'A validacao deve ser feita fora de uma corrida.'
+            : ((code === 'ResourceNotFoundException' || code === 'SessionNotFoundException')
+              ? 'Esta sessao expirou. Inicie uma nova validacao.'
+              : 'Nao foi possivel confirmar a validacao agora. Tente novamente.'));
         return res.status(statusCode).json({
           success: false,
-          error: error.message,
+          error: publicError,
           code
         });
       } finally {
         if (verificationWindowClaim?.acquired && !retainVerificationWindow) {
-          await driverIdentityTrustService
+          await kycRuntime?.trustService
             .releaseVerificationWindow(verificationWindowClaim)
             .catch(() => null);
         }
@@ -842,23 +1521,13 @@ class KYCRoutes {
             code: 'AWS_LIVENESS_CREDENTIALS_SESSION_BINDING_REQUIRED'
           });
         }
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        await kycRuntime.trustService.assertVerificationOutsideActiveTrip(userId);
         const sessionMetadata = await this.awsLivenessService.getSessionMetadata(sessionId);
-        this.awsLivenessService.assertBoundSessionMetadata(sessionMetadata, { userId });
-        const verificationWindowClaim = await driverIdentityTrustService.claimVerificationWindow(
+        this.awsLivenessService.assertBoundSessionMetadata(sessionMetadata, {
           userId,
-          {
-            token: sessionMetadata.verificationWindowToken || null,
-            scope: 'aws_liveness_credentials'
-          }
-        );
-        if (!verificationWindowClaim.acquired) {
-          return res.status(409).json({
-            success: false,
-            error: 'Outra validacao de identidade ja esta em andamento',
-            code: 'KYC_VERIFICATION_IN_PROGRESS'
-          });
-        }
-        await driverIdentityTrustService.assertVerificationOutsideActiveTrip(userId);
+          ...getExpectedKycSessionPersistenceBinding(kycRuntime)
+        });
         const credentialsResult = await this.awsLivenessService.issueTemporaryCredentials({
           userId,
           sessionId
@@ -872,8 +1541,6 @@ class KYCRoutes {
           credentials: credentialsResult.credentials
         });
       } catch (error) {
-        const authorityUnavailable = sendRedisCriticalAuthorityUnavailable(res, error);
-        if (authorityUnavailable) return authorityUnavailable;
         const code = error?.code || error?.name || 'KYC_AWS_LIVENESS_CREDENTIALS_ERROR';
         let statusCode = 500;
         if (code === 'AWS_LIVENESS_DISABLED' || code === 'AWS_LIVENESS_CREDENTIALS_DISABLED') statusCode = 503;
@@ -883,16 +1550,17 @@ class KYCRoutes {
         if (code === 'AWS_LIVENESS_SESSION_EXPIRED') statusCode = 410;
         if (code === 'AWS_LIVENESS_SESSION_USER_MISMATCH') statusCode = 403;
         if (code === 'AWS_LIVENESS_SESSION_ABANDONED') statusCode = 409;
-        if (code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP' || code === 'KYC_VERIFICATION_IN_PROGRESS') statusCode = 409;
-        if (code === 'AWS_LIVENESS_SESSION_BINDING_INVALID' || code === 'AWS_LIVENESS_SESSION_NOT_FOUND') statusCode = 404;
+        if (code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP') statusCode = 409;
         if (code === 'AccessDenied' || code === 'AccessDeniedException') statusCode = 403;
         if (code === 'ValidationError' || code === 'ValidationException') statusCode = 400;
 
         logError(error, 'Erro ao emitir credenciais AWS liveness', { service: 'kyc-routes-routes' });
+        const publicFailure = resolvePublicAwsLivenessCredentialsFailure(code);
         return res.status(statusCode).json({
           success: false,
-          error: error.message,
-          code
+          error: publicFailure.error,
+          code,
+          retryable: publicFailure.retryable
         });
       }
       }
@@ -902,6 +1570,7 @@ class KYCRoutes {
     this.router.post(
       '/upload-profile',
       requireFirebaseUser,
+      requireOperationalLegacyKycRoute,
       this.upload.single('image'),
       requireFirebaseSelf(bodyUserId),
       async (req, res) => {
@@ -913,6 +1582,11 @@ class KYCRoutes {
             success: false,
             error: 'userId é obrigatório'
           });
+        }
+
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        if (kycRuntime.namespace === 'sandbox') {
+          return sendSandboxLegacyRouteDisabled(res);
         }
 
         if (!req.file) {
@@ -958,6 +1632,7 @@ class KYCRoutes {
       async (req, res) => {
       let verificationWindowClaim = null;
       let retainVerificationWindow = false;
+      let kycRuntime = null;
       try {
         const { userId, deviceKyc, challengeId, requirement } = req.body || {};
 
@@ -975,9 +1650,15 @@ class KYCRoutes {
           });
         }
 
-        const approvalGate = await kycPolicyService.requireApprovedKyc(userId);
+        kycRuntime = await resolveRequestKycRuntime(req, userId);
+        if (kycRuntime.namespace === 'sandbox') {
+          return sendCanonicalRouteRequired(res);
+        }
+        const { policyService } = kycRuntime;
+
+        const approvalGate = await policyService.requireApprovedKyc(userId);
         const implicitChallenge = !challengeId
-          ? await kycPolicyService.getStepUpChallenge(null, userId)
+          ? await policyService.getStepUpChallenge(null, userId)
           : null;
         if (
           approvalGate?.code === 'KYC_REVERIFY_REQUIRED'
@@ -992,7 +1673,7 @@ class KYCRoutes {
         let challenge = null;
         let effectiveRequirement = requirement || null;
         if (challengeId) {
-          challenge = await kycPolicyService.getStepUpChallenge(challengeId, userId);
+          challenge = await policyService.getStepUpChallenge(challengeId, userId);
           if (!challenge) {
             return res.status(404).json({
               success: false,
@@ -1003,7 +1684,9 @@ class KYCRoutes {
           effectiveRequirement = effectiveRequirement || challenge.requirement || 'VERIFY_REQUIRED';
         }
 
-        const firstAccessPolicy = await kycPolicyService.requiresFirstAccessLiveness(userId);
+        const firstAccessPolicy = kycRuntime.namespace === 'sandbox'
+          ? { required: false }
+          : await policyService.requiresFirstAccessLiveness(userId);
         const firstAccessLivenessRequired = !challengeId && firstAccessPolicy.required === true;
         if (!effectiveRequirement && firstAccessLivenessRequired) {
           effectiveRequirement = 'LIVENESS_REQUIRED';
@@ -1021,7 +1704,10 @@ class KYCRoutes {
         let boundSessionMetadata = null;
         if (awsSessionId) {
           boundSessionMetadata = await this.awsLivenessService.getSessionMetadata(awsSessionId);
-          this.awsLivenessService.assertBoundSessionMetadata(boundSessionMetadata, { userId });
+          this.awsLivenessService.assertBoundSessionMetadata(boundSessionMetadata, {
+            userId,
+            ...getExpectedKycSessionPersistenceBinding(kycRuntime)
+          });
         }
         if (requiresCanonicalVerificationRoute({
           awsSessionId,
@@ -1031,7 +1717,7 @@ class KYCRoutes {
         })) {
           return sendCanonicalRouteRequired(res);
         }
-        verificationWindowClaim = await driverIdentityTrustService.claimVerificationWindow(userId, {
+        verificationWindowClaim = await kycRuntime.trustService.claimVerificationWindow(userId, {
           token: boundSessionMetadata?.verificationWindowToken || null,
           scope: 'legacy_device_verify'
         });
@@ -1043,9 +1729,11 @@ class KYCRoutes {
           });
         }
         const [lockedApprovalGate, lockedFirstAccessPolicy, lockedActiveChallenge] = await Promise.all([
-          kycPolicyService.requireApprovedKyc(userId),
-          kycPolicyService.requiresFirstAccessLiveness(userId),
-          kycPolicyService.getStepUpChallenge(null, userId)
+          policyService.requireApprovedKyc(userId),
+          kycRuntime.namespace === 'sandbox'
+            ? Promise.resolve({ required: false })
+            : policyService.requiresFirstAccessLiveness(userId),
+          policyService.getStepUpChallenge(null, userId)
         ]);
         if (
           lockedApprovalGate?.code === 'KYC_REVERIFY_REQUIRED'
@@ -1089,7 +1777,8 @@ class KYCRoutes {
                 challengeId,
                 attemptState: awsResult.attemptState,
                 source: 'device_verify_liveness_result',
-                attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null
+                attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null,
+                kycRuntime
               });
             }
           } catch (awsError) {
@@ -1107,7 +1796,7 @@ class KYCRoutes {
 
         if (
           effectiveRequirement === 'LIVENESS_REQUIRED'
-          && !kycPolicyService.isLivenessSatisfied(verificationPayload)
+          && !policyService.isLivenessSatisfied(verificationPayload)
         ) {
           return res.status(412).json({
             success: false,
@@ -1135,7 +1824,7 @@ class KYCRoutes {
         }
 
         if (challengeId && deviceResult.isMatch) {
-          const challengeResolution = await kycPolicyService.resolveStepUpChallenge({
+          const challengeResolution = await policyService.resolveStepUpChallenge({
             challengeId,
             driverId: userId,
             requirement: effectiveRequirement,
@@ -1151,9 +1840,11 @@ class KYCRoutes {
         }
 
         if (deviceResult.isMatch) {
-          await kycPolicyService.recordVerificationSuccess(userId, {
-            source: challengeId ? 'stepup_challenge' : 'device_verify'
-          });
+          if (typeof policyService.recordVerificationSuccess === 'function') {
+            await policyService.recordVerificationSuccess(userId, {
+              source: challengeId ? 'stepup_challenge' : 'device_verify'
+            });
+          }
         }
 
         return res.json({
@@ -1173,8 +1864,6 @@ class KYCRoutes {
         });
       } catch (error) {
         logError(error, 'Erro na verificação device-first:', { service: 'kyc-routes-routes' });
-        const authorityUnavailable = sendRedisCriticalAuthorityUnavailable(res, error);
-        if (authorityUnavailable) return authorityUnavailable;
         const conflict = [
           'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP',
           'KYC_VERIFICATION_IN_PROGRESS'
@@ -1187,7 +1876,7 @@ class KYCRoutes {
         });
       } finally {
         if (verificationWindowClaim?.acquired && !retainVerificationWindow) {
-          await driverIdentityTrustService
+          await kycRuntime?.trustService
             .releaseVerificationWindow(verificationWindowClaim)
             .catch(() => null);
         }
@@ -1204,6 +1893,7 @@ class KYCRoutes {
       let canonicalSessionClaim = null;
       let retainVerificationWindow = false;
       let leaseHeartbeat = null;
+      let kycRuntime = null;
       try {
         const { userId, awsSessionId, challengeId, requirement, forceRecheck } = req.body || {};
 
@@ -1222,15 +1912,20 @@ class KYCRoutes {
           });
         }
 
-        const identityReviewGate = await kycIdentityReviewWorkflowService
-          .assertKycOperationAllowed(userId);
-        if (identityReviewGate.identityReviewHold) {
-          return res.status(423).json({
+        kycRuntime = await resolveRequestKycRuntime(req, userId);
+        const {
+          trustService,
+          evidenceService,
+          workflowService,
+          policyService,
+          scope: persistenceScope
+        } = kycRuntime;
+
+        if (kycRuntime.namespace === 'sandbox' && !this.usesAwsCanonicalFaceCompare()) {
+          return res.status(503).json({
             success: false,
-            error: 'Sua solicitacao de analise de identidade esta em andamento.',
-            code: 'KYC_IDENTITY_REVIEW_HOLD',
-            reviewAvailable: true,
-            reviewCaseId: identityReviewGate.holdCaseId || null
+            error: 'A validacao de identidade esta temporariamente indisponivel. Tente novamente em alguns minutos.',
+            code: 'KYC_CANONICAL_FACE_PROVIDER_UNAVAILABLE'
           });
         }
 
@@ -1242,7 +1937,7 @@ class KYCRoutes {
         if (isIdentityReverificationRequest) {
           effectiveRequirement = 'IDENTITY_REVERIFICATION';
         } else if (challengeId) {
-          stepUpChallenge = await kycPolicyService.getStepUpChallenge(challengeId, userId);
+          stepUpChallenge = await policyService.getStepUpChallenge(challengeId, userId);
           if (!stepUpChallenge) {
             return res.status(404).json({
               success: false,
@@ -1253,7 +1948,9 @@ class KYCRoutes {
           effectiveRequirement = stepUpChallenge.requirement || effectiveRequirement || 'VERIFY_REQUIRED';
         }
 
-        const firstAccessPolicy = await kycPolicyService.requiresFirstAccessLiveness(userId);
+        const firstAccessPolicy = kycRuntime.namespace === 'sandbox'
+          ? { required: false }
+          : await policyService.requiresFirstAccessLiveness(userId);
         const firstAccessLivenessRequired = !challengeId && firstAccessPolicy.required === true;
         if (!effectiveRequirement && firstAccessLivenessRequired) {
           effectiveRequirement = 'LIVENESS_REQUIRED';
@@ -1267,7 +1964,8 @@ class KYCRoutes {
           this.awsLivenessService.assertBoundSessionMetadata(sessionMetadataCandidate, {
             userId,
             expectedChallengeId: challengeId || null,
-            expectedRequirement: effectiveRequirement || null
+            expectedRequirement: effectiveRequirement || null,
+            ...getExpectedKycSessionPersistenceBinding(kycRuntime)
           });
           boundSessionMetadata = sessionMetadataCandidate;
         } catch (error) {
@@ -1276,8 +1974,35 @@ class KYCRoutes {
         if (sessionMetadataError?.code === 'AWS_LIVENESS_SESSION_ABANDONED') {
           throw sessionMetadataError;
         }
+        if ([
+          'AWS_LIVENESS_SESSION_PERSISTENCE_SCOPE_MISMATCH',
+          'AWS_LIVENESS_SESSION_FINANCIAL_CONTEXT_MISMATCH'
+        ].includes(sessionMetadataError?.code)) {
+          throw sessionMetadataError;
+        }
 
-        canonicalSessionClaim = await driverIdentityTrustService.claimCanonicalSession(
+        const identityReviewGate = await workflowService
+          .assertKycOperationAllowed(userId, {
+            attemptScope: sessionMetadataCandidate?.attemptScope || null,
+            awsSessionId
+          });
+        if (
+          identityReviewGate.retryAuthorizationId
+          && identityReviewGate.sessionBoundRetryAuthorized !== true
+        ) {
+          retainVerificationWindow = false;
+          return res.status(409).json({
+            success: false,
+            error: 'Esta sessao nao corresponde a nova tentativa autorizada. Inicie uma nova validacao.',
+            code: 'KYC_IDENTITY_RETRY_SESSION_BINDING_REQUIRED'
+          });
+        }
+        if (identityReviewGate.identityReviewHold) {
+          retainVerificationWindow = false;
+          return sendIdentityReviewGateResponse(res, identityReviewGate);
+        }
+
+        canonicalSessionClaim = await trustService.claimCanonicalSession(
           userId,
           awsSessionId,
           {
@@ -1297,13 +2022,68 @@ class KYCRoutes {
         }
         if (canonicalSessionClaim.consumed) {
           leaseHeartbeat = createIdentityLeaseHeartbeat(
-            () => driverIdentityTrustService.renewCanonicalSessionClaim(canonicalSessionClaim)
+            () => trustService.renewCanonicalSessionClaim(canonicalSessionClaim)
           );
           await leaseHeartbeat.assertHeld();
-          const reconciledVerification = (
-            isIdentityReverificationRequest || firstAccessLivenessRequired
-          )
-            ? driverIdentityTrustService.restoreApprovedIdentityVerification(
+          const reconciledRejection = typeof trustService.restoreRejectedIdentityVerification === 'function'
+            ? trustService.restoreRejectedIdentityVerification(
+              userId,
+              canonicalSessionClaim.sessionHash || null,
+              canonicalSessionClaim.existingEvidence,
+              {
+                challengeId: challengeId || null,
+                requirement: effectiveRequirement
+              }
+            )
+            : null;
+          if (reconciledRejection) {
+            const reviewEvidenceCandidate = String(
+              reconciledRejection.reviewEvidenceId || ''
+            ).trim();
+            const reviewEvidenceId = /^[A-Za-z0-9_-]{16,128}$/
+              .test(reviewEvidenceCandidate)
+              ? reviewEvidenceCandidate
+              : null;
+            await trustService.assertVerificationOutsideActiveTrip(userId);
+            await workflowService.finalizeCleanRetryAuthorization({
+              driverId: userId,
+              attemptScope: sessionMetadataCandidate?.attemptScope || null,
+              sessionId: awsSessionId,
+              outcome: 'REJECTED',
+              resultEvidenceId: reconciledRejection.evidenceId,
+              reason: 'canonical_face_compare_rejection_reconciliation'
+            });
+            if (
+              isIdentityReverificationRequest
+              && typeof policyService.recordIdentityReverificationResult === 'function'
+            ) {
+              try {
+                await policyService.recordIdentityReverificationResult(userId, {
+                  ...reconciledRejection,
+                  reconciliationOnly: true
+                });
+              } catch (policyError) {
+                logError(policyError, 'Falha no espelho de uma rejeicao canonica reconciliada', {
+                  service: 'kyc-routes-routes',
+                  userId,
+                  challengeId: challengeId || null
+                });
+              }
+            }
+            await leaseHeartbeat.assertHeld();
+            retainVerificationWindow = false;
+            return res.status(403).json(buildPublicCanonicalCompareResult({}, {
+              success: false,
+              error: 'Não foi possível confirmar sua identidade.',
+              code: 'KYC_CHALLENGE_NOT_PASSED',
+              isMatch: false,
+              reviewAvailable: Boolean(reviewEvidenceId),
+              evidenceId: reviewEvidenceId,
+              idempotentReconciliation: true
+            }));
+          }
+          const reconciledVerification = typeof trustService.restoreApprovedIdentityVerification === 'function'
+            ? trustService.restoreApprovedIdentityVerification(
               userId,
               canonicalSessionClaim.sessionHash || null,
               canonicalSessionClaim.existingEvidence,
@@ -1314,15 +2094,17 @@ class KYCRoutes {
             )
             : null;
           if (reconciledVerification) {
-            await driverIdentityTrustService.assertVerificationOutsideActiveTrip(userId);
+            await trustService.assertVerificationOutsideActiveTrip(userId);
             if (isIdentityReverificationRequest) {
-              const identityResult = await kycPolicyService.recordIdentityReverificationResult(
+              const identityResult = typeof policyService.recordIdentityReverificationResult === 'function'
+                ? await policyService.recordIdentityReverificationResult(
                 userId,
                 {
                   ...reconciledVerification,
                   reconciliationOnly: true
                 }
-              );
+                )
+                : { success: true, recorded: true };
               if (identityResult?.recorded !== true) {
                 retainVerificationWindow = false;
                 return res.status(409).json({
@@ -1332,24 +2114,32 @@ class KYCRoutes {
                 });
               }
             }
-            await kycPolicyService.recordVerificationSuccess(userId, {
-              source: firstAccessLivenessRequired
-                ? 'canonical_first_access_reconciliation'
-                : 'canonical_identity_reconciliation',
-              markFirstAccess: firstAccessLivenessRequired,
-              clearReverify: false
+            const reconciliationSource = isIdentityReverificationRequest
+              ? 'canonical_identity_reconciliation'
+              : 'canonical_first_access_reconciliation';
+            if (typeof policyService.recordVerificationSuccess === 'function') {
+              await policyService.recordVerificationSuccess(userId, {
+                source: reconciliationSource,
+                markFirstAccess: firstAccessLivenessRequired,
+                clearReverify: false
+              });
+            }
+            await workflowService.finalizeCleanRetryAuthorization({
+              driverId: userId,
+              attemptScope: sessionMetadataCandidate?.attemptScope || null,
+              sessionId: awsSessionId,
+              outcome: 'SUCCEEDED',
+              resultEvidenceId: canonicalSessionClaim.sessionHash || null,
+              reason: reconciliationSource
             });
-            await kycIdentityReviewWorkflowService.clearResolvedMismatchHold(userId, {
-              source: firstAccessLivenessRequired
-                ? 'canonical_first_access_reconciliation'
-                : 'canonical_identity_reconciliation'
+            await workflowService.clearResolvedMismatchHold(userId, {
+              source: reconciliationSource
             });
             await leaseHeartbeat.assertHeld();
             retainVerificationWindow = false;
-            return res.json({
-              ...reconciledVerification,
+            return res.json(buildPublicCanonicalCompareResult(reconciledVerification, {
               idempotentReconciliation: true
-            });
+            }));
           }
           retainVerificationWindow = false;
           return res.status(409).json({
@@ -1364,7 +2154,7 @@ class KYCRoutes {
         }
         retainVerificationWindow = true;
         leaseHeartbeat = createIdentityLeaseHeartbeat(
-          () => driverIdentityTrustService.renewCanonicalSessionClaim(canonicalSessionClaim)
+          () => trustService.renewCanonicalSessionClaim(canonicalSessionClaim)
         );
         await leaseHeartbeat.assertHeld();
 
@@ -1393,7 +2183,6 @@ class KYCRoutes {
               success: false,
               code: 'KYC_AWS_LIVENESS_PENDING',
               error: 'Sessão AWS de liveness ainda está em processamento',
-              provider: awsResult.provider,
               sessionId: awsResult.sessionId,
               status: awsResult.status
             });
@@ -1410,7 +2199,8 @@ class KYCRoutes {
               challengeId,
               attemptState: awsResult.attemptState,
               source: 'server_side_selfie_liveness_result',
-              attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null
+              attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null,
+              kycRuntime
             });
           }
         } catch (awsError) {
@@ -1420,12 +2210,21 @@ class KYCRoutes {
             : (awsCode === 'ResourceNotFoundException' ? 404 : 400);
           return res.status(awsStatus).json({
             success: false,
-            error: awsError.message,
+            error: awsStatus === 404
+              ? 'A sessao de validacao foi encerrada. Inicie uma nova tentativa.'
+              : 'Nao foi possivel confirmar a validacao agora. Tente novamente.',
             code: awsCode
           });
         }
 
-        if (!kycPolicyService.isLivenessSatisfied(livenessPayload)) {
+        if (!policyService.isLivenessSatisfied(livenessPayload)) {
+          await workflowService.finalizeCleanRetryAuthorization({
+            driverId: userId,
+            attemptScope: sessionMetadataCandidate?.attemptScope || null,
+            sessionId: awsSessionId,
+            outcome: 'ABORTED',
+            reason: 'aws_liveness_not_satisfied'
+          });
           retainVerificationWindow = false;
           return res.status(412).json({
             success: false,
@@ -1435,26 +2234,7 @@ class KYCRoutes {
           });
         }
 
-        await driverIdentityTrustService.assertVerificationOutsideActiveTrip(userId);
-
-        if (isIdentityReverificationRequest) {
-          const currentIdentityChallenge = await kycPolicyService.recordIdentityReverificationStarted(
-            userId,
-            {
-              challengeId: challengeId || null,
-              requirement: 'IDENTITY_REVERIFICATION',
-              canonicalPreCompareCheck: true
-            }
-          );
-          if (currentIdentityChallenge?.recorded !== true) {
-            retainVerificationWindow = false;
-            return res.status(409).json({
-              success: false,
-              error: 'Esta revalidacao foi substituida por uma solicitacao mais recente',
-              code: currentIdentityChallenge?.code || 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
-            });
-          }
-        }
+        await trustService.assertVerificationOutsideActiveTrip(userId);
 
         const referenceImageAvailable = Buffer.isBuffer(awsResult?.referenceImageBuffer)
           && awsResult.referenceImageBuffer.length > 0;
@@ -1464,7 +2244,16 @@ class KYCRoutes {
             userId,
             sessionId: awsSessionId,
             requirement: effectiveRequirement,
-            attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null
+            attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null,
+            persistenceNamespace: sessionMetadataCandidate?.persistenceNamespace || null,
+            financialContextId: sessionMetadataCandidate?.financialContextId || null
+          });
+          await workflowService.finalizeCleanRetryAuthorization({
+            driverId: userId,
+            attemptScope: sessionMetadataCandidate?.attemptScope || null,
+            sessionId: awsSessionId,
+            outcome: 'ABORTED',
+            reason: 'aws_reference_image_unavailable'
           });
           retainVerificationWindow = false;
           if (recovery.canRetry !== true) {
@@ -1472,16 +2261,14 @@ class KYCRoutes {
               success: false,
               error: 'Não foi possível concluir esta validação agora. Tente novamente mais tarde.',
               code: 'KYC_AWS_REFERENCE_IMAGE_TEMPORARILY_UNAVAILABLE',
-              retryable: false,
-              attemptState: recovery.attemptState || null
+              retryable: false
             });
           }
           return res.status(422).json({
             success: false,
             error: 'Não conseguimos usar a imagem desta validação. Inicie uma nova tentativa.',
             code: 'KYC_AWS_REFERENCE_IMAGE_REQUIRED',
-            retryable: true,
-            attemptState: recovery.attemptState || null
+            retryable: true
           });
         }
 
@@ -1512,7 +2299,16 @@ class KYCRoutes {
             userId,
             sessionId: awsSessionId,
             requirement: effectiveRequirement,
-            attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null
+            attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null,
+            persistenceNamespace: sessionMetadataCandidate?.persistenceNamespace || null,
+            financialContextId: sessionMetadataCandidate?.financialContextId || null
+          });
+          await workflowService.finalizeCleanRetryAuthorization({
+            driverId: userId,
+            attemptScope: sessionMetadataCandidate?.attemptScope || null,
+            sessionId: awsSessionId,
+            outcome: 'ABORTED',
+            reason: comparisonError.code || 'aws_reference_face_not_detected'
           });
           retainVerificationWindow = false;
           if (recovery.canRetry !== true) {
@@ -1520,16 +2316,14 @@ class KYCRoutes {
               success: false,
               error: 'Não foi possível concluir esta validação agora. Tente novamente mais tarde.',
               code: 'KYC_AWS_REFERENCE_IMAGE_TEMPORARILY_UNAVAILABLE',
-              retryable: false,
-              attemptState: recovery.attemptState || null
+              retryable: false
             });
           }
           return res.status(422).json({
             success: false,
             error: 'Não conseguimos usar a imagem desta validação. Inicie uma nova tentativa.',
             code: comparisonError.code,
-            retryable: true,
-            attemptState: recovery.attemptState || null
+            retryable: true
           });
         }
 
@@ -1537,14 +2331,23 @@ class KYCRoutes {
           const status = verificationResult.code === 'BIOMETRIC_FACE_SERVICE_NOT_CONFIGURED'
             ? 503
             : (verificationResult.code === 'CNH_FACE_EMBEDDING_NOT_FOUND' ? 409 : 400);
-          return res.status(status).json(verificationResult);
+          return res.status(status).json(buildPublicCanonicalCompareResult(
+            verificationResult,
+            {
+              success: false,
+              error: 'Não foi possível concluir a validação agora.',
+              code: verificationResult.code || 'KYC_CANONICAL_COMPARE_FAILED',
+              requirement: effectiveRequirement || 'LIVENESS_REQUIRED',
+              challengeId: challengeId || null
+            }
+          ));
         }
 
         await leaseHeartbeat.assertHeld();
-        await driverIdentityTrustService.assertVerificationOutsideActiveTrip(userId);
+        await trustService.assertVerificationOutsideActiveTrip(userId);
 
         if (!verificationResult.isMatch) {
-          const failureRecord = await driverIdentityTrustService.recordCanonicalFailure(userId, {
+          const failureRecord = await trustService.recordCanonicalFailure(userId, {
             awsSessionId,
             sourcePath: 'server_side_aws_reference_compare',
             reason: isIdentityReverificationRequest
@@ -1567,15 +2370,22 @@ class KYCRoutes {
               code: 'KYC_AWS_SESSION_ALREADY_CONSUMED'
             });
           }
+
           let reviewEvidence = null;
+          let reviewEvidenceLinkedToTrust = false;
           try {
-            reviewEvidence = await failedBiometricEvidenceService.captureRejectedComparisonEvidence({
+            reviewEvidence = await evidenceService.captureRejectedComparisonEvidence({
               driverId: userId,
               referenceImageBuffer: awsResult.referenceImageBuffer,
               liveness: verificationResult.liveness,
               comparison: verificationResult,
               cnh: verificationResult.reference
             });
+            await trustService.linkReviewEvidenceToCanonicalFailure(userId, {
+              failureEvidenceId: failureRecord?.evidenceId,
+              reviewEvidenceId: reviewEvidence?.evidenceId
+            });
+            reviewEvidenceLinkedToTrust = true;
           } catch (evidenceError) {
             // A indisponibilidade da trilha de revisão jamais transforma uma
             // divergência canônica em aprovação. O hard-fail permanece ativo.
@@ -1585,11 +2395,14 @@ class KYCRoutes {
               code: evidenceError?.code || null
             });
           }
+          let mismatchHoldPersisted = false;
           try {
             await persistIdentityMismatchHold(userId, {
               evidenceId: reviewEvidence?.evidenceId || null,
-              decision: verificationResult.decision || 'reject'
+              decision: verificationResult.decision || 'reject',
+              persistenceScope
             });
+            mismatchHoldPersisted = true;
           } catch (holdError) {
             // O trust canônico já foi revogado acima; este espelho adicional
             // existe para impedir troca de CNH e novas chamadas pagas.
@@ -1599,12 +2412,38 @@ class KYCRoutes {
               code: holdError?.code || null
             });
           }
-          if (isIdentityReverificationRequest) {
-            const identityResult = await kycPolicyService.recordIdentityReverificationResult(userId, {
-              ...verificationResult,
-              requirement: effectiveRequirement,
-              challengeId: challengeId || null
+          if (reviewEvidence?.evidenceId && !reviewEvidenceLinkedToTrust && !mismatchHoldPersisted) {
+            await evidenceService.deleteEvidence(reviewEvidence.evidenceId, {
+              actorId: 'system:kyc_mismatch_binding_recovery',
+              reason: 'review_evidence_binding_failed'
+            }).catch((cleanupError) => {
+              logError(cleanupError, 'Falha ao limpar evidencia sem binding recuperavel', {
+                service: 'kyc-routes-routes',
+                userId,
+                code: cleanupError?.code || null
+              });
             });
+          }
+          const reviewEvidenceTraceable = Boolean(
+            reviewEvidence?.evidenceId
+            && (reviewEvidenceLinkedToTrust || mismatchHoldPersisted)
+          );
+          await workflowService.finalizeCleanRetryAuthorization({
+            driverId: userId,
+            attemptScope: sessionMetadataCandidate?.attemptScope || null,
+            sessionId: awsSessionId,
+            outcome: 'REJECTED',
+            resultEvidenceId: failureRecord?.evidenceId || null,
+            reason: 'canonical_face_compare_rejected'
+          });
+          if (isIdentityReverificationRequest) {
+            const identityResult = typeof policyService.recordIdentityReverificationResult === 'function'
+              ? await policyService.recordIdentityReverificationResult(userId, {
+                ...verificationResult,
+                requirement: effectiveRequirement,
+                challengeId: challengeId || null
+              })
+              : { success: true, recorded: true };
             if (identityResult?.recorded !== true) {
               return res.status(409).json({
                 success: false,
@@ -1614,24 +2453,22 @@ class KYCRoutes {
             }
           }
           retainVerificationWindow = false;
-          return res.status(403).json({
+          return res.status(403).json(buildPublicCanonicalCompareResult({}, {
             success: false,
             error: isIdentityReverificationRequest
               ? 'Não foi possível concluir a validação agora'
               : 'Verificação facial não aprovada para este desafio',
             code: 'KYC_CHALLENGE_NOT_PASSED',
-            userId,
             isMatch: false,
-            reviewAvailable: Boolean(reviewEvidence?.evidenceId),
-            evidenceId: reviewEvidence?.evidenceId || null,
-            reviewCaseId: null
-          });
+            reviewAvailable: reviewEvidenceTraceable,
+            evidenceId: reviewEvidenceTraceable ? reviewEvidence.evidenceId : null
+          }));
         }
 
         let canonicalRecord = null;
         if (verificationResult.isMatch) {
           try {
-            canonicalRecord = await driverIdentityTrustService.recordCanonicalSuccess(userId, {
+            canonicalRecord = await trustService.recordCanonicalSuccess(userId, {
               driverId: userId,
               sourcePath: 'server_side_aws_reference_compare',
               awsSessionId,
@@ -1680,13 +2517,16 @@ class KYCRoutes {
               'KYC_CANONICAL_CHALLENGE_BINDING_INVALID',
               'KYC_CANONICAL_CHALLENGE_NOT_FOUND'
             ]).has(canonicalError.code);
-            return res.status(canonicalConflict ? 409 : 503).json({
+            const publicFailure = resolvePublicCanonicalConflictFailure(
+              canonicalError?.code,
+              { stateUnavailable: !canonicalConflict }
+            );
+            return res.status(canonicalConflict ? 409 : 503).json(buildPublicCanonicalCompareResult({}, {
               success: false,
-              error: canonicalConflict
-                ? canonicalError.message
-                : 'A validacao foi concluida, mas nao foi possivel registrar a evidencia agora.',
-              code: canonicalError.code || 'KYC_CANONICAL_EVIDENCE_PERSIST_FAILED'
-            });
+              error: publicFailure.error,
+              code: canonicalError.code || 'KYC_CANONICAL_EVIDENCE_PERSIST_FAILED',
+              retryable: publicFailure.retryable
+            }));
           }
         }
 
@@ -1700,11 +2540,13 @@ class KYCRoutes {
         }
 
         if (isIdentityReverificationRequest) {
-          const identityResult = await kycPolicyService.recordIdentityReverificationResult(userId, {
-            ...verificationResult,
-            requirement: effectiveRequirement,
-            challengeId: challengeId || null
-          });
+          const identityResult = typeof policyService.recordIdentityReverificationResult === 'function'
+            ? await policyService.recordIdentityReverificationResult(userId, {
+              ...verificationResult,
+              requirement: effectiveRequirement,
+              challengeId: challengeId || null
+            })
+            : { success: true, recorded: true };
           if (identityResult?.recorded !== true) {
             return res.status(409).json({
               success: false,
@@ -1715,40 +2557,37 @@ class KYCRoutes {
         }
 
         if (verificationResult.isMatch) {
-          await kycPolicyService.recordVerificationSuccess(userId, {
-            source: challengeId ? 'stepup_challenge' : 'server_side_selfie_verify',
-            markFirstAccess: firstAccessLivenessRequired,
-            clearReverify: false
+          if (typeof policyService.recordVerificationSuccess === 'function') {
+            await policyService.recordVerificationSuccess(userId, {
+              source: challengeId ? 'stepup_challenge' : 'server_side_selfie_verify',
+              markFirstAccess: firstAccessLivenessRequired,
+              clearReverify: false
+            });
+          }
+          await workflowService.finalizeCleanRetryAuthorization({
+            driverId: userId,
+            attemptScope: sessionMetadataCandidate?.attemptScope || null,
+            sessionId: awsSessionId,
+            outcome: 'SUCCEEDED',
+            resultEvidenceId: canonicalRecord?.evidenceId || null,
+            reason: 'canonical_identity_match'
           });
-          await kycIdentityReviewWorkflowService.clearResolvedMismatchHold(userId, {
+          await workflowService.clearResolvedMismatchHold(userId, {
             source: 'server_side_aws_reference_compare'
           });
         }
 
         retainVerificationWindow = false;
 
-        return res.json({
+        return res.json(buildPublicCanonicalCompareResult(verificationResult, {
           success: true,
-          userId,
           isMatch: verificationResult.isMatch,
           needsReview: verificationResult.needsReview || false,
-          similarityScore: verificationResult.similarityScore,
-          confidence: verificationResult.confidence,
-          threshold: verificationResult.threshold,
-          reviewThreshold: verificationResult.reviewThreshold,
-          processingTime: verificationResult.processingTime,
-          mode: verificationResult.mode,
-          decision: verificationResult.decision || null,
-          embeddingDimension: verificationResult.embeddingDimension || null,
-          comparisonProvider: verificationResult.comparisonProvider || null,
-          provider: verificationResult.provider || null,
           requirement: effectiveRequirement || 'LIVENESS_REQUIRED',
           challengeId: challengeId || null
-        });
+        }));
       } catch (error) {
         logError(error, 'Erro na verificação server-side pós-liveness:', { service: 'kyc-routes-routes' });
-        const authorityUnavailable = sendRedisCriticalAuthorityUnavailable(res, error);
-        if (authorityUnavailable) return authorityUnavailable;
         const conflictCodes = new Set([
           'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP',
           'KYC_VERIFICATION_LEASE_LOST',
@@ -1765,14 +2604,6 @@ class KYCRoutes {
           'KYC_IDENTITY_REVIEW_STORE_UNAVAILABLE',
           'KYC_TRUST_STORE_UNAVAILABLE'
         ].includes(error?.code);
-        const costGuardUnavailable = new Set([
-          'KYC_AWS_COST_GUARD_REQUIRED',
-          'KYC_AWS_COST_GUARD_CONFIG_INVALID',
-          'KYC_AWS_COST_GUARD_UNAVAILABLE',
-          'KYC_AWS_COST_OPERATION_NOT_FOUND',
-          'KYC_AWS_COST_OPERATION_STATE_INVALID',
-          'KYC_AWS_COMPARE_OUTCOME_UNKNOWN'
-        ]).has(error?.code);
         const documentImageCodes = new Set([
           'AWS_COMPARE_FACES_CNH_FACE_NOT_DETECTED',
           'KYC_CNH_PORTRAIT_LAYOUT_UNSUPPORTED',
@@ -1791,29 +2622,34 @@ class KYCRoutes {
         const identityPermanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
         const statusCode = identityPermanentlyBlocked
           ? 423
-          : (stateUnavailable || costGuardUnavailable)
+          : stateUnavailable
           ? 503
           : (conflictCodes.has(error?.code)
             ? 409
             : ((isDocumentImageFailure || isLivenessImageFailure) ? 422 : 500));
+        const canonicalPublicFailure = resolvePublicCanonicalConflictFailure(error?.code, {
+          stateUnavailable
+        });
         const safeError = identityPermanentlyBlocked
-          ? 'Esta conta nao pode usar o modo motorista.'
+          ? canonicalPublicFailure.error
           : isDocumentImageFailure
           ? 'Não conseguimos identificar a foto na CNH aprovada. Envie uma nova versão do documento.'
           : (isLivenessImageFailure
             ? 'Não conseguimos usar a imagem desta validação. Inicie uma nova tentativa.'
-            : ((stateUnavailable || costGuardUnavailable || conflictCodes.has(error?.code))
-              ? error.message
+            : ((stateUnavailable || conflictCodes.has(error?.code))
+              ? canonicalPublicFailure.error
               : 'Erro interno do servidor'));
-        return res.status(statusCode).json({
+        return res.status(statusCode).json(buildPublicCanonicalCompareResult({}, {
           success: false,
           error: safeError,
           code: error?.code || 'KYC_SERVER_SIDE_VERIFICATION_ERROR',
-          details: undefined
-        });
+          ...((stateUnavailable || conflictCodes.has(error?.code))
+            ? { retryable: canonicalPublicFailure.retryable }
+            : {})
+        }));
       } finally {
         leaseHeartbeat?.stop();
-        await driverIdentityTrustService
+        await kycRuntime?.trustService
           .releaseCanonicalSessionClaim(canonicalSessionClaim, {
             releaseVerificationWindow: (
               canonicalSessionClaim?.consumed === true
@@ -1828,11 +2664,13 @@ class KYCRoutes {
     this.router.post(
       '/verify-driver',
       requireFirebaseUser,
+      requireOperationalLegacyKycRoute,
       this.upload.single('currentImage'),
       requireFirebaseSelf(bodyUserId),
       async (req, res) => {
       let verificationWindowClaim = null;
       let retainVerificationWindow = false;
+      let kycRuntime = null;
       try {
         const { userId, forceRecheck, cacheValidityHours } = req.body;
         
@@ -1843,13 +2681,21 @@ class KYCRoutes {
           });
         }
 
+        kycRuntime = await resolveRequestKycRuntime(req, userId);
+        if (kycRuntime.namespace === 'sandbox') {
+          return sendCanonicalRouteRequired(res);
+        }
+        const { policyService } = kycRuntime;
+
         const legacyChallengeId = req.body?.challengeId || null;
         const [approvalGate, firstAccessPolicy, implicitChallenge] = await Promise.all([
-          kycPolicyService.requireApprovedKyc(userId),
-          kycPolicyService.requiresFirstAccessLiveness(userId),
+          policyService.requireApprovedKyc(userId),
+          kycRuntime.namespace === 'sandbox'
+            ? Promise.resolve({ required: false })
+            : policyService.requiresFirstAccessLiveness(userId),
           legacyChallengeId
             ? Promise.resolve(null)
-            : kycPolicyService.getStepUpChallenge(null, userId)
+            : policyService.getStepUpChallenge(null, userId)
         ]);
         if (
           approvalGate?.code === 'KYC_REVERIFY_REQUIRED'
@@ -1869,10 +2715,13 @@ class KYCRoutes {
         let boundSessionMetadata = null;
         if (legacyAwsSessionId) {
           boundSessionMetadata = await this.awsLivenessService.getSessionMetadata(legacyAwsSessionId);
-          this.awsLivenessService.assertBoundSessionMetadata(boundSessionMetadata, { userId });
+          this.awsLivenessService.assertBoundSessionMetadata(boundSessionMetadata, {
+            userId,
+            ...getExpectedKycSessionPersistenceBinding(kycRuntime)
+          });
           return sendCanonicalRouteRequired(res);
         }
-        verificationWindowClaim = await driverIdentityTrustService.claimVerificationWindow(userId, {
+        verificationWindowClaim = await kycRuntime.trustService.claimVerificationWindow(userId, {
           token: boundSessionMetadata?.verificationWindowToken || null,
           scope: 'legacy_verify_driver'
         });
@@ -1884,9 +2733,11 @@ class KYCRoutes {
           });
         }
         const [lockedApprovalGate, lockedFirstAccessPolicy, lockedActiveChallenge] = await Promise.all([
-          kycPolicyService.requireApprovedKyc(userId),
-          kycPolicyService.requiresFirstAccessLiveness(userId),
-          kycPolicyService.getStepUpChallenge(null, userId)
+          policyService.requireApprovedKyc(userId),
+          kycRuntime.namespace === 'sandbox'
+            ? Promise.resolve({ required: false })
+            : policyService.requiresFirstAccessLiveness(userId),
+          policyService.getStepUpChallenge(null, userId)
         ]);
         if (
           lockedApprovalGate?.code === 'KYC_REVERIFY_REQUIRED'
@@ -1906,7 +2757,7 @@ class KYCRoutes {
           const challengeId = req.body.challengeId || null;
           let effectiveRequirement = req.body.requirement || null;
           if (challengeId) {
-            const challenge = await kycPolicyService.getStepUpChallenge(challengeId, userId);
+            const challenge = await policyService.getStepUpChallenge(challengeId, userId);
             if (!challenge) {
               return res.status(404).json({
                 success: false,
@@ -1965,7 +2816,7 @@ class KYCRoutes {
 
           if (
             effectiveRequirement === 'LIVENESS_REQUIRED'
-            && !kycPolicyService.isLivenessSatisfied(verificationPayload)
+            && !policyService.isLivenessSatisfied(verificationPayload)
           ) {
             return res.status(412).json({
               success: false,
@@ -1994,7 +2845,7 @@ class KYCRoutes {
           }
 
           if (challengeId && deviceResult.isMatch) {
-            const challengeResolution = await kycPolicyService.resolveStepUpChallenge({
+            const challengeResolution = await policyService.resolveStepUpChallenge({
               challengeId,
               driverId: userId,
               requirement: effectiveRequirement,
@@ -2010,9 +2861,11 @@ class KYCRoutes {
           }
 
           if (deviceResult.isMatch) {
-            await kycPolicyService.recordVerificationSuccess(userId, {
-              source: challengeId ? 'stepup_challenge' : 'device_verify'
-            });
+            if (typeof policyService.recordVerificationSuccess === 'function') {
+              await policyService.recordVerificationSuccess(userId, {
+                source: challengeId ? 'stepup_challenge' : 'device_verify'
+              });
+            }
           }
 
           return res.json({
@@ -2050,9 +2903,11 @@ class KYCRoutes {
 
         if (result.success) {
           if (result.isMatch) {
-            await kycPolicyService.recordVerificationSuccess(userId, {
-              source: 'backend_verify'
-            });
+            if (typeof policyService.recordVerificationSuccess === 'function') {
+              await policyService.recordVerificationSuccess(userId, {
+                source: 'backend_verify'
+              });
+            }
           }
 
           res.json({
@@ -2070,8 +2925,6 @@ class KYCRoutes {
 
       } catch (error) {
         logError(error, 'Erro na verificação:', { service: 'kyc-routes-routes' });
-        const authorityUnavailable = sendRedisCriticalAuthorityUnavailable(res, error);
-        if (authorityUnavailable) return authorityUnavailable;
 
         if ([
           'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP',
@@ -2100,7 +2953,7 @@ class KYCRoutes {
         });
       } finally {
         if (verificationWindowClaim?.acquired && !retainVerificationWindow) {
-          await driverIdentityTrustService
+          await kycRuntime?.trustService
             .releaseVerificationWindow(verificationWindowClaim)
             .catch(() => null);
         }
@@ -2118,6 +2971,11 @@ class KYCRoutes {
         const { userId } = req.params;
         if (!userId || typeof userId !== 'string') {
           return res.status(400).json({ success: false, error: 'userId inválido' });
+        }
+
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        if (kycRuntime.namespace === 'sandbox') {
+          return sendSandboxLegacyRouteDisabled(res);
         }
 
         if (!firebaseConfig || !firebaseConfig.getFromRealtimeDB) {
@@ -2161,7 +3019,8 @@ class KYCRoutes {
           });
         }
 
-        const challenge = await kycPolicyService.getStepUpChallenge(challengeId, userId);
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        const challenge = await kycRuntime.policyService.getStepUpChallenge(challengeId, userId);
         if (!challenge) {
           return res.status(404).json({
             success: false,
@@ -2202,6 +3061,11 @@ class KYCRoutes {
           });
         }
 
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        if (kycRuntime.namespace === 'sandbox') {
+          return sendSandboxLegacyRouteDisabled(res);
+        }
+
         const encoding = await this.kycService.getFaceEncoding(userId);
         
         if (encoding.success) {
@@ -2238,6 +3102,11 @@ class KYCRoutes {
           });
         }
 
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        if (kycRuntime.namespace === 'sandbox') {
+          return sendSandboxLegacyRouteDisabled(res);
+        }
+
         const result = await this.kycService.deleteFaceEncoding(userId);
         
         if (result.success) {
@@ -2260,6 +3129,13 @@ class KYCRoutes {
     // Estatísticas do serviço
     this.router.get('/stats', requireFirebaseUser, async (req, res) => {
       try {
+        const authenticatedUserId = req?.authenticatedUser?.uid || req?.firebaseUser?.uid || null;
+        if (authenticatedUserId) {
+          const kycRuntime = await resolveRequestKycRuntime(req, authenticatedUserId);
+          if (kycRuntime.namespace === 'sandbox') {
+            return sendSandboxLegacyRouteDisabled(res);
+          }
+        }
         const stats = await this.kycService.getStats();
         res.json(stats);
 
@@ -2276,6 +3152,13 @@ class KYCRoutes {
     // Health check
     this.router.get('/health', requireFirebaseUser, async (req, res) => {
       try {
+        const authenticatedUserId = req?.authenticatedUser?.uid || req?.firebaseUser?.uid || null;
+        if (authenticatedUserId) {
+          const kycRuntime = await resolveRequestKycRuntime(req, authenticatedUserId);
+          if (kycRuntime.namespace === 'sandbox') {
+            return sendSandboxLegacyRouteDisabled(res);
+          }
+        }
         const health = await this.kycService.healthCheck();
         res.json(health);
 
@@ -2306,13 +3189,14 @@ class KYCRoutes {
           });
         }
 
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        const maxAge = maxAgeHours ? parseInt(maxAgeHours) : 24;
         const [status, firstAccessPolicy, activeChallenge] = await Promise.all([
-          this.kycService.hasValidVerification(
-            userId,
-            maxAgeHours ? parseInt(maxAgeHours) : 24
-          ),
-          kycPolicyService.requiresFirstAccessLiveness(userId),
-          kycPolicyService.getStepUpChallenge(null, userId)
+          kycRuntime.trustService.readCanonicalCompatibilityVerification(userId, maxAge),
+          kycRuntime.namespace === 'sandbox'
+            ? Promise.resolve({ required: false, reason: null })
+            : kycRuntime.policyService.requiresFirstAccessLiveness(userId),
+          kycRuntime.policyService.getStepUpChallenge(null, userId)
         ]);
 
         res.json({
@@ -2358,6 +3242,11 @@ class KYCRoutes {
           });
         }
 
+        const kycRuntime = await resolveRequestKycRuntime(req, userId);
+        if (kycRuntime.namespace === 'sandbox') {
+          return sendSandboxLegacyRouteDisabled(res);
+        }
+
         const result = await this.kycService.invalidateVerificationCache(userId);
         res.json(result);
 
@@ -2382,9 +3271,6 @@ class KYCRoutes {
           });
         }
       }
-
-      const authorityUnavailable = sendRedisCriticalAuthorityUnavailable(res, error);
-      if (authorityUnavailable) return authorityUnavailable;
       
       logError(error, 'Erro não tratado:', { service: 'kyc-routes-routes' });
       res.status(500).json({

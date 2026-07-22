@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
@@ -99,14 +100,24 @@ function formatDocumentRequestMessage(result) {
 function resolveNextAction(item) {
   const status = String(item?.status || "pending").toLowerCase();
   if (item?.requiredUpdate || item?.requestStatus === "requested") return "Aguardar reenvio do motorista";
-  if (!item?.fileUrl) return "Pedir envio pelo app";
+  if (item?.contentAvailable !== true) return "Pedir reenvio pelo app";
   if (status === "pending") return "Abrir documento e decidir";
   if (status === "rejected") return "Aguardar correção";
   if (status === "approved") return "Sem ação";
   return "Revisar cadastro";
 }
 
-export default function DriversReviewQueuePage() {
+function DriversReviewQueuePageContent() {
+  const searchParams = useSearchParams();
+  const kycPersistenceScope = String(searchParams.get("kycScope") || "")
+    .trim()
+    .toLowerCase() === "sandbox"
+    ? "sandbox"
+    : "operational";
+  const kycRequestContext = useMemo(
+    () => ({ scope: kycPersistenceScope }),
+    [kycPersistenceScope],
+  );
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState({ total: 0, byStatus: { pending: 0, approved: 0, rejected: 0 } });
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, pages: 0 });
@@ -114,6 +125,7 @@ export default function DriversReviewQueuePage() {
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [busyKey, setBusyKey] = useState("");
+  const [openingKey, setOpeningKey] = useState("");
   const [filters, setFilters] = useState({
     documentType: "all",
     status: "pending",
@@ -130,7 +142,7 @@ export default function DriversReviewQueuePage() {
         ...filters,
         page: pagination.page,
         limit: pagination.limit,
-      });
+      }, kycRequestContext);
       const payload = response?.data || response || {};
       setItems(Array.isArray(payload?.items) ? payload.items : []);
       setSummary(payload?.summary || { total: 0, byStatus: { pending: 0, approved: 0, rejected: 0 } });
@@ -177,9 +189,9 @@ export default function DriversReviewQueuePage() {
     };
   }, [items, summary]);
   const reviewChecklist = useMemo(() => {
-    const missingFiles = items.filter((item) => !item?.fileUrl).length;
+    const missingFiles = items.filter((item) => item?.contentAvailable !== true).length;
     const waitingResubmit = items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length;
-    const readyToReview = items.filter((item) => String(item?.status || "pending").toLowerCase() === "pending" && item?.fileUrl).length;
+    const readyToReview = items.filter((item) => String(item?.status || "pending").toLowerCase() === "pending" && item?.contentAvailable === true).length;
     return [
       {
         label: "Prontos para decisão",
@@ -199,6 +211,33 @@ export default function DriversReviewQueuePage() {
     ];
   }, [items]);
 
+  const openDocument = async (item) => {
+    const driverId = String(item?.driverId || "").trim();
+    const documentType = String(item?.documentType || "").trim().toLowerCase();
+    if (!driverId || !documentType || item?.contentAvailable !== true) return;
+    const actionKey = `${driverId}:${documentType}:open`;
+
+    try {
+      setOpeningKey(actionKey);
+      setError("");
+      const file = await leafAPI.getDriverDocumentFile(driverId, documentType, kycRequestContext);
+      const objectUrl = URL.createObjectURL(file.blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err) {
+      setError(err?.message || "Não foi possível abrir o documento agora.");
+    } finally {
+      setOpeningKey("");
+    }
+  };
+
   const reviewDocument = async (item, action) => {
     const driverId = String(item?.driverId || "").trim();
     const documentType = String(item?.documentType || "").trim().toLowerCase();
@@ -211,7 +250,13 @@ export default function DriversReviewQueuePage() {
       setBusyKey(`${driverId}:${documentType}`);
       setError("");
       setActionMessage("");
-      await leafAPI.reviewDriverDocument(driverId, documentType, action, rejectionReason || "");
+      await leafAPI.reviewDriverDocument(
+        driverId,
+        documentType,
+        action,
+        rejectionReason || "",
+        kycRequestContext,
+      );
       setActionMessage(
         `${resolveDocumentLabel(documentType)} ${action === "approve" ? "aprovado" : "rejeitado"} com sucesso.`,
       );
@@ -239,7 +284,7 @@ export default function DriversReviewQueuePage() {
       const result = await leafAPI.requestDriverDocument(driverId, documentType, {
         reason,
         sendPush: true,
-      });
+      }, kycRequestContext);
       setActionMessage(formatDocumentRequestMessage(result));
       await load({ silent: true });
     } catch (err) {
@@ -260,6 +305,20 @@ export default function DriversReviewQueuePage() {
         </header>
 
         <AppNav />
+        <section className="card">
+          <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
+            {kycPersistenceScope === "sandbox" ? "Sandbox KYC" : "Operacional"}
+          </span>
+          <div className="filters" style={{ marginTop: 8 }}>
+            <Link
+              href={kycPersistenceScope === "sandbox"
+                ? "/drivers/review-queue"
+                : "/drivers/review-queue?kycScope=sandbox"}
+            >
+              {kycPersistenceScope === "sandbox" ? "Voltar à fila operacional" : "Abrir fila sandbox"}
+            </Link>
+          </div>
+        </section>
         {loading ? <LoadingState message="Carregando fila de revisão..." /> : null}
 
         <section className="grid grid-kpi">
@@ -396,6 +455,7 @@ export default function DriversReviewQueuePage() {
                       const badgeClass = statusTone[statusKey] || "status-warn";
                       const actionKey = `${item?.driverId || ""}:${item?.documentType || ""}`;
                       const requestKey = `${item?.driverId || ""}:${item?.documentType || ""}:request`;
+                      const openKey = `${item?.driverId || ""}:${item?.documentType || ""}:open`;
                       const isBusy = busyKey === actionKey || busyKey === requestKey;
                       return (
                         <tr key={rowKey}>
@@ -435,16 +495,13 @@ export default function DriversReviewQueuePage() {
                           </td>
                           <td>
                             <div className="actions-cell">
-                              <Link href={`/drivers/${item?.driverId}/documents`}>Abrir ficha</Link>
+                              <Link href={`/drivers/${item?.driverId}/documents${kycPersistenceScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>Abrir ficha</Link>
                               <button
                                 type="button"
-                                disabled={!item?.fileUrl}
-                                onClick={() => {
-                                  if (!item?.fileUrl) return;
-                                  window.open(item.fileUrl, "_blank", "noopener,noreferrer");
-                                }}
+                                disabled={item?.contentAvailable !== true || openingKey === openKey}
+                                onClick={() => openDocument(item)}
                               >
-                                Visualizar
+                                {openingKey === openKey ? "Abrindo..." : "Visualizar"}
                               </button>
                               <button
                                 type="button"
@@ -508,5 +565,13 @@ export default function DriversReviewQueuePage() {
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
       </main>
     </ProtectedRoute>
+  );
+}
+
+export default function DriversReviewQueuePage() {
+  return (
+    <Suspense fallback={<LoadingState message="Carregando fila de documentos..." />}>
+      <DriversReviewQueuePageContent />
+    </Suspense>
   );
 }

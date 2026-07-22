@@ -100,12 +100,23 @@ describe('KYCService liveness handling', () => {
       ok: false,
       status: 503,
       statusText: 'Service Unavailable',
-      json: async () => ({ error: 'AWS disabled' })
+      json: async () => ({
+        error: 'AWS disabled',
+        code: 'KYC_IDENTITY_RECOVERY_REQUIRED',
+        reviewCaseId: 'case-123',
+        reviewAvailable: true,
+      })
     });
 
     const result = await kycService.createAwsLivenessSession('driver-1');
     expect(result.success).toBe(false);
     expect(result.error).toContain('AWS disabled');
+    expect(result).toMatchObject({
+      code: 'KYC_IDENTITY_RECOVERY_REQUIRED',
+      status: 503,
+      reviewCaseId: 'case-123',
+      reviewAvailable: true,
+    });
     expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer firebase-id-token');
   });
 
@@ -125,10 +136,10 @@ describe('KYCService liveness handling', () => {
       })
     });
 
-    const result = await kycService.getAwsLivenessCredentials('driver-1');
+    const result = await kycService.getAwsLivenessCredentials('driver-1', 'session-1');
     expect(result.success).toBe(true);
     expect(global.fetch).toHaveBeenCalledWith(
-      'https://api.test/api/kyc/liveness/aws/credentials?userId=driver-1',
+      'https://api.test/api/kyc/liveness/aws/credentials?userId=driver-1&sessionId=session-1',
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
@@ -136,6 +147,17 @@ describe('KYCService liveness handling', () => {
         })
       })
     );
+  });
+
+  test('getAwsLivenessCredentials fails closed without a bound session', async () => {
+    const result = await kycService.getAwsLivenessCredentials('driver-1');
+
+    expect(result).toMatchObject({
+      success: false,
+      status: 400,
+      code: 'AWS_LIVENESS_CREDENTIALS_SESSION_BINDING_REQUIRED',
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   test('getAwsLivenessSessionResult should return error on timeout/fetch failure', async () => {
@@ -184,11 +206,13 @@ describe('KYCService liveness handling', () => {
 
     expect(result.success).toBe(true);
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [, options] = global.fetch.mock.calls[0];
-    const body = JSON.parse(options.body);
-    expect(body.userId).toBe('driver-1');
-    expect(body.deviceKyc.awsSessionId).toBe('sess-123');
-    expect(body.deviceKyc.aws.sessionId).toBe('sess-123');
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/kyc/verify-driver/server-side-selfie');
+    expect(options.body.parts).toEqual(expect.arrayContaining([
+      ['userId', 'driver-1'],
+      ['awsSessionId', 'sess-123'],
+    ]));
+    expect(options.body.parts.find(([key]) => key === 'currentImage')).toBeUndefined();
     expect(options.headers.Authorization).toBe('Bearer firebase-id-token');
   });
 
@@ -197,7 +221,11 @@ describe('KYCService liveness handling', () => {
       ok: false,
       status: 412,
       statusText: 'Precondition Failed',
-      json: async () => ({ error: 'Liveness obrigatório para concluir esta verificação' })
+      json: async () => ({
+        error: 'Liveness obrigatório para concluir esta verificação',
+        code: 'KYC_LIVENESS_REQUIRED',
+        evidenceId: 'evidence-123',
+      })
     });
 
     const result = await kycService.verifyDriver('driver-1', null, {
@@ -208,9 +236,14 @@ describe('KYCService liveness handling', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/Liveness obrigatório/);
+    expect(result).toMatchObject({
+      code: 'KYC_LIVENESS_REQUIRED',
+      status: 412,
+      evidenceId: 'evidence-123',
+    });
   });
 
-  test('verifyDriver should prefer device embedding after AWS liveness', async () => {
+  test('verifyDriver should never send an AWS session to the legacy device route', async () => {
     jest.resetModules();
     jest.doMock('../src/services/DeviceFaceEmbeddingService', () => ({
       __esModule: true,
@@ -244,18 +277,15 @@ describe('KYCService liveness handling', () => {
 
     expect(result.success).toBe(true);
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(global.fetch.mock.calls[0][0]).toBe('https://api.test/api/kyc/verify-driver/device');
-    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(body.deviceKyc).toMatchObject({
-      mode: 'mobile_arcface_w600k_r50_v1',
-      provider: 'mobile_face_embedding',
-      awsSessionId: 'sess-123',
-      embeddingFormat: 'float32-l2-normalized-512'
-    });
-    expect(body.deviceKyc.embedding).toHaveLength(512);
+    expect(global.fetch.mock.calls[0][0]).toBe('https://api.test/api/kyc/verify-driver/server-side-selfie');
+    expect(global.fetch.mock.calls[0][1].body.parts).toEqual(expect.arrayContaining([
+      ['userId', 'driver-1'],
+      ['awsSessionId', 'sess-123'],
+    ]));
+    expect(global.fetch.mock.calls[0][1].body.parts.find(([key]) => key === 'currentImage')).toBeUndefined();
   });
 
-  test('verifyDriver should fallback to server-side selfie when device embedding is unavailable after AWS', async () => {
+  test('verifyDriver canonical AWS flow should not depend on device embedding availability', async () => {
     jest.resetModules();
     jest.doMock('../src/services/DeviceFaceEmbeddingService', () => ({
       __esModule: true,
@@ -291,12 +321,8 @@ describe('KYCService liveness handling', () => {
       ['awsSessionId', 'sess-123'],
       ['challengeId', 'challenge-1'],
       ['requirement', 'LIVENESS_REQUIRED'],
-      ['currentImage', expect.objectContaining({
-        uri: 'file://selfie.jpg',
-        name: 'driver-selfie.jpg',
-        type: 'image/jpeg'
-      })]
     ]));
+    expect(global.fetch.mock.calls[0][1].body.parts.find(([key]) => key === 'currentImage')).toBeUndefined();
   });
 
   test('verifyDriverServerSideSelfie should send multipart selfie after AWS liveness', async () => {

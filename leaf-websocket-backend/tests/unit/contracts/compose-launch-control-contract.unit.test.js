@@ -116,7 +116,7 @@ describe('production compose launch-control contract', () => {
     expect(softReleaseProfileSource).toContain('KYC_STRICT_PRODUCTION_MODE=false');
     expect(
       composeSource.match(/- KYC_STRICT_PRODUCTION_MODE=\$\{KYC_STRICT_PRODUCTION_MODE:-false\}/g),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(
       gatewayScaleSource.match(/- KYC_STRICT_PRODUCTION_MODE=\$\{KYC_STRICT_PRODUCTION_MODE:-false\}/g),
     ).toHaveLength(2);

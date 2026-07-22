@@ -39,7 +39,11 @@ describe('firebase-storage-service', () => {
       getMetadata: jest.fn(async () => [{
         generation: '1784000000000000',
         size: '16',
-        contentType: 'application/pdf'
+        contentType: 'application/pdf',
+        metadata: {
+          driverId: 'driver-1',
+          documentType: 'cnh'
+        }
       }])
     };
     const bucket = { file: jest.fn(() => file) };
@@ -64,6 +68,10 @@ describe('firebase-storage-service', () => {
     );
     expect(result.buffer).toEqual(Buffer.from('approved-cnh-pdf'));
     expect(result.metadata.generation).toBe('1784000000000000');
+    expect(result.metadata.customMetadata).toEqual({
+      driverId: 'driver-1',
+      documentType: 'cnh'
+    });
   });
 
   test('fails closed when the downloaded Storage generation differs', async () => {

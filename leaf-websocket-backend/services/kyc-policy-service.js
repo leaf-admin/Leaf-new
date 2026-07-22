@@ -18,10 +18,16 @@ const IDENTITY_REVERIFY_REASON_CODE = 'passenger_photo_mismatch_report';
 const LIVENESS_ATTEMPTS_EXHAUSTED_REASON_CODE = 'aws_liveness_attempts_exhausted';
 const IDENTITY_REVERIFY_REQUIREMENT = 'IDENTITY_REVERIFICATION';
 const MANUAL_REVIEW_RETRY_SCOPE_PREFIX = 'manual_review_retry_';
+const ORPHAN_HOLD_RETRY_SCOPE_PREFIX = 'orphan_hold_retry_';
 
-function normalizeManualReviewRetryScope(value) {
+function normalizeAuthorizedRetryScope(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  return new RegExp(`^${MANUAL_REVIEW_RETRY_SCOPE_PREFIX}[a-z0-9_]{8,45}$`).test(normalized)
+  const acceptedPrefixes = [
+    MANUAL_REVIEW_RETRY_SCOPE_PREFIX,
+    ORPHAN_HOLD_RETRY_SCOPE_PREFIX
+  ];
+  return acceptedPrefixes.some((prefix) =>
+    new RegExp(`^${prefix}[a-z0-9_]{8,45}$`).test(normalized))
     ? normalized
     : null;
 }
@@ -1046,33 +1052,45 @@ class KYCPolicyService {
     }
 
     const nowIso = new Date().toISOString();
+    if (!this.redis || typeof this.redis.multi !== 'function') {
+      const error = new Error('Redis indisponivel para concluir challenge KYC');
+      error.code = 'KYC_CHALLENGE_CACHE_RESOLVE_FAILED';
+      throw error;
+    }
     const redisMulti = this.redis.multi();
     redisMulti.del(`${this.challengePrefix}${challenge.challengeId}`);
     redisMulti.del(`${this.activeChallengePrefix}${challenge.driverId}`);
-    await redisMulti.exec().catch(() => null);
+    const redisResult = await redisMulti.exec();
+    if (!redisResult) {
+      const error = new Error('Redis nao confirmou a conclusao do challenge KYC');
+      error.code = 'KYC_CHALLENGE_CACHE_RESOLVE_FAILED';
+      throw error;
+    }
 
     const firestore = firebaseConfig.getFirestore();
-    if (firestore) {
-      await firestore
-        .collection('kyc_stepup_challenges')
-        .doc(challenge.challengeId)
-        .set(
-          {
-            status: 'resolved',
-            resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
-            resolution: {
-              requirement: effectiveRequirement,
-              provider: verificationPayload.provider || verificationPayload.mode || 'unknown',
-              livenessPassed: this.isLivenessSatisfied(verificationPayload),
-              similarityScore: Number(verificationPayload.similarityScore || 0),
-              confidence: Number(verificationPayload.confidence || 0)
-            },
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          },
-          { merge: true }
-        )
-        .catch(() => null);
+    if (!firestore) {
+      const error = new Error('Firestore indisponivel para concluir challenge KYC');
+      error.code = 'KYC_CHALLENGE_STORE_RESOLVE_FAILED';
+      throw error;
     }
+    await firestore
+      .collection('kyc_stepup_challenges')
+      .doc(challenge.challengeId)
+      .set(
+        {
+          status: 'resolved',
+          resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+          resolution: {
+            requirement: effectiveRequirement,
+            provider: verificationPayload.provider || verificationPayload.mode || 'unknown',
+            livenessPassed: this.isLivenessSatisfied(verificationPayload),
+            similarityScore: Number(verificationPayload.similarityScore || 0),
+            confidence: Number(verificationPayload.confidence || 0)
+          },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
 
     await this.recordVerificationSuccess(challenge.driverId, {
       source: `challenge:${effectiveRequirement}`,
@@ -1425,7 +1443,7 @@ class KYCPolicyService {
     const firestore = firebaseConfig.getFirestore();
     const reason = payload.publicReason || IDENTITY_REVERIFY_PUBLIC_REASON;
     const reasonCode = payload.reasonCode || IDENTITY_REVERIFY_REASON_CODE;
-    const attemptScope = normalizeManualReviewRetryScope(payload.attemptScope);
+    const attemptScope = normalizeAuthorizedRetryScope(payload.attemptScope);
     const eventType = reasonCode === LIVENESS_ATTEMPTS_EXHAUSTED_REASON_CODE
       ? 'AWS_LIVENESS_ATTEMPTS_EXHAUSTED'
       : (status === 'deferred_until_trip_end'
@@ -1518,7 +1536,7 @@ class KYCPolicyService {
     const effectiveChallengeId = challengeId || this.buildIdentityReverificationChallengeId(driverId);
     const reason = payload.publicReason || IDENTITY_REVERIFY_PUBLIC_REASON;
     const reasonCode = payload.reasonCode || IDENTITY_REVERIFY_REASON_CODE;
-    const attemptScope = normalizeManualReviewRetryScope(payload.attemptScope);
+    const attemptScope = normalizeAuthorizedRetryScope(payload.attemptScope);
     const firestore = firebaseConfig.getFirestore();
 
     if (!this.redis || typeof this.redis.hset !== 'function') {
@@ -2150,7 +2168,35 @@ class KYCPolicyService {
           code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
         };
       }
-      return { success: true, driverId, status, recorded: true };
+      const challengeResolution = await this.resolveStepUpChallenge({
+        challengeId,
+        driverId,
+        requirement: IDENTITY_REVERIFY_REQUIREMENT,
+        verificationPayload: {
+          ...verificationResult,
+          awsLivenessPassed: true,
+          provider: verificationResult.provider
+            || verificationResult.comparisonProvider
+            || 'aws_rekognition_compare_faces'
+        }
+      });
+      if (challengeResolution?.success !== true) {
+        return {
+          success: true,
+          driverId,
+          recorded: false,
+          stale: true,
+          code: challengeResolution?.code || 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+      return {
+        success: true,
+        driverId,
+        status,
+        recorded: true,
+        challengeResolved: true,
+        resolvedAt: challengeResolution.resolvedAt
+      };
     }
 
     const firestore = firebaseConfig.getFirestore();

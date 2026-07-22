@@ -78,7 +78,8 @@ jest.mock('../../../services/fcm-service', () => jest.fn(() => ({
 })));
 
 jest.mock('../../../services/audit-service', () => ({
-  logEvent: (...args) => mockAuditLogEvent(...args)
+  logEvent: (...args) => mockAuditLogEvent(...args),
+  requireEvent: (...args) => mockAuditLogEvent(...args)
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -116,7 +117,16 @@ describe('dashboard-user-management-service', () => {
     const result = await service.updateUserOperationalStatus(
       'driver_1',
       { status: 'blocked', reason: 'Risco operacional' },
-      { operator: { id: 'admin_1', email: 'admin@leaf.test' } }
+      {
+        operator: { id: 'admin_1', email: 'admin@leaf.test' },
+        auditIntentId: 'audit_intent_1',
+        auditMutationId: 'document_request_1',
+        auditEnvelope: {
+          financialContext: { namespace: 'operational' },
+          financialNamespace: 'operational',
+          financialContextId: 'operational-test-context'
+        }
+      }
     );
 
     expect(result).toMatchObject({ success: true, userId: 'driver_1', userType: 'driver', status: 'blocked' });
@@ -299,7 +309,16 @@ describe('dashboard-user-management-service', () => {
       'driver_2',
       'cnh',
       { reason: 'Envie uma CNH mais recente' },
-      { operator: { id: 'admin_1', email: 'admin@leaf.test' } }
+      {
+        operator: { id: 'admin_1', email: 'admin@leaf.test' },
+        auditIntentId: 'audit_intent_1',
+        auditMutationId: 'document_request_1',
+        auditEnvelope: {
+          financialContext: { namespace: 'operational' },
+          financialNamespace: 'operational',
+          financialContextId: 'operational-test-context'
+        }
+      }
     );
 
     expect(result).toMatchObject({
@@ -317,6 +336,7 @@ describe('dashboard-user-management-service', () => {
             status: 'approved',
             requestStatus: 'requested',
             requiredUpdate: true,
+            requestAuditIntentId: 'audit_intent_1',
             requestReason: 'Envie uma CNH mais recente'
           })
         })

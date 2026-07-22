@@ -9,14 +9,15 @@ const {
   driverDocumentAnalysisQueue,
   ALLOWED_DRIVER_DOCUMENT_TYPES,
   sanitizeDocumentType,
-  recomputeDriverActivationStatus
+  recomputeDriverActivationStatus,
+  commitDocumentSubmissionState
 } = require('../services/driver-document-analysis-queue');
 const driverApplicationService = require('../services/driver-application-service');
 const canonicalDriverDocumentApprovalService = require('../services/canonical-driver-document-approval-service');
 const {
   sha256Buffer
 } = require('../services/canonical-driver-document-approval-service');
-const kycIdentityReviewWorkflowService = require('../services/kyc-identity-review-workflow-service');
+const { resolveKycRuntimeForUser } = require('../services/kyc-runtime-scope-service');
 
 const router = express.Router();
 
@@ -308,6 +309,146 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
   }
 }
 
+async function deleteActivationStorageObject(filePath, { driverId, reason } = {}) {
+  const safePath = String(filePath || '').trim();
+  if (!safePath) return false;
+  try {
+    const bucket = admin.storage().bucket();
+    await bucket.file(safePath).delete({ ignoreNotFound: true });
+    return true;
+  } catch (error) {
+    logStructured('warn', 'Falha ao remover upload de CNH que perdeu o guard KYC', {
+      service: 'driver-activation-routes',
+      driverId: driverId || null,
+      reason: reason || null,
+      error: error?.message || String(error)
+    });
+    return false;
+  }
+}
+
+function createCnhUploadVerificationLease({ kycRuntime, driverId, claim, res }) {
+  let released = false;
+  let lost = false;
+  let renewalInFlight = null;
+
+  const renew = async () => {
+    if (released || lost) return false;
+    if (renewalInFlight) return renewalInFlight;
+    renewalInFlight = Promise.resolve()
+      .then(() => kycRuntime.trust.renewVerificationWindow(claim))
+      .then((held) => {
+        if (held !== true) lost = true;
+        return held === true;
+      })
+      .catch(() => {
+        lost = true;
+        return false;
+      })
+      .finally(() => {
+        renewalInFlight = null;
+      });
+    return renewalInFlight;
+  };
+
+  const timer = setInterval(() => {
+    void renew();
+  }, 10 * 1000);
+  timer.unref?.();
+
+  const release = async () => {
+    if (released) return;
+    released = true;
+    clearInterval(timer);
+    await kycRuntime.trust.releaseVerificationWindow(claim).catch(() => null);
+  };
+  res.once('finish', () => { void release(); });
+  res.once('close', () => { void release(); });
+
+  return {
+    async assertHeld() {
+      if (lost || !(await renew())) {
+        const error = new Error('A janela segura para troca da CNH foi perdida');
+        error.code = 'KYC_VERIFICATION_LEASE_LOST';
+        throw error;
+      }
+      return true;
+    },
+    release
+  };
+}
+
+function sendCnhUploadGuardError(res, error) {
+  const permanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
+  const reviewHold = error?.code === 'KYC_IDENTITY_REVIEW_HOLD';
+  const verificationBusy = error?.code === 'KYC_VERIFICATION_IN_PROGRESS';
+  const leaseLost = error?.code === 'KYC_VERIFICATION_LEASE_LOST';
+  const statusCode = permanentlyBlocked || reviewHold
+    ? 423
+    : verificationBusy
+      ? 409
+      : 503;
+  return res.status(statusCode).json({
+    success: false,
+    code: error?.code || 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
+    message: permanentlyBlocked
+      ? 'Esta conta nao pode substituir a CNH.'
+      : reviewHold
+        ? 'A CNH nao pode ser alterada enquanto sua solicitacao de analise estiver em andamento.'
+        : verificationBusy
+          ? 'Outra validacao de identidade esta em andamento. Tente novamente depois.'
+          : leaseLost
+            ? 'Nao foi possivel concluir a troca da CNH com seguranca. Tente novamente.'
+            : 'Nao foi possivel validar a troca da CNH agora.'
+  });
+}
+
+const DOCUMENT_CONFLICT_CODES = new Set([
+  'DRIVER_DOCUMENT_MUTATION_BUSY',
+  'DRIVER_DOCUMENT_MUTATION_LEASE_LOST',
+  'DRIVER_ACTIVATION_DOCUMENT_BINDING_MISMATCH',
+  'DRIVER_DOCUMENT_SUBMISSION_BINDING_MISMATCH',
+  'KYC_VERIFICATION_IN_PROGRESS',
+  'KYC_VERIFICATION_LEASE_LOST'
+]);
+
+function publicDriverActivationFailure(error, operation = 'document') {
+  const code = String(error?.code || '').trim();
+  if (DOCUMENT_CONFLICT_CODES.has(code)) {
+    return {
+      status: 409,
+      code: 'DRIVER_ACTIVATION_DOCUMENT_CONFLICT',
+      message: 'Outro envio está sendo finalizado. Aguarde alguns instantes e tente novamente.',
+      retryable: true
+    };
+  }
+  if (code === 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED') {
+    return {
+      status: 503,
+      code,
+      message: 'Não foi possível armazenar o documento agora. Tente novamente.',
+      retryable: true
+    };
+  }
+  const copies = {
+    consent: 'Não foi possível atualizar sua autorização agora. Tente novamente.',
+    status: 'Não foi possível atualizar o status do cadastro agora.',
+    documents: 'Não foi possível carregar seus documentos agora.',
+    document: 'Não foi possível enviar o documento agora. Tente novamente.'
+  };
+  return {
+    status: 503,
+    code: `DRIVER_ACTIVATION_${String(operation || 'document').toUpperCase()}_UNAVAILABLE`,
+    message: copies[operation] || copies.document,
+    retryable: true
+  };
+}
+
+function sendPublicDriverActivationFailure(res, error, operation) {
+  const { status, ...payload } = publicDriverActivationFailure(error, operation);
+  return res.status(status).json({ success: false, ...payload });
+}
+
 router.post(
   '/api/drivers/me/activation/documents/:type',
   requireDriverAuth,
@@ -315,21 +456,31 @@ router.post(
     const documentType = sanitizeDocumentType(req.params.type);
     if (documentType !== 'cnh') return next();
     try {
-      await kycIdentityReviewWorkflowService.assertCnhUploadAllowed(req.user.uid);
+      const kycRuntime = await resolveKycRuntimeForUser({
+        userId: req.user.uid,
+        actor: { uid: req.user.uid, id: req.user.uid, role: 'driver' }
+      });
+      const verificationWindowClaim = await kycRuntime.trust
+        .claimVerificationWindow(req.user.uid, {
+          scope: 'canonical_cnh_replacement'
+        });
+      if (!verificationWindowClaim?.acquired) {
+        return sendCnhUploadGuardError(res, {
+          code: 'KYC_VERIFICATION_IN_PROGRESS'
+        });
+      }
+      const lease = createCnhUploadVerificationLease({
+        kycRuntime,
+        driverId: req.user.uid,
+        claim: verificationWindowClaim,
+        res
+      });
+      req.cnhUploadKycGuard = { kycRuntime, lease };
+      await lease.assertHeld();
+      await kycRuntime.workflow.assertCnhUploadAllowed(req.user.uid);
       return next();
     } catch (error) {
-      const permanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
-      const reviewHold = error?.code === 'KYC_IDENTITY_REVIEW_HOLD';
-      const statusCode = permanentlyBlocked || reviewHold ? 423 : 503;
-      return res.status(statusCode).json({
-        success: false,
-        code: error?.code || 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
-        message: permanentlyBlocked
-          ? 'Esta conta nao pode substituir a CNH.'
-          : reviewHold
-            ? 'A CNH nao pode ser alterada enquanto sua solicitacao de analise estiver em andamento.'
-            : 'Nao foi possivel validar a troca da CNH agora.'
-      });
+      return sendCnhUploadGuardError(res, error);
     }
   },
   (req, res, next) => {
@@ -340,7 +491,8 @@ router.post(
 
       return res.status(400).json({
         success: false,
-        message: err?.message || 'Falha no upload do documento.'
+        code: 'DRIVER_ACTIVATION_PDF_REQUIRED',
+        message: 'Envie um arquivo PDF válido de até 20 MB.'
       });
     });
   },
@@ -390,6 +542,26 @@ router.post(
         throw createActivationStorageError('Documento de ativação não foi armazenado corretamente.');
       }
 
+      if (documentType === 'cnh') {
+        try {
+          const guard = req.cnhUploadKycGuard;
+          if (!guard?.kycRuntime || !guard?.lease) {
+            const guardError = new Error('Guard canonico da troca de CNH indisponivel');
+            guardError.code = 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE';
+            throw guardError;
+          }
+          await guard.lease.assertHeld();
+          await guard.kycRuntime.workflow.assertCnhUploadAllowed(driverId);
+          await guard.lease.assertHeld();
+        } catch (guardError) {
+          await deleteActivationStorageObject(filePath, {
+            driverId,
+            reason: guardError?.code || 'cnh_guard_revalidation_failed'
+          });
+          throw guardError;
+        }
+      }
+
       const metadata = {
         fileName: sanitizeFilename(req.file.originalname || `${documentType}.pdf`),
         fileType: 'application/pdf',
@@ -426,28 +598,32 @@ router.post(
         ...metadata
       };
 
-      await db.ref().update({
-        [`driver_activation/${driverId}/documents/${documentType}`]: activationDocPayload,
-        [`driver_activation/${driverId}/documents_history/${submissionId}`]: activationDocPayload,
-        [`driver_activation/${driverId}/updatedAt`]: nowIso,
-        [`users/${driverId}/documents/${documentType}`]: {
-          type: documentType,
-          status: 'pending',
-          analysisStatus: 'in_review',
-          analysisReason: '',
-          reviewedAt: null,
-          updatedAt: nowIso,
-          uploadedAt: nowIso,
-          fileName: metadata.fileName,
-          fileType: metadata.fileType,
-          fileSize: metadata.fileSize,
-          fileUrl,
-          filePath,
-          fileUrlExpiresAt,
-          documentSha256,
-          storageGeneration,
-          lastSubmissionId: submissionId
-        }
+      const userDocumentPayload = {
+        type: documentType,
+        status: 'pending',
+        analysisStatus: 'in_review',
+        analysisReason: '',
+        reviewedAt: null,
+        updatedAt: nowIso,
+        uploadedAt: nowIso,
+        fileName: metadata.fileName,
+        fileType: metadata.fileType,
+        fileSize: metadata.fileSize,
+        fileUrl,
+        filePath,
+        fileUrlExpiresAt,
+        documentSha256,
+        storageGeneration,
+        lastSubmissionId: submissionId
+      };
+
+      await commitDocumentSubmissionState({
+        db,
+        driverId,
+        documentType,
+        activationDocument: activationDocPayload,
+        userDocument: userDocumentPayload,
+        updatedAt: nowIso
       });
       try {
         await driverApplicationService.syncDriverApplication(driverId, {
@@ -510,6 +686,18 @@ router.post(
         }
       });
     } catch (error) {
+      if (
+        String(req.params?.type || '').trim().toLowerCase() === 'cnh'
+        && [
+          'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK',
+          'KYC_IDENTITY_REVIEW_HOLD',
+          'KYC_VERIFICATION_IN_PROGRESS',
+          'KYC_VERIFICATION_LEASE_LOST',
+          'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE'
+        ].includes(error?.code)
+      ) {
+        return sendCnhUploadGuardError(res, error);
+      }
       if (error?.code === 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED') {
         logStructured('warn', 'Upload de documento de ativação rejeitado antes de persistência', {
           service: 'driver-activation-routes',
@@ -518,12 +706,7 @@ router.post(
           error: error.message
         });
 
-        return res.status(503).json({
-          success: false,
-          code: 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED',
-          message: error.message,
-          retryable: true
-        });
+        return sendPublicDriverActivationFailure(res, error, 'document');
       }
 
       logError(error, 'Erro ao enviar documento de ativação', {
@@ -531,10 +714,7 @@ router.post(
         driverId: req.user?.uid || null,
         documentType: req.params?.type || null
       });
-      return res.status(500).json({
-        success: false,
-        message: `Erro ao processar documento: ${error.message}`
-      });
+      return sendPublicDriverActivationFailure(res, error, 'document');
     }
   }
 );
@@ -572,10 +752,7 @@ router.post('/api/drivers/me/activation/consent/background-check', requireDriver
       driverId: req.user?.uid || null
     });
 
-    return res.status(500).json({
-      success: false,
-      message: `Erro ao atualizar consentimento: ${error.message}`
-    });
+    return sendPublicDriverActivationFailure(res, error, 'consent');
   }
 });
 
@@ -594,10 +771,7 @@ router.get('/api/drivers/me/activation/status', requireDriverAuth, async (req, r
       driverId: req.user?.uid || null
     });
 
-    return res.status(500).json({
-      success: false,
-      message: `Erro ao obter status de ativação: ${error.message}`
-    });
+    return sendPublicDriverActivationFailure(res, error, 'status');
   }
 });
 
@@ -629,10 +803,7 @@ router.get('/api/drivers/me/activation/documents', requireDriverAuth, async (req
       driverId: req.user?.uid || null
     });
 
-    return res.status(500).json({
-      success: false,
-      message: `Erro ao listar documentos de ativação: ${error.message}`
-    });
+    return sendPublicDriverActivationFailure(res, error, 'documents');
   }
 });
 

@@ -26,9 +26,9 @@ const h3VisualPolicyService = require('../services/h3-visual-policy-service');
 const financialReconciliationDashboardService = require('../services/financial-reconciliation-dashboard-service');
 const FinancialLedgerService = require('../services/financial-ledger-service');
 const auditService = require('../services/audit-service');
-const kycIdentityReviewWorkflowService = require('../services/kyc-identity-review-workflow-service');
-const kycFailedBiometricEvidenceService = require('../services/kyc-failed-biometric-evidence-service');
 const kycPolicyService = require('../services/kyc-policy-service');
+const kycFailedBiometricEvidenceService = require('../services/kyc-failed-biometric-evidence-service');
+const kycRuntimeScopeService = require('../services/kyc-runtime-scope-service');
 const canonicalDriverDocumentApprovalService = require('../services/canonical-driver-document-approval-service');
 const FirebaseStorageService = require('../services/firebase-storage-service');
 const CnhFaceBiometricService = require('../services/cnh-face-biometric-service');
@@ -39,7 +39,9 @@ const {
   assertDriverIdentityNotPermanentlyBlocked
 } = require('../services/dashboard-user-management-service');
 const {
-  recomputeDriverActivationStatus
+  recomputeDriverActivationStatus,
+  runWithDocumentMutationLease,
+  runWithCurrentDocumentBinding
 } = require('../services/driver-document-analysis-queue');
 const {
   buildRecentRideActivities,
@@ -76,11 +78,21 @@ const DASHBOARD_SUPPORT_ROLES = ['admin', 'super-admin', 'manager', 'support', '
 const DASHBOARD_FINANCIAL_ROLES = ['admin', 'super-admin', 'manager'];
 const DASHBOARD_MONITORING_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const DASHBOARD_KYC_REVIEW_ROLES = ['admin', 'super-admin', 'manager'];
+const DASHBOARD_KYC_SANDBOX_PERMISSION = 'support:sandbox';
+const DASHBOARD_KYC_SCOPES = new Set(['operational', 'sandbox']);
+const DASHBOARD_DIRECT_UPLOAD_DOCUMENT_TYPES = new Set(['antecedentes_criminais']);
+const DASHBOARD_REVIEWABLE_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
+const DASHBOARD_DOCUMENT_PROVIDER_URL_KEYS = new Set([
+  'fileUrl',
+  'fileUrlExpiresAt',
+  'url',
+  'downloadUrl',
+  'front',
+  'back',
+  'registration',
+  'insurance'
+]);
 const KYC_PERMANENT_BLOCK_CONFIRMATION = 'CONFIRMAR FRAUDE E BLOQUEAR';
-const DRIVER_DOCUMENT_SIGNED_URL_TTL_MS = Math.max(
-  5 * 60 * 1000,
-  Number.parseInt(process.env.DRIVER_DOCUMENT_SIGNED_URL_TTL_MS || `${24 * 60 * 60 * 1000}`, 10) || 24 * 60 * 60 * 1000
-);
 const LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED = false;
 const DASHBOARD_JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
   context: 'dashboard-routes'
@@ -107,6 +119,353 @@ function getDashboardKycReviewer(req) {
   };
 }
 
+function dashboardKycBoundaryError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function resolveRequestedDashboardKycScope(req) {
+  const rawSignals = [
+    req.get?.('X-Leaf-KYC-Scope'),
+    req.query?.scope,
+    req.query?.persistenceScope,
+    req.body?.scope,
+    req.body?.persistenceScope
+  ].flatMap((value) => Array.isArray(value) ? value : [value]);
+  const signals = rawSignals
+    .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
+    .map((value) => String(value).trim().toLowerCase());
+
+  if (signals.some((scope) => !DASHBOARD_KYC_SCOPES.has(scope))) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_SCOPE_INVALID',
+      'Escopo KYC do dashboard invalido.'
+    );
+  }
+  const distinctScopes = [...new Set(signals)];
+  if (distinctScopes.length > 1) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_SCOPE_CONFLICT',
+      'Os sinais de escopo KYC do dashboard sao divergentes.'
+    );
+  }
+  return distinctScopes[0] || 'operational';
+}
+
+function canAccessDashboardKycSandbox(user = {}) {
+  if (user.role === 'super-admin') return true;
+  const permissions = Array.isArray(user.permissions)
+    ? user.permissions.map((permission) => String(permission || '').trim().toLowerCase())
+    : [];
+  return permissions.includes('*') || permissions.includes(DASHBOARD_KYC_SANDBOX_PERMISSION);
+}
+
+async function resolveDashboardKycRuntime(req, driverId) {
+  const requestedScope = resolveRequestedDashboardKycScope(req);
+  const runtime = await kycRuntimeScopeService.resolveForUser({
+    userId: String(driverId || '').trim()
+  });
+  const authoritativeScope = String(runtime?.scope?.namespace || '').trim().toLowerCase();
+  if (!DASHBOARD_KYC_SCOPES.has(authoritativeScope)) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_RUNTIME_UNAVAILABLE',
+      'O runtime KYC autoritativo nao esta disponivel.'
+    );
+  }
+  if (requestedScope === 'sandbox' && !canAccessDashboardKycSandbox(req.user)) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_SANDBOX_ACCESS_DENIED',
+      'O acesso ao KYC sandbox exige permissao especifica.'
+    );
+  }
+  if (authoritativeScope !== requestedScope) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_SCOPE_USER_MISMATCH',
+      'O escopo KYC solicitado diverge da classificacao autoritativa do motorista.'
+    );
+  }
+  if (
+    authoritativeScope === 'sandbox' &&
+    runtime?.scope?.financialContext?.testUserSandbox !== true
+  ) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_SANDBOX_USER_MISMATCH',
+      'O motorista nao possui classificacao sandbox autoritativa.'
+    );
+  }
+  if (!runtime.workflow || !runtime.evidence || !runtime.trust) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_RUNTIME_UNAVAILABLE',
+      'O runtime KYC autoritativo nao esta disponivel.'
+    );
+  }
+  return runtime;
+}
+
+function isDashboardCnhMutationGuardError(error) {
+  return [
+    'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK',
+    'KYC_IDENTITY_REVIEW_HOLD',
+    'KYC_VERIFICATION_IN_PROGRESS',
+    'KYC_VERIFICATION_LEASE_LOST',
+    'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
+    'KYC_DASHBOARD_RUNTIME_UNAVAILABLE'
+  ].includes(error?.code);
+}
+
+function sendDashboardCnhMutationGuardError(res, error) {
+  const permanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
+  const reviewHold = error?.code === 'KYC_IDENTITY_REVIEW_HOLD';
+  const verificationBusy = error?.code === 'KYC_VERIFICATION_IN_PROGRESS';
+  const leaseLost = error?.code === 'KYC_VERIFICATION_LEASE_LOST';
+  const statusCode = permanentlyBlocked || reviewHold
+    ? 423
+    : verificationBusy
+      ? 409
+      : 503;
+
+  return res.status(statusCode).json({
+    success: false,
+    code: error?.code || 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
+    message: permanentlyBlocked || reviewHold
+      ? 'A CNH não pode ser alterada enquanto a identidade está bloqueada ou em análise.'
+      : verificationBusy
+        ? 'Outra validação de identidade está em andamento. Tente novamente depois.'
+        : leaseLost
+          ? 'Não foi possível concluir a alteração da CNH com segurança. Tente novamente.'
+          : 'Não foi possível validar a alteração da CNH agora.'
+  });
+}
+
+function createDashboardCnhMutationVerificationLease({
+  kycRuntime,
+  claim,
+  res
+}) {
+  let released = false;
+  let lost = false;
+  let renewalInFlight = null;
+
+  const renew = async () => {
+    if (released || lost) return false;
+    if (renewalInFlight) return renewalInFlight;
+    renewalInFlight = Promise.resolve()
+      .then(() => kycRuntime.trust.renewVerificationWindow(claim))
+      .then((held) => {
+        if (held !== true) lost = true;
+        return held === true;
+      })
+      .catch(() => {
+        lost = true;
+        return false;
+      })
+      .finally(() => {
+        renewalInFlight = null;
+      });
+    return renewalInFlight;
+  };
+
+  const timer = setInterval(() => {
+    void renew();
+  }, 10 * 1000);
+  timer.unref?.();
+
+  const release = async () => {
+    if (released) return;
+    released = true;
+    clearInterval(timer);
+    await kycRuntime.trust.releaseVerificationWindow(claim).catch(() => null);
+  };
+  res.once('finish', () => { void release(); });
+  res.once('close', () => { void release(); });
+
+  return {
+    async assertHeld() {
+      if (lost || !(await renew())) {
+        const error = new Error('A janela segura para alteração da CNH foi perdida');
+        error.code = 'KYC_VERIFICATION_LEASE_LOST';
+        throw error;
+      }
+      return true;
+    },
+    release
+  };
+}
+
+async function requireDashboardCnhMutationWindow(req, res, next) {
+  const documentType = sanitizeDocumentType(req.params?.documentType);
+  const driverId = String(req.params?.driverId || '').trim();
+  let kycRuntime = null;
+  let claim = null;
+  let lease = null;
+  try {
+    kycRuntime = await resolveDashboardKycRuntime(req, driverId);
+    req.dashboardDocumentKycRuntime = kycRuntime;
+    if (documentType !== 'cnh') return next();
+    if (
+      typeof kycRuntime.trust.claimVerificationWindow !== 'function'
+      || typeof kycRuntime.trust.renewVerificationWindow !== 'function'
+      || typeof kycRuntime.trust.releaseVerificationWindow !== 'function'
+    ) {
+      throw dashboardKycBoundaryError(
+        'KYC_DASHBOARD_RUNTIME_UNAVAILABLE',
+        'A janela segura para alteração da CNH não está disponível.'
+      );
+    }
+
+    claim = await kycRuntime.trust.claimVerificationWindow(driverId, {
+      scope: 'dashboard_canonical_cnh_review'
+    });
+    if (!claim?.acquired) {
+      return sendDashboardCnhMutationGuardError(res, {
+        code: 'KYC_VERIFICATION_IN_PROGRESS'
+      });
+    }
+
+    lease = createDashboardCnhMutationVerificationLease({
+      kycRuntime,
+      claim,
+      res
+    });
+    req.dashboardCnhMutationGuard = {
+      driverId,
+      kycRuntime,
+      lease
+    };
+    await lease.assertHeld();
+    await kycRuntime.workflow.assertCnhUploadAllowed(driverId);
+    await lease.assertHeld();
+    return next();
+  } catch (error) {
+    if (!lease && claim?.acquired && kycRuntime?.trust) {
+      await kycRuntime.trust.releaseVerificationWindow(claim).catch(() => null);
+    }
+    if (documentType === 'cnh') return sendDashboardCnhMutationGuardError(res, error);
+    const denied = String(error?.code || '').includes('ACCESS_DENIED');
+    const mismatch = String(error?.code || '').includes('MISMATCH') || String(error?.code || '').includes('CONFLICT');
+    return res.status(denied ? 403 : mismatch ? 409 : 503).json({
+      success: false,
+      code: error?.code || 'KYC_DASHBOARD_RUNTIME_UNAVAILABLE',
+      message: denied
+        ? 'Você não tem permissão para acessar documentos do ambiente de testes.'
+        : mismatch
+          ? 'Este cadastro pertence a outro ambiente. Abra a fila correspondente e tente novamente.'
+          : 'Não foi possível validar o ambiente deste cadastro agora.'
+    });
+  }
+}
+
+function restrictDashboardDirectDocumentUpload(req, res, next) {
+  const documentType = sanitizeDocumentType(req.params?.documentType);
+  if (DASHBOARD_DIRECT_UPLOAD_DOCUMENT_TYPES.has(documentType)) return next();
+  return res.status(409).json({
+    success: false,
+    code: 'DRIVER_ACTIVATION_DOCUMENT_UPLOAD_DRIVER_REQUIRED',
+    message: 'CNH e CRLV só podem ser enviados pelo próprio motorista no fluxo seguro de documentos do app.'
+  });
+}
+
+async function assertDashboardCnhMutationWindowHeld(req, driverId) {
+  const guard = req.dashboardCnhMutationGuard;
+  if (
+    !guard?.kycRuntime
+    || !guard?.lease
+    || guard.driverId !== String(driverId || '').trim()
+  ) {
+    throw dashboardKycBoundaryError(
+      'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
+      'A proteção da alteração da CNH não está disponível.'
+    );
+  }
+  await guard.lease.assertHeld();
+  await guard.kycRuntime.workflow.assertCnhUploadAllowed(driverId);
+  await guard.lease.assertHeld();
+  return true;
+}
+
+function dashboardKycPersistenceContext(runtime) {
+  return runtime?.persistenceContext || runtime?.scope?.financialContext || null;
+}
+
+function dashboardKycAuditEnvelope(runtime) {
+  const financialContext = dashboardKycPersistenceContext(runtime);
+  if (
+    !financialContext ||
+    !runtime?.scope?.namespace ||
+    !(runtime.scope.financialContextId || financialContext.contextId)
+  ) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_RUNTIME_UNAVAILABLE',
+      'O contexto de auditoria KYC não está disponível.'
+    );
+  }
+  return {
+    financialContext,
+    financialNamespace: runtime.scope.namespace,
+    financialContextId: runtime.scope.financialContextId || financialContext.contextId,
+    providerEnvironment: financialContext.providerEnvironment,
+    paymentProfileId: financialContext.paymentProfileId || null,
+    testUserSandbox: financialContext.testUserSandbox === true
+  };
+}
+
+function requireDashboardKycScopedPolicy(runtime) {
+  const policy = runtime?.policyService || runtime?.policy || null;
+  if (
+    runtime?.capabilities?.challengePolicyMutations !== true ||
+    !policy ||
+    (
+      typeof policy.applyIdentityReverificationGate !== 'function' &&
+      typeof policy.getOrCreateStepUpChallenge !== 'function'
+    )
+  ) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_SANDBOX_POLICY_UNAVAILABLE',
+      'Esta acao permanece bloqueada no sandbox ate que a politica KYC tenha isolamento proprio.'
+    );
+  }
+  if (
+    runtime.scope.namespace === 'sandbox' &&
+    (
+      policy.scope?.namespace !== 'sandbox' ||
+      policy.scope?.financialContextId !== runtime.scope.financialContextId
+    )
+  ) {
+    throw dashboardKycBoundaryError(
+      'KYC_DASHBOARD_SANDBOX_POLICY_SCOPE_MISMATCH',
+      'A politica KYC nao pertence ao mesmo contexto sandbox do motorista.'
+    );
+  }
+  return policy;
+}
+
+async function applyDashboardIdentityReverificationGate(runtime, input = {}) {
+  const policy = requireDashboardKycScopedPolicy(runtime);
+  if (typeof policy.applyIdentityReverificationGate === 'function') {
+    return policy.applyIdentityReverificationGate(input);
+  }
+
+  const payload = input.payload && typeof input.payload === 'object'
+    ? input.payload
+    : {};
+  return policy.getOrCreateStepUpChallenge({
+    driverId: input.driverId,
+    requirement: 'IDENTITY_REVERIFICATION',
+    score: 100,
+    signals: ['manual_identity_review'],
+    source: payload.reasonCode || 'dashboard_identity_review',
+    metadata: {
+      reporterId: input.reporterId || null,
+      reporterType: input.reporterType || null,
+      supportTicketId: input.supportTicketId || null,
+      publicReason: payload.publicReason || null,
+      selectedOptions: Array.isArray(payload.selectedOptions) ? payload.selectedOptions : [],
+      attemptScope: payload.attemptScope || null
+    }
+  });
+}
+
 function normalizeKycReviewReason(value) {
   const reason = String(value || '').trim();
   if (reason.length < 20 || reason.length > 1000) {
@@ -121,11 +480,12 @@ function statusForKycReviewError(error) {
   const code = String(error?.code || '');
   if (code.includes('NOT_FOUND')) return 404;
   if (code.includes('EXPIRED')) return 410;
-  if (code.includes('ADMIN_REQUIRED')) return 403;
+  if (code.includes('ADMIN_REQUIRED') || code.includes('ACCESS_DENIED')) return 403;
   if (code.includes('PERMANENT_BLOCK')) return 423;
+  if (code.includes('SCOPE_CONFLICT') || code.includes('USER_MISMATCH')) return 409;
   if (code.includes('ACTIVE_TRIP') || code.includes('DEFERRED_ACTIVE_TRIP')) return 409;
   if (code.includes('BINDING') || code.includes('CONFLICT') || code.includes('TRANSITION') || code.includes('UNDER_REVIEW')) return 409;
-  if (code.includes('UNAVAILABLE') || code.includes('STORE_')) return 503;
+  if (code.includes('UNAVAILABLE') || code.includes('STORE_') || code.includes('POLICY_')) return 503;
   if (code.includes('INVALID') || code.includes('REQUIRED')) return 400;
   return 500;
 }
@@ -140,6 +500,20 @@ function respondKycReviewError(res, error) {
 
 function sha256Buffer(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function projectDashboardDocumentMetadata(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => projectDashboardDocumentMetadata(item));
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.entries(value).reduce((projection, [key, item]) => {
+    if (!DASHBOARD_DOCUMENT_PROVIDER_URL_KEYS.has(key)) {
+      projection[key] = projectDashboardDocumentMetadata(item);
+    }
+    return projection;
+  }, {});
 }
 
 async function applyConfirmedIdentityFraudBlock({ driverId, enforcement, reviewer, reason }) {
@@ -189,56 +563,6 @@ async function applyConfirmedIdentityFraudBlock({ driverId, enforcement, reviewe
       error: error?.message || String(error)
     });
   }
-}
-
-async function applyFalsePositiveRetryAuthorization({
-  driverId,
-  caseId,
-  ticketId,
-  evidenceBindingHash,
-  reviewer
-}) {
-  const firestore = firebaseConfig?.getFirestore?.();
-  if (!firestore) {
-    const error = new Error('Firestore indisponivel para autorizar nova tentativa.');
-    error.code = 'KYC_IDENTITY_REVIEW_STORE_UNAVAILABLE';
-    throw error;
-  }
-  const ref = firestore.collection('driver_identity_enforcement').doc(driverId);
-  const nowIso = new Date().toISOString();
-  return firestore.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(ref);
-    const current = snapshot.exists ? (snapshot.data() || {}) : {};
-    if (
-      current.active === true &&
-      (current.permanent === true || String(current.status || '').toUpperCase() === 'PERMANENTLY_BLOCKED')
-    ) {
-      const error = new Error('A identidade possui bloqueio permanente confirmado.');
-      error.code = 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
-      throw error;
-    }
-    transaction.set(ref, {
-      schemaVersion: 1,
-      driverId,
-      status: 'FALSE_POSITIVE_RETRY_AUTHORIZED',
-      active: true,
-      permanent: false,
-      reasonCode: 'FALSE_POSITIVE_REVIEW',
-      caseId,
-      ticketId,
-      evidenceBindingHash,
-      retryAllowed: true,
-      retryAttempts: 1,
-      identityApproved: false,
-      decidedBy: {
-        uid: reviewer.uid,
-        email: reviewer.email
-      },
-      decidedAt: nowIso,
-      updatedAt: nowIso
-    }, { merge: false });
-    return { status: 'FALSE_POSITIVE_RETRY_AUTHORIZED', updatedAt: nowIso };
-  });
 }
 
 function emitDriverActivationUnlockedEvent(req, driverId, payload = {}) {
@@ -842,41 +1166,96 @@ router.patch('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERAT
 });
 
 // 🚗 Driver Applications - SISTEMA COMPLETO DE APROVAÇÃO
-router.get('/api/drivers/applications', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.get('/api/drivers/applications', authenticateJWT, requireRole(DASHBOARD_KYC_REVIEW_ROLES), async (req, res) => {
   try {
-    const response = await driverApplicationService.listApplications(req.query || {});
+    const requestedScope = resolveRequestedDashboardKycScope(req);
+    if (requestedScope === 'sandbox' && !canAccessDashboardKycSandbox(req.user)) {
+      return res.status(403).json({
+        success: false,
+        code: 'KYC_DASHBOARD_SANDBOX_ACCESS_DENIED',
+        message: 'O acesso ao KYC sandbox exige permissão específica.'
+      });
+    }
+    const response = await driverApplicationService.listApplications({
+      ...(req.query || {}),
+      persistenceScope: requestedScope
+    });
     res.json(response);
   } catch (error) {
     logError(error, 'Erro ao buscar aplicações:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(500).json({
+      success: false,
+      code: 'DRIVER_APPLICATIONS_UNAVAILABLE',
+      message: 'Não foi possível carregar os motoristas agora.'
+    });
   }
 });
 
+// Canonical metadata-only detail shadows the legacy provider-URL route registered later.
+router.get(
+  '/api/drivers/applications/:id',
+  authenticateJWT,
+  requireRole(DASHBOARD_KYC_REVIEW_ROLES),
+  async (req, res) => {
+    try {
+      const driverId = String(req.params.id || '').trim();
+      const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
+      const application = await driverApplicationService.getDriverApplication(driverId, {
+        refresh: true,
+        includeRatings: true
+      });
+      if (!application) {
+        return res.status(404).json({
+          success: false,
+          message: 'Motorista não encontrado.'
+        });
+      }
+      await auditService.requireEvent({
+        userId: req.user?.id || req.user?.userId || req.user?.email,
+        action: 'driver.application_metadata_view',
+        resource: 'driver_application',
+        severity: 'INFO',
+        details: {
+          driverId,
+          actorEmail: req.user?.email || null,
+          actorRole: req.user?.role || null
+        },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        success: true,
+        ...dashboardKycAuditEnvelope(kycRuntime)
+      });
+      return res.json(application);
+    } catch (error) {
+      logError(error, 'Erro ao buscar aplicação canônica do motorista', {
+        service: 'dashboard-routes',
+        driverId: req.params.id
+      });
+      return respondKycReviewError(res, error);
+    }
+  }
+);
+
 // 📋 Aprovar/Rejeitar Documento Específico - NOVO SISTEMA
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.post('/api/drivers/:driverId/documents/:documentType/review', authenticateJWT, requireRole(DASHBOARD_KYC_REVIEW_ROLES), async (req, res) => {
-  try {
-    const { driverId, documentType } = req.params;
-    const { action, rejectionReason } = req.body; // action: 'approve' | 'reject'
+router.post(
+  '/api/drivers/:driverId/documents/:documentType/review',
+  authenticateJWT,
+  requireRole(DASHBOARD_KYC_REVIEW_ROLES),
+  requireDashboardCnhMutationWindow,
+  async (req, res) => {
+    try {
+      const { driverId, documentType } = req.params;
+      const { action, rejectionReason } = req.body; // action: 'approve' | 'reject'
     const reviewedBy = req.user.id; // ✅ ID do admin logado
     const normalizedDocumentType = sanitizeDocumentType(documentType);
 
-    if (normalizedDocumentType === 'cnh') {
-      try {
-        await kycIdentityReviewWorkflowService.assertCnhUploadAllowed(driverId);
-      } catch (guardError) {
-        const blocked = [
-          'KYC_IDENTITY_REVIEW_HOLD',
-          'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK'
-        ].includes(guardError?.code);
-        return res.status(blocked ? 423 : 503).json({
-          success: false,
-          code: guardError?.code || 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
-          message: blocked
-            ? 'A CNH não pode ser alterada enquanto a identidade está bloqueada ou em análise.'
-            : 'Não foi possível validar a alteração da CNH agora.'
-        });
-      }
+    if (!DASHBOARD_REVIEWABLE_DOCUMENT_TYPES.has(normalizedDocumentType)) {
+      return res.status(400).json({
+        success: false,
+        code: 'DRIVER_DOCUMENT_TYPE_NOT_REVIEWABLE',
+        message: 'Este tipo de documento não pode ser revisado por esta tela.'
+      });
     }
 
     if (!['approve', 'reject'].includes(action)) {
@@ -908,120 +1287,192 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
           });
         }
 
-        const existingDocument = documentSnapshot.val() || {};
+        let existingDocument = documentSnapshot.val() || {};
         const nextStatus = action === 'approve' ? 'approved' : 'rejected';
         const canonicalActivationStatus = action === 'approve' ? 'approved' : 'failed';
-        const reviewAtIso = new Date().toISOString();
+        let reviewAtIso = null;
+        let reviewData = null;
         let canonicalReviewPending = null;
+        const expectedReviewBinding = {
+          submissionId: existingDocument.lastSubmissionId || existingDocument.submissionId,
+          filePath: existingDocument.filePath,
+          documentSha256: existingDocument.documentSha256,
+          storageGeneration: existingDocument.storageGeneration
+        };
+        const reviewMutationId = `document_review_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+        const reviewAuditEnvelope = dashboardKycAuditEnvelope(req.dashboardDocumentKycRuntime);
+        const reviewAuditIntent = await auditService.requireEvent({
+          userId: reviewedBy,
+          action: 'driver.document_review_intent',
+          resource: 'driver_document',
+          severity: action === 'reject' ? 'WARNING' : 'INFO',
+          details: {
+            mutationId: reviewMutationId,
+            driverId,
+            documentType: normalizedDocumentType,
+            submissionId: expectedReviewBinding.submissionId || null,
+            action,
+            reviewedByEmail: req.user.email || null
+          },
+          ip: req.ip,
+          userAgent: req.headers['user-agent'] || 'unknown',
+          success: true,
+          ...reviewAuditEnvelope
+        });
 
-        if (normalizedDocumentType === 'cnh') {
-          try {
+        const applyReviewMutation = async ({
+          mutationDb,
+          documentLease = null,
+          currentUserDocument = existingDocument
+        }) => {
+          const documentForReview = currentUserDocument || {};
+
+          if (normalizedDocumentType === 'crlv') {
+            await assertCurrentCrlvReviewBinding({
+              db: mutationDb,
+              driverId,
+              document: documentForReview,
+              action
+            });
+          }
+
+          if (normalizedDocumentType === 'cnh') {
+            await assertDashboardCnhMutationWindowHeld(req, driverId);
             await canonicalDriverDocumentApprovalService.assertReviewableBinding({
               driverId,
               documentType: normalizedDocumentType,
-              submissionId: existingDocument.lastSubmissionId || existingDocument.submissionId,
-              filePath: existingDocument.filePath,
-              documentSha256: existingDocument.documentSha256,
-              storageGeneration: existingDocument.storageGeneration
+              submissionId: documentForReview.lastSubmissionId || documentForReview.submissionId,
+              filePath: documentForReview.filePath,
+              documentSha256: documentForReview.documentSha256,
+              storageGeneration: documentForReview.storageGeneration
             });
             canonicalReviewPending = await canonicalDriverDocumentApprovalService.beginManualReview({
               driverId,
               documentType: normalizedDocumentType,
-              submissionId: existingDocument.lastSubmissionId || existingDocument.submissionId,
-              filePath: existingDocument.filePath,
-              documentSha256: existingDocument.documentSha256,
-              storageGeneration: existingDocument.storageGeneration,
-              analysisStatus: existingDocument.analysisStatus,
+              submissionId: documentForReview.lastSubmissionId || documentForReview.submissionId,
+              filePath: documentForReview.filePath,
+              documentSha256: documentForReview.documentSha256,
+              storageGeneration: documentForReview.storageGeneration,
+              analysisStatus: documentForReview.analysisStatus,
               action,
               rejectionReason,
               reviewedBy,
               reviewedByEmail: req.user.email
             });
-          } catch (bindingError) {
-            if (
-              String(bindingError?.code || '').startsWith('KYC_CANONICAL_DOCUMENT_')
-            ) {
-              return res.status(409).json({
-                success: false,
-                code: bindingError.code,
-                message: bindingError.message
-              });
-            }
-            throw bindingError;
           }
-        }
 
-        // ✅ Atualizar status do documento no Firebase Realtime Database
-        const reviewData = {
-          status: nextStatus,
-          reviewedAt: reviewAtIso,
-          reviewedBy: reviewedBy, // ✅ ID do admin logado
-          reviewedByEmail: req.user.email, // ✅ Email do admin para auditoria
-          updatedAt: reviewAtIso
-        };
+          reviewAtIso = new Date().toISOString();
+          reviewData = {
+            status: nextStatus,
+            reviewAuditIntentId: reviewAuditIntent.logId,
+            reviewMutationId,
+            reviewedAt: reviewAtIso,
+            reviewedBy,
+            reviewedByEmail: req.user.email,
+            updatedAt: reviewAtIso,
+            rejectionReason: action === 'reject' ? rejectionReason : null
+          };
 
-        if (action === 'reject') {
-          reviewData.rejectionReason = rejectionReason;
-        } else {
-          reviewData.rejectionReason = null;
-        }
-
-        // Índice denormalizado para consultas rápidas por tipo/status.
-        const statusIndexPath = `driver_documents_index/${normalizedDocumentType}`;
-        const statusBuckets = ['pending', 'approved', 'rejected'];
-        const indexUpdates = {};
-        Object.entries(reviewData).forEach(([field, value]) => {
-          indexUpdates[`users/${driverId}/documents/${normalizedDocumentType}/${field}`] = value;
-        });
-        indexUpdates[`users/${driverId}/documents/${normalizedDocumentType}/analysisStatus`] = canonicalActivationStatus;
-        indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/status`] = canonicalActivationStatus;
-        indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reason`] =
-          action === 'reject' ? rejectionReason : '';
-        indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedAt`] = reviewAtIso;
-        indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedBy`] = reviewedBy;
-        indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedByEmail`] = req.user.email || null;
-        indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/updatedAt`] = reviewAtIso;
-        indexUpdates[`driver_activation/${driverId}/updatedAt`] = reviewAtIso;
-        statusBuckets.forEach((bucket) => {
-          indexUpdates[`${statusIndexPath}/${bucket}/${driverId}`] = null;
-        });
-        indexUpdates[`${statusIndexPath}/${nextStatus}/${driverId}`] = {
-          driverId,
-          documentType: normalizedDocumentType,
-          status: nextStatus,
-          uploadedAt: existingDocument.uploadedAt || null,
-          reviewedAt: reviewAtIso,
-          updatedAt: reviewAtIso,
-          fileName: existingDocument.fileName || null,
-          fileType: existingDocument.fileType || null
-        };
-        await db.ref().update(indexUpdates);
-
-        if (normalizedDocumentType === 'cnh') {
-          await canonicalDriverDocumentApprovalService.finalizeManualReview({
+          // Índice denormalizado para consultas rápidas por tipo/status.
+          const statusIndexPath = `driver_documents_index/${normalizedDocumentType}`;
+          const statusBuckets = ['pending', 'approved', 'rejected'];
+          const indexUpdates = {};
+          Object.entries(reviewData).forEach(([field, value]) => {
+            indexUpdates[`users/${driverId}/documents/${normalizedDocumentType}/${field}`] = value;
+          });
+          indexUpdates[`users/${driverId}/documents/${normalizedDocumentType}/analysisStatus`] = canonicalActivationStatus;
+          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/status`] = canonicalActivationStatus;
+          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reason`] =
+            action === 'reject' ? rejectionReason : '';
+          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedAt`] = reviewAtIso;
+          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedBy`] = reviewedBy;
+          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedByEmail`] = req.user.email || null;
+          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/updatedAt`] = reviewAtIso;
+          indexUpdates[`driver_activation/${driverId}/updatedAt`] = reviewAtIso;
+          const reviewSubmissionId = documentForReview.lastSubmissionId || documentForReview.submissionId;
+          if (reviewSubmissionId) {
+            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/status`] = canonicalActivationStatus;
+            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reason`] =
+              action === 'reject' ? rejectionReason : '';
+            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewedAt`] = reviewAtIso;
+            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewedBy`] = reviewedBy;
+            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewedByEmail`] = req.user.email || null;
+            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewAuditIntentId`] = reviewAuditIntent.logId;
+            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewMutationId`] = reviewMutationId;
+            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/updatedAt`] = reviewAtIso;
+          }
+          statusBuckets.forEach((bucket) => {
+            indexUpdates[`${statusIndexPath}/${bucket}/${driverId}`] = null;
+          });
+          indexUpdates[`${statusIndexPath}/${nextStatus}/${driverId}`] = {
             driverId,
             documentType: normalizedDocumentType,
-            submissionId: existingDocument.lastSubmissionId || existingDocument.submissionId,
-            filePath: existingDocument.filePath,
-            documentSha256: existingDocument.documentSha256,
-            storageGeneration: existingDocument.storageGeneration,
-            reviewSyncToken: canonicalReviewPending.reviewSyncToken
-          });
+            submissionId: documentForReview.lastSubmissionId || documentForReview.submissionId || null,
+            filePath: documentForReview.filePath || null,
+            documentSha256: documentForReview.documentSha256 || null,
+            storageGeneration: documentForReview.storageGeneration || null,
+            status: nextStatus,
+            uploadedAt: documentForReview.uploadedAt || null,
+            reviewedAt: reviewAtIso,
+            updatedAt: reviewAtIso,
+            fileName: documentForReview.fileName || null,
+            fileType: documentForReview.fileType || null
+          };
+
+          if (normalizedDocumentType === 'cnh') {
+            await assertDashboardCnhMutationWindowHeld(req, driverId);
+          }
+          await documentLease?.assertHeld();
+          await mutationDb.ref().update(indexUpdates);
+
+          if (normalizedDocumentType === 'cnh') {
+            await assertDashboardCnhMutationWindowHeld(req, driverId);
+            await canonicalDriverDocumentApprovalService.finalizeManualReview({
+              driverId,
+              documentType: normalizedDocumentType,
+              submissionId: documentForReview.lastSubmissionId || documentForReview.submissionId,
+              filePath: documentForReview.filePath,
+              documentSha256: documentForReview.documentSha256,
+              storageGeneration: documentForReview.storageGeneration,
+              reviewSyncToken: canonicalReviewPending.reviewSyncToken
+            });
+          }
+
+          await documentLease?.assertHeld();
+          await adjustDocumentIndexCounters(
+            mutationDb,
+            normalizedDocumentType,
+            documentForReview.status || null,
+            nextStatus
+          );
+
+          return documentForReview;
+        };
+
+        if (DASHBOARD_REVIEWABLE_DOCUMENT_TYPES.has(normalizedDocumentType)) {
+          existingDocument = await runWithCurrentDocumentBinding({
+            db,
+            driverId,
+            documentType: normalizedDocumentType,
+            expectedBinding: expectedReviewBinding,
+            scope: 'dashboard_document_review'
+          }, async ({ db: mutationDb, lease, userDocument }) => applyReviewMutation({
+            mutationDb,
+            documentLease: lease,
+            currentUserDocument: userDocument
+          }));
+        } else {
+          existingDocument = await applyReviewMutation({ mutationDb: db });
         }
 
-        await adjustDocumentIndexCounters(
-          db,
-          normalizedDocumentType,
-          existingDocument.status || null,
-          nextStatus
-        );
-
-        await auditService.logEvent({
+        await auditService.requireEvent({
           userId: reviewedBy,
           action: 'driver.document_review',
           resource: 'driver_document',
           severity: action === 'reject' ? 'WARNING' : 'INFO',
           details: {
+            mutationId: reviewMutationId,
+            auditIntentId: reviewAuditIntent.logId,
             driverId,
             documentType: normalizedDocumentType,
             action,
@@ -1032,7 +1483,8 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
           },
           ip: req.ip,
           userAgent: req.headers['user-agent'] || 'unknown',
-          success: true
+          success: true,
+          ...reviewAuditEnvelope
         });
 
         // Document review never grants operational access by itself. The canonical
@@ -1091,26 +1543,52 @@ router.post('/api/drivers/:driverId/documents/:documentType/review', authenticat
         throw new Error('Firebase não configurado');
       }
     } catch (error) {
+      if (normalizedDocumentType === 'cnh' && isDashboardCnhMutationGuardError(error)) {
+        return sendDashboardCnhMutationGuardError(res, error);
+      }
+      if (String(error?.code || '').startsWith('DRIVER_ACTIVATION_DOCUMENT_')) {
+        return res.status(409).json({
+          success: false,
+          code: error.code,
+          message: error.message
+        });
+      }
+      if (String(error?.code || '').startsWith('KYC_CANONICAL_DOCUMENT_')) {
+        return res.status(409).json({
+          success: false,
+          code: error.code,
+          message: error.message
+        });
+      }
+      if (error?.code === 'AUDIT_WRITE_UNAVAILABLE') {
+        return res.status(503).json({
+          success: false,
+          code: 'DRIVER_DOCUMENT_AUDIT_UNAVAILABLE',
+          message: 'Não foi possível registrar esta ação com segurança. Tente novamente.'
+        });
+      }
       logError(error, '❌ Erro ao revisar documento:', { service: 'dashboard-routes' });
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
-        message: `Erro ao ${action === 'approve' ? 'aprovar' : 'rejeitar'} documento: ${error.message}`
+        message: 'Não foi possível concluir a revisão do documento agora.'
       });
     }
-  } catch (error) {
-    logError(error, '❌ Erro na API de review de documento:', { service: 'dashboard-routes' });
-    res.status(500).json({
-      success: false,
-      message: 'Erro interno do servidor.'
-    });
+    } catch (error) {
+      logError(error, '❌ Erro na API de review de documento:', { service: 'dashboard-routes' });
+      return res.status(500).json({
+        success: false,
+        message: 'Erro interno do servidor.'
+      });
+    }
   }
-});
+);
 
 // 📋 Buscar Documentos de um Motorista Específico - NOVA API
 // ✅ Protegido com autenticação JWT e permissão de admin
-router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(DASHBOARD_KYC_REVIEW_ROLES), async (req, res) => {
   try {
     const { driverId } = req.params;
+    await resolveDashboardKycRuntime(req, driverId);
     const application = await driverApplicationService.getDriverApplication(driverId, {
       refresh: true,
       includeRatings: true
@@ -1133,7 +1611,7 @@ router.get('/api/drivers/:driverId/documents', authenticateJWT, requireRole(DASH
           latestNegativeReviews: []
         },
         kyc: application.kyc || {},
-        documents: application.documents || {},
+        documents: projectDashboardDocumentMetadata(application.documents || {}),
         totalDocuments: application.totalDocuments || 0,
         vehicleConfig: application.vehicleConfig || {
           vehicles: []
@@ -1163,6 +1641,280 @@ function sanitizeFilename(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .replace(/_+/g, '_');
+}
+
+function isSafeFirebasePathSegment(value) {
+  const normalized = String(value || '').trim();
+  return Boolean(normalized) &&
+    normalized.length <= 128 &&
+    !/[.#$\[\]\/\u0000-\u001f\u007f]/.test(normalized);
+}
+
+function isSafeStorageObjectPath(value) {
+  const normalized = String(value || '').trim();
+  return Boolean(normalized) &&
+    !normalized.startsWith('/') &&
+    !normalized.split('/').some((segment) => !segment || segment === '.' || segment === '..');
+}
+
+function isCanonicalDashboardDocumentPath(driverId, documentType, filePath) {
+  const expectedPrefix = documentType === 'antecedentes_criminais'
+    ? `documents/${driverId}/${documentType}/`
+    : `driver-activation/${driverId}/${documentType}/`;
+  return isSafeStorageObjectPath(filePath) && String(filePath).startsWith(expectedPrefix);
+}
+
+function normalizeDashboardDocumentContentType(value) {
+  const normalized = String(value || '').trim().toLowerCase().split(';')[0];
+  if (normalized === 'application/pdf') return normalized;
+  if (/^image\/(?:jpeg|png|webp|heic|heif)$/.test(normalized)) return normalized;
+  return 'application/octet-stream';
+}
+
+function statusForDashboardDocumentContentError(error) {
+  const code = String(error?.code || '');
+  if (code === 'DRIVER_DOCUMENT_NOT_FOUND' || code === 'FIREBASE_STORAGE_OBJECT_NOT_FOUND') return 404;
+  if (code.includes('ACCESS_DENIED')) return 403;
+  if (
+    code.includes('BINDING') ||
+    code.includes('INTEGRITY') ||
+    code.includes('REUPLOAD') ||
+    code.includes('GENERATION_MISMATCH') ||
+    code.includes('MISMATCH') ||
+    code.includes('CONFLICT')
+  ) return 409;
+  if (code.includes('INVALID')) return 400;
+  return 503;
+}
+
+function sendDashboardDocumentContentError(res, error) {
+  const status = statusForDashboardDocumentContentError(error);
+  const messages = {
+    400: 'Não foi possível identificar o documento solicitado.',
+    403: 'Você não tem permissão para abrir este documento.',
+    404: 'O documento solicitado não foi encontrado.',
+    409: 'Este documento precisa ser reenviado antes de ser visualizado.',
+    503: 'Não foi possível abrir o documento agora. Tente novamente.'
+  };
+  return res.status(status).json({
+    success: false,
+    code: error?.code || 'DRIVER_DOCUMENT_CONTENT_UNAVAILABLE',
+    message: messages[status]
+  });
+}
+
+router.get(
+  '/api/drivers/:driverId/documents/:documentType/content',
+  authenticateJWT,
+  requireRole(DASHBOARD_KYC_REVIEW_ROLES),
+  async (req, res) => {
+    const driverId = String(req.params.driverId || '').trim();
+    const documentType = sanitizeDocumentType(req.params.documentType);
+
+    try {
+      if (!isSafeFirebasePathSegment(driverId)) {
+        throw dashboardKycBoundaryError('DRIVER_DOCUMENT_DRIVER_ID_INVALID', 'Motorista inválido.');
+      }
+      if (!DASHBOARD_REVIEWABLE_DOCUMENT_TYPES.has(documentType)) {
+        throw dashboardKycBoundaryError('DRIVER_DOCUMENT_TYPE_INVALID', 'Tipo de documento inválido.');
+      }
+      const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
+
+      const db = firebaseConfig?.getRealtimeDB?.();
+      if (!db) {
+        throw dashboardKycBoundaryError(
+          'DRIVER_DOCUMENT_STORE_UNAVAILABLE',
+          'Armazenamento de documentos indisponível.'
+        );
+      }
+
+      const snapshot = await db.ref(`users/${driverId}/documents/${documentType}`).once('value');
+      if (!snapshot.exists()) {
+        throw dashboardKycBoundaryError('DRIVER_DOCUMENT_NOT_FOUND', 'Documento não encontrado.');
+      }
+
+      const document = snapshot.val() || {};
+      const filePath = String(document.filePath || '').trim();
+      if (!isCanonicalDashboardDocumentPath(driverId, documentType, filePath)) {
+        throw dashboardKycBoundaryError(
+          'DRIVER_DOCUMENT_BINDING_PATH_MISMATCH',
+          'O vínculo do documento não corresponde ao motorista e ao tipo solicitados.'
+        );
+      }
+
+      const storageGeneration = String(document.storageGeneration || '').trim();
+      const documentSha256 = String(document.documentSha256 || '').trim().toLowerCase();
+      if (!/^\d+$/.test(storageGeneration) || !/^[a-f0-9]{64}$/.test(documentSha256)) {
+        throw dashboardKycBoundaryError(
+          'DRIVER_DOCUMENT_REUPLOAD_REQUIRED',
+          'Documento sem vínculo canônico.'
+        );
+      }
+
+      const storedObject = await getDashboardKycStorageService().downloadStoragePath(filePath, {
+        ...(storageGeneration ? { generation: storageGeneration } : {}),
+        includeMetadata: true
+      });
+      const documentBuffer = storedObject?.buffer;
+      if (!Buffer.isBuffer(documentBuffer) || documentBuffer.length === 0) {
+        throw dashboardKycBoundaryError(
+          'DRIVER_DOCUMENT_CONTENT_INVALID',
+          'Conteúdo do documento inválido.'
+        );
+      }
+      if (sha256Buffer(documentBuffer) !== documentSha256) {
+        throw dashboardKycBoundaryError(
+          'DRIVER_DOCUMENT_INTEGRITY_MISMATCH',
+          'Integridade do documento divergiu.'
+        );
+      }
+      const customMetadata = storedObject?.metadata?.customMetadata || {};
+      if (
+        String(customMetadata.driverId || '').trim() !== driverId ||
+        sanitizeDocumentType(customMetadata.documentType) !== documentType
+      ) {
+        throw dashboardKycBoundaryError(
+          'DRIVER_DOCUMENT_BINDING_METADATA_MISMATCH',
+          'Os metadados do documento divergem do vínculo atual.'
+        );
+      }
+
+      await auditService.requireEvent({
+        userId: req.user?.id || req.user?.userId || req.user?.email,
+        action: 'driver.document_content_view',
+        resource: 'driver_document',
+        severity: 'INFO',
+        details: {
+          driverId,
+          documentType,
+          submissionId: document.lastSubmissionId || document.submissionId || null,
+          actorEmail: req.user?.email || null,
+          actorRole: req.user?.role || null
+        },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        success: true,
+        ...dashboardKycAuditEnvelope(kycRuntime)
+      });
+
+      const contentType = normalizeDashboardDocumentContentType(
+        storedObject?.metadata?.contentType || document.fileType
+      );
+      const fallbackExtension = contentType === 'application/pdf' ? '.pdf' : '';
+      const filename = sanitizeFilename(
+        document.fileName || path.basename(filePath) || `${documentType}${fallbackExtension}`
+      );
+      res.set({
+        'Content-Type': contentType,
+        'Content-Length': String(documentBuffer.length),
+        'Cache-Control': 'private, no-store, max-age=0',
+        Pragma: 'no-cache',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': `inline; filename="${filename || `documento-${documentType}${fallbackExtension}`}"`
+      });
+      return res.status(200).send(documentBuffer);
+    } catch (error) {
+      logError(error, 'Falha ao abrir documento do motorista no dashboard', {
+        service: 'dashboard-routes',
+        driverId,
+        documentType
+      });
+      return sendDashboardDocumentContentError(res, error);
+    }
+  }
+);
+
+function dashboardActivationDocumentReviewError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function normalizedDocumentBindingValue(value) {
+  return value === undefined || value === null ? '' : String(value).trim();
+}
+
+function assertMatchingDocumentBinding(expected = {}, actual = {}) {
+  const fields = ['submissionId', 'filePath', 'documentSha256', 'storageGeneration'];
+  const mismatch = fields.some((field) => (
+    !normalizedDocumentBindingValue(expected[field])
+    || normalizedDocumentBindingValue(expected[field])
+      !== normalizedDocumentBindingValue(actual[field])
+  ));
+  if (mismatch) {
+    throw dashboardActivationDocumentReviewError(
+      'DRIVER_ACTIVATION_DOCUMENT_BINDING_MISMATCH',
+      'O documento mudou desde que esta revisão foi aberta. Recarregue a tela antes de continuar.'
+    );
+  }
+}
+
+async function assertCurrentCrlvReviewBinding({ db, driverId, document, action }) {
+  const submissionId = normalizedDocumentBindingValue(
+    document?.lastSubmissionId || document?.submissionId
+  );
+  const expectedBinding = {
+    submissionId,
+    filePath: document?.filePath,
+    documentSha256: document?.documentSha256,
+    storageGeneration: document?.storageGeneration
+  };
+  if (!submissionId) {
+    throw dashboardActivationDocumentReviewError(
+      'DRIVER_ACTIVATION_DOCUMENT_REUPLOAD_REQUIRED',
+      'Este CRLV não possui vínculo seguro. Solicite um novo envio pelo app antes da revisão.'
+    );
+  }
+
+  const [currentSnapshot, activationSnapshot, historySnapshot] = await Promise.all([
+    db.ref(`users/${driverId}/documents/crlv`).once('value'),
+    db.ref(`driver_activation/${driverId}/documents/crlv`).once('value'),
+    db.ref(`driver_activation/${driverId}/documents_history/${submissionId}`).once('value')
+  ]);
+  if (!currentSnapshot.exists() || !activationSnapshot.exists() || !historySnapshot.exists()) {
+    throw dashboardActivationDocumentReviewError(
+      'DRIVER_ACTIVATION_DOCUMENT_REUPLOAD_REQUIRED',
+      'O vínculo atual do CRLV não está completo. Solicite um novo envio pelo app.'
+    );
+  }
+
+  const currentDocument = currentSnapshot.val() || {};
+  const activationDocument = activationSnapshot.val() || {};
+  const historyDocument = historySnapshot.val() || {};
+  assertMatchingDocumentBinding(expectedBinding, {
+    submissionId: currentDocument.lastSubmissionId || currentDocument.submissionId,
+    filePath: currentDocument.filePath,
+    documentSha256: currentDocument.documentSha256,
+    storageGeneration: currentDocument.storageGeneration
+  });
+  assertMatchingDocumentBinding(expectedBinding, {
+    submissionId: historyDocument.submissionId,
+    filePath: historyDocument.filePath,
+    documentSha256: historyDocument.documentSha256,
+    storageGeneration: historyDocument.storageGeneration
+  });
+  assertMatchingDocumentBinding(expectedBinding, {
+    submissionId: activationDocument.submissionId || historyDocument.submissionId,
+    filePath: activationDocument.filePath,
+    documentSha256: activationDocument.documentSha256,
+    storageGeneration: activationDocument.storageGeneration
+  });
+
+  if (
+    action === 'approve'
+    && (
+      String(currentDocument.analysisStatus || '').toLowerCase() !== 'approved'
+      || String(activationDocument.status || '').toLowerCase() !== 'approved'
+      || String(historyDocument.status || '').toLowerCase() !== 'approved'
+    )
+  ) {
+    throw dashboardActivationDocumentReviewError(
+      'DRIVER_ACTIVATION_DOCUMENT_ANALYSIS_NOT_APPROVED',
+      'O CRLV ainda não concluiu a análise segura. Aguarde ou solicite um novo envio.'
+    );
+  }
+
+  return expectedBinding;
 }
 
 function normalizeManualApprovalEvidence(value) {
@@ -1256,10 +2008,21 @@ async function adjustDocumentIndexCounters(db, documentType, previousStatus, nex
 router.get(
   '/api/drivers/documents/review-queue',
   authenticateJWT,
-  requireRole(DASHBOARD_OPERATION_ROLES),
+  requireRole(DASHBOARD_KYC_REVIEW_ROLES),
   async (req, res) => {
     try {
-      const data = await driverApplicationService.listReviewQueue(req.query || {});
+      const requestedScope = resolveRequestedDashboardKycScope(req);
+      if (requestedScope === 'sandbox' && !canAccessDashboardKycSandbox(req.user)) {
+        return res.status(403).json({
+          success: false,
+          code: 'KYC_DASHBOARD_SANDBOX_ACCESS_DENIED',
+          message: 'O acesso ao KYC sandbox exige permissão específica.'
+        });
+      }
+      const data = await driverApplicationService.listReviewQueue({
+        ...(req.query || {}),
+        persistenceScope: requestedScope
+      });
       const payload = await backofficeCostGuardService.attachToResponse(
         res,
         'drivers.documents.reviewQueue',
@@ -1276,7 +2039,8 @@ router.get(
       logError(error, 'Erro ao buscar fila de revisão de documentos', { service: 'dashboard-routes' });
       return res.status(500).json({
         success: false,
-        message: `Erro ao buscar fila de revisão: ${error.message}`
+        code: 'DRIVER_DOCUMENT_REVIEW_QUEUE_UNAVAILABLE',
+        message: 'Não foi possível carregar a fila de revisão agora.'
       });
     }
   }
@@ -1286,7 +2050,9 @@ router.get(
 router.post(
   '/api/drivers/:driverId/documents/:documentType/upload',
   authenticateJWT,
-  requireRole(DASHBOARD_OPERATION_MUTATION_ROLES),
+  requireRole(DASHBOARD_KYC_REVIEW_ROLES),
+  restrictDashboardDirectDocumentUpload,
+  requireDashboardCnhMutationWindow,
   (req, res, next) => {
     adminDocumentUpload.single('file')(req, res, (err) => {
       if (err) {
@@ -1299,6 +2065,9 @@ router.post(
     });
   },
   async (req, res) => {
+    let storageFile = null;
+    let storageObjectCreated = false;
+    let documentCommitted = false;
     try {
       const { driverId } = req.params;
       const documentType = sanitizeDocumentType(req.params.documentType);
@@ -1308,24 +2077,6 @@ router.post(
           success: false,
           message: 'driverId e documentType são obrigatórios.'
         });
-      }
-
-      if (documentType === 'cnh') {
-        try {
-          await kycIdentityReviewWorkflowService.assertCnhUploadAllowed(driverId);
-        } catch (guardError) {
-          const blocked = [
-            'KYC_IDENTITY_REVIEW_HOLD',
-            'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK'
-          ].includes(guardError?.code);
-          return res.status(blocked ? 423 : 503).json({
-            success: false,
-            code: guardError?.code || 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
-            message: blocked
-              ? 'A CNH não pode ser substituída enquanto a identidade está bloqueada ou em análise.'
-              : 'Não foi possível validar a substituição da CNH agora.'
-          });
-        }
       }
 
       if (!req.file) {
@@ -1365,9 +2116,28 @@ router.post(
       const fileName = sanitizeFilename(req.file.originalname || `${documentType}.pdf`);
       const extension = path.extname(fileName) || (requestedMime === 'application/pdf' ? '.pdf' : '');
       const objectPath = `documents/${driverId}/${documentType}/${Date.now()}_${fileName.replace(extension, '')}${extension}`;
-      const storageFile = bucket.file(objectPath);
-      const signedUrlExpiresAt = new Date(Date.now() + DRIVER_DOCUMENT_SIGNED_URL_TTL_MS);
-
+      const submissionId = `dashboard_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+      const uploadAuditEnvelope = dashboardKycAuditEnvelope(req.dashboardDocumentKycRuntime);
+      const uploadAuditIntent = await auditService.requireEvent({
+        userId: req.user?.id || req.user?.userId || req.user?.email,
+        action: 'driver.document_upload_intent',
+        resource: 'driver_document',
+        severity: 'INFO',
+        details: {
+          mutationId: submissionId,
+          driverId,
+          documentType,
+          fileName,
+          fileSize: Number(req.file.size || 0),
+          actorEmail: req.user?.email || null,
+          actorRole: req.user?.role || null
+        },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        success: true,
+        ...uploadAuditEnvelope
+      });
+      storageFile = bucket.file(objectPath);
       await storageFile.save(req.file.buffer, {
         resumable: false,
         metadata: {
@@ -1380,18 +2150,27 @@ router.post(
           }
         }
       });
-
-      const [signedUrl] = await storageFile.getSignedUrl({
-        action: 'read',
-        expires: signedUrlExpiresAt
-      });
+      storageObjectCreated = true;
+      const [storedMetadata] = await storageFile.getMetadata();
+      const storageGeneration = String(storedMetadata?.generation || '').trim();
+      if (!/^\d+$/.test(storageGeneration)) {
+        throw dashboardKycBoundaryError(
+          'DRIVER_DOCUMENT_STORAGE_GENERATION_INVALID',
+          'O armazenamento não confirmou a versão do documento.'
+        );
+      }
 
       const documentPayload = {
         type: documentType,
+        documentType,
+        submissionId,
+        lastSubmissionId: submissionId,
+        uploadAuditIntentId: uploadAuditIntent.logId,
+        uploadMutationId: submissionId,
         status: 'pending',
-        fileUrl: signedUrl,
-        fileUrlExpiresAt: signedUrlExpiresAt.toISOString(),
         filePath: objectPath,
+        storageGeneration,
+        documentSha256: sha256Buffer(req.file.buffer),
         fileType: req.file.mimetype,
         fileName,
         fileSize: Number(req.file.size || 0),
@@ -1402,13 +2181,14 @@ router.post(
       };
 
       const documentPath = `users/${driverId}/documents/${documentType}`;
-      const previousDocumentSnapshot = await db.ref(documentPath).once('value');
-      const previousDocument = previousDocumentSnapshot.val() || {};
-      const previousStatus = previousDocument?.status || null;
       const statusIndexPath = `driver_documents_index/${documentType}`;
       const indexPayload = {
         driverId,
         documentType,
+        submissionId,
+        filePath: objectPath,
+        documentSha256: documentPayload.documentSha256,
+        storageGeneration,
         status: 'pending',
         uploadedAt: nowIso,
         reviewedAt: null,
@@ -1417,13 +2197,48 @@ router.post(
         fileType: req.file.mimetype
       };
 
-      await db.ref().update({
-        [documentPath]: documentPayload,
-        [`${statusIndexPath}/pending/${driverId}`]: indexPayload,
-        [`${statusIndexPath}/approved/${driverId}`]: null,
-        [`${statusIndexPath}/rejected/${driverId}`]: null
+      await runWithDocumentMutationLease({
+        db,
+        driverId,
+        documentType,
+        scope: `dashboard_upload_${submissionId}`
+      }, async ({ db: mutationDb, lease }) => {
+        const previousDocumentSnapshot = await mutationDb.ref(documentPath).once('value');
+        const previousDocument = previousDocumentSnapshot.val() || {};
+        const activationPayload = {
+          ...documentPayload,
+          lastSubmissionId: null,
+          reason: '',
+          source: 'dashboard_document_upload'
+        };
+        await lease.assertHeld();
+        await mutationDb.ref().update({
+          [documentPath]: documentPayload,
+          [`driver_activation/${driverId}/documents/${documentType}`]: activationPayload,
+          [`driver_activation/${driverId}/documents_history/${submissionId}`]: activationPayload,
+          [`driver_activation/${driverId}/updatedAt`]: nowIso,
+          [`${statusIndexPath}/pending/${driverId}`]: indexPayload,
+          [`${statusIndexPath}/approved/${driverId}`]: null,
+          [`${statusIndexPath}/rejected/${driverId}`]: null
+        });
+        documentCommitted = true;
+        await lease.assertHeld();
+        try {
+          await adjustDocumentIndexCounters(
+            mutationDb,
+            documentType,
+            previousDocument?.status || null,
+            'pending'
+          );
+        } catch (counterError) {
+          logStructured('warn', 'Falha ao atualizar contadores após upload documental', {
+            service: 'dashboard-routes',
+            driverId,
+            documentType,
+            error: counterError?.message || String(counterError)
+          });
+        }
       });
-      await adjustDocumentIndexCounters(db, documentType, previousStatus, 'pending');
 
       try {
         await driverApplicationService.syncDriverApplication(driverId, {
@@ -1439,6 +2254,26 @@ router.post(
         });
       }
 
+      await auditService.requireEvent({
+        userId: req.user?.id || req.user?.userId || req.user?.email,
+        action: 'driver.document_upload',
+        resource: 'driver_document',
+        severity: 'INFO',
+        details: {
+          mutationId: submissionId,
+          auditIntentId: uploadAuditIntent.logId,
+          driverId,
+          documentType,
+          submissionId,
+          actorEmail: req.user?.email || null,
+          actorRole: req.user?.role || null
+        },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'] || 'unknown',
+        success: true,
+        ...uploadAuditEnvelope
+      });
+
       logStructured('info', 'Documento enviado via dashboard', {
         service: 'dashboard-routes',
         driverId,
@@ -1453,16 +2288,26 @@ router.post(
         data: {
           driverId,
           documentType,
-          fileUrl: signedUrl,
-          fileUrlExpiresAt: signedUrlExpiresAt.toISOString(),
+          contentAvailable: true,
           status: 'pending'
         }
       });
     } catch (error) {
+      if (storageObjectCreated && !documentCommitted && storageFile) {
+        await storageFile.delete({ ignoreNotFound: true }).catch((cleanupError) => {
+          logStructured('warn', 'Falha ao remover upload incompleto de documento do dashboard', {
+            service: 'dashboard-routes',
+            driverId: req.params?.driverId || null,
+            documentType: sanitizeDocumentType(req.params?.documentType),
+            error: cleanupError?.message || String(cleanupError)
+          });
+        });
+      }
       logError(error, 'Erro ao fazer upload de documento no dashboard', { service: 'dashboard-routes' });
       return res.status(500).json({
         success: false,
-        message: `Erro ao enviar documento: ${error.message}`
+        code: error?.code || 'DRIVER_DOCUMENT_UPLOAD_UNAVAILABLE',
+        message: 'Não foi possível enviar o documento agora. Tente novamente.'
       });
     }
   }
@@ -8351,17 +9196,125 @@ router.post('/api/drivers/:driverId/extend-free', authenticateJWT, requireRole(D
  * Revisao restrita de divergencia facial (CNH canonica x selfie rejeitada)
  */
 router.post(
+  '/api/drivers/:driverId/kyc/orphan-identity-hold/recovery',
+  authenticateJWT,
+  requireRole(DASHBOARD_KYC_REVIEW_ROLES),
+  async (req, res) => {
+    try {
+      if (req.body?.explicitRecovery !== true) {
+        const error = new Error('A recuperacao exige confirmacao administrativa explicita.');
+        error.code = 'KYC_ORPHAN_HOLD_RECOVERY_EXPLICIT_CONFIRMATION_REQUIRED';
+        throw error;
+      }
+
+      const driverId = String(req.params.driverId || '').trim();
+      const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
+      requireDashboardKycScopedPolicy(kycRuntime);
+      const failureEvidenceId = String(req.body?.failureEvidenceId || '').trim();
+      const expectedStateRevision = Number(req.body?.expectedStateRevision);
+      const expectedRevokedAt = String(req.body?.expectedRevokedAt || '').trim();
+      const reason = normalizeKycReviewReason(req.body?.reason);
+      const reviewerContext = getDashboardKycReviewer(req);
+      const recovery = await kycRuntime.workflow.authorizeOrphanHoldRecovery({
+        driverId,
+        failureEvidenceId,
+        expectedStateRevision,
+        expectedRevokedAt,
+        reviewerContext,
+        reason
+      });
+
+      const challengeId = `idrev_or_${crypto
+        .createHash('sha1')
+        .update(recovery.recoveryId)
+        .digest('hex')
+        .slice(0, 18)}`;
+      let retryChallenge;
+      try {
+        retryChallenge = await applyDashboardIdentityReverificationGate(kycRuntime, {
+          driverId,
+          reporterId: reviewerContext.uid,
+          reporterType: 'admin',
+          supportTicketId: null,
+          challengeId,
+          payload: {
+            reasonCode: 'kyc_orphan_hold_retry_authorized',
+            publicReason: 'Uma nova validacao de identidade foi autorizada pelo suporte.',
+            selectedOptions: ['orphan_hold_recovery'],
+            attemptScope: recovery.attemptScope
+          },
+          notify: true
+        });
+      } catch (setupError) {
+        await kycRuntime.workflow.abortOrphanHoldRecoverySetup({
+          driverId,
+          recoveryId: recovery.recoveryId,
+          reason: setupError?.code || 'identity_reverification_setup_failed'
+        }).catch((compensationError) => {
+          logError(compensationError, 'Falha ao compensar recuperacao KYC sem challenge', {
+            service: 'dashboard-routes',
+            driverId,
+            recoveryId: recovery.recoveryId
+          });
+        });
+        throw setupError;
+      }
+
+      await auditService.logEvent({
+        ...dashboardKycAuditEnvelope(kycRuntime),
+        userId: reviewerContext.uid,
+        action: 'KYC_ORPHAN_IDENTITY_HOLD_RECOVERY_CHALLENGE_CREATED',
+        resource: 'kyc_identity_retry_authorization',
+        severity: 'WARNING',
+        success: true,
+        details: {
+          driverId,
+          recoveryId: recovery.recoveryId,
+          challengeId,
+          idempotentReplay: recovery.idempotentReplay === true
+        }
+      });
+
+      res.set('Cache-Control', 'private, no-store, max-age=0');
+      return res.status(recovery.idempotentReplay ? 200 : 201).json({
+        success: true,
+        persistenceScope: kycRuntime.scope.namespace,
+        recovery: {
+          recoveryId: recovery.recoveryId,
+          status: recovery.authorization?.status || null,
+          remainingAttempts: recovery.authorization?.remainingAttempts ?? null,
+          expiresAt: recovery.authorization?.expiresAt || null,
+          idempotentReplay: recovery.idempotentReplay === true
+        },
+        challenge: {
+          challengeId: retryChallenge?.challengeId || challengeId,
+          requirement: retryChallenge?.requirement || 'IDENTITY_REVERIFICATION',
+          attemptScope: recovery.attemptScope
+        }
+      });
+    } catch (error) {
+      logError(error, 'Falha ao autorizar recuperacao de hold KYC orfao', {
+        service: 'dashboard-routes',
+        driverId: req.params.driverId
+      });
+      return respondKycReviewError(res, error);
+    }
+  }
+);
+
+router.post(
   '/api/drivers/:driverId/kyc/identity-reviews/reconcile',
   authenticateJWT,
   requireRole(DASHBOARD_KYC_REVIEW_ROLES),
   async (req, res) => {
     try {
       const { driverId } = req.params;
+      const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
       const ticketId = String(req.body?.ticketId || '').trim();
       const evidenceId = String(req.body?.evidenceId || '').trim();
       const reason = normalizeKycReviewReason(req.body?.reason);
       const reviewerContext = getDashboardKycReviewer(req);
-      const result = await kycIdentityReviewWorkflowService.openCaseFromTicket({
+      const result = await kycRuntime.workflow.openCaseFromTicket({
         driverId,
         evidenceId,
         ticketId,
@@ -8373,8 +9326,9 @@ router.post(
         identityReviewCaseId: result.case.caseId,
         identityReviewLinkUpdatedAt: new Date().toISOString(),
         identityReviewReconciledBy: reviewerContext.uid
-      });
+      }, dashboardKycPersistenceContext(kycRuntime));
       await auditService.logEvent({
+        ...dashboardKycAuditEnvelope(kycRuntime),
         userId: reviewerContext.uid,
         action: 'KYC_IDENTITY_REVIEW_TICKET_RECONCILED',
         resource: 'kyc_identity_review_case',
@@ -8390,6 +9344,7 @@ router.post(
       });
       return res.json({
         success: true,
+        persistenceScope: kycRuntime.scope.namespace,
         case: result.case,
         idempotentReplay: result.idempotentReplay === true
       });
@@ -8410,12 +9365,23 @@ router.get(
   requireRole(DASHBOARD_KYC_REVIEW_ROLES),
   async (req, res) => {
     try {
-      const cases = await kycIdentityReviewWorkflowService.listCasesForDriver(
-        req.params.driverId,
-        { reviewerContext: getDashboardKycReviewer(req) }
-      );
+      const driverId = req.params.driverId;
+      const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
+      const reviewerContext = getDashboardKycReviewer(req);
+      const [cases, orphanRecoveryCandidate] = await Promise.all([
+        kycRuntime.workflow.listCasesForDriver(driverId, { reviewerContext }),
+        kycRuntime.workflow.getOrphanHoldRecoveryCandidate(
+          driverId,
+          { reviewerContext }
+        )
+      ]);
       res.set('Cache-Control', 'private, no-store, max-age=0');
-      return res.json({ success: true, cases });
+      return res.json({
+        success: true,
+        persistenceScope: kycRuntime.scope.namespace,
+        cases,
+        orphanRecoveryCandidate
+      });
     } catch (error) {
       logError(error, 'Falha ao listar casos KYC de identidade', {
         service: 'dashboard-routes',
@@ -8433,6 +9399,7 @@ router.post(
   async (req, res) => {
     try {
       const { driverId, caseId } = req.params;
+      const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
       const kind = String(req.params.kind || '').trim().toLowerCase();
       if (!['cnh', 'selfie'].includes(kind)) {
         const error = new Error('Tipo de evidencia invalido.');
@@ -8443,7 +9410,7 @@ router.post(
       const reason = normalizeKycReviewReason(req.body?.reason);
       const evidenceBindingHash = String(req.body?.evidenceBindingHash || '').trim();
       const reviewerContext = getDashboardKycReviewer(req);
-      const reviewCase = await kycIdentityReviewWorkflowService.getCaseForDriver(
+      const reviewCase = await kycRuntime.workflow.getCaseForDriver(
         driverId,
         caseId,
         { reviewerContext }
@@ -8453,7 +9420,7 @@ router.post(
         error.code = 'KYC_IDENTITY_REVIEW_EVIDENCE_BINDING_INVALID';
         throw error;
       }
-      const context = await kycIdentityReviewWorkflowService.getReviewContext({
+      const context = await kycRuntime.workflow.getReviewContext({
         driverId,
         caseId,
         ticketId,
@@ -8464,7 +9431,7 @@ router.post(
       let imageBuffer;
       let contentType = 'image/jpeg';
       if (kind === 'selfie') {
-        const metadata = await kycFailedBiometricEvidenceService.getMetadata(
+        const metadata = await kycRuntime.evidence.getMetadata(
           context.evidence.evidenceId
         );
         imageBuffer = await getDashboardKycStorageService().downloadStoragePath(
@@ -8505,7 +9472,8 @@ router.post(
         'Cache-Control': 'private, no-store, max-age=0',
         Pragma: 'no-cache',
         'X-Content-Type-Options': 'nosniff',
-        'Content-Disposition': 'inline; filename="kyc-review-evidence.jpg"'
+        'Content-Disposition': 'inline; filename="kyc-review-evidence.jpg"',
+        'X-Leaf-KYC-Scope': kycRuntime.scope.namespace
       });
       return res.status(200).send(imageBuffer);
     } catch (error) {
@@ -8526,9 +9494,10 @@ router.post(
   requireRole(DASHBOARD_KYC_REVIEW_ROLES),
   async (req, res) => {
     try {
+      const kycRuntime = await resolveDashboardKycRuntime(req, req.params.driverId);
       const reviewerContext = getDashboardKycReviewer(req);
       const reason = normalizeKycReviewReason(req.body?.reason);
-      const service = kycIdentityReviewWorkflowService.caseService(reviewerContext);
+      const service = kycRuntime.workflow.caseService(reviewerContext);
       const result = await service.startReview({
         caseId: req.params.caseId,
         ticketId: req.body?.ticketId,
@@ -8536,13 +9505,14 @@ router.post(
         reason,
         evidenceBindingHash: req.body?.evidenceBindingHash
       });
-      const reviewCase = await kycIdentityReviewWorkflowService.getCaseForDriver(
+      const reviewCase = await kycRuntime.workflow.getCaseForDriver(
         req.params.driverId,
         req.params.caseId,
         { reviewerContext }
       );
       return res.json({
         success: true,
+        persistenceScope: kycRuntime.scope.namespace,
         case: reviewCase,
         idempotentReplay: result?.idempotentReplay === true
       });
@@ -8564,6 +9534,7 @@ router.post(
   async (req, res) => {
     try {
       const { driverId, caseId } = req.params;
+      const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
       const reviewerContext = getDashboardKycReviewer(req);
       const reason = normalizeKycReviewReason(req.body?.reason);
       const decision = String(req.body?.decision || '').trim().toUpperCase();
@@ -8589,10 +9560,17 @@ router.post(
         throw error;
       }
 
-      const service = kycIdentityReviewWorkflowService.caseService(reviewerContext);
+      if (decision === 'FALSE_POSITIVE') {
+        requireDashboardKycScopedPolicy(kycRuntime);
+      }
+
+      const service = kycRuntime.workflow.caseService(reviewerContext);
       let decisionResult;
       let retryChallenge = null;
-      await kycIdentityReviewWorkflowService.runOutsideActiveTrip(driverId, async () => {
+      await kycRuntime.workflow.runWithVerificationWindow(
+        driverId,
+        `dashboard_identity_decision_${caseId}`,
+        async () => {
         decisionResult = await service.decideCase({
           caseId,
           ticketId: req.body?.ticketId,
@@ -8605,15 +9583,17 @@ router.post(
         });
 
         if (decision === 'CONFIRMED_FRAUD') {
-          await applyConfirmedIdentityFraudBlock({
-            driverId,
-            enforcement: decisionResult.enforcement,
-            reviewer: reviewerContext,
-            reason: `Fraude de identidade confirmada no caso ${caseId}: ${reason}`
-          });
+          if (kycRuntime.scope.namespace === 'operational') {
+            await applyConfirmedIdentityFraudBlock({
+              driverId,
+              enforcement: decisionResult.enforcement,
+              reviewer: reviewerContext,
+              reason: `Fraude de identidade confirmada no caso ${caseId}: ${reason}`
+            });
+          }
         } else {
           const attemptScope = `manual_review_retry_${caseId}`.toLowerCase();
-          retryChallenge = await kycPolicyService.applyIdentityReverificationGate({
+          retryChallenge = await applyDashboardIdentityReverificationGate(kycRuntime, {
             driverId,
             reporterId: reviewerContext.uid,
             reporterType: 'admin',
@@ -8627,19 +9607,13 @@ router.post(
             },
             notify: true
           });
-          await applyFalsePositiveRetryAuthorization({
-            driverId,
-            caseId,
-            ticketId: req.body?.ticketId,
-            evidenceBindingHash: req.body?.evidenceBindingHash,
-            reviewer: reviewerContext
-          });
         }
-      });
+        }
+      );
 
       const evidenceId = decisionResult?.case?.evidenceBinding?.evidenceId;
       if (evidenceId) {
-        await kycFailedBiometricEvidenceService.recordReviewOutcome(evidenceId, {
+        await kycRuntime.evidence.recordReviewOutcome(evidenceId, {
           outcome: decision === 'CONFIRMED_FRAUD' ? 'fraud_confirmed' : 'no_fraud_confirmed',
           actorId: reviewerContext.uid,
           ticketId: req.body?.ticketId,
@@ -8655,15 +9629,19 @@ router.post(
         });
       }
 
-      const reviewCase = await kycIdentityReviewWorkflowService.getCaseForDriver(
+      const reviewCase = await kycRuntime.workflow.getCaseForDriver(
         driverId,
         caseId,
         { reviewerContext }
       );
       return res.json({
         success: true,
+        persistenceScope: kycRuntime.scope.namespace,
         case: reviewCase,
         permanentBlockApplied: decision === 'CONFIRMED_FRAUD',
+        operationalMirrorApplied:
+          decision === 'CONFIRMED_FRAUD' &&
+          kycRuntime.scope.namespace === 'operational',
         retryAuthorization: decisionResult?.retryAuthorization || null,
         retryChallenge
       });

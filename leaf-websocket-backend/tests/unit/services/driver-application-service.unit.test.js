@@ -38,6 +38,13 @@ jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn()
 }));
 
+jest.mock('../../../services/sandbox-persistence-context', () => ({
+  resolveUserPersistenceScope: jest.fn(async () => ({
+    namespace: 'operational',
+    financialContextId: 'operational-test-context'
+  }))
+}));
+
 function mockFirestoreApplications(applications = []) {
   mockCollectionGet.mockResolvedValue({
     docs: applications.map((application) => ({
@@ -123,6 +130,10 @@ describe('driver-application-service', () => {
               type: 'antecedentes_criminais',
               status: 'pending',
               fileUrl: 'https://storage.test/background.pdf',
+              filePath: 'documents/driver_mei/antecedentes_criminais/123_background.pdf',
+              documentSha256: 'a'.repeat(64),
+              storageGeneration: '1234567890',
+              contentAvailable: true,
               fileName: 'background.pdf',
               fileType: 'application/pdf',
               uploadedAt: '2026-05-21T10:00:00.000Z'
@@ -142,8 +153,10 @@ describe('driver-application-service', () => {
       driverId: 'driver_mei',
       documentType: 'antecedentes_criminais',
       status: 'pending',
-      fileName: 'background.pdf'
+      fileName: 'background.pdf',
+      contentAvailable: true
     });
+    expect(result.items[0]).not.toHaveProperty('fileUrl');
     expect(result.summary).toMatchObject({
       total: 1,
       byStatus: {
@@ -152,6 +165,39 @@ describe('driver-application-service', () => {
         rejected: 0
       }
     });
+  });
+
+  it('removes persisted provider URLs recursively from the applications response', async () => {
+    mockFirestoreApplications([{
+      id: 'driver_safe_projection',
+      driverId: 'driver_safe_projection',
+      status: 'pending',
+      documents: {
+        license: {
+          front: 'https://storage.test/cnh.pdf',
+          status: 'pending'
+        },
+        vehicle: {
+          registration: 'https://storage.test/crlv.pdf'
+        },
+        all_documents: [{
+          type: 'cnh',
+          fileUrl: 'https://storage.test/cnh.pdf',
+          fileUrlExpiresAt: '2026-07-22T00:00:00.000Z',
+          contentAvailable: true
+        }]
+      }
+    }]);
+
+    const result = await service.listApplications({});
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain('https://storage.test');
+    expect(result.applications[0].documents.all_documents[0]).toMatchObject({
+      type: 'cnh',
+      contentAvailable: true
+    });
+    expect(result.applications[0].documents.all_documents[0]).not.toHaveProperty('fileUrl');
   });
 
   it('builds a lightweight review queue summary from denormalized counters', async () => {

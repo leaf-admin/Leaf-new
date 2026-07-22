@@ -142,12 +142,20 @@ function buildSupportScopePayload(context = {}) {
     "city",
     "regionHash",
     "severity",
+    "kycEvidenceId",
+    "kycReviewCaseId",
+    "kycChallengeId",
+    "requirement",
   ].forEach((key) => {
     const value = String(context[key] ?? "").trim();
     if (value) {
       scopedPayload[key] = value;
     }
   });
+
+  if (typeof context.reviewAvailable === "boolean") {
+    scopedPayload.reviewAvailable = context.reviewAvailable;
+  }
 
   return scopedPayload;
 }

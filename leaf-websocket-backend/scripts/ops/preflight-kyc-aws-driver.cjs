@@ -5,6 +5,7 @@ const crypto = require('crypto');
 
 const EXPECTED_LIVENESS_PROVIDER = 'aws_rekognition_face_liveness';
 const EXPECTED_COMPARE_PROVIDER = 'aws_rekognition_compare_faces';
+const EXPECTED_LIVENESS_SESSION_TTL_SECONDS = 180;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 class PreflightBlockerError extends Error {
@@ -159,6 +160,17 @@ function assertExact(value, expected, code, message, details = {}) {
   if (value !== expected) throw blocker(code, message, details);
 }
 
+function assertExactPublicKeys(value, expectedKeys, code, message) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw blocker(code, message);
+  }
+  const actual = Object.keys(value).sort();
+  const expected = [...expectedKeys].sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    throw blocker(code, message, { unexpectedFields: actual.filter((key) => !expected.includes(key)) });
+  }
+}
+
 function validateProvider(payload) {
   assertExact(payload?.success, true, 'KYC_PROVIDER_NOT_READY', 'Provider de liveness nao confirmou success=true');
   assertExact(
@@ -167,74 +179,106 @@ function validateProvider(payload) {
     'KYC_PROVIDER_NOT_AWS_LIVENESS',
     'Provider ativo nao e AWS Rekognition Face Liveness'
   );
+  assertExactPublicKeys(
+    payload,
+    ['success', 'provider', 'config'],
+    'KYC_PROVIDER_PUBLIC_CONTRACT_UNSAFE',
+    'Provider de liveness retornou campos fora do contrato publico minimo'
+  );
   const config = payload?.config || {};
+  assertExactPublicKeys(
+    config,
+    ['enabled', 'credentialsEnabled', 'hasAssumeRoleArn'],
+    'KYC_PROVIDER_PUBLIC_CONTRACT_UNSAFE',
+    'Provider de liveness expos configuracao interna no contrato publico'
+  );
   const valid = config.enabled === true
-    && config.provider === EXPECTED_LIVENESS_PROVIDER
-    && config.region === 'us-east-1'
     && config.credentialsEnabled === true
-    && config.hasAssumeRoleArn === true
-    && config.hasOutputBucket === false
-    && config.costGuard?.enabled === true
-    && config.costGuard?.dailyLimitConfigured === true
-    && config.costGuard?.monthlyLimitConfigured === true;
+    && config.hasAssumeRoleArn === true;
   if (!valid) {
     throw blocker(
       'KYC_PROVIDER_CONFIG_BLOCKED',
-      'Provider AWS Liveness nao satisfaz region, credenciais temporarias, role, bucket vazio e cost guard'
+      'Provider AWS Liveness nao confirmou habilitacao e credenciais temporarias'
     );
   }
   return {
     provider: payload.provider,
-    region: config.region,
+    enabled: true,
     credentialsEnabled: true,
-    assumeRoleConfigured: true,
-    outputBucketDisabled: true,
-    costGuardEnabled: true
+    assumeRoleConfigured: true
   };
 }
 
 function validateBiometricReadiness(payload) {
-  const policy = payload?.policy || {};
-  const liveness = payload?.awsLiveness || {};
-  const compare = payload?.awsFaceCompare || {};
-  const blockers = Array.isArray(payload?.blockers) ? payload.blockers : null;
+  assertExactPublicKeys(
+    payload,
+    ['success', 'ready', 'code'],
+    'KYC_BIOMETRIC_READINESS_PUBLIC_CONTRACT_UNSAFE',
+    'Readiness biometrica retornou detalhes internos fora do contrato publico'
+  );
   if (
     payload?.success !== true
-    || payload?.ok !== true
-    || payload?.enabled !== true
-    || !blockers
-    || blockers.length !== 0
-    || policy.productionRuntime !== true
-    || policy.productionBiometricsEnabled !== true
-    || policy.strictProductionMode !== true
-    || policy.requireTrustedBiometricMatch !== true
-    || policy.allowLegacyDeviceSignature !== false
-    || policy.allowAwsLivenessOnlyMatch !== false
-    || policy.allowMobileDeviceEmbedding !== false
-    || liveness.enabled !== true
-    || liveness.provider !== EXPECTED_LIVENESS_PROVIDER
-    || liveness.costGuard?.enabled !== true
-    || compare.enabled !== true
-    || compare.provider !== EXPECTED_COMPARE_PROVIDER
-    || compare.costGuard?.enabled !== true
-    || !Number.isFinite(Number(compare.approveThreshold))
-    || Number(compare.approveThreshold) < 0.95
-    || !Number.isFinite(Number(compare.reviewThreshold))
-    || Number(compare.reviewThreshold) >= Number(compare.approveThreshold)
+    || payload?.ready !== true
+    || payload?.code !== 'KYC_BIOMETRICS_READY'
   ) {
     throw blocker(
       'KYC_BIOMETRIC_READINESS_BLOCKED',
-      'Readiness biometrica nao confirma politica estrita AWS Liveness + CompareFaces e thresholds aprovados'
+      'Readiness biometrica nao confirmou o perfil interno aprovado'
     );
   }
   return {
-    enabled: true,
-    strictProductionMode: true,
-    trustedServerMatchRequired: true,
-    livenessProvider: liveness.provider,
-    compareProvider: compare.provider,
-    compareApproveThreshold: Number(compare.approveThreshold),
-    compareReviewThreshold: Number(compare.reviewThreshold)
+    ready: true,
+    code: payload.code
+  };
+}
+
+function validateInternalBiometricRuntime(snapshot) {
+  const readiness = snapshot?.readiness || {};
+  const liveness = snapshot?.liveness || {};
+  const compare = snapshot?.compare || {};
+  const valid = snapshot?.readOnly === true
+    && readiness.ok === true
+    && readiness.enabled === true
+    && Array.isArray(readiness.blockers)
+    && readiness.blockers.length === 0
+    && readiness.policy?.productionRuntime === true
+    && readiness.policy?.productionBiometricsEnabled === true
+    && readiness.policy?.strictProductionMode === true
+    && readiness.policy?.requireTrustedBiometricMatch === true
+    && readiness.policy?.allowLegacyDeviceSignature === false
+    && readiness.policy?.allowAwsLivenessOnlyMatch === false
+    && readiness.policy?.allowMobileDeviceEmbedding === false
+    && liveness.enabled === true
+    && liveness.provider === EXPECTED_LIVENESS_PROVIDER
+    && liveness.region === 'us-east-1'
+    && liveness.credentialsEnabled === true
+    && liveness.hasAssumeRoleArn === true
+    && liveness.hasOutputBucket === false
+    && Number(liveness.sessionTtlSeconds) === EXPECTED_LIVENESS_SESSION_TTL_SECONDS
+    && Number.isFinite(Number(liveness.attemptWindowSeconds))
+    && Number(liveness.attemptWindowSeconds) >= EXPECTED_LIVENESS_SESSION_TTL_SECONDS
+    && Number(liveness.sessionBindingTtlSeconds) >= Number(liveness.attemptWindowSeconds)
+    && liveness.costGuard?.enabled === true
+    && liveness.costGuard?.dailyLimitConfigured === true
+    && liveness.costGuard?.monthlyLimitConfigured === true
+    && compare.enabled === true
+    && compare.provider === EXPECTED_COMPARE_PROVIDER
+    && compare.region === 'us-east-1'
+    && Number(compare.sdkMaxAttempts) === 1
+    && compare.costGuard?.enabled === true
+    && Number.isFinite(Number(compare.approveThreshold))
+    && Number(compare.approveThreshold) >= 0.95
+    && Number.isFinite(Number(compare.reviewThreshold))
+    && Number(compare.reviewThreshold) < Number(compare.approveThreshold);
+  if (!valid) {
+    throw blocker(
+      'KYC_INTERNAL_BIOMETRIC_RUNTIME_BLOCKED',
+      'Runtime local nao confirmou a configuracao biometrica aprovada'
+    );
+  }
+  return {
+    ready: true,
+    checkedLocally: true
   };
 }
 
@@ -444,6 +488,11 @@ async function runKycAwsPreflight(config, dependencies) {
       validate: validateBiometricReadiness
     }),
     runCheck({
+      name: 'internalBiometricRuntime',
+      query: () => dependencies.queryInternalBiometricRuntime(),
+      validate: validateInternalBiometricRuntime
+    }),
+    runCheck({
       name: 'runtimeFlags',
       query: () => getJson({
         fetchImpl: dependencies.fetchImpl,
@@ -511,6 +560,9 @@ async function loadRuntimeDependencies() {
     redisPool = require('../../utils/redis-pool');
     const canonicalDocumentService = require('../../services/canonical-driver-document-approval-service');
     const costGuard = require('../../services/aws-kyc-cost-guard-service');
+    const AwsFaceLivenessService = require('../../services/aws-face-liveness-service');
+    const CanonicalAwsFaceCompareService = require('../../services/canonical-aws-face-compare-service');
+    const { evaluateProductionReadiness } = require('../../services/kyc-biometric-production-policy');
 
     const app = firebaseConfig.initializeFirebase();
     if (!app) {
@@ -522,11 +574,19 @@ async function loadRuntimeDependencies() {
     }
     await redisPool.ensureConnection();
     const redis = redisPool.getConnection();
+    const livenessService = new AwsFaceLivenessService();
+    const faceCompareService = new CanonicalAwsFaceCompareService();
 
     return {
       fetchImpl: globalThis.fetch,
       verifyIdToken: (token) => admin.auth().verifyIdToken(token),
       queryCanonicalCnh: (driverId) => canonicalDocumentService.requireApprovedCnh(driverId),
+      queryInternalBiometricRuntime: async () => ({
+        readOnly: true,
+        readiness: evaluateProductionReadiness(process.env),
+        liveness: livenessService.getConfigSummary(),
+        compare: faceCompareService.getConfigSummary()
+      }),
       async queryActiveRide(driverId) {
         const [indexTripId, driverState] = await Promise.all([
           redis.get(`active_trip_by_driver:${driverId}`),
@@ -624,6 +684,7 @@ module.exports = {
   runKycAwsPreflight,
   validateProvider,
   validateBiometricReadiness,
+  validateInternalBiometricRuntime,
   validateRuntimeFlags,
   validateDriverOffline,
   validateNoActiveRide,

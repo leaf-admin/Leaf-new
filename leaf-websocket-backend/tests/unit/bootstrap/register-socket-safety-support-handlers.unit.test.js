@@ -23,14 +23,23 @@ jest.mock('../../../services/kyc-identity-review-workflow-service', () => ({
   openCaseFromTicket: jest.fn()
 }));
 
+jest.mock('../../../services/kyc-runtime-scope-service', () => ({
+  resolveKycRuntimeForUser: jest.fn()
+}));
+
 const supportChatService = require('../../../services/support-chat-service');
 const safetyIncidentService = require('../../../services/safety-incident-service');
 const supportQueueService = require('../../../services/support-queue-service');
 const supportTicketService = require('../../../services/support-ticket-service');
 const paymentRuntimeProfileService = require('../../../services/payment-runtime-profile-service');
 const kycIdentityReviewWorkflowService = require('../../../services/kyc-identity-review-workflow-service');
+const kycRuntimeScopeService = require('../../../services/kyc-runtime-scope-service');
 const registerSocketSafetySupportHandlers = require('../../../bootstrap/register-socket-safety-support-handlers');
 const { sealFinancialContext } = require('../../../services/financial-runtime-context');
+const runtimeWorkflowService = {
+  openCaseFromTicket: jest.fn(),
+  resumeExistingCaseRequest: jest.fn()
+};
 
 function createHarness(socketOverrides = {}, options = {}) {
   const handlers = {};
@@ -101,8 +110,12 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
       source: 'env',
       testUserSandbox: false
     });
-    kycIdentityReviewWorkflowService.openCaseFromTicket.mockResolvedValue({
+    runtimeWorkflowService.openCaseFromTicket.mockReset().mockResolvedValue({
       case: { caseId: 'kyc_case_1' }
+    });
+    runtimeWorkflowService.resumeExistingCaseRequest.mockReset().mockResolvedValue(null);
+    kycRuntimeScopeService.resolveKycRuntimeForUser.mockResolvedValue({
+      workflow: runtimeWorkflowService
     });
     supportTicketService.updateTicketMetadata.mockImplementation(async (ticketId, metadata) => ({
       id: ticketId,
@@ -145,6 +158,29 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
       expect.objectContaining({
         success: true,
         messageId: 'support_msg_1'
+      })
+    );
+  });
+
+  it('fails closed before the operational chat service for a sandbox user', async () => {
+    paymentRuntimeProfileService.resolveProfile.mockResolvedValue({
+      profileId: 'qa-test-users-sandbox-durable',
+      environment: 'sandbox',
+      source: 'firestore',
+      testUserSandbox: true
+    });
+    const { handlers, socket } = createHarness({
+      userId: 'driver-sandbox',
+      userType: 'driver'
+    });
+
+    await handlers['support:chat:message']({ message: 'Preciso de ajuda.' });
+
+    expect(supportChatService.sendMessage).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith(
+      'support:chat:error',
+      expect.objectContaining({
+        code: 'KYC_SANDBOX_SUPPORT_CHAT_ISOLATION_REQUIRED'
       })
     );
   });
@@ -523,11 +559,17 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
         identityReviewLinkAttempts: 0
       })
     }));
-    expect(kycIdentityReviewWorkflowService.openCaseFromTicket).toHaveBeenCalledWith({
+    expect(runtimeWorkflowService.openCaseFromTicket).toHaveBeenCalledWith({
       driverId: 'driver_1',
       evidenceId: 'evidence_1',
       ticketId: 'ticket_kyc_1',
       requestedBy: expect.objectContaining({ uid: 'driver_1', type: 'driver' })
+    });
+    expect(kycRuntimeScopeService.resolveKycRuntimeForUser).toHaveBeenCalledWith({
+      userId: 'driver_1',
+      phone: null,
+      actor: expect.objectContaining({ userId: 'driver_1', userType: 'driver' }),
+      expectedPersistenceContext: expect.objectContaining({ namespace: 'operational' })
     });
     expect(supportTicketService.updateTicketMetadata).toHaveBeenCalledWith(
       'ticket_kyc_1',
@@ -547,6 +589,32 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
     );
   });
 
+  it('fails before ticket creation when the authoritative KYC runtime cannot be resolved', async () => {
+    kycRuntimeScopeService.resolveKycRuntimeForUser.mockRejectedValueOnce(
+      Object.assign(new Error('Classificacao KYC indisponivel'), {
+        code: 'KYC_RUNTIME_SCOPE_MISMATCH'
+      })
+    );
+    const { handlers, socket } = createHarness({
+      userId: 'driver_1',
+      userType: 'driver'
+    });
+
+    await handlers.createSupportTicket({
+      type: 'account',
+      description: 'Quero solicitar a analise da validacao de identidade.',
+      source: 'kyc_identity_mismatch_appeal',
+      kycEvidenceId: 'evidence_1'
+    });
+
+    expect(supportQueueService.createSupportTicket).not.toHaveBeenCalled();
+    expect(runtimeWorkflowService.openCaseFromTicket).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith('supportTicketError', {
+      error: 'Classificacao KYC indisponivel',
+      code: 'KYC_RUNTIME_SCOPE_MISMATCH'
+    });
+  });
+
   it('preserva ticket duravel como pendente quando o vinculo KYC falha duas vezes', async () => {
     supportQueueService.createSupportTicket.mockResolvedValueOnce({
       ticket: {
@@ -559,7 +627,7 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
       },
       queue: { slaMinutes: { firstResponse: 60 } }
     });
-    kycIdentityReviewWorkflowService.openCaseFromTicket.mockRejectedValue(
+    runtimeWorkflowService.openCaseFromTicket.mockRejectedValue(
       Object.assign(new Error('store indisponivel'), {
         code: 'KYC_IDENTITY_REVIEW_STORE_UNAVAILABLE'
       })
@@ -576,7 +644,7 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
       kycEvidenceId: 'evidence_1'
     });
 
-    expect(kycIdentityReviewWorkflowService.openCaseFromTicket).toHaveBeenCalledTimes(2);
+    expect(runtimeWorkflowService.openCaseFromTicket).toHaveBeenCalledTimes(2);
     expect(supportTicketService.updateTicketMetadata).toHaveBeenCalledWith(
       'ticket_kyc_pending',
       expect.objectContaining({
@@ -606,7 +674,7 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
     });
 
     expect(supportQueueService.createSupportTicket).not.toHaveBeenCalled();
-    expect(kycIdentityReviewWorkflowService.openCaseFromTicket).not.toHaveBeenCalled();
+    expect(runtimeWorkflowService.openCaseFromTicket).not.toHaveBeenCalled();
     expect(socket.emit).toHaveBeenCalledWith(
       'supportTicketError',
       expect.objectContaining({ error: 'Erro interno do servidor' })

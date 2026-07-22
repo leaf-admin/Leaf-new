@@ -5,6 +5,8 @@ const request = require('supertest');
 
 const mockUpdateUserOperationalStatus = jest.fn();
 const mockRequestDriverDocument = jest.fn();
+const mockAuditRequireEvent = jest.fn();
+const mockResolveKycRuntime = jest.fn();
 
 const mockAuthenticateJWT = jest.fn((req, res, next) => {
   const token = req.headers.authorization?.replace('Bearer ', '');
@@ -41,6 +43,14 @@ jest.mock('../../../services/dashboard-user-management-service', () => ({
   requestDriverDocument: (...args) => mockRequestDriverDocument(...args)
 }));
 
+jest.mock('../../../services/audit-service', () => ({
+  requireEvent: (...args) => mockAuditRequireEvent(...args)
+}));
+
+jest.mock('../../../services/kyc-runtime-scope-service', () => ({
+  resolveForUser: (...args) => mockResolveKycRuntime(...args)
+}));
+
 jest.mock('../../../utils/logger', () => ({
   logError: jest.fn(),
   logStructured: jest.fn()
@@ -67,6 +77,19 @@ describe('user-management routes', () => {
       driverId: 'driver_1',
       documentType: 'cnh',
       status: 'requested'
+    });
+    mockAuditRequireEvent.mockResolvedValue({ success: true, logId: 'audit_intent_1' });
+    mockResolveKycRuntime.mockResolvedValue({
+      scope: {
+        namespace: 'operational',
+        financialContextId: 'operational-test-context',
+        financialContext: {
+          namespace: 'operational',
+          providerEnvironment: 'production',
+          paymentProfileId: 'production-default',
+          testUserSandbox: false
+        }
+      }
     });
   });
 
@@ -127,6 +150,16 @@ describe('user-management routes', () => {
     const response = await request(createApp())
       .post('/api/drivers/driver_1/documents/cnh/request')
       .set('Authorization', 'Bearer support')
+      .send({ reason: 'Atualize sua CNH', sendPush: true });
+
+    expect(response.status).toBe(403);
+    expect(mockRequestDriverDocument).not.toHaveBeenCalled();
+  });
+
+  it('rejects development role from KYC document requests', async () => {
+    const response = await request(createApp())
+      .post('/api/drivers/driver_1/documents/cnh/request')
+      .set('Authorization', 'Bearer development')
       .send({ reason: 'Atualize sua CNH', sendPush: true });
 
     expect(response.status).toBe(403);

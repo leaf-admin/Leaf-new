@@ -152,13 +152,21 @@ function evaluateProductionReadiness(env = process.env) {
   const warnings = [];
   const enabled = policy.productionBiometricsEnabled;
   const launchProfile = String(env.LEAF_LAUNCH_PROFILE || '').trim().toLowerCase();
-  const pilotControlled =
-    readBooleanLike(env.LEAF_PILOT_CONTROLLED, false) ||
-    ['pilot', 'pilot_controlled', 'controlled_pilot'].includes(launchProfile);
+  const runtimeRole = String(env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+  const preKycValidationProfile = [
+    'geofence_validation',
+    'ride_flow_validation'
+  ].includes(launchProfile);
+  const nonInteractiveWorker = [
+    'sideeffects',
+    'billing',
+    'trip-location',
+    'trip_location'
+  ].includes(runtimeRole);
 
   if (!enabled) {
     const message = 'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.';
-    if (policy.productionRuntime && pilotControlled) {
+    if (policy.productionRuntime && !preKycValidationProfile && !nonInteractiveWorker) {
       blockers.push(message);
     } else {
       warnings.push(message);
@@ -273,6 +281,9 @@ function evaluateProductionReadiness(env = process.env) {
     const compareResultPersistenceAttempts = Number(
       env.KYC_AWS_COMPARE_RESULT_PERSIST_MAX_ATTEMPTS ?? 3
     );
+    const compareSdkMaxAttempts = Number(
+      env.KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS ?? 1
+    );
     if (!readBooleanLike(env.KYC_AWS_COMPARE_FACES_ENABLED, false)) {
       blockers.push('KYC_AWS_COMPARE_FACES_ENABLED=true obrigatório para usar AWS CompareFaces.');
     }
@@ -281,6 +292,9 @@ function evaluateProductionReadiness(env = process.env) {
     }
     if (readBooleanLike(env.ENABLE_CNH_FACE_BIOMETRICS, false)) {
       blockers.push('ENABLE_CNH_FACE_BIOMETRICS=false obrigatório no perfil AWS canônico para manter o embedding legado isolado.');
+    }
+    if (compareSdkMaxAttempts !== 1) {
+      blockers.push('KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS=1 obrigatório para impedir cobrança duplicada sem idempotency token.');
     }
     if (
       !Number.isInteger(compareResultPersistenceAttempts)

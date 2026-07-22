@@ -1,5 +1,6 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiDriverDocumentsScreen from '../src/screens/prototype/RobotaxiDriverDocumentsScreen';
 import RobotaxiDriverActivationScreen from '../src/screens/prototype/RobotaxiDriverActivationScreen';
@@ -920,5 +921,75 @@ describe('prototype new surfaces', () => {
     await waitFor(() => {
       expect(DocumentPicker.getDocumentAsync).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('only confirms a driver document after the backend accepts the upload', async () => {
+    const DocumentPicker = require('expo-document-picker');
+    let resolveUpload;
+    const uploadPromise = new Promise(resolve => {
+      resolveUpload = resolve;
+    });
+    const submitDriverActivationDocument = jest.fn(() => uploadPromise);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    DocumentPicker.getDocumentAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///tmp/cnh.pdf',
+          mimeType: 'application/pdf',
+          name: 'cnh.pdf',
+          size: 1024,
+        },
+      ],
+    });
+    usePrototypeRideRuntime.mockReturnValue(
+      buildRuntime({
+        driverActivation: {
+          stages: {
+            driver_data_activation: {
+              status: 'action_required',
+              checklist: {
+                cnhEar: false,
+                vehicleRegistration: false,
+                backgroundCheckConsent: false,
+              },
+            },
+          },
+        },
+        driverActivationRemote: { documents: {} },
+        submitDriverActivationDocument,
+      })
+    );
+
+    const screen = render(
+      <RobotaxiDriverActivationScreen
+        navigation={buildNavigation()}
+        route={{ key: 'driver-activation-upload', params: {} }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Enviar')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('driver-activation-continue-button'));
+
+    await waitFor(() => {
+      expect(submitDriverActivationDocument).toHaveBeenCalledTimes(1);
+    });
+    expect(alertSpy).not.toHaveBeenCalledWith('Documento enviado', expect.any(String));
+
+    await act(async () => {
+      resolveUpload({ success: true });
+      await uploadPromise;
+    });
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Documento enviado',
+        expect.stringContaining('Em análise')
+      );
+    });
+    alertSpy.mockRestore();
   });
 });

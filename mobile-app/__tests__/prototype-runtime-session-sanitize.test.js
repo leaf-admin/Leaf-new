@@ -13,6 +13,7 @@ jest.mock("expo-notifications", () => ({
 import {
   buildRuntimeProfileDispatchKey,
   buildCompletedRideEphemeralResetPatch,
+  extractPrototypeDriverKycFailureContext,
   resolveAcceptedPickupDistanceKm,
   resolveRuntimeStatePatchChanges,
   sanitizePersistedRuntimeSessionForProfile,
@@ -31,6 +32,27 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
     usertype: "driver",
     role: "driver",
   };
+
+  it("preserves opaque identity-review references from an online gate failure", () => {
+    expect(
+      extractPrototypeDriverKycFailureContext({
+        code: "KYC_IDENTITY_REVIEW_HOLD",
+        payload: {
+          challengeId: "challenge_01HZX9",
+          requirement: "IDENTITY_REVERIFICATION",
+          evidenceId: "evidence_01HZX9",
+          reviewCaseId: "case_01HZX9",
+          reviewAvailable: true,
+        },
+      }),
+    ).toEqual({
+      challengeId: "challenge_01HZX9",
+      requirement: "IDENTITY_REVERIFICATION",
+      evidenceId: "evidence_01HZX9",
+      reviewCaseId: "case_01HZX9",
+      reviewAvailable: true,
+    });
+  });
 
   it("keeps zero as a valid accepted pickup distance instead of using trip distance fallbacks", () => {
     expect(

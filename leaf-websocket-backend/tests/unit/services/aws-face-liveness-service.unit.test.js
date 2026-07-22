@@ -7,6 +7,19 @@ const mockGet = jest.fn();
 const mockSet = jest.fn();
 const mockEval = jest.fn();
 const redisValues = new Map();
+const OPERATIONAL_BINDING = Object.freeze({
+  persistenceNamespace: 'operational',
+  financialContextId: 'ctx_operational_unit_test'
+});
+
+function buildAttemptKey(userId, attemptScope, binding = OPERATIONAL_BINDING) {
+  const contextHash = require('crypto')
+    .createHash('sha256')
+    .update(binding.financialContextId)
+    .digest('hex')
+    .slice(0, 24);
+  return `kyc:aws:liveness:attempts:${userId}:${attemptScope}:${binding.persistenceNamespace}:${contextHash}`;
+}
 
 function readJsonValue(key, fallback = {}) {
   const raw = redisValues.get(key);
@@ -15,6 +28,17 @@ function readJsonValue(key, fallback = {}) {
 
 function writeJsonValue(key, value) {
   redisValues.set(key, JSON.stringify(value));
+}
+
+function writeAttemptState(key, value, binding = OPERATIONAL_BINDING) {
+  writeJsonValue(key, {
+    ...value,
+    persistenceNamespace: binding.persistenceNamespace,
+    financialContextIdHash: require('crypto')
+      .createHash('sha256')
+      .update(binding.financialContextId)
+      .digest('hex')
+  });
 }
 
 function executeMockEval(script, numberOfKeys, key, ...args) {
@@ -30,6 +54,8 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
       grantId,
       grantedAt,
       providerRecoveryMaxCreditsRaw,
+      persistenceNamespace,
+      financialContextIdHash,
     ] = args;
     const state = readJsonValue(attemptKey, null);
     if (!state) return JSON.stringify({ status: 'attempt_state_missing' });
@@ -48,6 +74,8 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
       state.userId !== userId
       || state.attemptScope !== attemptScope
       || state.lastSessionId !== sessionId
+      || state.persistenceNamespace !== persistenceNamespace
+      || state.financialContextIdHash !== financialContextIdHash
     ) {
       return JSON.stringify({ status: 'attempt_binding_mismatch' });
     }
@@ -112,6 +140,15 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
 
   if (script.includes('leaf_aws_liveness_attempt_reserve_v1')) {
     const state = readJsonValue(key);
+    if (
+      Object.keys(state).length > 0
+      && (
+        state.persistenceNamespace !== args[13]
+        || state.financialContextIdHash !== args[14]
+      )
+    ) {
+      throw new Error('KYC_ATTEMPT_PERSISTENCE_BINDING_MISMATCH');
+    }
     const maxAttempts = Number(args[3]);
     const reservations = Array.isArray(state.attemptReservations)
       ? state.attemptReservations
@@ -119,10 +156,22 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
     if (reservations.some((reservation) => reservation.token === args[7])) {
       return JSON.stringify({ status: 'reserved', state });
     }
+    const committed = reservations.find((reservation) => (
+      reservation.status === 'committed'
+      && reservation.sessionId
+      && reservation.metadataPersisted !== true
+    ));
+    if (committed) {
+      return JSON.stringify({
+        status: 'committed',
+        token: committed.token,
+        sessionId: committed.sessionId,
+        state
+      });
+    }
     const nowEpochMs = Number(args[9]);
     const retryDelayMs = Number(args[10]) * 1000;
     const retryWindowMs = Number(args[11]) * 1000;
-    let reservationsChanged = false;
     for (const reservation of reservations) {
       if (reservation.status !== 'reserved') continue;
       const createdAtEpochMs = Number(reservation.createdAtEpochMs);
@@ -138,7 +187,8 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
       }
       reservation.status = 'dispatch_unknown_expired';
       reservation.resolvedAt = args[6];
-      reservationsChanged = true;
+      writeJsonValue(key, state);
+      return JSON.stringify({ status: 'dispatch_unknown_expired', state });
     }
     const started = Number(state.started || 0);
     const recoveryAllowanceTotal = Math.max(
@@ -174,7 +224,6 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
         )
       )
     ) {
-      if (reservationsChanged) writeJsonValue(key, state);
       return JSON.stringify({ status: 'exhausted', state });
     }
     if (usesRecoveryAllowance) {
@@ -196,6 +245,8 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
     state.recoveryAllowanceRemaining = recoveryAllowanceRemaining;
     state.recoveryAllowanceConsumed = recoveryAllowanceConsumed;
     state.effectiveMax = maxAttempts + (recoveryAllowanceValid ? recoveryAllowanceTotal : 0);
+    state.persistenceNamespace = args[13];
+    state.financialContextIdHash = args[14];
     reservations.push({
       token: args[7],
       status: 'reserved',
@@ -209,18 +260,49 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
     return JSON.stringify({ status: 'reserved', state });
   }
 
+  if (script.includes('leaf_aws_liveness_attempt_recovery_bind_v1')) {
+    const state = readJsonValue(key, null);
+    if (!state) return JSON.stringify({ status: 'missing' });
+    const reservation = (state.attemptReservations || [])
+      .find((item) => item.token === args[0] && item.status === 'reserved');
+    if (!reservation) return JSON.stringify({ status: 'missing', state });
+    reservation.recoveryMetadata = JSON.parse(args[1]);
+    writeJsonValue(key, state);
+    return JSON.stringify({ status: 'bound', state });
+  }
+
   if (script.includes('leaf_aws_liveness_attempt_commit_v1')) {
     const state = readJsonValue(key, null);
     if (!state) return JSON.stringify({ status: 'missing' });
     const reservation = (state.attemptReservations || [])
       .find((item) => item.token === args[0]);
     if (!reservation) return JSON.stringify({ status: 'missing', state });
+    if (!['reserved', 'dispatch_unknown_expired', 'committed'].includes(reservation.status)) {
+      return JSON.stringify({ status: 'missing', state });
+    }
     reservation.status = 'committed';
     reservation.sessionId = args[1];
     reservation.committedAt = args[2];
+    reservation.recoveryMetadata = JSON.parse(args[4]);
     state.lastSessionId = args[1];
     writeJsonValue(key, state);
     return JSON.stringify({ status: 'committed', state });
+  }
+
+  if (script.includes('leaf_aws_liveness_attempt_metadata_persisted_v1')) {
+    const state = readJsonValue(key, null);
+    if (!state) return JSON.stringify({ status: 'missing' });
+    const reservation = (state.attemptReservations || []).find((item) => (
+      item.token === args[0] && item.sessionId === args[1]
+    ));
+    if (!reservation) return JSON.stringify({ status: 'missing', state });
+    if (reservation.status !== 'committed') {
+      return JSON.stringify({ status: 'state_invalid', state });
+    }
+    reservation.metadataPersisted = true;
+    reservation.metadataPersistedAt = args[2];
+    writeJsonValue(key, state);
+    return JSON.stringify({ status: 'persisted', state });
   }
 
   if (script.includes('leaf_aws_liveness_attempt_rollback_v1')) {
@@ -272,6 +354,15 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
 
   if (script.includes('leaf_aws_liveness_attempt_result_v1')) {
     const state = readJsonValue(key);
+    if (
+      Object.keys(state).length > 0
+      && (
+        state.persistenceNamespace !== args[14]
+        || state.financialContextIdHash !== args[15]
+      )
+    ) {
+      throw new Error('KYC_ATTEMPT_PERSISTENCE_BINDING_MISMATCH');
+    }
     const processed = Array.isArray(state.processedResults) ? state.processedResults : [];
     if (processed.some((item) => item.sessionIdHash === args[6])) {
       return JSON.stringify({
@@ -292,6 +383,8 @@ function executeMockEval(script, numberOfKeys, key, ...args) {
     state.estimatedUnitCostUsd = Number(args[4]);
     state.windowSeconds = Number(args[5]);
     state.idempotentReplay = false;
+    state.persistenceNamespace = args[14];
+    state.financialContextIdHash = args[15];
     state.attemptReservations = (state.attemptReservations || [])
       .filter((item) => item.sessionId !== args[7]);
     if (passed) {
@@ -400,6 +493,16 @@ jest.mock('@aws-sdk/client-rekognition', () => ({
   GetFaceLivenessSessionResultsCommand: jest.fn((input) => ({ input }))
 }));
 
+function createBoundSession(service, input = {}) {
+  const hasExplicitBinding = Object.prototype.hasOwnProperty.call(input, 'persistenceNamespace')
+    || Object.prototype.hasOwnProperty.call(input, 'financialContextId');
+  return service.createSession(hasExplicitBinding ? input : {
+    persistenceNamespace: 'operational',
+    financialContextId: 'ctx_operational_unit_test',
+    ...input
+  });
+}
+
 describe('aws-face-liveness-service', () => {
   let AwsFaceLivenessService;
 
@@ -441,7 +544,7 @@ describe('aws-face-liveness-service', () => {
     mockSend.mockResolvedValueOnce({ SessionId: 'session-movement-default' });
 
     const service = new AwsFaceLivenessService();
-    const result = await service.createSession({
+    const result = await createBoundSession(service, {
       userId: 'driver-movement-default'
     });
 
@@ -462,7 +565,7 @@ describe('aws-face-liveness-service', () => {
     mockSend.mockResolvedValueOnce({ SessionId: 'session-movement-light' });
 
     const service = new AwsFaceLivenessService();
-    const result = await service.createSession({
+    const result = await createBoundSession(service, {
       userId: 'driver-movement-light'
     });
 
@@ -489,7 +592,7 @@ describe('aws-face-liveness-service', () => {
     mockSend.mockResolvedValueOnce({ SessionId: 'session-123' });
 
     const service = new AwsFaceLivenessService();
-    const result = await service.createSession({
+    const result = await createBoundSession(service, {
       userId: 'driver-1',
       verificationWindowToken: 'verification-window-token-123'
     });
@@ -506,10 +609,206 @@ describe('aws-face-liveness-service', () => {
     expect(mockSet).toHaveBeenCalled();
   });
 
+  test('should retain the canonical session binding for the attempt window after the AWS session expires', async () => {
+    process.env.KYC_AWS_LIVENESS_SESSION_TTL_SECONDS = '1200';
+    process.env.KYC_AWS_LIVENESS_ATTEMPT_WINDOW_SECONDS = '86400';
+    mockSend.mockResolvedValueOnce({ SessionId: 'session-retained-expiry-proof' });
+
+    const service = new AwsFaceLivenessService();
+    await createBoundSession(service, {
+      userId: 'driver-retained-expiry-proof',
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'first_access'
+    });
+
+    const metadata = readJsonValue(
+      'kyc:aws:liveness:session:session-retained-expiry-proof'
+    );
+    const metadataTtlCall = mockSet.mock.calls.find(([key]) => (
+      key === 'kyc:aws:liveness:session:session-retained-expiry-proof'
+    ));
+
+    expect(service.getConfigSummary()).toEqual(expect.objectContaining({
+      sessionTtlSeconds: 180,
+      sessionBindingTtlSeconds: 86400,
+      attemptWindowSeconds: 86400
+    }));
+    expect(Date.parse(metadata.expiresAt) - Date.parse(metadata.createdAt)).toBe(180_000);
+    expect(metadataTtlCall).toEqual([
+      'kyc:aws:liveness:session:session-retained-expiry-proof',
+      expect.any(String),
+      'EX',
+      86400
+    ]);
+  });
+
+  test('should restore an already-missing expired binding only after Firestore cost-guard attestation', async () => {
+    const userId = 'driver-restore-expired-proof';
+    const sessionId = 'session-restore-expired-proof';
+    const operationId = 'cost-operation-restore-expired-proof';
+    const attemptKey = buildAttemptKey(userId, 'first_access');
+    const recoveryMetadata = {
+      provider: 'aws_rekognition_face_liveness',
+      userId,
+      challengeId: null,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'first_access',
+      verificationWindowToken: 'expired-proof-window-token',
+      ...OPERATIONAL_BINDING,
+      costGuardOperationId: operationId,
+      challengeType: 'FaceMovementChallenge',
+      createdAt: new Date(Date.now() - 240_000).toISOString(),
+      expiresAt: new Date(Date.now() - 60_000).toISOString()
+    };
+    writeAttemptState(attemptKey, {
+      userId,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'first_access',
+      started: 1,
+      failed: 0,
+      passed: 0,
+      maxAttempts: 2,
+      lastSessionId: sessionId,
+      attemptReservations: [{
+        token: operationId,
+        status: 'committed',
+        sessionId,
+        metadataPersisted: true,
+        recoveryMetadata
+      }]
+    });
+    const costGuard = {
+      isEnabled: jest.fn(() => true),
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      assertRecoverableLivenessSession: jest.fn(async () => ({
+        operationId,
+        livenessStatus: 'completed'
+      }))
+    };
+
+    const service = new AwsFaceLivenessService({ costGuard });
+    const recovered = await service.recoverExpiredSessionMetadata({
+      userId,
+      sessionId,
+      challengeId: null,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING
+    });
+
+    expect(recovered).toEqual({
+      sessionId,
+      sessionMetadata: recoveryMetadata,
+      expired: true
+    });
+    expect(costGuard.assertRecoverableLivenessSession).toHaveBeenCalledWith(
+      operationId,
+      { userId, sessionId }
+    );
+    expect(readJsonValue(`kyc:aws:liveness:session:${sessionId}`)).toEqual(recoveryMetadata);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  test('should keep a missing expired binding fail-closed when canonical attestation fails', async () => {
+    const userId = 'driver-expired-proof-unattested';
+    const sessionId = 'session-expired-proof-unattested';
+    const operationId = 'cost-operation-expired-proof-unattested';
+    const recoveryMetadata = {
+      provider: 'aws_rekognition_face_liveness',
+      userId,
+      challengeId: null,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'first_access',
+      verificationWindowToken: 'unattested-window-token',
+      ...OPERATIONAL_BINDING,
+      costGuardOperationId: operationId,
+      createdAt: new Date(Date.now() - 240_000).toISOString(),
+      expiresAt: new Date(Date.now() - 60_000).toISOString()
+    };
+    writeAttemptState(buildAttemptKey(userId, 'first_access'), {
+      userId,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'first_access',
+      started: 1,
+      maxAttempts: 2,
+      lastSessionId: sessionId,
+      attemptReservations: [{
+        token: operationId,
+        status: 'committed',
+        sessionId,
+        metadataPersisted: true,
+        recoveryMetadata
+      }]
+    });
+    const attestationError = Object.assign(new Error('canonical operation unavailable'), {
+      code: 'KYC_AWS_COST_OPERATION_NOT_FOUND'
+    });
+    const costGuard = {
+      isEnabled: jest.fn(() => true),
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      assertRecoverableLivenessSession: jest.fn(async () => { throw attestationError; })
+    };
+
+    const service = new AwsFaceLivenessService({ costGuard });
+    await expect(service.recoverExpiredSessionMetadata({
+      userId,
+      sessionId,
+      challengeId: null,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING
+    })).rejects.toBe(attestationError);
+
+    expect(redisValues.has(`kyc:aws:liveness:session:${sessionId}`)).toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  test('should bind a paid liveness session to the authoritative KYC persistence scope', async () => {
+    mockSend.mockResolvedValueOnce({ SessionId: 'session-sandbox-bound' });
+
+    const service = new AwsFaceLivenessService();
+    await createBoundSession(service, {
+      userId: 'driver-sandbox-bound',
+      persistenceNamespace: 'sandbox',
+      financialContextId: 'ctx_sandbox_bound'
+    });
+
+    const metadata = readJsonValue('kyc:aws:liveness:session:session-sandbox-bound');
+    expect(metadata).toEqual(expect.objectContaining({
+      persistenceNamespace: 'sandbox',
+      financialContextId: 'ctx_sandbox_bound'
+    }));
+    expect(() => service.assertBoundSessionMetadata(metadata, {
+      userId: 'driver-sandbox-bound',
+      expectedPersistenceNamespace: 'sandbox',
+      expectedFinancialContextId: 'ctx_sandbox_bound'
+    })).not.toThrow();
+    expect(() => service.assertBoundSessionMetadata(metadata, {
+      userId: 'driver-sandbox-bound',
+      expectedPersistenceNamespace: 'operational',
+      expectedFinancialContextId: 'ctx_sandbox_bound'
+    })).toThrow(expect.objectContaining({
+      code: 'AWS_LIVENESS_SESSION_PERSISTENCE_SCOPE_MISMATCH'
+    }));
+  });
+
+  test('should reject an incomplete persistence binding before any paid call', async () => {
+    const service = new AwsFaceLivenessService();
+
+    await expect(createBoundSession(service, {
+      userId: 'driver-invalid-persistence-binding',
+      persistenceNamespace: 'sandbox'
+    })).rejects.toMatchObject({
+      code: 'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_INVALID'
+    });
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockEval).not.toHaveBeenCalled();
+  });
+
   test('should reject a provider session without a bound user before any paid call', async () => {
     const service = new AwsFaceLivenessService();
 
-    await expect(service.createSession({ attemptScope: 'driver_online' }))
+    await expect(createBoundSession(service, { attemptScope: 'driver_online' }))
       .rejects.toMatchObject({
         code: 'KYC_AWS_LIVENESS_USER_REQUIRED'
       });
@@ -522,9 +821,20 @@ describe('aws-face-liveness-service', () => {
     process.env.KYC_AWS_LIVENESS_S3_BUCKET = 'leaf-liveness-output';
     const service = new AwsFaceLivenessService();
 
-    await expect(service.createSession({ userId: 'driver-s3-blocked' }))
+    await expect(createBoundSession(service, { userId: 'driver-s3-blocked' }))
       .rejects.toMatchObject({
         code: 'AWS_LIVENESS_S3_OUTPUT_UNSUPPORTED'
+      });
+    expect(mockEval).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  test('should require the persistence binding before any paid call even outside strict mode', async () => {
+    const service = new AwsFaceLivenessService();
+
+    await expect(service.createSession({ userId: 'driver-unbound-production' }))
+      .rejects.toMatchObject({
+        code: 'KYC_AWS_LIVENESS_PERSISTENCE_BINDING_REQUIRED'
       });
     expect(mockEval).not.toHaveBeenCalled();
     expect(mockSend).not.toHaveBeenCalled();
@@ -543,7 +853,11 @@ describe('aws-face-liveness-service', () => {
     };
     const service = new AwsFaceLivenessService({ costGuard });
 
-    await expect(service.createSession({ userId: 'driver-budget-blocked' }))
+    await expect(createBoundSession(service, {
+      userId: 'driver-budget-blocked',
+      persistenceNamespace: 'operational',
+      financialContextId: 'ctx_operational_budget'
+    }))
       .rejects.toMatchObject({ code: 'KYC_AWS_COST_BUDGET_EXHAUSTED' });
     expect(costGuard.reserveLivenessBundle).toHaveBeenCalledWith(expect.objectContaining({
       userId: 'driver-budget-blocked',
@@ -568,7 +882,11 @@ describe('aws-face-liveness-service', () => {
     };
     const service = new AwsFaceLivenessService({ costGuard });
 
-    const result = await service.createSession({ userId: 'driver-cost-bound' });
+    const result = await createBoundSession(service, {
+      userId: 'driver-cost-bound',
+      persistenceNamespace: 'operational',
+      financialContextId: 'ctx_operational_cost'
+    });
     const reservedOperationId = costGuard.reserveLivenessBundle.mock.calls[0][0].operationId;
 
     expect(result.sessionId).toBe('session-cost-bound');
@@ -576,28 +894,53 @@ describe('aws-face-liveness-service', () => {
     expect(costGuard.markLivenessDispatched).toHaveBeenCalledWith(reservedOperationId);
     expect(costGuard.markLivenessCompleted).toHaveBeenCalledWith(
       reservedOperationId,
-      'session-cost-bound'
+      'session-cost-bound',
+      {
+        recoveryBinding: expect.any(String),
+        recoveryExpiresAt: expect.any(String)
+      }
     );
     expect(readJsonValue('kyc:aws:liveness:session:session-cost-bound')).toMatchObject({
       costGuardOperationId: reservedOperationId
     });
   });
 
-  test('should preserve paid attempt when canonical metadata cannot be persisted after SessionId', async () => {
-    process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '1';
+  test('should resume the committed paid session when metadata persistence failed with another slot available', async () => {
+    process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
+    process.env.KYC_PRODUCTION_BIOMETRICS_ENABLED = 'true';
     mockSend.mockResolvedValueOnce({ SessionId: 'session-without-binding' });
     mockSet.mockRejectedValueOnce(new Error('redis unavailable'));
+    let recoveryHandle = null;
+    const costGuard = {
+      isEnabled: jest.fn(() => true),
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      reserveLivenessBundle: jest.fn(async ({ operationId }) => ({ operationId })),
+      markLivenessDispatched: jest.fn(async () => ({})),
+      markLivenessCompleted: jest.fn(async (operationId, sessionId, recovery) => {
+        recoveryHandle = { operationId, sessionId, ...recovery };
+        return recoveryHandle;
+      }),
+      recoverCompletedLivenessSession: jest.fn(async (operationId, { recoveryBinding }) => {
+        if (
+          recoveryHandle?.operationId !== operationId
+          || recoveryHandle?.recoveryBinding !== recoveryBinding
+        ) throw new Error('recovery binding mismatch');
+        return { operationId, sessionId: recoveryHandle.sessionId };
+      }),
+      markLivenessMetadataPersisted: jest.fn(async () => ({})),
+      rollbackBeforeDispatch: jest.fn(async () => false)
+    };
 
-    const service = new AwsFaceLivenessService();
+    const service = new AwsFaceLivenessService({ costGuard });
 
-    await expect(service.createSession({ userId: 'driver-binding-failure' }))
+    await expect(createBoundSession(service, { userId: 'driver-binding-failure' }))
       .rejects.toMatchObject({
         code: 'AWS_LIVENESS_SESSION_METADATA_PERSIST_FAILED',
         providerDispatched: true
       });
     expect(mockSend).toHaveBeenCalledTimes(1);
     expect(readJsonValue(
-      'kyc:aws:liveness:attempts:driver-binding-failure:general'
+      buildAttemptKey('driver-binding-failure', 'general')
     )).toEqual(expect.objectContaining({
       started: 1,
       attemptReservations: [expect.objectContaining({
@@ -605,45 +948,123 @@ describe('aws-face-liveness-service', () => {
         sessionId: 'session-without-binding'
       })]
     }));
-    await expect(service.createSession({ userId: 'driver-binding-failure' }))
-      .rejects.toMatchObject({
-        code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED'
-      });
+    const resumed = await createBoundSession(service, {
+      userId: 'driver-binding-failure',
+      verificationWindowToken: 'replacement-window-token'
+    });
+    expect(resumed).toMatchObject({
+      sessionId: 'session-without-binding',
+      idempotentResume: true,
+      attempt: 1,
+      maxAttempts: 2
+    });
     expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(costGuard.reserveLivenessBundle).toHaveBeenCalledTimes(1);
+    const originalClientRequestToken = mockSend.mock.calls[0][0].input.ClientRequestToken;
+    expect(costGuard.reserveLivenessBundle).toHaveBeenCalledWith(expect.objectContaining({
+      operationId: originalClientRequestToken
+    }));
+    expect(costGuard.recoverCompletedLivenessSession).toHaveBeenCalledWith(
+      originalClientRequestToken,
+      expect.objectContaining({
+        userId: 'driver-binding-failure',
+        recoveryBinding: expect.any(String)
+      })
+    );
+    expect(readJsonValue('kyc:aws:liveness:session:session-without-binding')).toMatchObject({
+      userId: 'driver-binding-failure',
+      verificationWindowToken: 'replacement-window-token'
+    });
     expect(mockEval.mock.calls.some(([script]) => (
       script.includes('leaf_aws_liveness_attempt_rollback_v1')
     ))).toBe(false);
   });
 
-  test('should preserve reserved paid attempt and fail closed when commit fails after SessionId', async () => {
-    process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '1';
+  test.each([
+    ['immediately', false],
+    ['after the idempotent retry window', true]
+  ])('should recover the same paid SessionId %s when Redis commit fails', async (_, ageReservation) => {
+    process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
+    process.env.KYC_PRODUCTION_BIOMETRICS_ENABLED = 'true';
     mockSend.mockResolvedValueOnce({ SessionId: 'session-without-commit' });
+    let failCommit = true;
     mockEval.mockImplementation((script, ...args) => {
-      if (script.includes('leaf_aws_liveness_attempt_commit_v1')) {
+      if (script.includes('leaf_aws_liveness_attempt_commit_v1') && failCommit) {
+        failCommit = false;
         throw new Error('redis commit unavailable');
       }
       return executeMockEval(script, ...args);
     });
+    let recoveryHandle = null;
+    const costGuard = {
+      isEnabled: jest.fn(() => true),
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      reserveLivenessBundle: jest.fn(async ({ operationId }) => ({ operationId })),
+      markLivenessDispatched: jest.fn(async () => ({})),
+      markLivenessCompleted: jest.fn(async (operationId, sessionId, recovery) => {
+        recoveryHandle = { operationId, sessionId, ...recovery };
+      }),
+      recoverCompletedLivenessSession: jest.fn(async (operationId, { recoveryBinding }) => {
+        if (
+          operationId !== recoveryHandle?.operationId
+          || recoveryBinding !== recoveryHandle?.recoveryBinding
+        ) throw new Error('recovery mismatch');
+        return { operationId, sessionId: recoveryHandle.sessionId };
+      }),
+      markLivenessMetadataPersisted: jest.fn(async () => ({})),
+      rollbackBeforeDispatch: jest.fn(async () => false)
+    };
 
-    const service = new AwsFaceLivenessService();
-    await expect(service.createSession({ userId: 'driver-commit-failure' }))
+    const service = new AwsFaceLivenessService({ costGuard });
+    await expect(createBoundSession(service, { userId: 'driver-commit-failure' }))
       .rejects.toMatchObject({
         code: 'KYC_AWS_LIVENESS_ATTEMPT_COMMIT_FAILED'
       });
 
-    expect(readJsonValue(
-      'kyc:aws:liveness:attempts:driver-commit-failure:general'
-    )).toEqual(expect.objectContaining({
+    const attemptKey = buildAttemptKey('driver-commit-failure', 'general');
+    const failedState = readJsonValue(attemptKey);
+    expect(failedState).toEqual(expect.objectContaining({
       started: 1,
       attemptReservations: [expect.objectContaining({
-        status: 'reserved'
+        status: 'reserved',
+        recoveryMetadata: expect.objectContaining({
+          persistenceNamespace: 'operational'
+        })
       })]
     }));
-    await expect(service.createSession({ userId: 'driver-commit-failure' }))
-      .rejects.toMatchObject({
-        code: 'KYC_AWS_LIVENESS_DISPATCH_OUTCOME_UNKNOWN'
-      });
+    const originalToken = failedState.attemptReservations[0].token;
+    if (ageReservation) {
+      failedState.attemptReservations[0].createdAtEpochMs = Date.now() - 121_000;
+      writeJsonValue(attemptKey, failedState);
+    }
+
+    const resumed = await createBoundSession(service, {
+      userId: 'driver-commit-failure',
+      verificationWindowToken: 'recovered-window-token'
+    });
+    expect(resumed).toMatchObject({
+      sessionId: 'session-without-commit',
+      idempotentResume: true,
+      attempt: 1,
+      maxAttempts: 2
+    });
+    expect(costGuard.recoverCompletedLivenessSession).toHaveBeenCalledWith(
+      originalToken,
+      expect.objectContaining({
+        userId: 'driver-commit-failure',
+        recoveryBinding: expect.any(String)
+      })
+    );
     expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(costGuard.reserveLivenessBundle).toHaveBeenCalledTimes(1);
+    expect(readJsonValue(attemptKey).attemptReservations).toEqual([
+      expect.objectContaining({
+        token: originalToken,
+        status: 'committed',
+        sessionId: 'session-without-commit',
+        metadataPersisted: true
+      })
+    ]);
     expect(mockEval.mock.calls.some(([script]) => (
       script.includes('leaf_aws_liveness_attempt_rollback_v1')
     ))).toBe(false);
@@ -655,8 +1076,8 @@ describe('aws-face-liveness-service', () => {
 
     const service = new AwsFaceLivenessService();
     const results = await Promise.allSettled([
-      service.createSession({ userId: 'driver-concurrent', attemptScope: 'driver_online' }),
-      service.createSession({ userId: 'driver-concurrent', attemptScope: 'driver_online' })
+      createBoundSession(service, { userId: 'driver-concurrent', attemptScope: 'driver_online' }),
+      createBoundSession(service, { userId: 'driver-concurrent', attemptScope: 'driver_online' })
     ]);
 
     expect(results.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
@@ -677,11 +1098,13 @@ describe('aws-face-liveness-service', () => {
       const service = new AwsFaceLivenessService();
       const first = await service.reserveAttempt({
         userId: 'driver-reservation-replay',
-        attemptScope: 'driver_online'
+        attemptScope: 'driver_online',
+        ...OPERATIONAL_BINDING
       });
       const replay = await service.reserveAttempt({
         userId: 'driver-reservation-replay',
-        attemptScope: 'driver_online'
+        attemptScope: 'driver_online',
+        ...OPERATIONAL_BINDING
       });
 
       expect(replay.token).toBe(first.token);
@@ -700,7 +1123,7 @@ describe('aws-face-liveness-service', () => {
       .createHash('sha256')
       .update(sessionId)
       .digest('hex');
-    const attemptKey = `kyc:aws:liveness:attempts:${userId}:first_access`;
+    const attemptKey = buildAttemptKey(userId, 'first_access');
     const sessionKey = `kyc:aws:liveness:session:${sessionId}`;
     const processedResults = [{
       sessionIdHash,
@@ -708,10 +1131,11 @@ describe('aws-face-liveness-service', () => {
       passed: true,
       processedAt: '2026-07-17T03:19:52.908Z'
     }];
-    writeJsonValue(attemptKey, {
+    writeAttemptState(attemptKey, {
       userId,
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING,
       started: 2,
       failed: 0,
       passed: 2,
@@ -733,13 +1157,15 @@ describe('aws-face-liveness-service', () => {
       userId,
       sessionId,
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'first_access'
+      attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING
     });
     const replay = await service.grantReferenceImageRecoveryAttempt({
       userId,
       sessionId,
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'first_access'
+      attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING
     });
 
     expect(applied).toEqual(expect.objectContaining({
@@ -788,11 +1214,12 @@ describe('aws-face-liveness-service', () => {
       .update(sessionId)
       .digest('hex');
     const previousGrantId = 'previous-provider-recovery-grant';
-    const attemptKey = `kyc:aws:liveness:attempts:${userId}:first_access`;
-    writeJsonValue(attemptKey, {
+    const attemptKey = buildAttemptKey(userId, 'first_access');
+    writeAttemptState(attemptKey, {
       userId,
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING,
       started: 3,
       failed: 0,
       passed: 3,
@@ -824,12 +1251,14 @@ describe('aws-face-liveness-service', () => {
       sessionId,
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING,
     });
     const replay = await service.grantReferenceImageRecoveryAttempt({
       userId,
       sessionId,
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING,
     });
 
     expect(applied).toEqual(expect.objectContaining({
@@ -868,7 +1297,7 @@ describe('aws-face-liveness-service', () => {
       .createHash('sha256')
       .update(sessionId)
       .digest('hex');
-    writeJsonValue(`kyc:aws:liveness:attempts:${userId}:first_access`, {
+    writeAttemptState(buildAttemptKey(userId, 'first_access'), {
       userId,
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'first_access',
@@ -897,24 +1326,25 @@ describe('aws-face-liveness-service', () => {
       userId,
       sessionId,
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'first_access'
+      attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING
     })).rejects.toMatchObject({
       code: 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP'
     });
-    expect(readJsonValue(`kyc:aws:liveness:attempts:${userId}:first_access`))
+    expect(readJsonValue(buildAttemptKey(userId, 'first_access')))
       .not.toHaveProperty('recoveryAllowanceGrantId');
   });
 
   test('should consume one pregranted recovery credit only above the normal max and block the fourth attempt', async () => {
     process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
-    const attemptKey = 'kyc:aws:liveness:attempts:driver-recovery:driver_online';
+    const attemptKey = buildAttemptKey('driver-recovery', 'driver_online');
     const processedHistory = [{
       sessionIdHash: 'previous-session-hash',
       status: 'SUCCEEDED',
       passed: true,
       processedAt: '2026-07-15T05:00:00.000Z'
     }];
-    writeJsonValue(attemptKey, {
+    writeAttemptState(attemptKey, {
       userId: 'driver-recovery',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online',
@@ -933,10 +1363,11 @@ describe('aws-face-liveness-service', () => {
       .mockResolvedValueOnce({ SessionId: 'recovery-session-3' });
 
     const service = new AwsFaceLivenessService();
-    await service.createSession({
+    await createBoundSession(service, {
       userId: 'driver-recovery',
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'driver_online'
+      attemptScope: 'driver_online',
+      ...OPERATIONAL_BINDING
     });
     const afterNormalAttempt = readJsonValue(attemptKey);
     expect(afterNormalAttempt).toEqual(expect.objectContaining({
@@ -950,10 +1381,11 @@ describe('aws-face-liveness-service', () => {
     }));
     expect(afterNormalAttempt.processedResults).toEqual(processedHistory);
 
-    await service.createSession({
+    await createBoundSession(service, {
       userId: 'driver-recovery',
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'driver_online'
+      attemptScope: 'driver_online',
+      ...OPERATIONAL_BINDING
     });
     const afterRecoveryAttempt = readJsonValue(attemptKey);
     expect(afterRecoveryAttempt).toEqual(expect.objectContaining({
@@ -978,7 +1410,8 @@ describe('aws-face-liveness-service', () => {
     const exposedState = await service.getAttemptState({
       userId: 'driver-recovery',
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'driver_online'
+      attemptScope: 'driver_online',
+      ...OPERATIONAL_BINDING
     });
     expect(exposedState).toEqual(expect.objectContaining({
       started: 3,
@@ -993,7 +1426,7 @@ describe('aws-face-liveness-service', () => {
       estimatedCostUsd: 0.045
     }));
 
-    await expect(service.createSession({
+    await expect(createBoundSession(service, {
       userId: 'driver-recovery',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online'
@@ -1012,14 +1445,14 @@ describe('aws-face-liveness-service', () => {
 
   test('should restore the same recovery credit when createSession rolls back before provider dispatch', async () => {
     process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
-    const attemptKey = 'kyc:aws:liveness:attempts:driver-recovery-rollback:driver_online';
+    const attemptKey = buildAttemptKey('driver-recovery-rollback', 'driver_online');
     const processedHistory = [{
       sessionIdHash: 'successful-session-hash',
       status: 'SUCCEEDED',
       passed: true,
       processedAt: '2026-07-15T05:00:00.000Z'
     }];
-    writeJsonValue(attemptKey, {
+    writeAttemptState(attemptKey, {
       userId: 'driver-recovery-rollback',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online',
@@ -1042,7 +1475,7 @@ describe('aws-face-liveness-service', () => {
     };
 
     const service = new AwsFaceLivenessService({ costGuard });
-    await expect(service.createSession({
+    await expect(createBoundSession(service, {
       userId: 'driver-recovery-rollback',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online'
@@ -1065,7 +1498,8 @@ describe('aws-face-liveness-service', () => {
 
     const exposedState = await service.getAttemptState({
       userId: 'driver-recovery-rollback',
-      attemptScope: 'driver_online'
+      attemptScope: 'driver_online',
+      ...OPERATIONAL_BINDING
     });
     expect(exposedState).toEqual(expect.objectContaining({
       started: 2,
@@ -1079,8 +1513,8 @@ describe('aws-face-liveness-service', () => {
 
   test('should replay a recovery reservation without consuming its grant twice', async () => {
     process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
-    const attemptKey = 'kyc:aws:liveness:attempts:driver-recovery-replay:driver_online';
-    writeJsonValue(attemptKey, {
+    const attemptKey = buildAttemptKey('driver-recovery-replay', 'driver_online');
+    writeAttemptState(attemptKey, {
       userId: 'driver-recovery-replay',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online',
@@ -1103,11 +1537,13 @@ describe('aws-face-liveness-service', () => {
       const service = new AwsFaceLivenessService();
       const first = await service.reserveAttempt({
         userId: 'driver-recovery-replay',
-        attemptScope: 'driver_online'
+        attemptScope: 'driver_online',
+        ...OPERATIONAL_BINDING
       });
       const replay = await service.reserveAttempt({
         userId: 'driver-recovery-replay',
-        attemptScope: 'driver_online'
+        attemptScope: 'driver_online',
+        ...OPERATIONAL_BINDING
       });
 
       expect(replay.token).toBe(first.token);
@@ -1126,10 +1562,14 @@ describe('aws-face-liveness-service', () => {
         })
       ]);
 
-      await service.commitAttemptReservation(first, 'recovery-replay-session');
+      await service.commitAttemptReservation(first, 'recovery-replay-session', {
+        attemptScope: 'driver_online'
+      });
+      await service.markAttemptMetadataPersisted(first, 'recovery-replay-session');
       await expect(service.reserveAttempt({
         userId: 'driver-recovery-replay',
-        attemptScope: 'driver_online'
+        attemptScope: 'driver_online',
+        ...OPERATIONAL_BINDING
       })).rejects.toMatchObject({
         code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED'
       });
@@ -1153,7 +1593,7 @@ describe('aws-face-liveness-service', () => {
       .mockResolvedValueOnce({ SessionId: 'session-idempotent-recovery' });
 
     const service = new AwsFaceLivenessService();
-    await expect(service.createSession({
+    await expect(createBoundSession(service, {
       userId: 'driver-rollback',
       attemptScope: 'driver_online'
     })).rejects.toMatchObject({
@@ -1162,14 +1602,14 @@ describe('aws-face-liveness-service', () => {
     });
 
     const originalToken = readJsonValue(
-      'kyc:aws:liveness:attempts:driver-rollback:driver_online'
+      buildAttemptKey('driver-rollback', 'driver_online')
     ).attemptReservations[0].token;
-    const recovered = await service.createSession({
+    const recovered = await createBoundSession(service, {
       userId: 'driver-rollback',
       attemptScope: 'driver_online'
     });
     const attemptState = readJsonValue(
-      'kyc:aws:liveness:attempts:driver-rollback:driver_online'
+      buildAttemptKey('driver-rollback', 'driver_online')
     );
 
     expect(recovered.sessionId).toBe('session-idempotent-recovery');
@@ -1184,50 +1624,45 @@ describe('aws-face-liveness-service', () => {
     expect(mockSend).toHaveBeenCalledTimes(2);
   });
 
-  test('should consume an expired ambiguous dispatch and open the next attempt slot', async () => {
+  test('should never open a new token after an ambiguous dispatch retry window expires', async () => {
     process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
     process.env.KYC_AWS_LIVENESS_IDEMPOTENT_RETRY_DELAY_SECONDS = '0';
     process.env.KYC_AWS_LIVENESS_IDEMPOTENT_RETRY_WINDOW_SECONDS = '30';
-    mockSend
-      .mockRejectedValueOnce(new Error('provider timeout'))
-      .mockResolvedValueOnce({ SessionId: 'session-second-slot' });
+    mockSend.mockRejectedValueOnce(new Error('provider timeout'));
 
     const service = new AwsFaceLivenessService();
-    await expect(service.createSession({
+    await expect(createBoundSession(service, {
       userId: 'driver-expired-dispatch',
       attemptScope: 'driver_online'
     })).rejects.toThrow('provider timeout');
 
-    const key = 'kyc:aws:liveness:attempts:driver-expired-dispatch:driver_online';
+    const key = buildAttemptKey('driver-expired-dispatch', 'driver_online');
     const state = readJsonValue(key);
     const firstToken = state.attemptReservations[0].token;
     state.attemptReservations[0].createdAtEpochMs = Date.now() - 31_000;
     writeJsonValue(key, state);
 
-    const recovered = await service.createSession({
+    await expect(createBoundSession(service, {
       userId: 'driver-expired-dispatch',
       attemptScope: 'driver_online'
+    })).rejects.toMatchObject({
+      code: 'KYC_AWS_LIVENESS_DISPATCH_OUTCOME_UNKNOWN'
     });
     const finalState = readJsonValue(key);
 
-    expect(recovered.sessionId).toBe('session-second-slot');
-    expect(finalState.started).toBe(2);
-    expect(finalState.attemptReservations).toEqual(expect.arrayContaining([
+    expect(finalState.started).toBe(1);
+    expect(finalState.attemptReservations).toEqual([
       expect.objectContaining({
         token: firstToken,
         status: 'dispatch_unknown_expired'
-      }),
-      expect.objectContaining({
-        status: 'committed',
-        sessionId: 'session-second-slot'
       })
-    ]));
-    expect(mockSend.mock.calls[1][0].input.ClientRequestToken).not.toBe(firstToken);
+    ]);
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 
   test('should keep successful sessions inside the paid budget without soft-blocking identity', async () => {
     process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '1';
-    writeJsonValue('kyc:aws:liveness:attempts:driver-success-budget:driver_online', {
+    writeAttemptState(buildAttemptKey('driver-success-budget', 'driver_online'), {
       userId: 'driver-success-budget',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online',
@@ -1249,7 +1684,8 @@ describe('aws-face-liveness-service', () => {
       attemptScope: 'driver_online',
       sessionId: 'session-success-budget',
       status: 'SUCCEEDED',
-      livenessPassed: true
+      livenessPassed: true,
+      ...OPERATIONAL_BINDING
     });
 
     expect(result).toEqual(expect.objectContaining({
@@ -1258,7 +1694,7 @@ describe('aws-face-liveness-service', () => {
       passed: 1,
       softBlocked: false
     }));
-    await expect(service.createSession({
+    await expect(createBoundSession(service, {
       userId: 'driver-success-budget',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online'
@@ -1279,14 +1715,15 @@ describe('aws-face-liveness-service', () => {
       attemptScope: 'driver_online',
       sessionId: 'session-result-ttl',
       status: 'FAILED',
-      livenessPassed: false
+      livenessPassed: false,
+      ...OPERATIONAL_BINDING
     });
     const resultEvalCall = mockEval.mock.calls.find(([script]) => (
       script.includes('leaf_aws_liveness_attempt_result_v1')
     ));
 
     expect(result.windowSeconds).toBe(300);
-    expect(resultEvalCall.at(-1)).toBe('300');
+    expect(resultEvalCall.at(-3)).toBe('300');
   });
 
   test.each([
@@ -1306,6 +1743,7 @@ describe('aws-face-liveness-service', () => {
         challengeId: 'challenge-abandon',
         requirement: 'LIVENESS_REQUIRED',
         attemptScope: 'driver_online',
+        ...OPERATIONAL_BINDING,
         verificationWindowToken: 'window-token-abandon',
         costGuardOperationId: 'cost-operation-abandon',
         estimatedUnitCostUsd: 0.015,
@@ -1453,6 +1891,7 @@ describe('aws-face-liveness-service', () => {
       challengeId: null,
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING,
       verificationWindowToken: 'window-token-passed',
       createdAt: new Date(Date.now() - 60_000).toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString()
@@ -1538,7 +1977,8 @@ describe('aws-face-liveness-service', () => {
 
   test('should parse result and set liveness pass based on threshold', async () => {
     writeJsonValue('kyc:aws:liveness:session:session-abc', {
-      userId: 'driver-2'
+      userId: 'driver-2',
+      ...OPERATIONAL_BINDING
     });
     mockSend.mockResolvedValueOnce({
       Status: 'SUCCEEDED',
@@ -1572,6 +2012,7 @@ describe('aws-face-liveness-service', () => {
       challengeId: 'challenge-bound',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online',
+      ...OPERATIONAL_BINDING,
       verificationWindowToken: 'server-only-window-token',
       createdAt: new Date(Date.now() - 60_000).toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString()
@@ -1624,6 +2065,7 @@ describe('aws-face-liveness-service', () => {
       challengeId: null,
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'first_access',
+      ...OPERATIONAL_BINDING,
       createdAt: new Date(Date.now() - 10_000).toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
@@ -1752,19 +2194,83 @@ describe('aws-face-liveness-service', () => {
     expect(service.buildAttemptRedisKey({
       userId: 'driver-1',
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'driver_online'
-    })).toBe('kyc:aws:liveness:attempts:driver-1:driver_online');
+      attemptScope: 'driver_online',
+      ...OPERATIONAL_BINDING
+    })).toBe(buildAttemptKey('driver-1', 'driver_online'));
     expect(service.buildAttemptRedisKey({
       userId: 'driver-1',
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'withdrawal'
-    })).toBe('kyc:aws:liveness:attempts:driver-1:withdrawal');
+      attemptScope: 'withdrawal',
+      ...OPERATIONAL_BINDING
+    })).toBe(buildAttemptKey('driver-1', 'withdrawal'));
     expect(service.getMaxAttemptsForScope('driver_online')).toBe(2);
     expect(service.getMaxAttemptsForScope('withdrawal')).toBe(3);
+    expect(service.getMaxAttemptsForScope(
+      'manual_review_retry_kyc_ir_0123456789abcdef0123456789abcdef'
+    )).toBe(1);
+    expect(service.getMaxAttemptsForScope(
+      'orphan_hold_retry_kyc_or_0123456789abcdef0123456789abcdef'
+    )).toBe(1);
+  });
+
+  test('should isolate operational and sandbox attempt state for the same driver', async () => {
+    const userId = 'driver-cross-runtime';
+    const sandboxBinding = {
+      persistenceNamespace: 'sandbox',
+      financialContextId: 'ctx_sandbox_cross_runtime'
+    };
+    const operationalKey = buildAttemptKey(userId, 'driver_online');
+    const sandboxKey = buildAttemptKey(userId, 'driver_online', sandboxBinding);
+    writeAttemptState(operationalKey, {
+      userId,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'driver_online',
+      started: 2,
+      failed: 2,
+      passed: 0,
+      maxAttempts: 2,
+      attemptsExhausted: true,
+      softBlocked: true,
+      attemptReservations: [{ token: 'operational-only-reservation', status: 'reserved' }]
+    });
+    mockSend.mockResolvedValueOnce({ SessionId: 'sandbox-isolated-session' });
+
+    const service = new AwsFaceLivenessService();
+    const result = await createBoundSession(service, {
+      userId,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'driver_online',
+      ...sandboxBinding
+    });
+    const sandboxState = await service.getAttemptState({
+      userId,
+      requirement: 'LIVENESS_REQUIRED',
+      attemptScope: 'driver_online',
+      ...sandboxBinding
+    });
+
+    expect(operationalKey).not.toBe(sandboxKey);
+    expect(result.sessionId).toBe('sandbox-isolated-session');
+    expect(sandboxState).toMatchObject({
+      started: 1,
+      failed: 0,
+      softBlocked: false,
+      persistenceNamespace: 'sandbox'
+    });
+    expect(readJsonValue(operationalKey)).toMatchObject({
+      started: 2,
+      failed: 2,
+      softBlocked: true,
+      attemptReservations: [{ token: 'operational-only-reservation' }]
+    });
+    expect(readJsonValue(sandboxKey)).toMatchObject({
+      started: 1,
+      persistenceNamespace: 'sandbox'
+    });
   });
 
   test('should allow withdrawal liveness when driver-online budget is exhausted', async () => {
-    writeJsonValue('kyc:aws:liveness:attempts:driver-1:driver_online', {
+    writeAttemptState(buildAttemptKey('driver-1', 'driver_online'), {
       userId: 'driver-1',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online',
@@ -1775,7 +2281,7 @@ describe('aws-face-liveness-service', () => {
     mockSend.mockResolvedValueOnce({ SessionId: 'withdrawal-session-1' });
 
     const service = new AwsFaceLivenessService();
-    const result = await service.createSession({
+    const result = await createBoundSession(service, {
       userId: 'driver-1',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'withdrawal'
@@ -1788,7 +2294,7 @@ describe('aws-face-liveness-service', () => {
   });
 
   test('should block new liveness session when attempt budget is exhausted', async () => {
-    writeJsonValue('kyc:aws:liveness:attempts:driver-exhausted:LIVENESS_REQUIRED'.toLowerCase(), {
+    writeAttemptState(buildAttemptKey('driver-exhausted', 'liveness_required'), {
       userId: 'driver-exhausted',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'liveness_required',
@@ -1801,7 +2307,7 @@ describe('aws-face-liveness-service', () => {
     const service = new AwsFaceLivenessService();
 
     await expect(
-      service.createSession({ userId: 'driver-exhausted', requirement: 'LIVENESS_REQUIRED' })
+      createBoundSession(service, { userId: 'driver-exhausted', requirement: 'LIVENESS_REQUIRED' })
     ).rejects.toMatchObject({
       code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED'
     });
@@ -1812,9 +2318,10 @@ describe('aws-face-liveness-service', () => {
     writeJsonValue('kyc:aws:liveness:session:session-final', {
       userId: 'driver-final',
       requirement: 'LIVENESS_REQUIRED',
-      attemptScope: 'liveness_required'
+      attemptScope: 'liveness_required',
+      ...OPERATIONAL_BINDING
     });
-    writeJsonValue('kyc:aws:liveness:attempts:driver-final:liveness_required', {
+    writeAttemptState(buildAttemptKey('driver-final', 'liveness_required'), {
       userId: 'driver-final',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'liveness_required',
@@ -1852,10 +2359,11 @@ describe('aws-face-liveness-service', () => {
       challengeId: 'challenge-terminal-replay',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online',
+      ...OPERATIONAL_BINDING,
       createdAt: new Date(Date.now() - 60_000).toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString()
     });
-    writeJsonValue('kyc:aws:liveness:attempts:driver-terminal-replay:driver_online', {
+    writeAttemptState(buildAttemptKey('driver-terminal-replay', 'driver_online'), {
       userId: 'driver-terminal-replay',
       requirement: 'LIVENESS_REQUIRED',
       attemptScope: 'driver_online',
