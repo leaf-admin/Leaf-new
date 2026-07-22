@@ -1418,6 +1418,51 @@ describe('kyc routes auth', () => {
     expect(mockCreateSession).not.toHaveBeenCalled();
   });
 
+  it('rebinds a stale activation request to the canonical authorized retry before AWS dispatch', async () => {
+    const recoveryId = `kyc_or_${'c'.repeat(32)}`;
+    const retryScope = `orphan_hold_retry_${recoveryId}`;
+    const claim = {
+      driverId: 'driver-1',
+      recoveryId,
+      authorizationId: recoveryId,
+      attemptScope: retryScope,
+      claimToken: 'opaque-canonical-rebind-token'
+    };
+    mockAssertKycOperationAllowed.mockResolvedValueOnce({
+      allowed: true,
+      identityReviewHold: false,
+      cleanRetryAuthorized: true,
+      retrySessionResumeCandidate: false,
+      retryAuthorizationId: recoveryId,
+      retryAuthorizationKind: 'orphan_hold'
+    });
+    mockGetFromRealtimeDB.mockResolvedValueOnce({
+      challengeId: 'idrev_orphan_canonical',
+      requirement: 'IDENTITY_REVERIFICATION',
+      status: 'requested',
+      attemptScope: retryScope
+    });
+    mockClaimCleanRetryAuthorization.mockResolvedValueOnce(claim);
+
+    const response = await request(createApp())
+      .post('/api/kyc/liveness/aws/session')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        userId: 'driver-1',
+        challengeId: null,
+        requirement: 'LIVENESS_REQUIRED'
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.success).toBe(true);
+    expect(mockCreateSession).toHaveBeenCalledWith(expect.objectContaining({
+      challengeId: 'idrev_orphan_canonical',
+      requirement: 'IDENTITY_REVERIFICATION',
+      attemptScope: retryScope
+    }));
+    expect(mockConsumeCleanRetryAuthorization).toHaveBeenCalledWith(claim, 'session-1');
+  });
+
   it('does not dispatch AWS when a retry scope has no durable authorization claim', async () => {
     const retryScope = `manual_review_retry_kyc_ir_${'e'.repeat(32)}`;
     mockGetFromRealtimeDB.mockResolvedValueOnce({
@@ -2828,7 +2873,7 @@ describe('kyc routes auth', () => {
     );
   });
 
-  it('reconciles a durable canonical rejection after a crash before retry finalization', async () => {
+  it('reconciles a retry session from canonical metadata when the mobile context is stale', async () => {
     const challengeId = 'idrev_rejected_reconciliation';
     const attemptScope = 'orphan_hold_retry_kyc_or_recovery_1';
     const sessionHash = 'a'.repeat(64);
@@ -2888,8 +2933,7 @@ describe('kyc routes auth', () => {
       .set('Authorization', 'Bearer firebase-token')
       .field('userId', 'driver-1')
       .field('awsSessionId', 'session-rejected-reconciliation')
-      .field('challengeId', challengeId)
-      .field('requirement', 'IDENTITY_REVERIFICATION');
+      .field('requirement', 'LIVENESS_REQUIRED');
 
     expect(response.status).toBe(403);
     expect(response.body).toEqual(expect.objectContaining({
@@ -2898,6 +2942,10 @@ describe('kyc routes auth', () => {
       reviewAvailable: true,
       idempotentReconciliation: true
     }));
+    expect(mockAssertKycOperationAllowed).toHaveBeenCalledWith('driver-1', {
+      attemptScope,
+      awsSessionId: 'session-rejected-reconciliation'
+    });
     expectCanonicalComparePublicProjection(response.body);
     expect(response.body.evidenceId).toBe(reviewEvidenceId);
     expect(response.body.evidenceId).not.toBe(sessionHash);

@@ -863,15 +863,64 @@ class KYCRoutes {
           return sendIdentityReviewGateResponse(res, identityReviewGate);
         }
 
-        const effectiveChallengeId = typeof challengeId === 'string' && challengeId.trim()
+        let effectiveChallengeId = typeof challengeId === 'string' && challengeId.trim()
           ? challengeId.trim()
           : null;
         let challenge = null;
         let authorizedAttemptScope = null;
         let identityChallengeAlreadyValidating = false;
+        let canonicalRetryIdentityState = null;
         let effectiveRequirement = typeof requirement === 'string' && requirement.trim()
           ? requirement.trim()
           : null;
+
+        if (
+          kycRuntime.namespace === 'operational'
+          && (
+            identityReviewGate.cleanRetryAuthorized === true
+            || identityReviewGate.retrySessionResumeCandidate === true
+          )
+          && !isIdentityReverificationRequest({
+            challengeId: effectiveChallengeId,
+            requirement: effectiveRequirement
+          })
+        ) {
+          const retryAuthorizationId = String(
+            identityReviewGate.retryAuthorizationId || ''
+          ).trim().toLowerCase();
+          const retryScopePrefix = identityReviewGate.retryAuthorizationKind === 'manual_review'
+            ? 'manual_review_retry_'
+            : (identityReviewGate.retryAuthorizationKind === 'orphan_hold'
+              ? 'orphan_hold_retry_'
+              : '');
+          const identityState = await Promise.resolve(
+            firebaseConfig?.getFromRealtimeDB?.(`users/${userId}/identityReverification`)
+          ).catch(() => null);
+          canonicalRetryIdentityState = identityState;
+          const canonicalChallengeId = String(identityState?.challengeId || '').trim();
+          const canonicalRequirement = String(identityState?.requirement || '').trim();
+          const canonicalStatus = String(identityState?.status || '').trim().toLowerCase();
+          const canonicalAttemptScope = normalizeLivenessAttemptScope(
+            identityState?.attemptScope || ''
+          );
+          const expectedAttemptScope = retryScopePrefix && retryAuthorizationId
+            ? `${retryScopePrefix}${retryAuthorizationId}`
+            : '';
+          const canonicalBindingValid = Boolean(
+            canonicalChallengeId.startsWith('idrev_')
+            && canonicalRequirement === 'IDENTITY_REVERIFICATION'
+            && ['requested', 'failed', 'validating'].includes(canonicalStatus)
+            && expectedAttemptScope
+            && canonicalAttemptScope === expectedAttemptScope
+          );
+          if (!canonicalBindingValid) {
+            const error = new Error('A nova tentativa perdeu o vinculo de autorizacao');
+            error.code = 'KYC_IDENTITY_RETRY_BINDING_REQUIRED';
+            throw error;
+          }
+          effectiveChallengeId = canonicalChallengeId;
+          effectiveRequirement = canonicalRequirement;
+        }
         const isIdentityReverification = isIdentityReverificationRequest({
           challengeId: effectiveChallengeId,
           requirement: effectiveRequirement
@@ -890,9 +939,9 @@ class KYCRoutes {
         } else if (isIdentityReverification) {
           const identityState = kycRuntime.namespace === 'sandbox'
             ? await policyService.getStepUpChallenge(effectiveChallengeId, userId)
-            : await Promise.resolve(
+            : (canonicalRetryIdentityState || await Promise.resolve(
               firebaseConfig?.getFromRealtimeDB?.(`users/${userId}/identityReverification`)
-            ).catch(() => null);
+            ).catch(() => null));
           identityChallengeAlreadyValidating = identityState?.status === 'validating';
           const identityChallengeIsActive = Boolean(
             effectiveChallengeId
@@ -1895,7 +1944,8 @@ class KYCRoutes {
       let leaseHeartbeat = null;
       let kycRuntime = null;
       try {
-        const { userId, awsSessionId, challengeId, requirement, forceRecheck } = req.body || {};
+        const { userId, awsSessionId, forceRecheck } = req.body || {};
+        let { challengeId, requirement } = req.body || {};
 
         if (!userId) {
           return res.status(400).json({
@@ -1929,7 +1979,7 @@ class KYCRoutes {
           });
         }
 
-        const isIdentityReverificationRequest =
+        let isIdentityReverificationRequest =
           requirement === 'IDENTITY_REVERIFICATION' ||
           String(challengeId || '').startsWith('idrev_');
         let effectiveRequirement = requirement || null;
@@ -1951,7 +2001,7 @@ class KYCRoutes {
         const firstAccessPolicy = kycRuntime.namespace === 'sandbox'
           ? { required: false }
           : await policyService.requiresFirstAccessLiveness(userId);
-        const firstAccessLivenessRequired = !challengeId && firstAccessPolicy.required === true;
+        let firstAccessLivenessRequired = !challengeId && firstAccessPolicy.required === true;
         if (!effectiveRequirement && firstAccessLivenessRequired) {
           effectiveRequirement = 'LIVENESS_REQUIRED';
         }
@@ -1961,6 +2011,34 @@ class KYCRoutes {
         let sessionMetadataError = null;
         try {
           sessionMetadataCandidate = await this.awsLivenessService.getSessionMetadata(awsSessionId);
+          const canonicalRetryAttemptScope = normalizeLivenessAttemptScope(
+            sessionMetadataCandidate?.attemptScope || ''
+          );
+          if (
+            canonicalRetryAttemptScope.startsWith('manual_review_retry_')
+            || canonicalRetryAttemptScope.startsWith('orphan_hold_retry_')
+          ) {
+            const canonicalChallengeId = String(
+              sessionMetadataCandidate?.challengeId || ''
+            ).trim();
+            const canonicalRequirement = String(
+              sessionMetadataCandidate?.requirement || ''
+            ).trim();
+            if (
+              !canonicalChallengeId.startsWith('idrev_')
+              || canonicalRequirement !== 'IDENTITY_REVERIFICATION'
+            ) {
+              const bindingError = new Error('A sessao perdeu o vinculo canonico de revalidacao');
+              bindingError.code = 'AWS_LIVENESS_SESSION_METADATA_INVALID';
+              throw bindingError;
+            }
+            challengeId = canonicalChallengeId;
+            requirement = canonicalRequirement;
+            effectiveRequirement = canonicalRequirement;
+            isIdentityReverificationRequest = true;
+            firstAccessLivenessRequired = false;
+            stepUpChallenge = null;
+          }
           this.awsLivenessService.assertBoundSessionMetadata(sessionMetadataCandidate, {
             userId,
             expectedChallengeId: challengeId || null,
@@ -1976,7 +2054,8 @@ class KYCRoutes {
         }
         if ([
           'AWS_LIVENESS_SESSION_PERSISTENCE_SCOPE_MISMATCH',
-          'AWS_LIVENESS_SESSION_FINANCIAL_CONTEXT_MISMATCH'
+          'AWS_LIVENESS_SESSION_FINANCIAL_CONTEXT_MISMATCH',
+          'AWS_LIVENESS_SESSION_METADATA_INVALID'
         ].includes(sessionMetadataError?.code)) {
           throw sessionMetadataError;
         }
