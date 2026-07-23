@@ -2,7 +2,101 @@ export function normalizeAuthFlowUserType(userType) {
   if (userType === 'passenger') {
     return 'customer';
   }
-  return userType === 'driver' ? 'driver' : 'customer';
+  if (userType === 'customer' || userType === 'driver') {
+    return userType;
+  }
+  return null;
+}
+
+const AUTH_FLOW_STEP_FIELD = {
+  phone_validation: 'phoneValidation',
+  profile_selection: 'profileSelection',
+  profile_data: 'profileData',
+  document_data: 'documentData',
+  credentials: 'credentials',
+  driver_contact: 'driverContactData',
+};
+
+export function unwrapAuthFlowStepData(stepName, data) {
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+
+  const fieldName = AUTH_FLOW_STEP_FIELD[stepName];
+  const wrappedData = fieldName ? data[fieldName] : null;
+  return wrappedData && typeof wrappedData === 'object' ? wrappedData : data;
+}
+
+export function hasRequiredDriverConsents(credentials = {}) {
+  const normalizedCredentials =
+    credentials?.credentials && typeof credentials.credentials === 'object'
+      ? credentials.credentials
+      : credentials;
+
+  return (
+    normalizedCredentials?.acceptTerms === true &&
+    normalizedCredentials?.acceptPrivacy === true &&
+    normalizedCredentials?.consentBackgroundCheck === true
+  );
+}
+
+export function isProfileIdentityConsistent({
+  profile = null,
+  firebaseUser = null,
+  storedUid = null,
+} = {}) {
+  const profileUid = String(profile?.uid || '').trim();
+  const firebaseUid = String(firebaseUser?.uid || '').trim();
+  const persistedUid = String(storedUid || '').trim();
+
+  if (!profileUid || !firebaseUid || profileUid !== firebaseUid) {
+    return false;
+  }
+  if (persistedUid && persistedUid !== firebaseUid) {
+    return false;
+  }
+
+  const normalizePhoneDigits = value => String(value || '').replace(/\D/g, '');
+  const firebasePhone = normalizePhoneDigits(firebaseUser?.phoneNumber);
+  const profilePhone = normalizePhoneDigits(
+    profile?.phoneNumber ||
+      profile?.phone ||
+      profile?.mobile ||
+      profile?.profile?.phoneNumber ||
+      profile?.profile?.phone ||
+      profile?.profile?.mobile,
+  );
+
+  return !firebasePhone || !profilePhone || firebasePhone === profilePhone;
+}
+
+export function isPersistedProfileOnboardingComplete(profile = {}) {
+  const userType = normalizeAuthFlowUserType(
+    profile?.usertype || profile?.userType || profile?.profile?.usertype || profile?.profile?.userType,
+  );
+
+  if (!profile?.usertype && !profile?.userType && !profile?.profile?.usertype && !profile?.profile?.userType) {
+    return false;
+  }
+
+  if (
+    profile?.profileIncomplete === true ||
+    profile?.onboardingPending === true ||
+    profile?.profileComplete === false ||
+    profile?.onboardingCompleted === false
+  ) {
+    return false;
+  }
+
+  if (userType !== 'driver' || Number(profile?.onboardingVersion || 0) < 2) {
+    return true;
+  }
+
+  return (
+    profile?.onboardingCompleted === true &&
+    profile?.profileComplete === true &&
+    hasRequiredDriverConsents(profile)
+  );
 }
 
 export function splitAuthFlowFullName(fullName) {
@@ -60,16 +154,19 @@ export function resolveAuthFlowInitialStep(
   completedSteps = [],
   fallbackStep = 0,
   userType = null,
+  credentialsData = null,
 ) {
   const normalizedType = normalizeAuthFlowUserType(userType);
+  const driverConsentsComplete =
+    normalizedType !== 'driver' || hasRequiredDriverConsents(credentialsData || {});
 
   if (completedSteps.includes('driver_contact')) {
-    return 6;
+    return driverConsentsComplete ? 6 : 5;
   }
 
   if (completedSteps.includes('credentials')) {
     if (normalizedType === 'driver') {
-      return 6;
+      return driverConsentsComplete ? 6 : 5;
     }
     return 5;
   }
@@ -102,31 +199,44 @@ export function buildRestoredAuthFlowData({
   profileSelectionData = null,
   profileData = null,
   documentData = null,
+  credentialsData = null,
   driverContactData = null,
 } = {}) {
   const savedData = {};
+  const normalizedPhoneData = unwrapAuthFlowStepData('phone_validation', phoneData);
+  const normalizedProfileSelectionData = unwrapAuthFlowStepData(
+    'profile_selection',
+    profileSelectionData,
+  );
+  const normalizedProfileData = unwrapAuthFlowStepData('profile_data', profileData);
+  const normalizedDocumentData = unwrapAuthFlowStepData('document_data', documentData);
+  const normalizedCredentialsData = unwrapAuthFlowStepData('credentials', credentialsData);
+  const normalizedDriverContactData = unwrapAuthFlowStepData(
+    'driver_contact',
+    driverContactData,
+  );
 
-  if (completedSteps.includes('phone_validation') && phoneData) {
-    if (phoneData.phoneNumber) {
-      savedData.phoneNumber = phoneData.phoneNumber;
+  if (completedSteps.includes('phone_validation') && normalizedPhoneData) {
+    if (normalizedPhoneData.phoneNumber) {
+      savedData.phoneNumber = normalizedPhoneData.phoneNumber;
     }
-    if (phoneData.confirmation) {
-      savedData.confirmation = phoneData.confirmation;
+    if (normalizedPhoneData.confirmation) {
+      savedData.confirmation = normalizedPhoneData.confirmation;
     }
-    if (Object.prototype.hasOwnProperty.call(phoneData, 'isExistingUser')) {
-      savedData.isExistingUser = Boolean(phoneData.isExistingUser);
+    if (Object.prototype.hasOwnProperty.call(normalizedPhoneData, 'isExistingUser')) {
+      savedData.isExistingUser = Boolean(normalizedPhoneData.isExistingUser);
     }
   }
 
-  if (completedSteps.includes('profile_selection') && profileSelectionData?.userType) {
+  if (completedSteps.includes('profile_selection') && normalizedProfileSelectionData?.userType) {
     savedData.profileSelection = {
-      userType: normalizeAuthFlowUserType(profileSelectionData.userType),
-      timestamp: profileSelectionData.timestamp,
+      userType: normalizeAuthFlowUserType(normalizedProfileSelectionData.userType),
+      timestamp: normalizedProfileSelectionData.timestamp,
     };
   }
 
-  if (completedSteps.includes('profile_data') && profileData) {
-    const normalizedProfile = normalizeAuthFlowProfileData(profileData);
+  if (completedSteps.includes('profile_data') && normalizedProfileData) {
+    const normalizedProfile = normalizeAuthFlowProfileData(normalizedProfileData);
     if (
       normalizedProfile.firstName ||
       normalizedProfile.lastName ||
@@ -138,33 +248,54 @@ export function buildRestoredAuthFlowData({
 
   if (
     completedSteps.includes('document_data') &&
-    documentData &&
+    normalizedDocumentData &&
     (
-      documentData.cpf ||
-      documentData.email ||
-      documentData.city ||
-      documentData.cnhExtraction ||
-      documentData.vehicleExtraction
+      normalizedDocumentData.cpf ||
+      normalizedDocumentData.email ||
+      normalizedDocumentData.city ||
+      normalizedDocumentData.cnhExtraction ||
+      normalizedDocumentData.vehicleExtraction
     )
   ) {
     savedData.documentData = {
-      cpf: documentData.cpf || '',
-      email: documentData.email || '',
-      city: documentData.city || '',
-      cnhExtraction: documentData.cnhExtraction || null,
-      vehicleExtraction: documentData.vehicleExtraction || null,
-      cnhPdfMeta: documentData.cnhPdfMeta || null,
-      vehiclePdfMeta: documentData.vehiclePdfMeta || null,
+      cpf: normalizedDocumentData.cpf || '',
+      email: normalizedDocumentData.email || '',
+      city: normalizedDocumentData.city || '',
+      ...(normalizedDocumentData.birthDate ? { birthDate: normalizedDocumentData.birthDate } : {}),
+      ...(normalizedDocumentData.motherName || normalizedDocumentData.nomeMae
+        ? { motherName: normalizedDocumentData.motherName || normalizedDocumentData.nomeMae }
+        : {}),
+      ...(normalizedDocumentData.gender || normalizedDocumentData.genero
+        ? { gender: normalizedDocumentData.gender || normalizedDocumentData.genero }
+        : {}),
+      cnhExtraction: normalizedDocumentData.cnhExtraction || null,
+      vehicleExtraction: normalizedDocumentData.vehicleExtraction || null,
+      cnhPdfMeta: normalizedDocumentData.cnhPdfMeta || null,
+      vehiclePdfMeta: normalizedDocumentData.vehiclePdfMeta || null,
     };
   }
 
-  if (completedSteps.includes('driver_contact') && driverContactData?.email) {
+  if (completedSteps.includes('credentials') && normalizedCredentialsData) {
+    const normalizedCredentials =
+      normalizedCredentialsData?.credentials && typeof normalizedCredentialsData.credentials === 'object'
+        ? normalizedCredentialsData.credentials
+        : normalizedCredentialsData;
+
+    savedData.credentials = {
+      acceptTerms: normalizedCredentials?.acceptTerms === true,
+      acceptPrivacy: normalizedCredentials?.acceptPrivacy === true,
+      consentBackgroundCheck: normalizedCredentials?.consentBackgroundCheck === true,
+      marketingOptIn: normalizedCredentials?.marketingOptIn === true,
+    };
+  }
+
+  if (completedSteps.includes('driver_contact') && normalizedDriverContactData?.email) {
     savedData.driverContactData = {
-      email: driverContactData.email,
+      email: normalizedDriverContactData.email,
     };
     savedData.documentData = {
       ...(savedData.documentData || {}),
-      email: driverContactData.email,
+      email: normalizedDriverContactData.email,
     };
   }
 

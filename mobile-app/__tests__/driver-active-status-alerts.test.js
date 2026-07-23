@@ -198,7 +198,7 @@ describe("driver active status alerts", () => {
       />,
     );
 
-    expect(screen.getByText("Passageiro Leaf")).toBeTruthy();
+    expect(screen.getByTestId("driver-live-trip-screen")).toBeTruthy();
     expect(screen.queryByText(ACTIVATION_STATUS_MESSAGE)).toBeNull();
   });
 
@@ -258,7 +258,7 @@ describe("driver active status alerts", () => {
       />,
     );
 
-    expect(screen.getByText("Nova solicitação")).toBeTruthy();
+    expect(screen.getByTestId("driver-offer-screen")).toBeTruthy();
     expect(screen.queryByText(ACTIVATION_STATUS_MESSAGE)).toBeNull();
   });
 

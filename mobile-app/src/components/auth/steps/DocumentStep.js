@@ -14,7 +14,7 @@ import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import driverDocumentExtractionService from '../../../services/DriverDocumentExtractionService';
-import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
+import { logFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
 const { color, spacing } = onboardingTheme;
 
@@ -74,9 +74,6 @@ function resolveCnhIdentityData(cnhExtraction = null) {
         extractedData?.filiacaoMae ||
         extractedData?.filiacao?.mae ||
         ''
-    ),
-    gender: normalizeGenderValue(
-      extractedData?.genero || extractedData?.sexo || extractedData?.gender || extractedData?.sex || ''
     )
   };
 }
@@ -108,7 +105,9 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
     cpf: initialData?.documentData?.cpf || initialData?.cpf || '',
     birthDate: initialData?.documentData?.birthDate || initialCnhIdentity.birthDate || '',
     motherName: initialData?.documentData?.motherName || initialData?.documentData?.nomeMae || initialCnhIdentity.motherName || '',
-    gender: initialData?.documentData?.gender || initialData?.documentData?.genero || initialCnhIdentity.gender || '',
+    gender: normalizeGenderValue(
+      initialData?.documentData?.gender || initialData?.documentData?.genero || ''
+    ),
     cnhExtraction: initialData?.documentData?.cnhExtraction || null,
     vehicleExtraction: initialData?.documentData?.vehicleExtraction || null,
     cnhPdfMeta: initialData?.documentData?.cnhPdfMeta || null,
@@ -119,6 +118,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
     cnh: false,
     vehicle: false
   });
+  const [genderOptionsVisible, setGenderOptionsVisible] = useState(false);
   const [errors, setErrors] = useState({});
 
   const isFormValid = useMemo(() => {
@@ -174,7 +174,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
     }
 
     if (!documentData.gender) {
-      nextErrors.gender = 'Gênero não identificado na CNH. Reenvie o PDF.';
+      nextErrors.gender = 'Selecione seu gênero para continuar.';
     }
 
     setErrors(nextErrors);
@@ -226,7 +226,6 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
             cpf: normalizedCpf,
             birthDate: identityData.birthDate || previous.birthDate,
             motherName: identityData.motherName || previous.motherName,
-            gender: identityData.gender || previous.gender,
             cnhExtraction: extraction,
             cnhPdfMeta: pdfMeta
           };
@@ -250,29 +249,8 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
         }));
       }
 
-      if (isDriver && type === 'cnh') {
-        const extractedCpf = normalizeCpf(extraction?.data?.cpf || documentData.cpf);
-        const identityData = resolveCnhIdentityData(extraction);
-        if (
-          CPF_REGEX.test(String(extractedCpf || '').trim()) &&
-          identityData.birthDate &&
-          identityData.motherName &&
-          identityData.gender
-        ) {
-          onSubmitted({
-            cpf: extractedCpf,
-            birthDate: identityData.birthDate,
-            motherName: identityData.motherName,
-            gender: identityData.gender,
-            cnhExtraction: extraction,
-            cnhPdfMeta: pdfMeta,
-            vehicleExtraction: documentData.vehicleExtraction || null,
-            vehiclePdfMeta: documentData.vehiclePdfMeta || null
-          });
-          return;
-        }
-      }
     } catch (error) {
+      logFriendlyError('DocumentStep PDF extraction', error, { context: 'document_upload' });
       setErrors(previous => ({
         ...previous,
         [fieldErrorKey]:
@@ -349,6 +327,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
         : 'Informe seu e-mail para recibos e recuperação da conta.'}
       onBack={onBack}
       progressMeta={progressMeta}
+      stickyFooter={false}
       footer={(
         <ContinueButton
           onPress={handleSubmit}
@@ -425,15 +404,72 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
 
               <View style={[styles.fieldContainer, styles.identityField]}>
                 <Text style={styles.label}>Gênero</Text>
-                <TextInput
-                  style={[styles.input, styles.readOnlyInput, errors.gender && styles.inputError]}
-                  value={formatGenderLabel(documentData.gender)}
-                  editable={false}
-                  placeholder="Após ler CNH"
-                  placeholderTextColor={color.textMuted}
-                />
+                <TouchableOpacity
+                  activeOpacity={0.84}
+                  accessibilityRole="button"
+                  accessibilityLabel="Selecionar gênero"
+                  accessibilityState={{
+                    disabled: !documentData.cnhExtraction?.success,
+                    expanded: genderOptionsVisible
+                  }}
+                  testID="driver-gender-select"
+                  style={[
+                    styles.input,
+                    styles.selectInput,
+                    !documentData.cnhExtraction?.success && styles.selectInputDisabled,
+                    errors.gender && styles.inputError
+                  ]}
+                  disabled={!documentData.cnhExtraction?.success}
+                  onPress={() => setGenderOptionsVisible(previous => !previous)}
+                >
+                  <Text
+                    style={documentData.gender ? styles.selectValue : styles.selectPlaceholder}
+                    numberOfLines={1}
+                  >
+                    {formatGenderLabel(documentData.gender) || 'Selecione'}
+                  </Text>
+                  <Ionicons
+                    name={genderOptionsVisible ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={color.textMuted}
+                  />
+                </TouchableOpacity>
                 {errors.gender ? <Text style={styles.errorText}>{errors.gender}</Text> : null}
               </View>
+
+              {genderOptionsVisible ? (
+                <View style={styles.genderOptions}>
+                  {[
+                    { value: 'F', label: 'Feminino' },
+                    { value: 'M', label: 'Masculino' },
+                    { value: 'X', label: 'Outro / prefiro não informar' }
+                  ].map((option, index, options) => {
+                    const selected = documentData.gender === option.value;
+                    return (
+                      <TouchableOpacity
+                        key={option.value}
+                        activeOpacity={0.84}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        testID={`driver-gender-option-${option.value}`}
+                        style={[
+                          styles.genderOption,
+                          index < options.length - 1 && styles.genderOptionBorder
+                        ]}
+                        onPress={() => {
+                          updateField('gender', option.value);
+                          setGenderOptionsVisible(false);
+                        }}
+                      >
+                        <Text style={[styles.genderOptionText, selected && styles.genderOptionTextSelected]}>
+                          {option.label}
+                        </Text>
+                        {selected ? <Ionicons name="checkmark" size={18} color={color.accent} /> : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
             </View>
 
             {renderUploadCard({
@@ -527,6 +563,32 @@ const styles = StyleSheet.create({
   readOnlyInput: {
     opacity: 0.95
   },
+  selectInput: {
+    minHeight: 37,
+    paddingVertical: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  selectInputDisabled: {
+    opacity: 0.62
+  },
+  selectValue: {
+    flex: 1,
+    marginRight: 8,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: fonts.Medium,
+    color: color.textPrimary
+  },
+  selectPlaceholder: {
+    flex: 1,
+    marginRight: 8,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: fonts.Medium,
+    color: color.textMuted
+  },
   uploadContainer: {
     marginBottom: spacing.xs
   },
@@ -603,6 +665,38 @@ const styles = StyleSheet.create({
   identityField: {
     flexBasis: '48%',
     flexGrow: 1
+  },
+  genderOptions: {
+    flexBasis: '100%',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: 18,
+    backgroundColor: color.surfaceMuted,
+    marginBottom: spacing.xs
+  },
+  genderOption: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  genderOptionBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: color.border
+  },
+  genderOptionText: {
+    flex: 1,
+    marginRight: 12,
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: fonts.Medium,
+    color: color.textPrimary
+  },
+  genderOptionTextSelected: {
+    fontFamily: fonts.SemiBold,
+    color: color.accent
   }
 });
 

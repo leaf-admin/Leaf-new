@@ -2,6 +2,7 @@ import auth from '@react-native-firebase/auth';
 import Logger from '../utils/Logger';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { createAxiosInstance } from '../utils/axiosInterceptor';
+import { postMultipartJson } from '../utils/multipartJsonRequest';
 
 function ensurePdfAsset(asset = {}) {
   const uri = String(asset?.uri || '').trim();
@@ -37,6 +38,7 @@ function normalizeErrorMessage(error, fallback) {
 class DriverActivationService {
   constructor() {
     const apiBaseUrl = getSelfHostedApiUrl('');
+    this.apiBaseUrl = String(apiBaseUrl || '').replace(/\/+$/, '');
     this.api = createAxiosInstance({
       baseURL: apiBaseUrl,
       timeout: 60000
@@ -71,15 +73,14 @@ class DriverActivationService {
     });
 
     const headers = await this.getAuthHeaders(false);
-    const response = await this.api.post(`/api/drivers/me/activation/documents/${normalizedType}`, formData, {
-      headers: {
-        ...headers,
-        Accept: 'application/json',
-        'Content-Type': 'multipart/form-data'
+    return postMultipartJson(
+      `${this.apiBaseUrl}/api/drivers/me/activation/documents/${normalizedType}`,
+      formData,
+      {
+        headers,
+        timeoutMs: 60000
       }
-    });
-
-    return response?.data || null;
+    );
   }
 
   async getActivationStatus() {

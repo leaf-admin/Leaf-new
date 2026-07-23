@@ -26,7 +26,29 @@ const FRIENDLY_BY_CODE = {
   VALIDATION_ERROR: 'Alguns dados estao incompletos ou invalidos. Revise e tente novamente.',
   INVALID_INPUT: 'Alguns dados estao invalidos. Revise e tente novamente.',
   SERVICE_UNAVAILABLE: 'Servico temporariamente indisponivel. Tente novamente em alguns minutos.',
-  INTERNAL_SERVER_ERROR: 'Estamos com instabilidade no servidor. Tente novamente em instantes.'
+  INTERNAL_SERVER_ERROR: 'Estamos com instabilidade no servidor. Tente novamente em instantes.',
+  KYC_CANONICAL_APPROVED_CNH_REQUIRED: 'Sua documentação ainda está em análise. Avisaremos quando você puder continuar.',
+  KYC_CANONICAL_CNH_NOT_APPROVED: 'Sua documentação ainda está em análise. Avisaremos quando você puder continuar.',
+  KYC_CANONICAL_DOCUMENT_REUPLOAD_REQUIRED: 'Precisamos de uma nova versão da sua CNH para continuar.',
+  KYC_CANONICAL_CNH_SUBMISSION_MISSING: 'Precisamos de uma nova versão da sua CNH para continuar.',
+  AWS_COMPARE_FACES_CNH_FACE_NOT_DETECTED: 'Não conseguimos identificar sua foto na CNH enviada. Envie uma nova versão do documento.',
+  KYC_CNH_PORTRAIT_LAYOUT_UNSUPPORTED: 'Não conseguimos identificar sua foto na CNH enviada. Envie uma nova versão do documento.',
+  KYC_CNH_PORTRAIT_EXTRACTION_FAILED: 'Não conseguimos identificar sua foto na CNH enviada. Envie uma nova versão do documento.',
+  AWS_COMPARE_FACES_LIVENESS_FACE_BOUNDS_REQUIRED: 'A validação não capturou seu rosto com clareza. Inicie uma nova tentativa.',
+  KYC_AWS_REFERENCE_IMAGE_REQUIRED: 'A validação não capturou seu rosto com clareza. Inicie uma nova tentativa.',
+  KYC_CHALLENGE_NOT_PASSED: 'Por segurança, não foi possível liberar o modo motorista. Se você acredita que houve um engano, solicite uma análise.',
+  KYC_CANONICAL_SESSION_BUSY: 'Uma validação já está em andamento. Aguarde alguns segundos.',
+  KYC_VERIFICATION_IN_PROGRESS: 'Uma validação já está em andamento. Aguarde alguns segundos.',
+  KYC_AWS_LIVENESS_PENDING: 'Ainda estamos confirmando o resultado. Aguarde alguns segundos.',
+  KYC_AWS_LIVENESS_SESSION_REQUIRED: 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.',
+  AWS_LIVENESS_SESSION_ID_REQUIRED: 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.',
+  AWS_LIVENESS_CREDENTIALS_SESSION_BINDING_REQUIRED: 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.',
+  AWS_LIVENESS_SESSION_BINDING_INVALID: 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.',
+  AWS_LIVENESS_SESSION_NOT_FOUND: 'A validação anterior foi encerrada. Inicie uma nova tentativa.',
+  KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED: 'Você atingiu o limite de tentativas. Tente novamente após o prazo informado.',
+  AWS_LIVENESS_ATTEMPTS_EXHAUSTED: 'Você atingiu o limite de tentativas. Tente novamente após o prazo informado.',
+  AWS_LIVENESS_SESSION_EXPIRED: 'A sessão expirou. Inicie uma nova validação.',
+  KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP: 'Vamos pedir a validação quando sua corrida terminar.'
 };
 
 const CONTEXT_FALLBACKS = {
@@ -36,10 +58,15 @@ const CONTEXT_FALLBACKS = {
   payment: 'Nao foi possivel processar o pagamento agora.',
   booking: 'Nao foi possivel solicitar a viagem agora.',
   trip: 'Nao foi possivel concluir esta etapa da viagem.',
-  document_upload: 'Nao foi possivel processar o documento enviado. Tente novamente.'
+  document_upload: 'Nao foi possivel processar o documento enviado. Tente novamente.',
+  kyc: 'Não foi possível iniciar a validação agora. Tente novamente em alguns minutos.'
 };
 
 const PATTERN_RULES = [
+  [/cnh.*aprovacao manual canonica|cnh.*aprovação manual canônica|aprovacao manual canonica.*comparacao facial/i, FRIENDLY_BY_CODE.KYC_CANONICAL_APPROVED_CNH_REQUIRED],
+  [/(?:session\s*id|sessionid).*?(?:obrigat|required)|(?:obrigat|required).*?(?:session\s*id|sessionid)/i, FRIENDLY_BY_CODE.KYC_AWS_LIVENESS_SESSION_REQUIRED],
+  [/(?:challenge\s*id|challengeid).*?(?:obrigat|required|expirad|not found)/i, CONTEXT_FALLBACKS.kyc],
+  [/liveness.*nao aprovado|liveness.*não aprovado|validacao facial nao aprovada|validação facial não aprovada/i, 'Não conseguimos confirmar sua identidade. Tente novamente com boa iluminação e o rosto centralizado.'],
   [/timeout|timed out|tempo limite|demorou mais que o esperado/i, FRIENDLY_BY_CODE.ECONNABORTED],
   [/socket|websocket|not connected|nao conectado|desconectado|io server disconnect|active.?ride.?sync|conexao com o servidor/i, 'Estamos com instabilidade de conexao. Tente novamente em instantes.'],
   [/network request failed|failed to fetch|network error|internet|offline|sem conexao com a internet/i, FRIENDLY_BY_CODE.NETWORK_ERROR],
@@ -62,7 +89,7 @@ const PATTERN_RULES = [
 ];
 
 const TECHNICAL_HINTS_REGEX =
-  /axios|websocket|socket|stack|trace|exception|promise|undefined|null|json|payload|abort|econn|http\s*\d{3}|status\s*\d{3}|failed|falha/i;
+  /axios|websocket|socket|stack|trace|exception|promise|undefined|null|json|payload|abort|econn|http\s*\d{3}|status\s*\d{3}|failed|falha|aws|rekognition|compare.?faces?|redis|firestore|liveness|can[oô]nic|comparacao facial|comparação facial|session\s*id|sessionid|challenge\s*id|challengeid|user\s*id|userid|metadata|binding|credentials?/i;
 
 function asString(value) {
   if (typeof value === 'string') return value.trim();

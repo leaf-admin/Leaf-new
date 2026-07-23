@@ -3,6 +3,7 @@ import auth from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
 import { toUserFriendlyError } from '../utils/friendlyErrorMessages';
 import { buildBackendUrl } from '../config/backendBaseUrl';
+import { resolveRequestAuthToken } from '../utils/axiosInterceptor';
 
 
 class AuthService {
@@ -116,7 +117,8 @@ class AuthService {
      */
     async authenticatedRequest(endpoint, options = {}) {
         try {
-            const token = await this.getFirebaseToken();
+            const initialAuth = await resolveRequestAuthToken({ forceRefresh: false });
+            const token = initialAuth?.token || null;
             if (!token) {
                 throw new Error('Usuário não autenticado');
             }
@@ -147,7 +149,8 @@ class AuthService {
                 // Se token expirou, tentar renovar
                 if (response.status === 401) {
                     Logger.log('🔄 Token expirado, renovando...');
-                    const newToken = await this.getFirebaseToken();
+                    const refreshedAuth = await resolveRequestAuthToken({ forceRefresh: true });
+                    const newToken = refreshedAuth?.token || null;
                     if (newToken) {
                         headers.Authorization = `Bearer ${newToken}`;
                         

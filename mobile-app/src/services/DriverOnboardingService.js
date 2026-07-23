@@ -131,12 +131,12 @@ export function computeDriverOnboardingState(rawState = {}) {
   const faceApproved = stages[DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION].status === 'approved';
   const vehicleApproved = stages[DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA].status === 'approved';
 
-  if (driverDataApproved && stages[DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION].status === 'locked') {
-    stages[DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION].status = 'action_required';
+  if (driverDataApproved && stages[DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA].status === 'locked') {
+    stages[DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA].status = 'action_required';
   }
 
-  if (faceApproved && stages[DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA].status === 'locked') {
-    stages[DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA].status = 'action_required';
+  if (vehicleApproved && stages[DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION].status === 'locked') {
+    stages[DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION].status = 'action_required';
   }
 
   const canGoOnline = driverDataApproved && faceApproved && vehicleApproved;
@@ -144,10 +144,10 @@ export function computeDriverOnboardingState(rawState = {}) {
   let currentStage = DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA;
   if (!driverDataApproved) {
     currentStage = DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA;
-  } else if (!faceApproved) {
-    currentStage = DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION;
   } else if (!vehicleApproved) {
     currentStage = DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA;
+  } else if (!faceApproved) {
+    currentStage = DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION;
   }
 
   return {
@@ -252,10 +252,10 @@ export function completeDriverOnboardingStage(state, stageKey) {
         title: 'Etapa concluída',
         message:
           stageKey === DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA
-            ? 'Dados do motorista aprovados. Próxima etapa: validação facial.'
-            : stageKey === DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION
-              ? 'Validação facial aprovada. Próxima etapa: documentos do veículo.'
-              : 'Documentos do veículo aprovados. Motorista liberado para ficar online.',
+            ? 'Dados do motorista aprovados. Próxima etapa: validação do veículo.'
+            : stageKey === DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA
+              ? 'Veículo aprovado. Próxima etapa: validação facial.'
+              : 'Validação facial aprovada. Motorista liberado para ficar online.',
         kind: 'driver',
         scope: 'driver',
         read: false,

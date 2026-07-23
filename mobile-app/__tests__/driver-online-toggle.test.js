@@ -3,11 +3,13 @@ import { Alert, Linking, Text, TouchableOpacity, View } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiHomeScreen, {
+  buildDriverIdentityReviewTicketParams,
   buildDestinationFareQuoteRouteKey,
   buildTrafficSegmentsFromDirectionsRoute,
   resolveHomeCategoryFarePresentation,
 } from '../src/screens/prototype/RobotaxiHomeScreen';
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
+import { fetchDynamicPricingQuote } from '../src/services/runtime/pricingQuoteService';
 import {
   resolvePassengerAutoRoute,
   shouldAutoSyncPassengerRoute,
@@ -75,18 +77,76 @@ jest.mock('../src/components/prototype/PrototypeScaffold', () => {
 
 jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
   const React = require('react');
-  const { Text, View } = require('react-native');
-  const PassengerHomeOverlay = ({ pickupLabel, pickupAddress, pickupCoordinate }) => (
-    <View testID="passenger-home-overlay">
-      <Text>{pickupLabel}</Text>
-      <Text>{pickupAddress}</Text>
-      <Text testID="passenger-home-overlay-pickup-coordinate">
-        {pickupCoordinate
-          ? `${pickupCoordinate.latitude},${pickupCoordinate.longitude}`
-          : 'none'}
-      </Text>
-    </View>
-  );
+  const { Text, TouchableOpacity, View } = require('react-native');
+  const PassengerHomeOverlay = ({
+    pickupLabel,
+    pickupAddress,
+    pickupCoordinate,
+    destinationSearchActive,
+    destinationSearchResults = [],
+    onDestinationPress,
+    onDestinationResultPress,
+    categoryVisible,
+    categoryOptions = [],
+    selectedCategoryId,
+    onCategoryConfirm,
+    categoryConfirmDisabled,
+    categoryConfirmLabel,
+  }) => {
+    const selectedCategory =
+      categoryOptions.find((item) => item?.id === selectedCategoryId) ||
+      categoryOptions[0] ||
+      null;
+
+    return (
+      <View testID="passenger-home-overlay">
+        <Text>{pickupLabel}</Text>
+        <Text>{pickupAddress}</Text>
+        <Text testID="passenger-home-overlay-pickup-coordinate">
+          {pickupCoordinate
+            ? `${pickupCoordinate.latitude},${pickupCoordinate.longitude}`
+            : 'none'}
+        </Text>
+        <TouchableOpacity
+          testID="mock-passenger-destination-open"
+          onPress={onDestinationPress}
+        >
+          <Text>Abrir destino</Text>
+        </TouchableOpacity>
+        {destinationSearchActive
+          ? destinationSearchResults.map((item, index) => (
+              <TouchableOpacity
+                key={item?.id || index}
+                testID={`mock-passenger-destination-result-${index}`}
+                onPress={() => onDestinationResultPress?.(item)}
+              >
+                <Text>{item?.name || item?.address || 'Destino'}</Text>
+              </TouchableOpacity>
+            ))
+          : null}
+        {categoryVisible ? (
+          <View testID="mock-passenger-category-card">
+            <Text testID="mock-passenger-category-description">
+              {selectedCategory?.description || ''}
+            </Text>
+            <Text testID="mock-passenger-category-price">
+              {selectedCategory?.priceLabel || ''}
+            </Text>
+            <Text testID="mock-passenger-category-arrival">
+              {selectedCategory?.arrivalLabel || ''}
+            </Text>
+            <TouchableOpacity
+              testID="mock-passenger-category-confirm"
+              disabled={categoryConfirmDisabled}
+              onPress={onCategoryConfirm}
+            >
+              <Text>{categoryConfirmLabel}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
   const PassengerHomeOverlaySkeleton = () => (
     <View testID="passenger-home-overlay-skeleton" />
   );
@@ -117,8 +177,28 @@ jest.mock('../src/screens/prototype/home/DriverHomeOverlay', () => {
 
 jest.mock('../src/screens/prototype/home/DriverLiveRideOverlay', () => {
   const React = require('react');
-  const { View } = require('react-native');
-  return () => <View />;
+  const { Text, TouchableOpacity, View } = require('react-native');
+  const ActualDriverLiveRideOverlay = jest.requireActual(
+    '../src/screens/prototype/home/DriverLiveRideOverlay',
+  ).default;
+  return (props) => {
+    if (props.driverActiveRide?.bookingId === 'booking_driver_viewport_contract') {
+      return <ActualDriverLiveRideOverlay {...props} />;
+    }
+
+    return (
+      <View testID="driver-live-ride-overlay-wrap" onLayout={props.onCardLayout}>
+        <View testID="driver-live-trip-card">
+          <View testID="driver-live-trip-compact-summary" />
+          <View testID="driver-live-passenger-identity" />
+          <View testID="driver-live-primary-action-complete-button" />
+        </View>
+        <TouchableOpacity testID="mock-driver-live-chat" onPress={props.onOpenChat}>
+          <Text>Abrir chat atual</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 });
 
 jest.mock('../src/screens/prototype/home/DriverTripStatusBanner', () => {
@@ -134,7 +214,13 @@ jest.mock('../src/screens/prototype/prototypeMapOcclusion', () => ({
 
 jest.mock('../src/screens/prototype/prototypeMapRoute', () => ({
   clearPrototypeMapRoute: jest.fn(),
+  getPrototypeMapRoute: jest.fn(() => ({ coordinates: [] })),
+  setPrototypeMapRoute: jest.fn(),
   subscribePrototypeMapRoute: jest.fn(() => jest.fn()),
+}));
+
+jest.mock('../src/services/runtime/pricingQuoteService', () => ({
+  fetchDynamicPricingQuote: jest.fn(),
 }));
 
 jest.mock('../src/screens/prototype/passengerFlowRouting', () => ({
@@ -294,6 +380,38 @@ function buildPassengerRuntime(overrides = {}) {
 }
 
 describe('driver online toggle', () => {
+  it('builds an identity review ticket with only opaque safe references', () => {
+    const params = buildDriverIdentityReviewTicketParams(
+      {
+        evidenceId: 'evidence_01HZX9',
+        reviewCaseId: 'case_01HZX9',
+        challengeId: 'https://storage.example/private-selfie.jpg',
+        requirement: 'identity_reverification',
+        reviewAvailable: true,
+        similarityScore: 0.12,
+        sourceImageHash: 'sensitive-hash',
+        referenceImageUrl: 'https://storage.example/private-selfie.jpg',
+      },
+      { challengeId: 'challenge_01HZX9' },
+    );
+
+    expect(params).toEqual({
+      type: 'account',
+      selectedType: 'account',
+      subject: 'Revisão de identidade',
+      description: 'A validação de identidade não foi concluída. Acredito que houve um engano e solicito uma análise.',
+      source: 'kyc_identity_mismatch_appeal',
+      kycEvidenceId: 'evidence_01HZX9',
+      kycReviewCaseId: 'case_01HZX9',
+      kycChallengeId: 'challenge_01HZX9',
+      requirement: 'IDENTITY_REVERIFICATION',
+      reviewAvailable: true,
+    });
+    expect(params).not.toHaveProperty('similarityScore');
+    expect(params).not.toHaveProperty('sourceImageHash');
+    expect(params).not.toHaveProperty('referenceImageUrl');
+  });
+
   it('keeps selected passenger fare hidden while the backend quote is pending', () => {
     expect(
       resolveHomeCategoryFarePresentation({
@@ -442,6 +560,14 @@ describe('driver online toggle', () => {
     kycServiceMock.getPreferredLivenessMode.mockResolvedValue({ success: true, mode: 'local' });
     kycServiceMock.verifyDriver.mockResolvedValue({ success: true, data: { isMatch: true } });
     kycServiceMock.getAwsProviderName.mockReturnValue('aws_rekognition_face_liveness');
+    fetchDynamicPricingQuote.mockReset();
+    fetchDynamicPricingQuote.mockResolvedValue({
+      estimatedFare: 20.23,
+      grossEstimatedFare: 20.23,
+      quoteLockId: 'quote-lock-home-retry',
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     const { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } = require('../src/services/BackgroundLocationService');
@@ -450,6 +576,136 @@ describe('driver online toggle', () => {
 
   afterEach(() => {
     Alert.alert.mockRestore();
+  });
+
+  it('retries the same current destination after a canonical route 503 without exposing fallback fare or ETA', async () => {
+    const destination = {
+      id: 'place-leblon',
+      name: 'Leblon',
+      address: 'Rio de Janeiro - RJ, Brasil',
+      coordinate: {
+        latitude: -22.9842698,
+        longitude: -43.223168,
+      },
+    };
+    const routeCoordinates = [
+      { latitude: -22.97045, longitude: -43.18276 },
+      { latitude: -22.9768, longitude: -43.20085 },
+      { latitude: -22.9842698, longitude: -43.223168 },
+    ];
+    const loadRecentDestinations = jest.fn().mockResolvedValue([destination]);
+    const selectDestination = jest.fn().mockResolvedValue(destination);
+    const mapRoute = require('../src/screens/prototype/prototypeMapRoute');
+    mapRoute.getPrototypeMapRoute.mockReturnValue({
+      origin: routeCoordinates[0],
+      destination: routeCoordinates[routeCoordinates.length - 1],
+      coordinates: routeCoordinates,
+      trafficSegments: [],
+      destinationLabel: 'Leblon',
+      destinationAddress: 'Rio de Janeiro - RJ, Brasil',
+    });
+
+    let directionsRequestCount = 0;
+    const originalFetch = global.fetch;
+    const directionsFetch = jest.fn(async (url) => {
+      if (!String(url).includes('/api/places/directions')) {
+        throw new Error(`Unexpected fetch in home route retry test: ${String(url)}`);
+      }
+
+      directionsRequestCount += 1;
+      if (directionsRequestCount === 1) {
+        return {
+          ok: false,
+          status: 503,
+          json: jest.fn().mockResolvedValue({
+            status: 'unavailable',
+            code: 'canonical_route_required',
+            message: 'Rota canônica indisponível para navegação.',
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: jest.fn().mockResolvedValue({
+          status: 'success',
+          data: {
+            coordinates: routeCoordinates,
+            distance_in_km: 8.3,
+            time_in_secs: 1080,
+            trafficSegments: [],
+          },
+        }),
+      };
+    });
+    global.fetch = directionsFetch;
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        currentCoordinate: routeCoordinates[0],
+        currentAddress: 'Avenida Atlântica, 2213, Rio de Janeiro',
+        loadRecentDestinations,
+        loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+        resolveDestinationInput: jest.fn().mockResolvedValue(destination),
+        selectDestination,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    try {
+      const screen = render(
+        <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />,
+      );
+
+      fireEvent.press(screen.getByTestId('mock-passenger-destination-open'));
+      await waitFor(() => {
+        expect(loadRecentDestinations).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId('mock-passenger-destination-result-0')).toBeTruthy();
+      });
+      fireEvent.press(screen.getByTestId('mock-passenger-destination-result-0'));
+
+      await waitFor(() => {
+        expect(directionsRequestCount).toBe(1);
+        expect(screen.getByText('Tentar novamente')).toBeTruthy();
+      });
+      expect(selectDestination).toHaveBeenCalledWith(destination);
+      expect(screen.getByTestId('mock-passenger-category-description').props.children)
+        .toBe('Rota indisponível no momento');
+      expect(screen.getByTestId('mock-passenger-category-price').props.children)
+        .toBe('--');
+      expect(screen.getByTestId('mock-passenger-category-arrival').props.children)
+        .toBe('--');
+      expect(mapRoute.setPrototypeMapRoute).not.toHaveBeenCalled();
+      expect(fetchDynamicPricingQuote).not.toHaveBeenCalled();
+
+      fireEvent.press(screen.getByTestId('mock-passenger-category-confirm'));
+
+      await waitFor(() => {
+        expect(directionsRequestCount).toBe(2);
+        expect(mapRoute.setPrototypeMapRoute).toHaveBeenCalledWith(
+          expect.objectContaining({
+            coordinates: routeCoordinates,
+            destinationLabel: 'Leblon',
+          }),
+        );
+        expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(3);
+        expect(screen.getByText('Confirmar')).toBeTruthy();
+      });
+      expect(screen.getByTestId('mock-passenger-category-price').props.children)
+        .toContain('20,23');
+      expect(screen.getByTestId('mock-passenger-category-arrival').props.children)
+        .not.toBe('--');
+      expect(directionsFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('shows the daily online limit message when the backend forces the driver offline', () => {
@@ -1719,17 +1975,18 @@ describe('driver online toggle', () => {
     expect(queryByTestId('prototype-top-controls')).toBeNull();
   });
 
-  it('keeps the focused driver active-ride map interactive and fitted above the live ride sheet', async () => {
+  it('keeps the current driver home route fitted after measuring the integrated live-ride card', async () => {
     const { subscribePrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+    const routeCoordinates = [
+      { latitude: 37.7772, longitude: -122.4193 },
+      { latitude: 37.7782, longitude: -122.4182 },
+      { latitude: 37.7791, longitude: -122.4171 },
+    ];
     subscribePrototypeMapRoute.mockImplementation((callback) => {
       callback({
-        origin: { latitude: 37.7772, longitude: -122.4193 },
-        destination: { latitude: 37.7791, longitude: -122.4171 },
-        coordinates: [
-          { latitude: 37.7772, longitude: -122.4193 },
-          { latitude: 37.7782, longitude: -122.4182 },
-          { latitude: 37.7791, longitude: -122.4171 },
-        ],
+        origin: routeCoordinates[0],
+        destination: routeCoordinates[routeCoordinates.length - 1],
+        coordinates: routeCoordinates,
         trafficSegments: [],
         destinationLabel: 'Ferry Building',
         destinationAddress: '1 Ferry Building, San Francisco',
@@ -1740,11 +1997,11 @@ describe('driver online toggle', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildDriverRuntime({
         bookingStatus: 'started',
-        driverCoordinate: { latitude: 37.7772, longitude: -122.4193 },
-        currentCoordinate: { latitude: 37.7772, longitude: -122.4193 },
+        driverCoordinate: routeCoordinates[0],
+        currentCoordinate: routeCoordinates[0],
         driverActiveRide: {
-          bookingId: 'booking_driver_started',
-          id: 'booking_driver_started',
+          bookingId: 'booking_driver_viewport_contract',
+          id: 'booking_driver_viewport_contract',
           status: 'started',
           pickupAddress: '1540 Mission St, San Francisco',
           dropoffAddress: '1 Ferry Building, San Francisco',
@@ -1761,9 +2018,32 @@ describe('driver online toggle', () => {
       goBack: jest.fn(),
     };
 
-    render(
+    const screen = render(
       <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
     );
+
+    expect(screen.getByTestId('driver-live-ride-overlay-wrap')).toBeTruthy();
+    expect(screen.getByTestId('driver-live-trip-card')).toBeTruthy();
+    expect(screen.getByTestId('driver-live-trip-compact-summary')).toBeTruthy();
+    expect(screen.getByTestId('driver-live-passenger-identity')).toBeTruthy();
+    expect(screen.getByTestId('driver-live-primary-action-complete-button')).toBeTruthy();
+    expect(screen.queryByTestId('driver-live-trip-screen')).toBeNull();
+
+    const mapWidth = 360;
+    const mapHeight = 640;
+    await waitFor(() => {
+      expect(mockPrototypeMapLayer.mock.calls.at(-1)?.[0]?.onMapLayout).toEqual(
+        expect.any(Function),
+      );
+    });
+    act(() => {
+      mockPrototypeMapLayer.mock.calls.at(-1)[0].onMapLayout({
+        nativeEvent: { layout: { width: mapWidth, height: mapHeight } },
+      });
+    });
+    fireEvent(screen.getByTestId('driver-live-ride-overlay-wrap'), 'layout', {
+      nativeEvent: { layout: { width: mapWidth, height: 312 } },
+    });
 
     await waitFor(() => {
       expect(mockPrototypeMapLayer).toHaveBeenCalled();
@@ -1781,7 +2061,77 @@ describe('driver online toggle', () => {
         latitudeDelta: expect.any(Number),
         longitudeDelta: expect.any(Number),
       }));
+
+      const viewport = latestMapProps.routeViewportRegion;
+      const padding = latestMapProps.viewportPadding;
+      const activeMinVisibleHeight = 180;
+      const top = Math.min(
+        Number(padding.top) || 0,
+        mapHeight - activeMinVisibleHeight,
+      );
+      const bottom = Math.min(
+        Number(padding.bottom) || 0,
+        mapHeight - top - activeMinVisibleHeight,
+      );
+      const left = Number(padding.left) || 0;
+      const right = Number(padding.right) || 0;
+
+      routeCoordinates.forEach((coordinate) => {
+        const x = mapWidth / 2 +
+          ((coordinate.longitude - viewport.longitude) / viewport.longitudeDelta) * mapWidth;
+        const y = mapHeight / 2 -
+          ((coordinate.latitude - viewport.latitude) / viewport.latitudeDelta) * mapHeight;
+
+        expect(x).toBeGreaterThanOrEqual(left);
+        expect(x).toBeLessThanOrEqual(mapWidth - right);
+        expect(y).toBeGreaterThanOrEqual(top);
+        expect(y).toBeLessThanOrEqual(mapHeight - bottom);
+      });
     });
+  });
+
+  it('opens the current ride chat from the driver home with role-aware context', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'started',
+        activeBookingId: 'booking_driver_chat',
+        driverActiveRide: {
+          bookingId: 'booking_driver_chat',
+          id: 'booking_driver_chat',
+          status: 'started',
+          pickupAddress: '1540 Mission St, San Francisco',
+          dropoffAddress: '1 Ferry Building, San Francisco',
+          passengerId: 'passenger_1',
+          estimatedDriverNetAmount: 15.01,
+        },
+        driverTripAssist: { status: 'started' },
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    fireEvent.press(await screen.findByTestId('mock-driver-live-chat'));
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeChat',
+      expect.objectContaining({
+        bookingId: 'booking_driver_chat',
+        rideId: 'booking_driver_chat',
+        tripId: 'booking_driver_chat',
+        bookingStatus: 'started',
+        source: 'driver-home',
+        role: 'driver',
+      }),
+    );
   });
 
   it('does not force overview fitting while native driver navigation owns the camera', async () => {

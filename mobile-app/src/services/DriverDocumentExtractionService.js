@@ -1,7 +1,7 @@
 import Logger from '../utils/Logger';
 import auth from '@react-native-firebase/auth';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
-import { createAxiosInstance } from '../utils/axiosInterceptor';
+import { postMultipartJson } from '../utils/multipartJsonRequest';
 
 function ensurePdfAsset(asset = {}) {
   const uri = String(asset?.uri || '').trim();
@@ -33,11 +33,7 @@ function normalizeApiResult(payload = {}) {
 
 class DriverDocumentExtractionService {
   constructor() {
-    const apiBaseUrl = getSelfHostedApiUrl('');
-    this.api = createAxiosInstance({
-      baseURL: apiBaseUrl,
-      timeout: 60000
-    });
+    this.apiBaseUrl = String(getSelfHostedApiUrl('') || '').replace(/\/+$/, '');
   }
 
   async getAuthHeaders(forceRefresh = false) {
@@ -66,14 +62,11 @@ class DriverDocumentExtractionService {
 
     Logger.log('📄 [DriverDocumentExtraction] Enviando CNH PDF para extração...');
     const authHeaders = await this.getAuthHeaders(false);
-    const response = await this.api.post('/api/ocr/cnh/pdf', formData, {
-      headers: {
-        ...authHeaders,
-        'Content-Type': 'multipart/form-data',
-        Accept: 'application/json'
-      }
+    const payload = await postMultipartJson(`${this.apiBaseUrl}/api/ocr/cnh/pdf`, formData, {
+      headers: authHeaders,
+      timeoutMs: 60000
     });
-    return normalizeApiResult(response?.data || {});
+    return normalizeApiResult(payload || {});
   }
 
   async extractVehicleFromPDF({ pdfAsset, userId }) {
@@ -86,14 +79,11 @@ class DriverDocumentExtractionService {
 
     Logger.log('📄 [DriverDocumentExtraction] Enviando documento do veículo PDF para extração...');
     const authHeaders = await this.getAuthHeaders(false);
-    const response = await this.api.post('/api/ocr/vehicle/pdf', formData, {
-      headers: {
-        ...authHeaders,
-        'Content-Type': 'multipart/form-data',
-        Accept: 'application/json'
-      }
+    const payload = await postMultipartJson(`${this.apiBaseUrl}/api/ocr/vehicle/pdf`, formData, {
+      headers: authHeaders,
+      timeoutMs: 60000
     });
-    return normalizeApiResult(response?.data || {});
+    return normalizeApiResult(payload || {});
   }
 }
 

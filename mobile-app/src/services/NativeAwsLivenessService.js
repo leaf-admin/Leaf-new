@@ -50,6 +50,27 @@ class NativeAwsLivenessService {
       credentials: normalizedCredentials,
     });
   }
+
+  async cancel() {
+    if (
+      !nativeModule
+      || typeof nativeModule.cancel !== 'function'
+      || (Platform.OS !== 'ios' && Platform.OS !== 'android')
+    ) {
+      return {
+        success: true,
+        cancelled: false,
+        supported: false,
+      };
+    }
+
+    const result = await nativeModule.cancel();
+    return {
+      success: result?.success !== false,
+      cancelled: result?.cancelled === true,
+      supported: true,
+    };
+  }
 }
 
 export const nativeAwsLivenessService = new NativeAwsLivenessService();

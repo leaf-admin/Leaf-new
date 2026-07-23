@@ -73,6 +73,8 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
     () => DRIVER_DOCS.filter(doc => resolveDocStatus(documents, analysisByType, doc.id) === 'aprovado').length,
     [analysisByType, documents],
   );
+  const documentsComplete = approvedCount === DRIVER_DOCS.length;
+  const operationallyReleasedBeforeDocumentSync = driverCanGoOnline && !documentsComplete;
 
   const handleDismiss = useCallback(() => {
     if (navigation.canGoBack?.()) {
@@ -113,7 +115,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
             eyebrow="Motorista"
             title="Documentos"
             subtitle="Acompanhe a análise que libera o modo online."
-            badgeLabel={driverCanGoOnline ? 'liberado' : `${approvedCount}/${DRIVER_DOCS.length}`}
+            badgeLabel={documentsComplete ? 'aprovados' : `${approvedCount}/${DRIVER_DOCS.length}`}
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -138,6 +140,13 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
                       title={doc.title}
                       subtitle={doc.subtitle}
                       badge={status}
+                      badgeTone={
+                        status === 'aprovado'
+                          ? 'success'
+                          : status === 'revisar'
+                            ? 'danger'
+                            : 'warning'
+                      }
                       active={status === 'aprovado'}
                       last={index === DRIVER_DOCS.length - 1}
                       onPress={() => navigation.navigate('RobotaxiPrototypeDriverActivation')}
@@ -147,12 +156,22 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
               </PrototypeMenuSection>
 
               <PrototypeMenuSection title="Resumo">
-                <PrototypeMenuInfoRow label="Status online" value={driverCanGoOnline ? 'Liberado' : 'Pendente'} />
+                <PrototypeMenuInfoRow
+                  label="Liberação operacional"
+                  value={driverCanGoOnline ? 'Liberada pelo backend' : 'Pendente'}
+                />
                 <PrototypeMenuInfoRow label="Prazo de análise" value="Até 48 horas" />
                 <PrototypeMenuInfoRow label="Última sync" value={lastSyncedAt ? 'Atualizada' : 'Sem sync'} last />
               </PrototypeMenuSection>
 
-              {approvedCount === 0 ? (
+              {operationallyReleasedBeforeDocumentSync ? (
+                <LeafEmptyState
+                  icon="sync-outline"
+                  title="Documentos aguardando sincronização"
+                  message="A liberação operacional veio do backend. Atualize para consultar o status de CNH e CRLV."
+                  testID="robotaxi-driver-documents-sync-state"
+                />
+              ) : approvedCount === 0 ? (
                 <LeafEmptyState
                   icon="cloud-upload-outline"
                   title="Envie seus documentos na ativação"

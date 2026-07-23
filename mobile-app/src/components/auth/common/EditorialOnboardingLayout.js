@@ -93,6 +93,7 @@ export default function EditorialOnboardingScreen({
   contentStyle,
   childrenStyle,
   footerStyle,
+  stickyFooter = true,
   testID
 }) {
   const insets = React.useContext(SafeAreaInsetsContext || FallbackSafeAreaInsetsContext) || defaultInsets;
@@ -116,7 +117,7 @@ export default function EditorialOnboardingScreen({
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: Math.max(insets.top + 18, 54) },
-          footer ? styles.scrollContentWithFooter : null,
+          footer && stickyFooter ? styles.scrollContentWithFooter : null,
           contentStyle
         ]}
       >
@@ -143,9 +144,20 @@ export default function EditorialOnboardingScreen({
         <Text style={styles.title}>{title}</Text>
         {description ? <Text style={styles.description}>{description}</Text> : null}
         <View style={[styles.childrenWrap, childrenStyle]}>{children}</View>
+        {footer && !stickyFooter ? (
+          <View
+            style={[
+              styles.inlineFooter,
+              { paddingBottom: Math.max(insets.bottom + 18, Platform.OS === 'android' ? 26 : 22) },
+              footerStyle
+            ]}
+          >
+            {footer}
+          </View>
+        ) : null}
       </ScrollView>
 
-      {footer ? (
+      {footer && stickyFooter ? (
         <View
           style={[
             styles.footer,
@@ -251,6 +263,10 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: 28,
+    paddingTop: 12,
+    backgroundColor: color.background
+  },
+  inlineFooter: {
     paddingTop: 12,
     backgroundColor: color.background
   }

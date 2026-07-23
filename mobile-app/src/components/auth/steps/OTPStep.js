@@ -3,7 +3,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, TextInput, TouchableOpacity, StyleSheet, Alert as NativeAlert, Text } from 'react-native';
 import { fonts } from '../../../theme/runtimeTokens';
 import auth from '@react-native-firebase/auth';
-import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import {
@@ -24,6 +23,30 @@ const QA_FIXED_OTP = '992111';
 
 function resolveQaFixedOtp(phoneNumber) {
     return QA_FIXED_OTP_BY_PHONE.get(String(phoneNumber || '').trim()) || QA_FIXED_OTP;
+}
+
+const normalizePhoneDigits = value => String(value || '').replace(/\D/g, '');
+
+export function assertVerifiedOtpIdentity({ requestedPhone, credentialUser, currentUser }) {
+    const verifiedUid = String(credentialUser?.uid || '').trim();
+    const currentUid = String(currentUser?.uid || '').trim();
+    if (!verifiedUid || !currentUid || verifiedUid !== currentUid) {
+        const error = new Error('A sessão autenticada não corresponde ao telefone confirmado.');
+        error.code = 'OTP_AUTH_UID_MISMATCH';
+        throw error;
+    }
+
+    const requestedDigits = normalizePhoneDigits(requestedPhone);
+    const verifiedPhoneDigits = normalizePhoneDigits(
+        credentialUser?.phoneNumber || currentUser?.phoneNumber,
+    );
+    if (!requestedDigits || !verifiedPhoneDigits || requestedDigits !== verifiedPhoneDigits) {
+        const error = new Error('O telefone autenticado não corresponde ao número informado.');
+        error.code = 'OTP_AUTH_PHONE_MISMATCH';
+        throw error;
+    }
+
+    return credentialUser;
 }
 
 const { color, spacing } = onboardingTheme;
@@ -169,7 +192,12 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                 if (verificationResponse?.data?.success && verificationResponse?.data?.customToken) {
                     const userCredential = await auth().signInWithCustomToken(verificationResponse.data.customToken);
                     if (userCredential?.user) {
-                        onVerified(userCredential.user);
+                        const verifiedUser = assertVerifiedOtpIdentity({
+                            requestedPhone: normalizedPhone,
+                            credentialUser: userCredential.user,
+                            currentUser: auth().currentUser,
+                        });
+                        onVerified(verifiedUser);
                         return;
                     }
                 }
@@ -209,7 +237,12 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                     if (response.data && response.data.success && response.data.customToken) {
                         const userCredential = await auth().signInWithCustomToken(response.data.customToken);
                         if (userCredential.user) {
-                            onVerified(userCredential.user);
+                            const verifiedUser = assertVerifiedOtpIdentity({
+                                requestedPhone: phoneNumber,
+                                credentialUser: userCredential.user,
+                                currentUser: auth().currentUser,
+                            });
+                            onVerified(verifiedUser);
                         }
                     } else {
                         throw new Error(response.data?.error || 'Código inválido.');
@@ -219,7 +252,12 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                     const credential = await currentConfirmation.confirm(otpString);
                     if (credential.user) {
                         // OTP verificado com sucesso
-                        onVerified(credential.user);
+                        const verifiedUser = assertVerifiedOtpIdentity({
+                            requestedPhone: phoneNumber,
+                            credentialUser: credential.user,
+                            currentUser: auth().currentUser,
+                        });
+                        onVerified(verifiedUser);
                     }
                 }
             }
@@ -258,19 +296,13 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
     }, [otp, currentConfirmation, onVerified, loading, verifyOtpWithFallback, phoneNumber]);
 
     // Função para lidar com mudança de input
-    const handleOtpChange = useCallback(async (value, index) => {
+    const handleOtpChange = useCallback((value, index) => {
         const newOtp = [...otp];
         newOtp[index] = value;
         setOtp(newOtp);
 
-        // Salvar automaticamente no AsyncStorage
         const otpString = newOtp.join('');
         if (otpString.length === 6) {
-            await saveStepData('phone_validation', {
-                phoneNumber: phoneNumber,
-                otp: otpString
-            });
-
             // ✅ AUTO-VERIFICAR quando completar 6 dígitos
             // Pequeno delay para garantir que o estado foi atualizado
             setTimeout(() => {

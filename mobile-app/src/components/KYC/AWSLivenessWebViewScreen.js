@@ -11,6 +11,7 @@ import { WebView } from 'react-native-webview';
 import kycService from '../../services/KYCService';
 import Logger from '../../utils/Logger';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
+import { resolveKycLivenessErrorPresentation } from './kycLivenessErrorPresentation';
 
 const STATUS = {
   CREATING_SESSION: 'creating_session',
@@ -150,7 +151,7 @@ export default function AWSLivenessWebViewScreen({
   onFallbackLocal,
 }) {
   const [status, setStatus] = useState(STATUS.CREATING_SESSION);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorPresentation, setErrorPresentation] = useState(null);
   const [sessionData, setSessionData] = useState(null);
   const [credentialsData, setCredentialsData] = useState(null);
   const webViewRef = useRef(null);
@@ -171,7 +172,7 @@ export default function AWSLivenessWebViewScreen({
 
   const initializeSession = async () => {
     setStatus(STATUS.CREATING_SESSION);
-    setErrorMessage('');
+    setErrorPresentation(null);
     setSessionData(null);
     setCredentialsData(null);
 
@@ -180,16 +181,17 @@ export default function AWSLivenessWebViewScreen({
       requirement,
     });
 
-    if (!createResult.success) {
+    if (!createResult.success || !createResult.data?.sessionId) {
       setStatus(STATUS.ERROR);
-      setErrorMessage(createResult.error || 'Nao foi possivel criar sessao de liveness');
+      setErrorPresentation(resolveKycLivenessErrorPresentation(createResult));
       return;
     }
 
-    const credentialsResult = await kycService.getAwsLivenessCredentials(driverId);
+    const sessionId = createResult.data.sessionId;
+    const credentialsResult = await kycService.getAwsLivenessCredentials(driverId, sessionId);
     if (!credentialsResult.success || !credentialsResult.data?.credentials) {
       setStatus(STATUS.ERROR);
-      setErrorMessage(credentialsResult.error || 'Nao foi possivel preparar credenciais seguras de liveness');
+      setErrorPresentation(resolveKycLivenessErrorPresentation(credentialsResult));
       return;
     }
 
@@ -220,7 +222,7 @@ export default function AWSLivenessWebViewScreen({
 
       if (type === 'init_error' || type === 'analysis_error') {
         setStatus(STATUS.ERROR);
-        setErrorMessage(payload?.error?.message || 'Falha no detector de liveness');
+        setErrorPresentation(resolveKycLivenessErrorPresentation(payload?.error || payload));
         return;
       }
 
@@ -230,14 +232,16 @@ export default function AWSLivenessWebViewScreen({
         const resultResponse = await kycService.getAwsLivenessSessionResult(driverId, sessionData?.sessionId);
         if (!resultResponse.success) {
           setStatus(STATUS.ERROR);
-          setErrorMessage(resultResponse.error || 'Nao foi possivel validar o resultado de liveness');
+          setErrorPresentation(resolveKycLivenessErrorPresentation(resultResponse));
           return;
         }
 
         const livenessData = resultResponse.data || {};
         if (livenessData?.livenessPassed !== true) {
           setStatus(STATUS.ERROR);
-          setErrorMessage('Liveness nao aprovado. Tente novamente com boa iluminacao e rosto centralizado.');
+          setErrorPresentation(resolveKycLivenessErrorPresentation({
+            message: 'Validação facial não aprovada.',
+          }));
           return;
         }
 
@@ -249,7 +253,7 @@ export default function AWSLivenessWebViewScreen({
       }
     } catch (error) {
       setStatus(STATUS.ERROR);
-      setErrorMessage(error.message || 'Erro ao processar resposta do liveness');
+      setErrorPresentation(resolveKycLivenessErrorPresentation(error));
     }
   };
 
@@ -257,7 +261,7 @@ export default function AWSLivenessWebViewScreen({
     return (
       <View style={styles.centeredContainer}>
         <ActivityIndicator size="large" color="#1A330E" />
-        <Text style={styles.statusText}>Criando sessao segura de verificacao...</Text>
+        <Text style={styles.statusText}>Preparando validação segura...</Text>
       </View>
     );
   }
@@ -265,16 +269,20 @@ export default function AWSLivenessWebViewScreen({
   if (status === STATUS.ERROR) {
     return (
       <View style={styles.centeredContainer}>
-        <Text style={styles.errorTitle}>Nao foi possivel concluir o liveness AWS</Text>
-        <Text style={styles.errorText}>{errorMessage}</Text>
+        <Text style={styles.errorTitle}>
+          {errorPresentation?.title || 'Não foi possível continuar'}
+        </Text>
+        <Text style={styles.errorText}>
+          {errorPresentation?.message || 'Não foi possível iniciar a validação agora.'}
+        </Text>
 
         <TouchableOpacity style={styles.primaryButton} onPress={initializeSession}>
           <Text style={styles.primaryButtonText}>Tentar novamente</Text>
         </TouchableOpacity>
 
-        {typeof onFallbackLocal === 'function' ? (
+        {errorPresentation?.allowLocalFallback && typeof onFallbackLocal === 'function' ? (
           <TouchableOpacity style={styles.secondaryButton} onPress={onFallbackLocal}>
-            <Text style={styles.secondaryButtonText}>Usar validacao local</Text>
+            <Text style={styles.secondaryButtonText}>Continuar com selfie</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -302,7 +310,7 @@ export default function AWSLivenessWebViewScreen({
           renderLoading={() => (
             <View style={styles.loadingOverlay}>
               <ActivityIndicator size="large" color="#1A330E" />
-              <Text style={styles.statusText}>Inicializando detector AWS...</Text>
+              <Text style={styles.statusText}>Preparando câmera...</Text>
             </View>
           )}
         />
@@ -311,7 +319,7 @@ export default function AWSLivenessWebViewScreen({
       {status === STATUS.VERIFYING ? (
         <View style={styles.verifyingOverlay}>
           <ActivityIndicator size="large" color="#1A330E" />
-          <Text style={styles.statusText}>Validando resultado com o backend...</Text>
+          <Text style={styles.statusText}>Confirmando resultado...</Text>
         </View>
       ) : null}
     </View>

@@ -58,7 +58,7 @@ describe('DocumentStep (driver KYC docs)', () => {
     expect(baseProps.onSubmitted).not.toHaveBeenCalled();
   });
 
-  test('auto-advances when CNH extraction returns mandatory identity fields', async () => {
+  test('requires manual gender selection after extracting the CNH identity', async () => {
     DocumentPicker.getDocumentAsync.mockResolvedValueOnce({
       canceled: false,
       assets: [
@@ -78,17 +78,23 @@ describe('DocumentStep (driver KYC docs)', () => {
         cpf: '12345678901',
         dataNascimento: '01/01/1990',
         nomeMae: 'Maria da Silva',
-        genero: 'F',
       },
     });
 
     const onSubmitted = jest.fn();
-    const { getByText } = render(<DocumentStep {...baseProps} onSubmitted={onSubmitted} />);
+    const { getByText, getByTestId } = render(<DocumentStep {...baseProps} onSubmitted={onSubmitted} />);
     fireEvent.press(getByText('Toque para enviar o PDF da CNH'));
 
     await waitFor(() => {
-      expect(onSubmitted).toHaveBeenCalledTimes(1);
+      expect(getByText('CNH-e.pdf')).toBeTruthy();
     });
+    expect(onSubmitted).not.toHaveBeenCalled();
+
+    fireEvent.press(getByTestId('driver-gender-select'));
+    fireEvent.press(getByTestId('driver-gender-option-F'));
+    fireEvent.press(getByText('Continuar'));
+
+    expect(onSubmitted).toHaveBeenCalledTimes(1);
 
     const payload = onSubmitted.mock.calls[0][0];
     expect(payload.cpf).toBe('123.456.789-01');

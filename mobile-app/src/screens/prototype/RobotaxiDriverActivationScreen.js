@@ -10,6 +10,7 @@ import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismi
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { DRIVER_ONBOARDING_STAGE_KEYS } from '../../services/DriverOnboardingService';
+import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContract';
 import Logger from '../../utils/Logger';
 
 const { color, typography } = robotaxiPrototypeTokens;
@@ -83,13 +84,13 @@ const STAGE_META = {
   },
   [DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA]: {
     title: 'Validação do veículo',
-    description: 'Atualizado automaticamente após o envio do CRLV.',
+    description: 'Status operacional confirmado pela plataforma.',
     fields: [
       {
         key: 'crlv',
         label: 'CRLV validado pela plataforma',
-        helper: 'Após envio, o documento entra em análise automatizada com IA.',
-        actionLabel: 'Envio pendente',
+        helper: 'A liberação depende do cadastro canônico do veículo.',
+        actionLabel: 'Pendente',
         kind: 'readonly'
       }
     ]
@@ -195,9 +196,16 @@ function resolveActivationRowSubtitle(field, fieldState, vehicleLabel = '') {
     return fieldState.fileName;
   }
   if (field?.kind === 'readonly') {
-    return status === FIELD_STATUS.APPROVED
-      ? vehicleLabel || 'Veículo aprovado'
-      : 'Atualizado após CRLV';
+    if (status === FIELD_STATUS.APPROVED) {
+      return vehicleLabel || 'Veículo aprovado';
+    }
+    if (status === FIELD_STATUS.IN_REVIEW) {
+      return 'Veículo em análise';
+    }
+    if (status === FIELD_STATUS.FAILED) {
+      return 'Veículo requer atenção';
+    }
+    return 'Cadastro do veículo pendente';
   }
   return mapFieldStatusLabel(status);
 }
@@ -227,6 +235,45 @@ function mapRemoteStatusToFieldStatus(status) {
     return FIELD_STATUS.IN_REVIEW;
   }
   return FIELD_STATUS.PENDING;
+}
+
+function resolveCanonicalVehicleFieldState(driverActivationRemote = null) {
+  const activationState = String(
+    driverActivationRemote?.activationState || driverActivationRemote?.state || '',
+  ).trim().toUpperCase();
+  const canonicalVehicleApproved =
+    driverActivationRemote?.checklist?.vehicleRegistration === true;
+  const canonicalVehicleInReview =
+    activationState === 'VEHICLE_IN_REVIEW' ||
+    driverActivationRemote?.vehicle?.inReview === true;
+  const vehicleScopedReason = ['VEHICLE_PENDING', 'VEHICLE_IN_REVIEW'].includes(activationState)
+    ? String(driverActivationRemote?.blockingReason || '')
+    : '';
+
+  if (canonicalVehicleApproved) {
+    return {
+      status: FIELD_STATUS.APPROVED,
+      reason: '',
+      fileName: '',
+      summaryRows: [],
+    };
+  }
+
+  if (canonicalVehicleInReview) {
+    return {
+      status: FIELD_STATUS.IN_REVIEW,
+      reason: vehicleScopedReason,
+      fileName: '',
+      summaryRows: [],
+    };
+  }
+
+  return {
+    status: FIELD_STATUS.PENDING,
+    reason: vehicleScopedReason,
+    fileName: '',
+    summaryRows: [],
+  };
 }
 
 function toFieldKey(stageKey, fieldKey) {
@@ -290,13 +337,26 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
   const lastInitialRefreshUidRef = useRef('');
   const activation = driverActivation || {};
   const stages = activation?.stages || EMPTY_ACTIVATION_STAGES;
+  const canonicalLivenessGate = useMemo(
+    () => resolveCanonicalLivenessGate(driverActivationRemote),
+    [driverActivationRemote],
+  );
 
   useEffect(() => {
     const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
     const showStatusBar = () => StatusBar.setHidden(false, 'fade');
+    const handleFocus = () => {
+      hideStatusBar();
+      if (!String(profile?.uid || '').trim()) {
+        return;
+      }
+      refreshDriverActivationRemote().catch(error => {
+        Logger.warn('⚠️ [DriverActivationScreen] Sync remoto no foco falhou:', error?.message || error);
+      });
+    };
 
     hideStatusBar();
-    const removeFocusListener = navigation?.addListener?.('focus', hideStatusBar);
+    const removeFocusListener = navigation?.addListener?.('focus', handleFocus);
     const removeBlurListener = navigation?.addListener?.('blur', showStatusBar);
 
     return () => {
@@ -304,13 +364,13 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       removeBlurListener?.();
       showStatusBar();
     };
-  }, [navigation]);
+  }, [navigation, profile?.uid, refreshDriverActivationRemote]);
 
   const stageKeys = useMemo(
     () => [
       DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA,
-      DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION,
-      DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA
+      DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA,
+      DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION
     ],
     []
   );
@@ -345,9 +405,12 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
         if (stageKey === DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA) {
           return true;
         }
+        if (stageKey === DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION) {
+          return canonicalLivenessGate.visible;
+        }
         return stages?.[stageKey]?.status && stages?.[stageKey]?.status !== 'locked';
       }),
-    [stageKeys, stages]
+    [canonicalLivenessGate.visible, stageKeys, stages]
   );
   const hiddenLockedStageCount = Math.max(0, stageKeys.length - visibleStageKeys.length);
   const activationVehicleLabel = useMemo(
@@ -357,6 +420,10 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
         documentAnalysisState,
       }),
     [documentAnalysisState, driverActivationRemote],
+  );
+  const canonicalVehicleFieldState = useMemo(
+    () => resolveCanonicalVehicleFieldState(driverActivationRemote),
+    [driverActivationRemote],
   );
 
   usePrototypeMapOcclusion({
@@ -508,7 +575,10 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       }
 
       if (field.kind === 'readonly') {
-        Alert.alert('Validação do veículo', 'O status será atualizado automaticamente após o envio do CRLV.');
+        Alert.alert(
+          'Validação do veículo',
+          'A liberação é confirmada pela plataforma após validar o cadastro do veículo e o CRLV.',
+        );
         return;
       }
 
@@ -541,6 +611,13 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       }
 
       if (field.kind === 'task') {
+        if (!canonicalLivenessGate.canStart) {
+          Alert.alert(
+            'Validação facial indisponível',
+            'Conclua primeiro a validação do veículo para liberar esta etapa.',
+          );
+          return;
+        }
         navigation.navigate('RobotaxiPrototype', {
           notificationType: 'kyc_activation_required',
           requirement: 'LIVENESS_REQUIRED',
@@ -591,6 +668,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     },
     [
       getFieldState,
+      canonicalLivenessGate.canStart,
       navigation,
       pickPdfAsset,
       refreshDriverActivationRemote,
@@ -607,7 +685,9 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       const isLocked = stage.status === 'locked';
 
       return (meta?.fields || []).map(field => {
-        const fieldState = getFieldState(stageKey, field.key);
+        const fieldState = field.kind === 'readonly'
+          ? canonicalVehicleFieldState
+          : getFieldState(stageKey, field.key);
         const fieldStatus = fieldState?.status || FIELD_STATUS.PENDING;
         const isReadonly = field.kind === 'readonly';
         const stageBlocked = isLocked && !isReadonly;
@@ -620,9 +700,11 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               : fieldStatus === FIELD_STATUS.IN_REVIEW
                 ? 'Em análise'
                 : fieldStatus === FIELD_STATUS.FAILED
-                  ? 'Reenviar'
+                  ? isReadonly
+                    ? 'Atenção'
+                    : 'Reenviar'
                   : isReadonly
-                    ? 'Automático'
+                    ? 'Pendente'
                     : field.actionLabel || 'Enviar';
 
         return {
@@ -638,7 +720,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
         };
       });
     });
-  }, [activationVehicleLabel, getFieldState, stages, visibleStageKeys]);
+  }, [activationVehicleLabel, canonicalVehicleFieldState, getFieldState, stages, visibleStageKeys]);
 
   const firstActionableRow = activationRows.find(row => {
     const status = row.fieldState?.status || FIELD_STATUS.PENDING;
