@@ -1,7 +1,6 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
 
 const {
   buildReport,
@@ -20,6 +19,20 @@ const ONE_PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
 );
+const TEST_VIDEO_BYTES = Buffer.from('leaf-ux-lab-video-fixture');
+
+function runSuccessfulMediaCommand(command) {
+  if (command !== 'ffprobe' && command !== 'ffmpeg') {
+    throw new Error(`unexpected media command: ${command}`);
+  }
+  return { status: 0, stdout: '', stderr: '' };
+}
+
+function buildTestReport(runDir) {
+  return buildReport(runDir, {
+    runMediaCommand: runSuccessfulMediaCommand,
+  });
+}
 
 function attachValidEvidence(runDir, observation) {
   const roleDir = path.join(runDir, 'evidence', observation.role);
@@ -29,16 +42,7 @@ function attachValidEvidence(runDir, observation) {
   const screenshotPath = path.join(roleDir, screenshotName);
   const videoPath = path.join(roleDir, videoName);
   fs.writeFileSync(screenshotPath, ONE_PIXEL_PNG);
-  const video = spawnSync('ffmpeg', [
-    '-v', 'error',
-    '-f', 'lavfi',
-    '-i', 'color=c=black:s=16x16:d=0.04',
-    '-frames:v', '1',
-    '-c:v', 'libx264',
-    '-y',
-    videoPath,
-  ]);
-  if (video.status !== 0) throw new Error('failed to create UX lab video fixture');
+  fs.writeFileSync(videoPath, TEST_VIDEO_BYTES);
   observation.evidence = {
     video: path.relative(runDir, videoPath),
     screenshots: [path.relative(runDir, screenshotPath)],
@@ -300,7 +304,7 @@ describe('Leaf UX Lab', () => {
     fs.writeFileSync(observationPath, `${JSON.stringify(observation, null, 2)}\n`);
 
     expect(weightedScore(observation, config.rubric)).toBeLessThan(2);
-    const result = buildReport(runDir);
+    const result = buildTestReport(runDir);
     const report = fs.readFileSync(result.outputPath, 'utf8');
 
     expect(result.validationErrors).toEqual([]);
@@ -321,7 +325,7 @@ describe('Leaf UX Lab', () => {
     setRunStatus(runDir, 'completed');
     passEveryObservation(runDir);
 
-    const result = buildReport(runDir);
+    const result = buildTestReport(runDir);
     const report = fs.readFileSync(result.outputPath, 'utf8');
 
     expect(result.validationErrors).toEqual([]);
@@ -335,7 +339,7 @@ describe('Leaf UX Lab', () => {
     const runDir = initRun({ runId: 'prepared-run', runsDir });
     passEveryObservation(runDir);
 
-    const result = buildReport(runDir);
+    const result = buildTestReport(runDir);
     const report = fs.readFileSync(result.outputPath, 'utf8');
 
     expect(result.validationErrors).toEqual([]);
@@ -363,7 +367,7 @@ describe('Leaf UX Lab', () => {
     run.rules.requirePassForAcceptance = false;
     fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
 
-    const result = buildReport(runDir);
+    const result = buildTestReport(runDir);
     const report = fs.readFileSync(result.outputPath, 'utf8');
 
     expect(result.validationErrors).toEqual([]);
@@ -398,7 +402,7 @@ describe('Leaf UX Lab', () => {
     observation.task.requiredTestIds = ['legacy-screen'];
     fs.writeFileSync(observationPath, `${JSON.stringify(observation, null, 2)}\n`);
 
-    const result = buildReport(runDir);
+    const result = buildTestReport(runDir);
 
     expect(result.validationErrors).toEqual(
       expect.arrayContaining([
@@ -421,7 +425,7 @@ describe('Leaf UX Lab', () => {
       }
     });
 
-    const result = buildReport(runDir);
+    const result = buildTestReport(runDir);
     const report = fs.readFileSync(result.outputPath, 'utf8');
 
     expect(result.validationErrors).toEqual(
@@ -445,7 +449,7 @@ describe('Leaf UX Lab', () => {
       path.join(observationsDir, 'passenger--home-copy.json'),
     );
 
-    const result = buildReport(runDir);
+    const result = buildTestReport(runDir);
     const report = fs.readFileSync(result.outputPath, 'utf8');
 
     expect(result.validationErrors).toEqual(

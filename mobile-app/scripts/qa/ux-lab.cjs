@@ -272,7 +272,12 @@ function resolveRunEvidencePath(runDir, evidencePath) {
   return { resolved, normalized };
 }
 
-function inspectEvidenceArtifacts(observation, runDir, cache = new Map()) {
+function inspectEvidenceArtifacts(
+  observation,
+  runDir,
+  cache = new Map(),
+  runMediaCommand = spawnSync,
+) {
   if (observation.status !== "pass" && observation.status !== "fail") return [];
   const errors = [];
   const artifacts = [
@@ -315,7 +320,7 @@ function inspectEvidenceArtifacts(observation, runDir, cache = new Map()) {
         artifactErrors.push(`screenshot is not a valid PNG/JPEG: ${normalized}`);
       }
     } else {
-      const probe = spawnSync("ffprobe", [
+      const probe = runMediaCommand("ffprobe", [
         "-v", "error",
         "-select_streams", "v:0",
         "-show_entries", "stream=codec_name,width,height",
@@ -325,7 +330,7 @@ function inspectEvidenceArtifacts(observation, runDir, cache = new Map()) {
       if (probe.status !== 0) {
         artifactErrors.push(`video probe failed: ${normalized}`);
       } else {
-        const decode = spawnSync("ffmpeg", [
+        const decode = runMediaCommand("ffmpeg", [
           "-v", "error",
           "-i", resolved,
           "-map", "0:v:0",
@@ -365,7 +370,7 @@ function listObservationFiles(runDir) {
     .sort();
 }
 
-function buildReport(runDir) {
+function buildReport(runDir, { runMediaCommand = spawnSync } = {}) {
   const config = loadConfig();
   const run = readJson(path.join(runDir, "run.json"));
   const observations = listObservationFiles(runDir).map((filePath) => ({
@@ -429,7 +434,14 @@ function buildReport(runDir) {
         ),
       );
     }
-    errors.push(...inspectEvidenceArtifacts(item.value, runDir, evidenceInspectionCache));
+    errors.push(
+      ...inspectEvidenceArtifacts(
+        item.value,
+        runDir,
+        evidenceInspectionCache,
+        runMediaCommand,
+      ),
+    );
     errors.forEach((error) => validationErrors.push(`${path.basename(item.filePath)}: ${error}`));
     for (const finding of item.value.findings || []) {
       findings.push({
