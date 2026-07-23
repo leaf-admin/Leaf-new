@@ -6,10 +6,10 @@ import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import {
-  CardHandle,
-  PrototypeCard,
-  PrototypePrimaryButton,
-} from "../../components/prototype/PrototypeUI";
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  robotaxiLifecycleMetrics,
+} from "../../components/prototype/RobotaxiLifecycleUI";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
@@ -36,7 +36,8 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const protectedPaymentSuccessExitRef = useRef(false);
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const sheetBottom =
+    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
 
   const destination =
     route?.params?.destination || selectedDestination?.name || "Destino";
@@ -286,8 +287,7 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
           dragEnabled={!isRideLifecycleLocked}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <PrototypeCard onLayout={handleCardLayout} style={styles.card}>
-            <CardHandle />
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={styles.card}>
 
             <View style={styles.iconWrap}>
               <Ionicons name="checkmark" size={30} color="#FFFFFF" />
@@ -298,9 +298,10 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
               Corrida criada com sucesso. Agora vamos buscar seu motorista.
             </Text>
 
-            <PrototypePrimaryButton
+            <RobotaxiLifecycleButton
               label="Continuar para busca"
               icon="car-sport-outline"
+              tone="primary"
               onPress={() => {
                 const targetRoute = passengerAutoRoute || "RobotaxiPrototypeDriverSearch";
                 if (targetRoute === "RobotaxiPrototypeReceipt") {
@@ -344,14 +345,14 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
             />
 
             {isRideLifecycleLocked ? null : (
-              <PrototypePrimaryButton
+              <RobotaxiLifecycleButton
                 label="Voltar ao mapa"
                 icon="map-outline"
                 onPress={() => navigation.navigate("RobotaxiPrototype")}
                 style={styles.secondaryButton}
               />
             )}
-          </PrototypeCard>
+          </RobotaxiLifecycleCard>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -369,13 +370,7 @@ const styles = StyleSheet.create({
     right: 0,
   },
   card: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 16,
+    marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
   iconWrap: {
     alignSelf: "center",
@@ -395,8 +390,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 15.5,
+    lineHeight: 20,
     textAlign: "center",
   },
   subtitle: {

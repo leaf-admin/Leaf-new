@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,13 +38,14 @@ function formatTimestamp(timestamp) {
 
 function resolveChatReturnRoute(context = {}) {
   const source = String(context.source || '').toLowerCase();
+  const role = String(context.role || context.activeRole || '').toLowerCase();
   const status = normalizeRuntimeRideStatus(context.bookingStatus);
 
   if (source === 'receipt' || status === 'completed') {
     return 'RobotaxiPrototypeReceipt';
   }
-  if (source === 'driver-trip') {
-    return 'RobotaxiPrototypeDriverTrip';
+  if (role === 'driver' || source.startsWith('driver-')) {
+    return 'RobotaxiPrototype';
   }
   if (context.bookingId || context.rideId || context.tripId) {
     return 'RobotaxiPrototypeTrip';
@@ -53,29 +54,44 @@ function resolveChatReturnRoute(context = {}) {
 }
 
 export default function RobotaxiChatScreen({ navigation, route }) {
-  const { loadChatSession, sendChatMessage, chatMessages, chatLoading, chatSending, chatError } = usePrototypeRideRuntime();
+  const {
+    activeRole,
+    loadChatSession,
+    sendChatMessage,
+    chatMessages,
+    chatLoading,
+    chatSending,
+    chatError,
+  } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [draft, setDraft] = useState('');
+  const messageListRef = useRef(null);
   const messages = Array.isArray(chatMessages) ? chatMessages : [];
   const hasListError = Boolean(chatError) && !chatLoading && messages.length === 0;
+  const canSendMessage = !chatSending && !hasListError && Boolean(String(draft || '').trim());
   const chatScope = useMemo(() => {
     const params = route?.params || {};
     const bookingId = String(params.bookingId || params.rideId || params.tripId || '').trim();
     const bookingStatus = normalizeRuntimeRideStatus(params.bookingStatus);
+    const role = String(params.role || activeRole || '').trim().toLowerCase();
     return {
       ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
       ...(bookingStatus ? { bookingStatus } : {}),
+      ...(role ? { role } : {}),
       source: params.source || 'prototype-chat',
     };
   }, [
+    activeRole,
     route?.params?.bookingId,
     route?.params?.bookingStatus,
     route?.params?.rideId,
+    route?.params?.role,
     route?.params?.source,
     route?.params?.tripId,
   ]);
+  const isDriverChat = chatScope.role === 'driver';
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -119,7 +135,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
 
   return (
     <PrototypeScreenTransition>
-      <View style={styles.container} pointerEvents="box-none">
+      <View style={styles.container} pointerEvents="box-none" testID="robotaxi-chat-screen">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
@@ -135,8 +151,8 @@ export default function RobotaxiChatScreen({ navigation, route }) {
             <PrototypeMenuSurface
               onLayout={handlePanelLayout}
               eyebrow="Canal direto"
-              title="Chat"
-              subtitle="Converse com motorista e suporte sem sair do contexto da viagem."
+              title={isDriverChat ? 'Chat com passageiro' : 'Chat com motorista'}
+              subtitle="Mensagens desta corrida."
               fullScreen
               style={{
                 paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -152,15 +168,22 @@ export default function RobotaxiChatScreen({ navigation, route }) {
               )}
             >
               <FlatList
+                ref={messageListRef}
                 data={messages}
                 keyExtractor={(item, index) => String(item?.id || item?.messageId || `chat-${index}`)}
                 style={styles.list}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
+                testID="prototype-chat-message-list"
+                onLayout={() => messageListRef.current?.scrollToEnd?.({ animated: false })}
+                onContentSizeChange={() => messageListRef.current?.scrollToEnd?.({ animated: true })}
                 renderItem={({ item }) => {
                   const fromYou = item.author === 'you';
                   return (
-                    <View style={[styles.messageRow, fromYou ? styles.messageRowRight : styles.messageRowLeft]}>
+                    <View
+                      style={[styles.messageRow, fromYou ? styles.messageRowRight : styles.messageRowLeft]}
+                      testID={`prototype-chat-message-${item?.id || item?.messageId || 'unknown'}`}
+                    >
                       <View style={[styles.bubble, fromYou ? styles.bubbleYou : styles.bubbleDriver]}>
                         <Text style={styles.bubbleText}>{item.text}</Text>
                         <Text style={styles.bubbleMeta}>{formatTimestamp(item.timestamp)}</Text>
@@ -207,13 +230,23 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                     onChangeText={setDraft}
                     placeholder="Enviar mensagem..."
                     placeholderTextColor={leafRideColors.muted}
-                    editable={!chatSending}
+                    editable={!chatSending && !hasListError}
                     returnKeyType="send"
                     onSubmitEditing={handleSend}
+                    testID="prototype-chat-message-input"
                   />
                 </View>
 
-                <TouchableOpacity style={[styles.sendButton, chatSending && styles.sendButtonDisabled]} activeOpacity={0.82} onPress={handleSend} disabled={chatSending}>
+                <TouchableOpacity
+                  style={[styles.sendButton, !canSendMessage && styles.sendButtonDisabled]}
+                  activeOpacity={0.82}
+                  onPress={handleSend}
+                  disabled={!canSendMessage}
+                  accessibilityRole="button"
+                  accessibilityLabel="Enviar mensagem"
+                  accessibilityState={{ disabled: !canSendMessage }}
+                  testID="prototype-chat-send-button"
+                >
                   {chatSending ? (
                     <ActivityIndicator size="small" color={color.accent.contrast} />
                   ) : (

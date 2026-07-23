@@ -13,6 +13,7 @@ function normalizeStatus(status) {
 function mapReceiptToBooking(receipt) {
     const status = normalizeStatus(receipt?.status || receipt?.bookingStatus || 'COMPLETE');
     const totalAmount = Number.parseFloat(
+        receipt?.grossAmount ??
         receipt?.totalAmountValue ??
         receipt?.totalAmountRaw ??
         receipt?.totalAmount
@@ -22,6 +23,7 @@ function mapReceiptToBooking(receipt) {
 
     return {
         id: receipt?.rideId || receipt?.bookingId || receipt?.receiptId,
+        rideId: receipt?.rideId || receipt?.bookingId || null,
         receiptId: receipt?.receiptId || null,
         pickup: {
             add: receipt?.pickup || receipt?.pickupAddress || 'Origem indisponivel',
@@ -29,17 +31,34 @@ function mapReceiptToBooking(receipt) {
             lng: receipt?.pickupLng ?? null
         },
         drop: {
-            add: receipt?.dropoff || receipt?.destination || receipt?.dropoffAddress || 'Destino indisponivel',
+            add: receipt?.dropoff || receipt?.destination || receipt?.destinationAddress || receipt?.dropoffAddress || 'Destino indisponivel',
             lat: receipt?.dropoffLat ?? null,
             lng: receipt?.dropoffLng ?? null
         },
         status,
+        date: receipt?.completedAt || receipt?.date || receipt?.createdAt || null,
         trip_cost: Number.isFinite(totalAmount) ? totalAmount : receipt?.totalAmount,
         estimate: Number.isFinite(totalAmount) ? totalAmount : receipt?.totalAmount,
+        grossAmount: Number.isFinite(totalAmount) ? totalAmount : 0,
+        driverNetAmount: Number.parseFloat(receipt?.driverNetAmount) || 0,
+        operationalFee: Number.parseFloat(receipt?.operationalFee) || 0,
+        paymentIntermediationFee: Number.parseFloat(receipt?.paymentIntermediationFee) || 0,
+        totalFees: Number.parseFloat(receipt?.totalFees) || 0,
+        tollAmount: Number.parseFloat(receipt?.tollAmount) || 0,
         distance: Number.isFinite(distanceKm) ? distanceKm : receipt?.distance,
+        distanceKm: Number.isFinite(distanceKm) ? distanceKm : 0,
         duration: Number.isFinite(durationMinutes) ? durationMinutes : receipt?.duration,
+        durationMinutes: Number.isFinite(durationMinutes) ? durationMinutes : 0,
         startTime: receipt?.date || receipt?.completedAt || receipt?.createdAt || null,
-        tripdate: receipt?.date || receipt?.completedAt || receipt?.createdAt || null
+        tripdate: receipt?.date || receipt?.completedAt || receipt?.createdAt || null,
+        driverId: receipt?.driverId || null,
+        driverName: receipt?.driverName || null,
+        passengerId: receipt?.passengerId || null,
+        passengerName: receipt?.passengerName || null,
+        vehicleLabel: receipt?.vehicleLabel || null,
+        vehiclePlate: receipt?.vehiclePlate || null,
+        authoritativeSnapshot: receipt?.authoritativeSnapshot === true,
+        financialSnapshotSource: receipt?.financialSnapshotSource || null,
     };
 }
 
@@ -113,7 +132,9 @@ class BookingHistoryService {
                     hasNextPage: Boolean(response?.data?.hasMore),
                     hasPreviousPage: offset > 0,
                     startCursor: filteredBookings.length > 0 ? String(offset) : null,
-                    endCursor: filteredBookings.length > 0 ? String(offset + filteredBookings.length) : null
+                    endCursor: filteredBookings.length > 0
+                        ? String(response?.data?.nextOffset ?? offset + receipts.length)
+                        : null
                 },
                 totalCount: Number(response?.data?.total || filteredBookings.length)
             };

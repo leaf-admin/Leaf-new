@@ -9,14 +9,31 @@ jest.mock('react-native-maps', () => {
   const React = require('react');
   const { View } = require('react-native');
   const MockView = ({ children, ...props }) => <View {...props}>{children}</View>;
-  const MockMapView = React.forwardRef(({ children, mapPadding, testID }, ref) => {
+  const MockMapView = React.forwardRef(({
+    children,
+    mapPadding,
+    testID,
+    region,
+    initialRegion,
+    ...props
+  }, ref) => {
     React.useImperativeHandle(ref, () => ({
       animateCamera: mockAnimateCamera,
       animateToRegion: mockAnimateToRegion,
       fitToCoordinates: mockFitToCoordinates,
     }));
 
-    return <View testID={testID} mapPadding={mapPadding}>{children}</View>;
+    return (
+      <View
+        {...props}
+        testID={testID}
+        mapPadding={mapPadding}
+        region={region}
+        initialRegion={initialRegion}
+      >
+        {children}
+      </View>
+    );
   });
 
   return {
@@ -125,6 +142,103 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       bottom: 0,
       left: 0,
     });
+  });
+
+  it('controls the native iOS region while active forceRegionUpdate is enabled', () => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+
+    try {
+      const { getByTestId, rerender } = render(
+        <PrototypeMapLayer
+          mapRef={React.createRef()}
+          region={baseRegion}
+          userCoordinate={routeCoordinates[0]}
+          routeCoordinates={routeCoordinates}
+          routeViewportRegion={visibleRouteRegion}
+          forceRegionUpdate
+        />,
+      );
+
+      expect(getByTestId('prototype-map-view').props.initialRegion).toEqual(baseRegion);
+      expect(getByTestId('prototype-map-view').props.region).toEqual(visibleRouteRegion);
+
+      rerender(
+        <PrototypeMapLayer
+          mapRef={React.createRef()}
+          region={baseRegion}
+          userCoordinate={routeCoordinates[0]}
+          routeCoordinates={routeCoordinates}
+          routeViewportRegion={visibleRouteRegion}
+          forceRegionUpdate={false}
+        />,
+      );
+      expect(getByTestId('prototype-map-view').props.region).toBeUndefined();
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
+  it('temporarily releases the controlled iOS region during the manual camera hold', () => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+
+    try {
+      const { getByTestId } = render(
+        <PrototypeMapLayer
+          mapRef={React.createRef()}
+          region={baseRegion}
+          userCoordinate={routeCoordinates[0]}
+          routeCoordinates={routeCoordinates}
+          routeViewportRegion={visibleRouteRegion}
+          forceRegionUpdate
+          manualCameraHoldMs={1000}
+        />,
+      );
+
+      act(() => {
+        getByTestId('prototype-map-view').props.onPanDrag({ nativeEvent: {} });
+      });
+      expect(getByTestId('prototype-map-view').props.region).toBeUndefined();
+
+      act(() => {
+        jest.advanceTimersByTime(1020);
+      });
+      expect(getByTestId('prototype-map-view').props.region).toEqual(visibleRouteRegion);
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
+  it('zeros native padding when iOS controls a fallback region without route geometry', () => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+
+    try {
+      const { getByTestId } = render(
+        <PrototypeMapLayer
+          mapRef={React.createRef()}
+          region={baseRegion}
+          userCoordinate={routeCoordinates[0]}
+          viewportPadding={{ top: 151, right: 24, bottom: 418, left: 24 }}
+          forceRegionUpdate
+        />,
+      );
+      const map = getByTestId('prototype-map-view');
+
+      expect(map.props.region).toEqual(baseRegion);
+      expect(map.props.mapPadding).toEqual({
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+      });
+    } finally {
+      Platform.OS = originalPlatform;
+    }
   });
 
   it('falls back to fitToCoordinates with viewport padding when no explicit route viewport region exists', () => {

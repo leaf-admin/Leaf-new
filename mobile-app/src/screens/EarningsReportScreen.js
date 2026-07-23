@@ -37,7 +37,7 @@ import {
   PrototypeMenuSurface,
 } from '../components/prototype/PrototypeMenuSurface';
 import KYCCameraScreen from '../components/KYC/KYCCameraScreen';
-import AWSLivenessWebViewScreen from '../components/KYC/AWSLivenessWebViewScreen';
+import AWSNativeLivenessScreen from '../components/KYC/AWSNativeLivenessScreen';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
 import useFeatureFlag from '../hooks/useFeatureFlag';
@@ -703,13 +703,15 @@ export default function EarningsReportScreen({ navigation, route }) {
       setShowWithdrawKYCModal(false);
       setIsProcessingKYCWithdraw(true);
 
-      const verifyResult = await kycService.verifyDriver(auth.profile.uid, null, {
-        challengeId: withdrawStepUpChallenge.challengeId,
-        requirement: withdrawStepUpChallenge.requirement,
-        livenessPassed: true,
-        awsSessionId: sessionId,
-        mode: kycService.getAwsProviderName()
-      });
+      const verifyResult = await kycService.verifyDriverServerSideSelfie(
+        auth.profile.uid,
+        null,
+        {
+          awsSessionId: sessionId,
+          challengeId: withdrawStepUpChallenge.challengeId,
+          requirement: withdrawStepUpChallenge.requirement,
+        },
+      );
 
       const isMatch = !!(verifyResult?.success && verifyResult?.data?.isMatch);
       if (!isMatch) {
@@ -1173,7 +1175,14 @@ export default function EarningsReportScreen({ navigation, route }) {
           testID="driver-earnings-screen"
           accessibilityLabel="driver-earnings-screen"
         >
-          <Text style={styles.earningsTitle}>Ganhos</Text>
+          <View style={styles.earningsHeaderRow}>
+            <Text style={styles.earningsTitle}>Ganhos</Text>
+            <PrototypeMenuCloseButton
+              onPress={handleBackPress}
+              testID="driver-earnings-close-button"
+              accessibilityLabel="Fechar ganhos"
+            />
+          </View>
           <Text style={styles.earningsSubtitle}>
             {withdrawalsEnabled
               ? 'Saldo, corridas e saques em um só lugar.'
@@ -1585,7 +1594,7 @@ export default function EarningsReportScreen({ navigation, route }) {
         ) : (
           <>
             {withdrawKycMode === 'aws' ? (
-              <AWSLivenessWebViewScreen
+              <AWSNativeLivenessScreen
                 driverId={auth?.profile?.uid}
                 challengeId={withdrawStepUpChallenge?.challengeId || null}
                 requirement={withdrawStepUpChallenge?.requirement || null}
@@ -1638,6 +1647,12 @@ const styles = StyleSheet.create({
   },
   earningsPage: {
     paddingHorizontal: 31,
+  },
+  earningsHeaderRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   earningsTitle: {
     color: '#0E1716',

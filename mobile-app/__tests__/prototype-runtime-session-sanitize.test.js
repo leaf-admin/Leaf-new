@@ -10,15 +10,126 @@ jest.mock("expo-notifications", () => ({
   scheduleNotificationAsync: jest.fn(() => Promise.resolve("notification-id")),
 }));
 
+const mockFirebaseSignInWithCustomToken = jest.fn();
+const mockFirebaseAuthInstance = {
+  currentUser: null,
+  signInWithCustomToken: mockFirebaseSignInWithCustomToken,
+};
+
+jest.mock("@react-native-firebase/auth", () => () => mockFirebaseAuthInstance);
+
 import {
+  PROTOTYPE_FIREBASE_IDENTITY_MISMATCH_CODE,
+  buildPrototypeChatMessageEnvelope,
   buildRuntimeProfileDispatchKey,
   buildCompletedRideEphemeralResetPatch,
+  canUseDivergentQaRuntimeProfile,
+  canContinuePrototypeSocketAuthentication,
+  ensureFirebaseSessionForPrototype,
+  isPrototypeRuntimeProfileIdentityAllowed,
   resolveAcceptedPickupDistanceKm,
   resolveRuntimeStatePatchChanges,
+  resolvePrototypeChatCatchUpScope,
   sanitizePersistedRuntimeSessionForProfile,
   shouldAttemptCompletedReceiptRecovery,
   shouldDispatchRuntimeProfileRestore,
+  shouldPreserveQADriverOfferOnBootstrap,
 } from "../src/screens/prototype/prototypeRideRuntime";
+
+describe("prototype Firebase identity guard", () => {
+  beforeEach(() => {
+    mockFirebaseSignInWithCustomToken.mockClear();
+    mockFirebaseAuthInstance.currentUser = null;
+  });
+
+  it("fails closed without custom-token login when Firebase belongs to another profile", async () => {
+    mockFirebaseAuthInstance.currentUser = {
+      uid: "firebase-user-a",
+      phoneNumber: "+5521998991886",
+    };
+
+    await expect(
+      ensureFirebaseSessionForPrototype({
+        uid: "qa-driver-b",
+        phoneNumber: "+5521123456789",
+      }),
+    ).rejects.toMatchObject({
+      code: PROTOTYPE_FIREBASE_IDENTITY_MISMATCH_CODE,
+    });
+
+    expect(mockFirebaseSignInWithCustomToken).not.toHaveBeenCalled();
+  });
+
+  it("accepts an already matching Firebase identity without custom-token login", async () => {
+    mockFirebaseAuthInstance.currentUser = {
+      uid: "firebase-user-a",
+      phoneNumber: "+5521998991886",
+    };
+
+    await expect(
+      ensureFirebaseSessionForPrototype({ uid: "firebase-user-a" }),
+    ).resolves.toBe(true);
+
+    expect(mockFirebaseSignInWithCustomToken).not.toHaveBeenCalled();
+  });
+
+  it("does not let the socket caller continue after a failed Firebase session gate", () => {
+    expect(
+      canContinuePrototypeSocketAuthentication({
+        firebaseSessionReady: false,
+        qaSocketTokenAvailable: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      canContinuePrototypeSocketAuthentication({
+        firebaseSessionReady: true,
+        qaSocketTokenAvailable: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      canContinuePrototypeSocketAuthentication({
+        firebaseSessionReady: false,
+        qaSocketTokenAvailable: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not let a physical runtime cache override another Firebase UID", () => {
+    expect(
+      isPrototypeRuntimeProfileIdentityAllowed({
+        profileUid: "cached-user-a",
+        firebaseUid: "firebase-user-b",
+        divergentQaProfileAllowed: false,
+      }),
+    ).toBe(false);
+    expect(
+      isPrototypeRuntimeProfileIdentityAllowed({
+        profileUid: "firebase-user-b",
+        firebaseUid: "firebase-user-b",
+        divergentQaProfileAllowed: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps divergent profile seeding restricted to explicit simulator E2E runs", () => {
+    expect(
+      canUseDivergentQaRuntimeProfile({
+        testUserToolsAllowed: true,
+        simulatorBuild: true,
+        e2eBuild: true,
+      }),
+    ).toBe(true);
+    expect(
+      canUseDivergentQaRuntimeProfile({
+        testUserToolsAllowed: true,
+        simulatorBuild: false,
+        e2eBuild: true,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("sanitizePersistedRuntimeSessionForProfile", () => {
   const passengerProfile = {
@@ -31,6 +142,77 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
     usertype: "driver",
     role: "driver",
   };
+
+  it("builds role-aware bilateral chat envelopes", () => {
+    const passengerEnvelope = buildPrototypeChatMessageEnvelope({
+      profile: passengerProfile,
+      state: {
+        profileUid: "passenger_1",
+        activeRole: "customer",
+        driverInfo: { id: "driver_1" },
+      },
+      bookingId: "booking_chat_1",
+      chatId: "booking_chat_1",
+      clientMessageId: "passenger_local_1",
+      message: " Estou no embarque ",
+      timestamp: "2026-07-13T12:00:00.000Z",
+    });
+    expect(passengerEnvelope).toEqual(
+      expect.objectContaining({
+        senderId: "passenger_1",
+        receiverId: "driver_1",
+        senderType: "passenger",
+        message: "Estou no embarque",
+      }),
+    );
+
+    const driverEnvelope = buildPrototypeChatMessageEnvelope({
+      profile: driverProfile,
+      state: {
+        profileUid: "driver_1",
+        activeRole: "driver",
+        driverActiveRide: {
+          bookingId: "booking_chat_1",
+          passengerId: "passenger_1",
+        },
+      },
+      bookingId: "booking_chat_1",
+      chatId: "booking_chat_1",
+      clientMessageId: "driver_local_1",
+      message: "Cheguei",
+    });
+    expect(driverEnvelope).toEqual(
+      expect.objectContaining({
+        senderId: "driver_1",
+        receiverId: "passenger_1",
+        senderType: "driver",
+      }),
+    );
+  });
+
+  it("restores only non-terminal active chat sessions after reconnect", () => {
+    expect(
+      resolvePrototypeChatCatchUpScope({
+        activeChatId: "booking_chat_1",
+        activeChatBookingId: "booking_chat_1",
+        bookingStatus: "started",
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        bookingId: "booking_chat_1",
+        chatId: "booking_chat_1",
+        forceReload: true,
+        source: "chat-reconnect",
+      }),
+    );
+    expect(
+      resolvePrototypeChatCatchUpScope({
+        activeChatId: "booking_chat_1",
+        activeChatBookingId: "booking_chat_1",
+        bookingStatus: "early_ended_by_rider",
+      }),
+    ).toBeNull();
+  });
 
   it("keeps zero as a valid accepted pickup distance instead of using trip distance fallbacks", () => {
     expect(
@@ -328,6 +510,102 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
     expect(restored.driverOnlinePending).toBe(false);
     expect(restored.driverOnlineStartedAt).toBeNull();
     expect(restored.driverCoordinate).toBeNull();
+  });
+
+  it("preserves a seeded driver offer only when the sanitizer receives explicit QA context", () => {
+    const seededOfferSession = {
+      activeRole: "driver",
+      bookingStatus: "searching",
+      activeBookingId: "booking_qa_offer",
+      activeBooking: { bookingId: "booking_qa_offer" },
+      driverActiveRide: null,
+      driverOnline: true,
+      driverOnlinePending: false,
+      driverOnlineStartedAt: "2026-07-12T15:00:00.000Z",
+      driverOnlineMutationSource: "qa_seed",
+      driverOffers: [{ bookingId: "booking_qa_offer" }],
+      currentCoordinate: { latitude: -22.9708, longitude: -43.1819 },
+      driverCoordinate: { latitude: -22.9708, longitude: -43.1819 },
+      currentAddress: "Copacabana Palace, Rio de Janeiro, RJ",
+    };
+
+    const restored = sanitizePersistedRuntimeSessionForProfile(
+      seededOfferSession,
+      driverProfile,
+      { preserveQaSeededDriverOffer: true },
+    );
+
+    expect(restored.bookingStatus).toBe("searching");
+    expect(restored.activeBookingId).toBe("booking_qa_offer");
+    expect(restored.activeBooking).toEqual({ bookingId: "booking_qa_offer" });
+    expect(restored.driverOffers).toEqual([{ bookingId: "booking_qa_offer" }]);
+    expect(restored.driverActiveRide).toBeNull();
+    expect(restored.driverOnline).toBe(true);
+    expect(restored.driverOnlinePending).toBe(false);
+    expect(restored.driverOnlineMutationSource).toBe(
+      "bootstrap_restore_qa_seeded_driver_offer",
+    );
+    expect(restored.currentCoordinate).toEqual({
+      latitude: -22.9708,
+      longitude: -43.1819,
+    });
+    expect(restored.driverCoordinate).toEqual({
+      latitude: -22.9708,
+      longitude: -43.1819,
+    });
+  });
+
+  it("authorizes QA driver-offer restoration only for a live current-home seed in a controlled runtime", () => {
+    const now = 1_752_336_000_000;
+    const qaSeedLock = {
+      scenario: "driver-offer",
+      route: "leafapp://robotaxi/home",
+      seededAt: now - 1_000,
+      freezeUntil: now + 60_000,
+    };
+    const controlledContext = {
+      qaSeedLock,
+      now,
+      testUserToolsAllowed: true,
+      e2eBuild: false,
+      simulatorBuild: true,
+    };
+
+    expect(shouldPreserveQADriverOfferOnBootstrap(controlledContext)).toBe(true);
+    expect(
+      shouldPreserveQADriverOfferOnBootstrap({
+        ...controlledContext,
+        testUserToolsAllowed: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQADriverOfferOnBootstrap({
+        ...controlledContext,
+        e2eBuild: false,
+        simulatorBuild: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQADriverOfferOnBootstrap({
+        ...controlledContext,
+        qaSeedLock: { ...qaSeedLock, scenario: "driver-accepted" },
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQADriverOfferOnBootstrap({
+        ...controlledContext,
+        qaSeedLock: {
+          ...qaSeedLock,
+          route: "leafapp://robotaxi/driver/offer",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQADriverOfferOnBootstrap({
+        ...controlledContext,
+        qaSeedLock: { ...qaSeedLock, freezeUntil: now },
+      }),
+    ).toBe(false);
   });
 });
 

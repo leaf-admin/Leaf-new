@@ -100,6 +100,7 @@ import {
 import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 import kycService from '../../services/KYCService';
 import nativeAwsLivenessService from '../../services/NativeAwsLivenessService';
+import { resolveKycLivenessErrorPresentation } from '../../components/KYC/kycLivenessErrorPresentation';
 import { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } from '../../services/BackgroundLocationService';
 import {
   fetchCoordsfromPlace,
@@ -252,6 +253,8 @@ const QA_ROUTE_PARAM_KEYS = Object.freeze([
   'automation',
   'e2e',
   'qaAutomation',
+  'qaAutoFlow',
+  'qaAutoConfirmPix',
   'qaDriverAction',
   'qaPassengerAction',
   'qaBookingId',
@@ -1454,6 +1457,45 @@ function isDriverKycRequiredResult(result = {}) {
 }
 
 const DRIVER_IDENTITY_REVERIFICATION_REASON = 'Por segurança, precisamos validar sua identidade.';
+const DRIVER_IDENTITY_REVIEW_SOURCE = 'kyc_identity_mismatch_appeal';
+const SAFE_KYC_REVIEW_CONTEXT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+
+function normalizeKycReviewContextId(value) {
+  const normalized = String(value || '').trim();
+  return SAFE_KYC_REVIEW_CONTEXT_ID_PATTERN.test(normalized) ? normalized : '';
+}
+
+function normalizeKycReviewRequirement(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return /^[A-Z][A-Z0-9_]{0,63}$/.test(normalized) ? normalized : '';
+}
+
+export function buildDriverIdentityReviewTicketParams(
+  failure = {},
+  challengeContext = {},
+) {
+  const kycEvidenceId = normalizeKycReviewContextId(failure?.evidenceId);
+  const kycReviewCaseId = normalizeKycReviewContextId(failure?.reviewCaseId);
+  const kycChallengeId = normalizeKycReviewContextId(failure?.challengeId) ||
+    normalizeKycReviewContextId(challengeContext?.challengeId);
+  const requirement = normalizeKycReviewRequirement(failure?.requirement) ||
+    normalizeKycReviewRequirement(challengeContext?.requirement);
+
+  return {
+    type: 'account',
+    selectedType: 'account',
+    subject: 'Revisão de identidade',
+    description: 'A validação de identidade não foi concluída. Acredito que houve um engano e solicito uma análise.',
+    source: DRIVER_IDENTITY_REVIEW_SOURCE,
+    ...(kycEvidenceId ? { kycEvidenceId } : {}),
+    ...(kycReviewCaseId ? { kycReviewCaseId } : {}),
+    ...(kycChallengeId ? { kycChallengeId } : {}),
+    ...(requirement ? { requirement } : {}),
+    ...(typeof failure?.reviewAvailable === 'boolean'
+      ? { reviewAvailable: failure.reviewAvailable }
+      : {}),
+  };
+}
 
 export default function RobotaxiHomeScreen({ navigation, route }) {
   const {
@@ -1489,6 +1531,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverOnlineDaily,
     driverCanGoOnline,
     driverActivationResolved,
+    driverActivationRemote,
     driverDestinationMode,
     paymentMethod,
     driverInfo,
@@ -1585,6 +1628,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [homeSelectedCategoryId, setHomeSelectedCategoryId] = useState('plus');
   const [homeLeafDelasEnabled] = useState(false);
   const [homeRoutePreview, setHomeRoutePreview] = useState(null);
+  const [homeRoutePreviewError, setHomeRoutePreviewError] = useState('');
+  const [homeRoutePreviewRequestNonce, setHomeRoutePreviewRequestNonce] = useState(0);
   const [homeBackendQuotesByCategory, setHomeBackendQuotesByCategory] = useState({});
   const homeBackendQuote = homeBackendQuotesByCategory[homeSelectedCategoryId] || null;
   const [, setHomeBackendQuoteLoading] = useState(false);
@@ -1676,6 +1721,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setHomeDestinationSearching(false);
     setHomeSelectedDestination(null);
     setHomeRoutePreview(null);
+    setHomeRoutePreviewError('');
     setHomeBackendQuotesByCategory({});
     setHomeBackendQuoteError('');
     setHomeAvailabilityNotice('');
@@ -2113,7 +2159,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       getHomeQuoteLockExpiresAtMs(homeBackendQuote) <= Date.now(),
   );
   const homeCategorySurfaceVisible = Boolean(
-    homeSelectedDestination?.coordinate && homeCanonicalRouteReady
+    homeSelectedDestination?.coordinate
   );
   const selectedHomeBackendPricingPayload = selectedHomeBackendQuoteReady
     ? homeBackendQuote.quote?.pricingPayload || null
@@ -2157,7 +2203,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeSelectedDestination?.coordinate &&
       homeBackendQuoteKey &&
       !selectedHomeBackendQuoteReady &&
-      !homeBackendQuoteError,
+      !homeBackendQuoteError &&
+      !homeRoutePreviewError,
   );
   const homeCategoryOptions = useMemo(
     () =>
@@ -2201,7 +2248,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               homeSelectedDestination?.coordinate &&
               homeBackendQuoteKey
           ),
-          quoteUnavailable: Boolean(homeBackendQuoteError),
+          quoteUnavailable: Boolean(homeBackendQuoteError || homeRoutePreviewError),
           backendFare,
           localFare,
           allowLocalEstimateWhilePending: false,
@@ -2210,13 +2257,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           id,
           title: rateCard.title,
           label: rateCard.label,
-          description: rateCard.description,
+          description: homeRoutePreviewError
+            ? 'Rota indisponível no momento'
+            : rateCard.description,
           pickupEtaLabel: isSelectedCategory && selectedHomeDriverUnavailable
             ? 'Sem motorista'
             : Number.isFinite(displayedPickupEta)
             ? `${displayedPickupEta} min`
             : '--',
-          arrivalLabel: homeArrivalTime,
+          arrivalLabel: homeCanonicalRouteReady ? homeArrivalTime : '--',
           fare: farePresentation.fare,
           priceLabel: farePresentation.priceLabel,
           rateCard,
@@ -2235,12 +2284,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }),
     [
       homeArrivalTime,
+      homeCanonicalRouteReady,
       homePickupEtaBaseMin,
       homeQuoteDistanceKm,
       homeQuoteDurationMin,
       homeBackendQuoteError,
       homeBackendQuoteKey,
       homeBackendQuotesByCategory,
+      homeRoutePreviewError,
       homeSelectedCategoryId,
       homeSelectedDestination?.coordinate,
       selectedHomeBackendPickupEtaAuthoritative,
@@ -2515,13 +2566,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const isDriverRoute =
     currentRouteName === 'RobotaxiPrototypeDriverPanel' ||
     currentRouteName === 'RobotaxiPrototypeDriverActivation' ||
-    currentRouteName === 'RobotaxiPrototypeDriverOffer' ||
-    currentRouteName === 'RobotaxiPrototypeDriverTrip' ||
     currentRouteName === 'RobotaxiPrototypeDriverSearch';
-  const isDriverOfferRoute = currentRouteName === 'RobotaxiPrototypeDriverOffer';
   const isDestinationRoute = currentRouteName === 'RobotaxiPrototypeDestination';
   const shouldSyncPassengerRoute = shouldAutoSyncPassengerRoute(currentRouteName);
-  const freezeBackgroundMapCamera = isDriverOfferRoute;
+  const freezeBackgroundMapCamera = false;
   const showHomeChrome = Boolean(isScreenFocused && isHomeRoute);
   const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
     enabled: showHomeChrome,
@@ -2576,6 +2624,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const passengerHomeRoutePending = Boolean(
     homeSelectedDestination?.coordinate &&
       homeRoutePreviewKey &&
+      !homeRoutePreviewError &&
       !homeRoutePreviewReady
   );
   const activeRouteTrafficLevel = useMemo(
@@ -6332,6 +6381,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         setHomeDestinationSearchActive(false);
         setHomeDestinationQuery('');
         setHomeDestinationResults([]);
+        setHomeRoutePreview(null);
+        setHomeRoutePreviewError('');
+        setHomeBackendQuotesByCategory({});
+        setHomeBackendQuoteError('');
+        setHomeRoutePreviewRequestNonce((current) => current + 1);
         setHomeSelectedDestination(resolvedDestination);
         setHomeSelectedCategoryId('plus');
         setHomeAvailabilityNotice('');
@@ -6359,6 +6413,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setHomeAvailabilityNotice('Preço expirado');
   }, []);
 
+  const retryHomeRoutePreview = useCallback(() => {
+    setHomeRoutePreview(null);
+    setHomeRoutePreviewError('');
+    setHomeBackendQuotesByCategory({});
+    setHomeBackendQuoteError('');
+    setHomeAvailabilityNotice('');
+    setHomeRoutePreviewRequestNonce((current) => current + 1);
+  }, []);
+
   const handleSelectHomeCategory = useCallback((categoryId) => {
     setHomeSelectedCategoryId(categoryId);
     setHomeAvailabilityNotice('');
@@ -6370,6 +6433,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const handleConfirmHomeCategory = useCallback(async () => {
     if (!homeSelectedDestination?.coordinate) {
       handleOpenPassengerDestination();
+      return;
+    }
+
+    if (homeRoutePreviewError) {
+      retryHomeRoutePreview();
       return;
     }
 
@@ -6395,6 +6463,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     navigation.navigate('RobotaxiPrototypeDestination', {
       ...destinationRoutePickupParams,
+      ...(effectiveRouteParams?.qaAutomation
+        ? {
+            qaAutomation: effectiveRouteParams.qaAutomation,
+            qaAutoFlow: effectiveRouteParams.qaAutoFlow || '',
+            qaAutoConfirmPix: effectiveRouteParams.qaAutoConfirmPix || '',
+            qaNonce: effectiveRouteParams.qaNonce || '',
+          }
+        : {}),
       initialSelectedDestination: homeSelectedDestination,
       initialSelectedPlan: homeSelectedCategory?.id || homeSelectedCategoryId || 'plus',
       initialPricingQuote: {
@@ -6439,6 +6515,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     });
   }, [
     destinationRoutePickupParams,
+    effectiveRouteParams?.qaAutoConfirmPix,
+    effectiveRouteParams?.qaAutoFlow,
+    effectiveRouteParams?.qaAutomation,
+    effectiveRouteParams?.qaNonce,
     handleOpenPassengerDestination,
     homeBackendQuote,
     homeDriverAvailabilityRefreshing,
@@ -6456,10 +6536,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     navigation,
     refreshHomeCategoryQuotes,
     refreshSelectedHomeDriverAvailability,
+    retryHomeRoutePreview,
     selectedHomeBackendQuoteExpired,
     selectedHomeBackendQuoteReady,
     selectedHomeDriverUnavailable,
     selectedHomeRateCard.title,
+    homeRoutePreviewError,
   ]);
 
   useEffect(() => {
@@ -6505,6 +6587,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
     let cancelled = false;
+    setHomeRoutePreview(null);
+    setHomeRoutePreviewError('');
     fetchPassengerHomeRoutePreview({
       startLoc,
       destLoc,
@@ -6556,9 +6640,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           tollDetection: route?.tollDetection || null,
           trafficLevel,
         });
+        setHomeRoutePreviewError('');
       })
       .catch(error => {
         if (!cancelled) {
+          setHomeRoutePreview(null);
+          setHomeRoutePreviewError(
+            'Não foi possível calcular a rota agora. Tente novamente.',
+          );
           Logger.warn('[PassengerHome] Rota real indisponível; aguardando rota válida para exibir polyline.', error?.message || error);
         }
       })
@@ -6576,6 +6665,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeDestinationRouteLongitude,
     homePickupRouteLatitude,
     homePickupRouteLongitude,
+    homeRoutePreviewRequestNonce,
     homeRoutePreviewKey,
     homeSelectedDestination?.address,
     homeSelectedDestination?.description,
@@ -6719,14 +6809,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       source?.payload?.type === 'kyc_reverification_required';
     const reason = isIdentityReverification
       ? DRIVER_IDENTITY_REVERIFICATION_REASON
-      : (
-        source?.reason ||
-        source?.error ||
-        source?.message ||
-        source?.payload?.reason ||
-        source?.payload?.error ||
-        'Validação facial obrigatória para ficar online.'
-      );
+      : resolveKycLivenessErrorPresentation({
+        ...source,
+        message:
+          source?.reason ||
+          source?.error ||
+          source?.message ||
+          source?.payload?.reason ||
+          source?.payload?.error ||
+          'Validação facial obrigatória para ficar online.',
+        code: source?.code || source?.payload?.code || '',
+      }).message;
 
     setDriverKycPendingReason(reason);
     setDriverKycChallengeContext({
@@ -6757,6 +6850,48 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       requirement: null,
     });
   }, []);
+
+  const navigateToDriverIdentityReview = useCallback((ticketParams) => {
+    if (driverHasAcceptedOrActiveWork) {
+      Alert.alert(
+        'Continue sua corrida',
+        'A análise de identidade poderá ser solicitada assim que sua corrida terminar.',
+      );
+      return;
+    }
+
+    navigation.navigate('RobotaxiPrototypeSupportTicket', ticketParams);
+  }, [driverHasAcceptedOrActiveWork, navigation]);
+
+  const presentDriverKycFailure = useCallback((failure = {}) => {
+    const errorPresentation = resolveKycLivenessErrorPresentation(failure);
+    const ticketParams = buildDriverIdentityReviewTicketParams(
+      failure,
+      driverKycChallengeContext,
+    );
+
+    handleDriverKycModalCancel();
+
+    if (errorPresentation.canRequestReview) {
+      Alert.alert(
+        errorPresentation.title,
+        errorPresentation.message,
+        [
+          {
+            text: errorPresentation.primaryActionLabel || 'Solicitar análise',
+            onPress: () => navigateToDriverIdentityReview(ticketParams),
+          },
+        ],
+      );
+      return;
+    }
+
+    Alert.alert(errorPresentation.title, errorPresentation.message);
+  }, [
+    driverKycChallengeContext,
+    handleDriverKycModalCancel,
+    navigateToDriverIdentityReview,
+  ]);
 
   useEffect(() => {
     if (!driverHasAcceptedOrActiveWork || !driverKycModalVisible) {
@@ -6837,19 +6972,29 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
 
     if (isDriverKycRequiredResult(onlineResult)) {
-      setDriverKycProcessing(false);
-      setDriverKycPendingReason(
-        onlineResult?.reason ||
-        onlineResult?.error ||
-        'A validação foi registrada, mas ainda não liberou o online. Tente novamente.'
-      );
+      const errorPresentation = resolveKycLivenessErrorPresentation({
+        ...onlineResult,
+        message:
+          onlineResult?.reason ||
+          onlineResult?.error ||
+          'A validação foi registrada, mas ainda não liberou o online. Tente novamente.',
+      });
+      handleDriverKycModalCancel();
+      Alert.alert(errorPresentation.title, errorPresentation.message);
       return;
     }
 
     handleDriverKycModalCancel();
+    const onlineErrorPresentation = resolveKycLivenessErrorPresentation({
+      ...onlineResult,
+      message:
+        onlineResult?.error ||
+        onlineResult?.reason ||
+        'Validação concluída, mas não foi possível ficar online agora.',
+    });
     Alert.alert(
       'Modo motorista',
-      onlineResult?.error || 'Validação concluída, mas não foi possível ficar online agora.'
+      onlineErrorPresentation.message
     );
   }, [handleDriverKycModalCancel, setDriverOnline]);
 
@@ -6874,16 +7019,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         ...kycOptions,
         mode: driverKycAwsSessionId ? 'mobile_arcface_w600k_r50_v1' : 'device_signature_v1',
         allowRawSelfieFallback: true,
+        preferServerSideSelfieVerification: Boolean(driverKycAwsSessionId),
         serverSideFallbackOnDeviceEmbeddingUnavailable: Boolean(driverKycAwsSessionId),
       });
       const isMatch = Boolean(result?.success && result?.data?.isMatch);
 
       if (!isMatch) {
-        handleDriverKycModalCancel();
-        Alert.alert(
-          'Validação não aprovada',
-          'Não foi possível validar sua identidade. Tente novamente com boa iluminação e rosto centralizado.'
-        );
+        const failure = result?.success
+          ? {
+              code: 'KYC_CHALLENGE_NOT_PASSED',
+              status: 403,
+              reviewAvailable: false,
+            }
+          : result;
+        presentDriverKycFailure(failure);
         return;
       }
 
@@ -6901,6 +7050,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverKycAwsSessionId,
     handleDriverKycModalCancel,
     handleDriverKycVerificationSuccess,
+    presentDriverKycFailure,
     profile?.uid,
     profileUid,
   ]);
@@ -6916,18 +7066,39 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setDriverKycProcessing(true);
 
     try {
-      setDriverKycAwsSessionId(sessionId);
-      setDriverKycLivenessMode('local_after_aws');
-      setDriverKycPendingReason('Liveness aprovado. Capture uma selfie rápida para comparar com sua CNH.');
+      const comparisonResult = await kycService.verifyDriverServerSideSelfie(
+        driverId,
+        null,
+        {
+          awsSessionId: sessionId,
+          challengeId: driverKycChallengeContext.challengeId || undefined,
+          requirement: driverKycChallengeContext.requirement || undefined,
+        },
+      );
+
+      if (!comparisonResult?.success || comparisonResult?.data?.isMatch !== true) {
+        presentDriverKycFailure({
+          ...comparisonResult,
+          message:
+            comparisonResult?.error ||
+            'Não foi possível concluir a validação de identidade.',
+        });
+        return;
+      }
+
+      await handleDriverKycVerificationSuccess();
     } catch (error) {
       Logger.error('❌ [PrototypeKYC] Erro ao validar motorista via AWS:', error);
-      handleDriverKycModalCancel();
-      Alert.alert('Validação facial', 'Falha ao validar identidade. Tente novamente.');
+      presentDriverKycFailure(error);
     } finally {
       setDriverKycProcessing(false);
     }
   }, [
+    driverKycChallengeContext.challengeId,
+    driverKycChallengeContext.requirement,
     handleDriverKycModalCancel,
+    handleDriverKycVerificationSuccess,
+    presentDriverKycFailure,
     profile?.uid,
     profileUid,
   ]);
@@ -7183,6 +7354,39 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       Alert.alert('Não foi possível abrir a navegação', error?.message || 'Tente novamente.');
     }
   }, [driverTripAssist]);
+
+  const handleOpenDriverChat = useCallback(() => {
+    const bookingId = String(
+      driverActiveRide?.bookingId ||
+        driverActiveRide?.id ||
+        activeBookingId ||
+        driverTripMeta?.bookingId ||
+        '',
+    ).trim();
+    if (!bookingId) {
+      return;
+    }
+
+    navigation.navigate('RobotaxiPrototypeChat', {
+      bookingId,
+      rideId: bookingId,
+      tripId: bookingId,
+      bookingStatus: normalizeRuntimeRideStatus(
+        driverActiveRide?.status || normalizedBookingStatus || bookingStatus,
+      ),
+      source: 'driver-home',
+      role: 'driver',
+    });
+  }, [
+    activeBookingId,
+    bookingStatus,
+    driverActiveRide?.bookingId,
+    driverActiveRide?.id,
+    driverActiveRide?.status,
+    driverTripMeta?.bookingId,
+    navigation,
+    normalizedBookingStatus,
+  ]);
 
   const handleDriverTripPrimaryAction = useCallback(async () => {
     if (!driverTripAssist) {
@@ -8195,18 +8399,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             selectedCategoryId={homeSelectedCategoryId}
             onCategorySelect={handleSelectHomeCategory}
             onCategoryConfirm={handleConfirmHomeCategory}
-            categoryNotice={homeAvailabilityNotice}
+            categoryNotice={homeRoutePreviewError || homeAvailabilityNotice}
             categoryConfirmDisabled={
               !homeSelectedDestination?.coordinate ||
-              passengerHomeRoutePending ||
-              selectedHomeDriverUnavailable ||
-              !selectedHomeBackendQuoteReady
+              (!homeRoutePreviewError &&
+                (passengerHomeRoutePending ||
+                  selectedHomeDriverUnavailable ||
+                  !selectedHomeBackendQuoteReady))
             }
             categoryConfirmSoftDisabled={
               selectedHomeDriverUnavailable && !homeDriverAvailabilityRefreshing
             }
             categoryConfirmLabel={
-              passengerHomeRoutePending
+              homeRoutePreviewError
+                ? 'Tentar novamente'
+                : passengerHomeRoutePending
                 ? 'Calculando rota...'
                 : selectedHomeDriverUnavailable
                   ? 'Sem motorista disponível'
@@ -8257,6 +8464,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               tripDistanceKm={tripDistanceKm}
               paymentMethod={paymentMethod}
               driverExtensionRequest={driverExtensionRequest}
+              operationalContinuation={operationalContinuation}
               acceptDriverOffer={acceptDriverOffer}
               rejectDriverOffer={rejectDriverOffer}
               respondToDriverExtension={respondToDriverExtension}
@@ -8267,6 +8475,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               completeTripFlow={completeTripFlow}
               driverTripAssist={driverTripAssist}
               onOpenNavigation={handleOpenDriverNavigation}
+              onOpenChat={handleOpenDriverChat}
               nativeNavigationVisible={showLeafNativeNavigation}
               onTripCompletedSuccess={(result) =>
                 navigation.navigate(
@@ -8290,6 +8499,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 driverRealtimeAuthenticated={isSocketAuthenticated}
                 driverCanGoOnline={driverCanGoOnline}
                 driverActivationResolved={driverActivationResolved}
+                driverActivationRemote={driverActivationRemote}
                 driverWorkInProgress={driverHasAcceptedOrActiveWork}
                 suppressDaySummary={driverHasAcceptedOrActiveWork}
                 ridesCount={todayTrips}

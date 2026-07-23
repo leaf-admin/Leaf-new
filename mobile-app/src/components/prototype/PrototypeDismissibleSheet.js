@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const { motion } = robotaxiPrototypeTokens;
@@ -25,6 +25,7 @@ export default function PrototypeDismissibleSheet({
   dragEnabled = true,
   backdropDismissEnabled = true
 }) {
+  const reduceMotion = useReducedMotion();
   const translateY = useSharedValue(OPEN_TRANSLATE_Y);
   const backdropOpacity = useSharedValue(0);
   const surfaceOpacity = useSharedValue(0.96);
@@ -35,6 +36,13 @@ export default function PrototypeDismissibleSheet({
   }, [sheetStyle]);
 
   useEffect(() => {
+    if (reduceMotion) {
+      translateY.value = 0;
+      backdropOpacity.value = 1;
+      surfaceOpacity.value = 1;
+      return;
+    }
+
     translateY.value = withSpring(0, motion.spring.sheet);
     backdropOpacity.value = withTiming(1, {
       duration: motion.timing.standard,
@@ -44,9 +52,17 @@ export default function PrototypeDismissibleSheet({
       duration: motion.timing.quick,
       easing: openEasing
     });
-  }, [backdropOpacity, surfaceOpacity, translateY]);
+  }, [backdropOpacity, reduceMotion, surfaceOpacity, translateY]);
 
   const closeSheet = useCallback((velocityY = 0) => {
+    if (reduceMotion) {
+      backdropOpacity.value = 0;
+      surfaceOpacity.value = 0;
+      translateY.value = CLOSE_TRANSLATE_Y;
+      onClose?.();
+      return;
+    }
+
     const closeDuration = velocityY > 1450 ? motion.timing.quick : motion.timing.standard;
     backdropOpacity.value = withTiming(0, { duration: closeDuration, easing: closeEasing });
     surfaceOpacity.value = withTiming(0, { duration: closeDuration, easing: closeEasing });
@@ -55,7 +71,7 @@ export default function PrototypeDismissibleSheet({
         runOnJS(onClose)();
       }
     });
-  }, [backdropOpacity, onClose, surfaceOpacity, translateY]);
+  }, [backdropOpacity, onClose, reduceMotion, surfaceOpacity, translateY]);
 
   const handleBackdropPress = useCallback(() => {
     if (!backdropDismissEnabled) {
@@ -78,6 +94,14 @@ export default function PrototypeDismissibleSheet({
       const shouldClose = event.translationY > CLOSE_DISTANCE || event.velocityY > CLOSE_VELOCITY;
 
       if (shouldClose) {
+        if (reduceMotion) {
+          translateY.value = CLOSE_TRANSLATE_Y;
+          if (onClose) {
+            runOnJS(onClose)();
+          }
+          return;
+        }
+
         translateY.value = withTiming(
           CLOSE_TRANSLATE_Y,
           {
@@ -93,7 +117,7 @@ export default function PrototypeDismissibleSheet({
         return;
       }
 
-      translateY.value = withSpring(0, motion.spring.sheet);
+      translateY.value = reduceMotion ? 0 : withSpring(0, motion.spring.sheet);
     });
 
   const animatedSheetStyle = useAnimatedStyle(() => {

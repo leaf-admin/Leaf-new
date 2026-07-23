@@ -13,6 +13,49 @@ function hasRemainingOffers(driverOffers = []) {
     : false;
 }
 
+export function shouldReleaseDriverOfferSuppressionForReoffer({
+  suppressionReason,
+  suppressionBoundaryMs,
+  offerTimestampMs,
+  offerDeadlineMs,
+  nowMs = Date.now(),
+} = {}) {
+  if (
+    String(suppressionReason || "").trim().toLowerCase() !== "offer_timeout"
+  ) {
+    return false;
+  }
+
+  const requiredInputs = [
+    suppressionBoundaryMs,
+    offerTimestampMs,
+    offerDeadlineMs,
+    nowMs,
+  ];
+  if (
+    requiredInputs.some(
+      (value) =>
+        value === null ||
+        value === undefined ||
+        value === "" ||
+        !Number.isFinite(Number(value)),
+    )
+  ) {
+    return false;
+  }
+
+  const boundary = Number(suppressionBoundaryMs);
+  const offerTimestamp = Number(offerTimestampMs);
+  const offerDeadline = Number(offerDeadlineMs);
+  const now = Number(nowMs);
+
+  return (
+    offerTimestamp > boundary &&
+    offerDeadline > now &&
+    offerDeadline > offerTimestamp
+  );
+}
+
 export function resolveDriverOfferClearPresentation(payload = {}) {
   const clearReason = String(payload?.reason || payload?.code || "")
     .trim()

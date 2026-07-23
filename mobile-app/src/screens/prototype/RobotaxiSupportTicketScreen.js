@@ -27,10 +27,14 @@ import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/pro
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
+import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
 
 const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
+const KYC_IDENTITY_REVIEW_SOURCE = 'kyc_identity_mismatch_appeal';
+const SAFE_KYC_CONTEXT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const SAFE_KYC_REQUIREMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 const TICKET_TYPES = [
   {
@@ -51,12 +55,24 @@ const TICKET_TYPES = [
     subtitle: 'Relato prioritário',
     icon: 'shield-checkmark-outline',
   },
+  {
+    id: 'account',
+    title: 'Conta e identidade',
+    subtitle: 'Acesso, cadastro ou validação de identidade',
+    icon: 'person-circle-outline',
+  },
 ];
 
 function pickTicketContextText(...values) {
   return values
     .map(value => String(value || '').trim())
     .find(Boolean) || '';
+}
+
+function pickSafeKycContextId(...values) {
+  return values
+    .map(value => String(value || '').trim())
+    .find(value => SAFE_KYC_CONTEXT_ID_PATTERN.test(value)) || '';
 }
 
 function resolveTicketReturnRoute(context = {}) {
@@ -67,7 +83,7 @@ function resolveTicketReturnRoute(context = {}) {
     return 'RobotaxiPrototypeReceipt';
   }
   if (source === 'driver-trip') {
-    return 'RobotaxiPrototypeDriverTrip';
+    return 'RobotaxiPrototype';
   }
   if (context.bookingId || context.rideId || context.tripId) {
     return 'RobotaxiPrototypeTrip';
@@ -100,7 +116,18 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
-  const initialType = route?.params?.type || route?.params?.selectedType || 'trip';
+  const identityReviewRequested = route?.params?.source === KYC_IDENTITY_REVIEW_SOURCE || Boolean(
+    pickSafeKycContextId(
+      route?.params?.kycEvidenceId,
+      route?.params?.kycReviewCaseId,
+    ),
+  );
+  const requestedType = route?.params?.type || route?.params?.selectedType || 'trip';
+  const initialType = identityReviewRequested
+    ? 'account'
+    : TICKET_TYPES.some(item => item.id === requestedType)
+    ? requestedType
+    : 'trip';
   const [selectedTypeId, setSelectedTypeId] = useState(initialType);
   const [subject, setSubject] = useState(route?.params?.subject || '');
   const [description, setDescription] = useState(route?.params?.description || '');
@@ -114,13 +141,48 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
   );
   const bookingStatus = normalizeRuntimeRideStatus(pickTicketContextText(route?.params?.bookingStatus, route?.params?.status));
   const supportSource = pickTicketContextText(route?.params?.source, bookingId ? 'support-ticket' : '');
+  const kycEvidenceId = pickSafeKycContextId(route?.params?.kycEvidenceId);
+  const kycReviewCaseId = pickSafeKycContextId(route?.params?.kycReviewCaseId);
+  const kycChallengeId = pickSafeKycContextId(route?.params?.kycChallengeId);
+  const requestedRequirement = String(route?.params?.requirement || '').trim().toUpperCase();
+  const requirement = SAFE_KYC_REQUIREMENT_PATTERN.test(requestedRequirement)
+    ? requestedRequirement
+    : '';
+  const isIdentityReviewFlow = supportSource === KYC_IDENTITY_REVIEW_SOURCE || Boolean(
+    kycEvidenceId || kycReviewCaseId,
+  );
+  const visibleSupportError = isIdentityReviewFlow && supportError
+    ? toUserFriendlyMessage(supportError, {
+        context: 'api',
+        fallbackMessage: 'Não foi possível solicitar a análise agora. Tente novamente em instantes.',
+      })
+    : supportError;
+  const effectiveSupportSource = isIdentityReviewFlow
+    ? KYC_IDENTITY_REVIEW_SOURCE
+    : supportSource;
   const ticketChatContext = useMemo(
     () => ({
       ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
       ...(bookingStatus ? { bookingStatus } : {}),
-      source: supportSource || 'support-ticket',
+      ...(kycEvidenceId ? { kycEvidenceId } : {}),
+      ...(kycReviewCaseId ? { kycReviewCaseId } : {}),
+      ...(kycChallengeId ? { kycChallengeId } : {}),
+      ...(requirement ? { requirement } : {}),
+      ...(typeof route?.params?.reviewAvailable === 'boolean'
+        ? { reviewAvailable: route.params.reviewAvailable }
+        : {}),
+      source: effectiveSupportSource || 'support-ticket',
     }),
-    [bookingId, bookingStatus, supportSource],
+    [
+      bookingId,
+      bookingStatus,
+      effectiveSupportSource,
+      kycChallengeId,
+      kycEvidenceId,
+      kycReviewCaseId,
+      requirement,
+      route?.params?.reviewAvailable,
+    ],
   );
 
   usePrototypeMapOcclusion({
@@ -159,41 +221,64 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
     try {
       const result = await openSupportTicket({
         type: selectedType.id,
-        priority: selectedType.id === 'safety' ? 'N1' : 'N3',
+        priority: selectedType.id === 'safety'
+          ? 'N1'
+          : selectedType.id === 'account'
+            ? 'N2'
+            : 'N3',
         subject: subject.trim() || selectedType.title,
         description: `${subject.trim() || selectedType.title}: ${description.trim()}`,
         ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
         ...(bookingStatus ? { bookingStatus } : {}),
-        ...(supportSource ? { source: supportSource } : {}),
+        ...(kycEvidenceId ? { kycEvidenceId } : {}),
+        ...(kycReviewCaseId ? { kycReviewCaseId } : {}),
+        ...(kycChallengeId ? { kycChallengeId } : {}),
+        ...(requirement ? { requirement } : {}),
+        ...(typeof route?.params?.reviewAvailable === 'boolean'
+          ? { reviewAvailable: route.params.reviewAvailable }
+          : {}),
+        ...(effectiveSupportSource ? { source: effectiveSupportSource } : {}),
       });
       setCreatedTicket(result?.ticket || null);
     } catch (error) {
-      Alert.alert('Não foi possível abrir ticket', error?.message || 'Tente novamente em instantes.');
+      const message = isIdentityReviewFlow
+        ? toUserFriendlyMessage(error, {
+            context: 'api',
+            fallbackMessage: 'Não foi possível solicitar a análise agora. Tente novamente em instantes.',
+          })
+        : error?.message || 'Tente novamente em instantes.';
+      Alert.alert('Não foi possível abrir ticket', message);
     }
   }, [
     bookingId,
     bookingStatus,
     canSubmit,
     description,
+    effectiveSupportSource,
+    kycChallengeId,
+    kycEvidenceId,
+    kycReviewCaseId,
+    isIdentityReviewFlow,
     openSupportTicket,
+    requirement,
+    route?.params?.reviewAvailable,
     selectedType.id,
     selectedType.title,
     subject,
-    supportSource,
   ]);
 
-  const handleOpenCreatedTicketChat = useCallback(() => {
-    if (ticketChatContext.bookingId || ticketChatContext.rideId || ticketChatContext.tripId) {
-      navigation.replace('RobotaxiPrototypeChat', ticketChatContext);
+  const handleOpenCreatedTicketThread = useCallback(() => {
+    if (!createdTicket?.id) {
       return;
     }
 
-    navigation.replace('Support', {
-      initialTab: 'chat',
+    navigation.replace('RobotaxiPrototypeSupportThread', {
+      ticketId: createdTicket.id,
+      ticket: createdTicket,
+      ...ticketChatContext,
       source: ticketChatContext.source || 'support-ticket',
-      ticketId: createdTicket?.id || null,
     });
-  }, [createdTicket?.id, navigation, ticketChatContext]);
+  }, [createdTicket, navigation, ticketChatContext]);
 
   return (
     <PrototypeScreenTransition>
@@ -213,8 +298,10 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
             <PrototypeMenuSurface
               onLayout={handlePanelLayout}
               eyebrow="Suporte"
-              title="Abrir ticket"
-              subtitle="Registre o problema com contexto suficiente para a operação agir rápido."
+              title={isIdentityReviewFlow ? 'Solicitar análise' : 'Abrir ticket'}
+              subtitle={isIdentityReviewFlow
+                ? 'Conte o que aconteceu. Nossa equipe verificará a validação de identidade e o documento aprovado.'
+                : 'Registre o problema com contexto suficiente para a operação agir rápido.'}
               fullScreen
               style={{
                 paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -230,7 +317,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
             >
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
                 <PrototypeMenuSection title="Tipo de atendimento">
-                  {TICKET_TYPES.map(item => (
+                  {TICKET_TYPES.filter(item => !isIdentityReviewFlow || item.id === 'account').map(item => (
                     <TicketTypeRow
                       key={item.id}
                       item={item}
@@ -266,7 +353,11 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                 </View>
 
                 <LeafButton
-                  label={supportLoading ? 'Enviando...' : 'Enviar ticket'}
+                  label={supportLoading
+                    ? 'Enviando...'
+                    : isIdentityReviewFlow
+                      ? 'Solicitar análise'
+                      : 'Enviar ticket'}
                   icon="send-outline"
                   tone="primary"
                   disabled={supportLoading || !canSubmit}
@@ -282,14 +373,14 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     <Text style={styles.feedbackText}>Sincronizando com suporte...</Text>
                   </View>
                 ) : null}
-                {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
+                {visibleSupportError ? <Text style={styles.errorText}>{visibleSupportError}</Text> : null}
                 {createdTicket?.id ? (
                   <LeafEmptyState
                     icon="checkmark-circle-outline"
                     title={`Ticket #${createdTicket.id} criado`}
-                    message="A operação recebeu sua solicitação. Você pode acompanhar pelo chat de suporte."
-                    actionLabel="Abrir chat"
-                    onAction={handleOpenCreatedTicketChat}
+                    message="A operação recebeu sua solicitação. A resposta aparecerá na thread deste ticket."
+                    actionLabel="Acompanhar ticket"
+                    onAction={handleOpenCreatedTicketThread}
                     testID="robotaxi-support-ticket-created"
                   />
                 ) : null}

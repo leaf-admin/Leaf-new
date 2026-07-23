@@ -7,17 +7,23 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
-  Platform,
   ActivityIndicator,
   Linking,
   Alert,
   FlatList
 } from 'react-native';
 import { Icon } from 'react-native-elements';
+import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiClient } from '../services/httpClient';
+import { fonts } from '../theme/runtimeTokens';
+import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
+
+const { color, radius, spacing, touch } = robotaxiPrototypeTokens;
 
 const LegalScreen = ({ navigation, route }) => {
+  const insets = useSafeAreaInsets();
   const [selectedSection, setSelectedSection] = useState('terms');
   const [legalData, setLegalData] = useState({
     terms: '',
@@ -78,6 +84,22 @@ const LegalScreen = ({ navigation, route }) => {
         { text: 'Abrir', onPress: () => Linking.openURL(url) }
       ]
     );
+  };
+
+  const handleBack = () => {
+    if (navigation.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+
+    const routeNames = navigation?.getState?.()?.routeNames || [];
+    if (routeNames.includes('RobotaxiPrototype')) {
+      navigation.navigate('RobotaxiPrototype');
+      return;
+    }
+    if (routeNames.includes('Splash')) {
+      navigation.navigate('Splash');
+    }
   };
 
   const renderTerms = () => (
@@ -381,6 +403,10 @@ const LegalScreen = ({ navigation, route }) => {
               selectedSection === item.id && styles.activeSectionTab
             ]}
             onPress={() => setSelectedSection(item.id)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: selectedSection === item.id }}
+            accessibilityLabel={item.label}
+            testID={`legal-section-${item.id}`}
           >
             <Icon 
               name={item.icon} 
@@ -403,32 +429,30 @@ const LegalScreen = ({ navigation, route }) => {
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2E8B57" />
+      <View style={[styles.loadingContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <ActivityIndicator size="large" color={color.accent.primary} />
         <Text style={styles.loadingText}>Carregando informações legais...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+    <View style={[styles.container, { paddingTop: insets.top }]} testID="legal-screen" accessibilityLabel="legal-screen">
+      <StatusBar translucent barStyle="dark-content" backgroundColor="transparent" />
       
       <View style={styles.header}>
+        <View style={styles.headerCopy}>
+          <Text style={styles.headerTitle}>Informações legais</Text>
+          <Text style={styles.headerSubtitle}>Termos, privacidade e licenças em um só lugar.</Text>
+        </View>
         <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          style={styles.closeButton}
+          onPress={handleBack}
+          accessibilityRole="button"
+          accessibilityLabel="Fechar informações legais"
+          testID="legal-close-button"
         >
-          <Icon name="arrow-back" type="material" color="#2c3e50" size={24} />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Informações Legais</Text>
-        
-        <TouchableOpacity
-          style={styles.helpButton}
-          onPress={() => navigation.navigate('HelpScreen')}
-        >
-          <Icon name="help-outline" type="material" color="#2c3e50" size={24} />
+          <Ionicons name="close" color={color.text.primary} size={18} />
         </TouchableOpacity>
       </View>
       
@@ -437,6 +461,7 @@ const LegalScreen = ({ navigation, route }) => {
       <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, spacing.lg) }}
       >
         {renderSectionContent()}
       </ScrollView>
@@ -447,103 +472,127 @@ const LegalScreen = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: color.bg.app,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: color.bg.app,
   },
   loadingText: {
     marginTop: 16,
-    fontSize: 16,
-    color: '#7f8c8d',
+    fontFamily: fonts.Regular,
+    fontSize: 15,
+    color: color.text.secondary,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    paddingBottom: 20,
-    backgroundColor: '#fff',
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
+    backgroundColor: color.bg.app,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: color.border.subtle,
   },
-  backButton: {
-    padding: 8,
+  headerCopy: {
+    flex: 1,
+    paddingRight: spacing.md,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2c3e50',
+    fontFamily: fonts.SemiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    color: color.text.primary,
   },
-  helpButton: {
-    padding: 8,
+  headerSubtitle: {
+    marginTop: spacing.xs,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 18,
+    color: color.text.secondary,
+  },
+  closeButton: {
+    width: touch.min,
+    height: touch.min,
+    borderRadius: touch.min / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.surface.secondary,
   },
   sectionsContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: color.bg.app,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: color.border.subtle,
   },
   sectionsList: {
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
   },
   sectionTab: {
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginRight: 8,
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    minHeight: touch.comfortable,
+    minWidth: 88,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    marginRight: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: color.surface.secondary,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
   },
   activeSectionTab: {
-    backgroundColor: '#e8f5e8',
+    backgroundColor: color.surface.activeStrong,
+    borderColor: color.accent.soft,
   },
   sectionText: {
+    fontFamily: fonts.Medium,
     fontSize: 12,
-    color: '#7f8c8d',
+    lineHeight: 16,
+    color: color.text.secondary,
     marginTop: 4,
   },
   activeSectionText: {
-    color: '#2E8B57',
-    fontWeight: 'bold',
+    color: color.accent.primary,
+    fontFamily: fonts.SemiBold,
   },
   content: {
     flex: 1,
   },
   sectionContent: {
-    padding: 20,
+    padding: spacing.xl,
   },
   sectionTitle: {
+    fontFamily: fonts.SemiBold,
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2c3e50',
+    lineHeight: 26,
+    color: color.text.primary,
     marginBottom: 8,
   },
   lastUpdated: {
     fontSize: 12,
-    color: '#7f8c8d',
+    fontFamily: fonts.Regular,
+    color: color.text.secondary,
     marginBottom: 20,
   },
   legalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    backgroundColor: color.surface.primary,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
   },
   legalText: {
     fontSize: 14,
-    color: '#2c3e50',
-    lineHeight: 20,
+    fontFamily: fonts.Regular,
+    color: color.text.primary,
+    lineHeight: 22,
   },
   boldText: {
-    fontWeight: 'bold',
+    fontFamily: fonts.SemiBold,
   },
   licensesList: {
     backgroundColor: '#fff',

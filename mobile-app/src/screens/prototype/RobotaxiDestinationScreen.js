@@ -172,6 +172,9 @@ const PIX_CANCELLED_RETRY_MESSAGE =
   "Pagamento cancelado. Gere um novo PIX para continuar.";
 const PIX_NOT_COMPLETED_RETRY_MESSAGE =
   "Pagamento nao concluido. Gere um novo PIX para continuar.";
+const DIRECT_PIX_AVAILABILITY_TIMEOUT_MS = 15000;
+const DIRECT_PIX_AVAILABILITY_TIMEOUT_MESSAGE =
+  "A validação de motoristas demorou mais que o esperado. Tente solicitar novamente.";
 const LEGACY_ROUTE_GUARD_MESSAGE_REGEX =
   /origem e destino inconsistentes para a (área|area) de opera(ç|c)ão da leaf/i;
 const REGION_UNAVAILABLE_MESSAGE_REGEX = /regi(ã|a)o indispon(i|í)vel/i;
@@ -992,6 +995,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     selectedVehicle,
     selectedFare,
     selectedDestination: runtimeSelectedDestination,
+    quoteLock: runtimeQuoteLock,
     tripDistanceKm: runtimeTripDistanceKm,
     tripDurationMin: runtimeTripDurationMin,
     tripArrivalText: runtimeTripArrivalText,
@@ -1202,8 +1206,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const qaAutoConfirmPix = automationConfig.autoConfirmPix;
   const qaAutomationNonce = automationConfig.nonce;
   const qaPresetQuery = automationConfig.presetQuery;
-  const returnRouteName =
-    route?.params?.returnRouteName || "RobotaxiPrototypeTrip";
+  const requestedReturnRouteName = String(route?.params?.returnRouteName || '').trim();
+  const returnRouteName = requestedReturnRouteName === 'RobotaxiPrototypeTrip'
+    ? requestedReturnRouteName
+    : 'RobotaxiPrototypeTrip';
   const qaAutoSelectStartedRef = useRef(false);
   const qaAutoPixOpenedRef = useRef(false);
   const qaAutoPixConfirmedRef = useRef(false);
@@ -1889,6 +1895,19 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       resolvedPickupCoordinate?.longitude,
     ],
   );
+  const liveRouteCoordinates = useMemo(
+    () =>
+      livePreviewMatchesSelection
+        ? normalizeRouteCoordinatesForTransport(
+            runtimeQuoteLock?.routeCoordinates || runtimeQuoteLock?.coordinates || [],
+          )
+        : [],
+    [
+      livePreviewMatchesSelection,
+      runtimeQuoteLock?.coordinates,
+      runtimeQuoteLock?.routeCoordinates,
+    ],
+  );
 
   useEffect(() => {
     const canLockQuote =
@@ -1904,6 +1923,13 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
     setFareQuoteLock((current) => {
       if (current?.routeKey === fareQuoteRouteKey) {
+        if (
+          (!Array.isArray(current.routeCoordinates) ||
+            current.routeCoordinates.length < 2) &&
+          liveRouteCoordinates.length >= 2
+        ) {
+          return { ...current, routeCoordinates: liveRouteCoordinates };
+        }
         return current;
       }
 
@@ -1911,6 +1937,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       return {
         routeKey: fareQuoteRouteKey,
         quoteSessionId: createPassengerQuoteSessionId(createdAt),
+        routeCoordinates: liveRouteCoordinates,
         distanceKm: liveDistanceKm,
         durationMin: liveDurationMin,
         arrivalTime: liveArrivalTime,
@@ -1924,6 +1951,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     liveArrivalTime,
     liveDistanceKm,
     liveDurationMin,
+    liveRouteCoordinates,
     routeGuardBlocked,
     step,
   ]);
@@ -2258,17 +2286,29 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     categoryOptions[0] ||
     null;
   const selectedPricingQuoteRequestKey = useMemo(() => {
+    const routeCoordinates = normalizeRouteCoordinatesForTransport(
+      fareQuoteLock?.routeCoordinates || [],
+    );
     if (!fareQuoteLockMatchesRoute || !fareQuoteRouteKey || !selectedPlanData?.title) {
       return "";
     }
+
+    const geometryKey = String(fareQuoteLock?.routePolyline || "").trim()
+      ? "polyline"
+      : routeCoordinates.length >= 2
+        ? `coordinates:${routeCoordinates.length}`
+        : "no-geometry";
 
     return [
       fareQuoteRouteKey,
       selectedPlanData.title,
       fareQuoteLock?.quoteSessionId || "no-session",
+      geometryKey,
     ].join("|");
   }, [
     fareQuoteLock?.quoteSessionId,
+    fareQuoteLock?.routeCoordinates,
+    fareQuoteLock?.routePolyline,
     fareQuoteLockMatchesRoute,
     fareQuoteRouteKey,
     selectedPlanData?.title,
@@ -2351,6 +2391,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           fareQuoteLock?.routePolyline ||
           initialPricingQuote?.routePolyline ||
           null,
+        routeCoordinates: normalizeRouteCoordinatesForTransport(
+          fareQuoteLock?.routeCoordinates ||
+            initialPricingQuote?.routeCoordinates ||
+            [],
+        ),
         requireRouteGeometry: true,
         tollFee:
           Number(
@@ -2435,6 +2480,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     durationMin,
     fareQuoteLock?.expiresAt,
     fareQuoteLock?.quoteSessionId,
+    fareQuoteLock?.routeCoordinates,
     fareQuoteLock?.routePolyline,
     fareQuoteLock?.tollFee,
     fareQuoteLockMatchesRoute,
@@ -3579,6 +3625,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             : "Pagamento não confirmado",
           errorMessage:
             error?.message || "Falha ao enviar a corrida para o servidor.",
+          retryConfirmedBooking: Boolean(confirmedChargeId),
           retryRouteName: "RobotaxiPrototype",
           retryParams: {},
         });
@@ -3842,6 +3889,29 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     setDirectPixOpening(shouldOpenPixOnReady);
     setDirectPixReturnHomePending(false);
   }, [routeParams.initialPricingQuote, shouldOpenPixOnReady]);
+
+  useEffect(() => {
+    if (
+      !shouldOpenPixOnReady ||
+      isPixModalVisible ||
+      directPixReturnHomePending
+    ) {
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(() => {
+      directPixOpenRequestedRef.current = false;
+      setDirectPixReturnHomePending(true);
+      returnToCleanPassengerHome(DIRECT_PIX_AVAILABILITY_TIMEOUT_MESSAGE);
+    }, DIRECT_PIX_AVAILABILITY_TIMEOUT_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    directPixReturnHomePending,
+    isPixModalVisible,
+    returnToCleanPassengerHome,
+    shouldOpenPixOnReady,
+  ]);
 
   useEffect(() => {
     if (
@@ -4612,7 +4682,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   </Text>
                 ) : pricingQuoteError ? (
                   <Text style={styles.pricingQuoteStatus}>
-                    Tarifa atualizada no pagamento.
+                    Não foi possível calcular a tarifa. Feche e tente novamente.
                   </Text>
                 ) : null}
 
@@ -4681,6 +4751,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         ? undefined
                         : handleOpenPixModal
                     }
+                    disabled={Boolean(
+                      checkingAvailability ||
+                        paymentQuotePending ||
+                        submittingRide ||
+                        routeGuardBlocked ||
+                        hasCoverageBlockedPlan ||
+                        selectedPlanUnavailable
+                    )}
                     testID="passenger-pickup-confirm-button"
                     accessibilityLabel="Confirmar ponto de embarque"
                   />
@@ -4894,6 +4972,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                       ? undefined
                       : handleOpenPixModal
                   }
+                  disabled={Boolean(
+                    checkingAvailability ||
+                      paymentQuotePending ||
+                      submittingRide ||
+                      availabilityNotice ||
+                      routeGuardBlocked ||
+                      hasCoverageBlockedPlan ||
+                      selectedPlanUnavailable
+                  )}
                   testID="passenger-destination-confirm-button"
                   accessibilityLabel="Confirmar categoria"
                 />
@@ -5051,6 +5138,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         ? undefined
                         : handleOpenPixModal
                     }
+                    disabled={Boolean(
+                      checkingAvailability ||
+                        paymentQuotePending ||
+                        submittingRide ||
+                        availabilityNotice ||
+                        routeGuardBlocked ||
+                        hasCoverageBlockedPlan ||
+                        selectedPlanUnavailable
+                    )}
                     testID="passenger-destination-confirm-button"
                     accessibilityLabel="Confirmar viagem"
                   />
@@ -5119,6 +5215,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               ""
             }
             qaAutoConfirm={qaAutoConfirmPix}
+            robotaxiLifecycleCard
           />
         ) : null}
 

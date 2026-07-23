@@ -30,11 +30,17 @@ describe('BookingHistoryService', () => {
             date: '2026-04-07T12:00:00.000Z',
             totalAmount: 'R$ 18,90',
             totalAmountValue: 18.9,
+            grossAmount: 18.9,
+            operationalFee: 2.5,
+            paymentIntermediationFee: 0.4,
+            tollAmount: 1.2,
             pickup: 'Rua A, 10',
             dropoff: 'Rua B, 20',
             distanceKm: 7.4,
             durationMinutes: 18,
-            status: 'completed'
+            status: 'completed',
+            authoritativeSnapshot: true,
+            financialSnapshotSource: 'backend_final'
           }
         ],
         total: 1,
@@ -63,6 +69,12 @@ describe('BookingHistoryService', () => {
         estimate: 18.9,
         distance: 7.4,
         duration: 18,
+        grossAmount: 18.9,
+        operationalFee: 2.5,
+        paymentIntermediationFee: 0.4,
+        tollAmount: 1.2,
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
         pickup: expect.objectContaining({ add: 'Rua A, 10' }),
         drop: expect.objectContaining({ add: 'Rua B, 20' })
       })
@@ -94,7 +106,8 @@ describe('BookingHistoryService', () => {
           }
         ],
         total: 2,
-        hasMore: true
+        hasMore: true,
+        nextOffset: 12
       }
     });
 
@@ -121,7 +134,7 @@ describe('BookingHistoryService', () => {
       hasNextPage: true,
       hasPreviousPage: true,
       startCursor: '10',
-      endCursor: '11'
+      endCursor: '12'
     });
     expect(result.bookings).toHaveLength(1);
     expect(result.bookings[0]).toEqual(

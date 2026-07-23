@@ -1292,6 +1292,7 @@ function PrototypeMapLayer({
   const normalizedManualCameraHoldMs = Math.max(0, Number(manualCameraHoldMs) || 0);
   const manualCameraHoldUntilRef = useRef(0);
   const manualCameraResumeTimeoutRef = useRef(null);
+  const [manualCameraControlHeld, setManualCameraControlHeld] = useState(false);
   const normalizedDriverCoordinate = useMemo(
     () => normalizeMapCoordinate(driverCoordinate),
     [
@@ -1982,6 +1983,7 @@ function PrototypeMapLayer({
   const handleMapPanDrag = useCallback((event) => {
     if (normalizedManualCameraHoldMs > 0) {
       manualCameraHoldUntilRef.current = Date.now() + normalizedManualCameraHoldMs;
+      setManualCameraControlHeld(true);
       if (manualCameraResumeTimeoutRef.current) {
         clearTimeout(manualCameraResumeTimeoutRef.current);
       }
@@ -1989,6 +1991,7 @@ function PrototypeMapLayer({
       // route behind a card. Re-frame the latest route once the hold expires.
       manualCameraResumeTimeoutRef.current = setTimeout(() => {
         manualCameraResumeTimeoutRef.current = null;
+        setManualCameraControlHeld(false);
         applyForcedRegionUpdate(Platform.OS === 'android' ? 0 : 180);
       }, normalizedManualCameraHoldMs + 20);
     }
@@ -2000,6 +2003,12 @@ function PrototypeMapLayer({
       clearTimeout(manualCameraResumeTimeoutRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!forceRegionUpdate || normalizedManualCameraHoldMs <= 0) {
+      setManualCameraControlHeld(false);
+    }
+  }, [forceRegionUpdate, normalizedManualCameraHoldMs]);
 
   useEffect(() => {
     if (!applyForcedRegionUpdate(0)) {
@@ -2020,6 +2029,14 @@ function PrototypeMapLayer({
   // Keep the user avatar tied to the real map coordinate on iOS.
   // The projected overlay is only needed for the Android screen-space marker path.
   const shouldRenderProjectedUserOverlay = Platform.OS === 'android';
+  const forcedTargetViewportRegion = resolvedRouteViewportRegion || region;
+  const iosControlledRegion =
+    Platform.OS === 'ios' &&
+    forceRegionUpdate &&
+    !manualCameraControlHeld &&
+    isValidMapRegion(forcedTargetViewportRegion)
+      ? forcedTargetViewportRegion
+      : undefined;
   const androidProjectionLayout = useMemo(() => {
     const width =
       Number.isFinite(androidMapLayout.width) && androidMapLayout.width > 0
@@ -2470,7 +2487,7 @@ function PrototypeMapLayer({
           testID="prototype-map-view"
           accessibilityLabel="prototype-map-view"
           style={StyleSheet.absoluteFillObject}
-          mapPadding={resolvedMapPadding}
+          mapPadding={iosControlledRegion ? ZERO_VIEWPORT_PADDING : resolvedMapPadding}
           onRegionChange={scheduleAndroidVisibleRegionUpdate}
           onRegionChangeComplete={nextRegion => {
             scheduleAndroidVisibleRegionUpdate(nextRegion);
@@ -2481,6 +2498,7 @@ function PrototypeMapLayer({
           onPanDrag={interactionEnabled ? handleMapPanDrag : undefined}
           provider={mapProvider}
           initialRegion={region}
+          region={iosControlledRegion}
           mapType="standard"
           customMapStyle={mapStyleAppleLike}
           onMapLoaded={handleNativeMapLoaded}

@@ -15,6 +15,16 @@ import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismi
 import PrototypeConnectionStatusPill from "../../components/prototype/PrototypeConnectionStatusPill";
 import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
 import {
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  RobotaxiLifecycleDisclosure,
+  RobotaxiLifecycleIdentity,
+  RobotaxiLifecycleMetric,
+  RobotaxiLifecycleSection,
+  RobotaxiLifecycleSummary,
+  robotaxiLifecycleMetrics,
+} from "../../components/prototype/RobotaxiLifecycleUI";
+import {
   LeafAnimatedPressable,
   LeafButton,
   LeafDivider,
@@ -32,6 +42,7 @@ import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from "./robotaxiPrototy
 import {
   buildRouteViewportRegion,
   buildVisibleRouteEdgePadding,
+  validateRoadRouteGeometry,
 } from "./prototypeRouteViewport";
 import {
   RIDE_CARD_ROLES,
@@ -52,8 +63,8 @@ const FALLBACK_CARD_HEIGHT = 318;
 const DRIVER_TRIP_SHEET_MIN_HEIGHT = 332;
 const DRIVER_TRIP_SHEET_MAX_HEIGHT_RATIO = 0.66;
 const DRIVER_TRIP_SHEET_SCROLL_VERTICAL_CHROME = 32;
-const DRIVER_TRIP_MAP_SIDE_PADDING = 44;
-const DRIVER_TRIP_MAP_TOP_PADDING = 118;
+const DRIVER_TRIP_MAP_SIDE_PADDING = 24;
+const DRIVER_TRIP_MAP_TOP_PADDING = 72;
 const DRIVER_TRIP_MAP_MIN_VISIBLE_HEIGHT = 220;
 const DRIVER_TRIP_MIN_OCCLUDED_BOTTOM = 300;
 const PROTECTED_DRIVER_TRIP_STATUSES = new Set([
@@ -134,22 +145,22 @@ const DRIVER_IN_TRIP_RENDERED_CARD_FIELD_IDS = Object.freeze([
 
 const DRIVER_TO_PICKUP_FIELD_TEST_ID_OVERRIDES = Object.freeze({
   arrived_action: "driver-live-primary-action-arrive-button",
-  cancel_action: "driver-trip-cancel-button",
-  contact_actions: "driver-trip-chat-button",
-  navigation_action: "driver-trip-navigation-button",
+  cancel_action: "driver-trip-more-actions-button",
+  contact_actions: "driver-trip-more-actions-button",
+  navigation_action: "driver-trip-more-actions-button",
 });
 
 const DRIVER_AT_PICKUP_FIELD_TEST_ID_OVERRIDES = Object.freeze({
-  contact_actions: "driver-trip-chat-button",
-  no_show_action: "driver-trip-no-show-button",
+  contact_actions: "driver-trip-more-actions-button",
+  no_show_action: "driver-trip-more-actions-button",
   start_trip_action: "driver-live-primary-action-start-button",
 });
 
 const DRIVER_IN_TRIP_FIELD_TEST_ID_OVERRIDES = Object.freeze({
-  contact_actions: "driver-trip-chat-button",
+  contact_actions: "driver-trip-more-actions-button",
   finish_trip_action: "driver-live-primary-action-complete-button",
-  navigation_action: "driver-trip-navigation-button",
-  report_problem_action: "driver-trip-report-button",
+  navigation_action: "driver-trip-more-actions-button",
+  report_problem_action: "driver-trip-more-actions-button",
 });
 
 const DRIVER_TRIP_FIELD_TEST_IDS = Object.freeze({
@@ -744,10 +755,11 @@ function IconActionButton({
   tone = "ghost",
   style,
   testID,
+  showLabel = false,
 }) {
   const isDanger = tone === "danger";
   const isPrimary = tone === "primary";
-  const shouldShowLabel = isPrimary;
+  const shouldShowLabel = isPrimary || showLabel;
   return (
     <LeafAnimatedPressable
       activeScale={0.978}
@@ -882,6 +894,12 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
   const isActiveTripSurface =
     hasActiveRide &&
     ACTIONABLE_DRIVER_TRIP_STATUSES.has(normalizedBookingStatus);
+  const driverTripCardBottom = isActiveTripSurface
+    ? Math.max(robotaxiLifecycleMetrics.cardBottomGap, safeBottom + 16)
+    : sheetBottom;
+  const driverTripCardMaxHeight = isActiveTripSurface
+    ? Math.max(280, driverTripSheetMaxHeight - driverTripCardBottom)
+    : driverTripSheetMaxHeight;
   const isOperationalHoldSurface =
     hasActiveRide &&
     ["operational_interrupted", "searching_replacement"].includes(
@@ -891,7 +909,6 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     isActiveTripSurface ||
     isOperationalHoldSurface ||
     isProtectedStatusWithoutRideIdentity;
-  const isCompactTripSurface = isActiveTripSurface && !detailsExpanded;
   const driverTripMapPresentation = useMemo(
     () => resolvePrototypeMapPresentation({ role: "driver", status: normalizedBookingStatus }),
     [normalizedBookingStatus],
@@ -1244,10 +1261,26 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       normalizedBookingStatus === "accepted" || normalizedBookingStatus === "arrived"
         ? pickupRouteCandidates
         : destinationRouteCandidates;
+    const expectedOrigin =
+      normalizedBookingStatus === "accepted" || normalizedBookingStatus === "arrived"
+        ? driverMapCoordinate
+        : pickupCoordinate;
+    const expectedDestination =
+      normalizedBookingStatus === "accepted" || normalizedBookingStatus === "arrived"
+        ? pickupCoordinate
+        : dropoffCoordinate;
 
     return candidateRoutes
       .map(normalizeRouteCoordinateList)
-      .find(coordinates => coordinates.length >= 2) || [];
+      .map(coordinates =>
+        validateRoadRouteGeometry({
+          coordinates,
+          origin: expectedOrigin || coordinates[0],
+          destination:
+            expectedDestination || coordinates[coordinates.length - 1],
+        }),
+      )
+      .find(result => result.valid)?.coordinates || [];
   }, [
     activeBooking?.destinationRouteCoordinates,
     activeBooking?.driverToPickupRouteCoordinates,
@@ -1267,7 +1300,10 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     driverActiveRide?.routePlan?.pickupCoordinates,
     driverTripMeta?.routePlan?.destinationCoordinates,
     driverTripMeta?.routePlan?.pickupCoordinates,
+    driverMapCoordinate,
+    dropoffCoordinate,
     normalizedBookingStatus,
+    pickupCoordinate,
     request?.destinationRouteCoordinates,
     request?.driverToPickupRouteCoordinates,
     request?.pickupRouteCoordinates,
@@ -1280,6 +1316,10 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     route?.params?.routeCoordinates,
   ]);
   const driverTripTrafficSegments = useMemo(() => {
+    if (driverTripRouteCoordinates.length < 3) {
+      return [];
+    }
+
     const pickupTrafficCandidates = [
       route?.params?.driverToPickupTrafficSegments,
       route?.params?.pickupTrafficSegments,
@@ -1339,6 +1379,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     driverActiveRide?.routePlan?.pickupTrafficSegments,
     driverTripMeta?.routePlan?.destinationTrafficSegments,
     driverTripMeta?.routePlan?.pickupTrafficSegments,
+    driverTripRouteCoordinates.length,
     normalizedBookingStatus,
     request?.destinationTrafficSegments,
     request?.driverToPickupTrafficSegments,
@@ -1355,11 +1396,11 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     () => ({
       top: 0,
       bottom: Math.max(
-        sheetBottom + Math.min(cardHeight, driverTripSheetMaxHeight),
+        driverTripCardBottom + Math.min(cardHeight, driverTripCardMaxHeight),
         DRIVER_TRIP_MIN_OCCLUDED_BOTTOM + safeBottom,
       ),
     }),
-    [cardHeight, driverTripSheetMaxHeight, safeBottom, sheetBottom],
+    [cardHeight, driverTripCardBottom, driverTripCardMaxHeight, safeBottom],
   );
   const driverTripViewportPadding = useMemo(
     () => buildVisibleRouteEdgePadding({
@@ -1382,20 +1423,32 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     ],
   );
   const driverTripViewportCoordinates = useMemo(
-    () => (
-      driverTripRouteCoordinates.length >= 2
-        ? [
-            ...driverTripRouteCoordinates,
-            driverMapCoordinate,
-            pickupCoordinate,
-            dropoffCoordinate,
-          ]
-        : []
-    ),
+    () => {
+      if (driverTripRouteCoordinates.length < 2) {
+        return [];
+      }
+
+      if (!isActiveTripSurface) {
+        return [
+          ...driverTripRouteCoordinates,
+          driverMapCoordinate,
+          pickupCoordinate,
+          dropoffCoordinate,
+        ];
+      }
+
+      const lifecycleAnchors = normalizedBookingStatus === "started"
+        ? [driverMapCoordinate, dropoffCoordinate]
+        : [driverMapCoordinate, pickupCoordinate];
+
+      return [...driverTripRouteCoordinates, ...lifecycleAnchors];
+    },
     [
       driverMapCoordinate,
       driverTripRouteCoordinates,
       dropoffCoordinate,
+      isActiveTripSurface,
+      normalizedBookingStatus,
       pickupCoordinate,
     ],
   );
@@ -1408,6 +1461,10 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       insets,
       viewportPadding: driverTripViewportPadding,
       minVisibleHeight: DRIVER_TRIP_MAP_MIN_VISIBLE_HEIGHT,
+      shortRouteLatitudeDeltaMultiplier: 1.55,
+      shortRouteLongitudeDeltaMultiplier: 1.6,
+      longRouteLatitudeDeltaMultiplier: 1.35,
+      longRouteLongitudeDeltaMultiplier: 1.4,
     }),
     [
       driverTripMapOcclusion,
@@ -1622,20 +1679,6 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       : normalizedBookingStatus === "accepted"
         ? "Indo buscar"
         : driverSheetTitle;
-  const compactTripMetaLabel = normalizedBookingStatus === "started"
-    ? "restante"
-    : normalizedBookingStatus === "arrived"
-      ? "embarque"
-      : "até o embarque";
-  const compactTripEtaLabel = normalizedBookingStatus === "arrived"
-    ? boardingCountdownLabel || "--"
-    : etaLabel;
-  const compactTripEtaCaption = normalizedBookingStatus === "arrived"
-    ? "tempo grátis"
-    : normalizedBookingStatus === "started"
-      ? "ETA final"
-      : "até chegar";
-
   useEffect(() => {
     if (normalizedBookingStatus === "completed") {
       const completedDriverReceiptParams = buildCompletedDriverReceiptParams();
@@ -1832,333 +1875,250 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     </View>
   );
 
-  const renderCompactMetric = (value, label, valueStyle = null, testID = undefined) => (
-    <View style={styles.compactMetric}>
-      <Text
-        style={[styles.compactMetricValue, valueStyle]}
-        numberOfLines={1}
-        testID={testID}
-      >
-        {value}
-      </Text>
-      <Text style={styles.compactMetricLabel} numberOfLines={1}>
-        {label}
-      </Text>
-    </View>
-  );
-
-  const renderCompactTripDetails = () => {
-    if (!detailsExpanded) {
-      return null;
-    }
-
-    if (normalizedBookingStatus === "started") {
-      return null;
-    }
-
-    if (normalizedBookingStatus === "accepted") {
-      return (
-        <>
-          <LeafDivider style={styles.compactDetailsDivider} />
-          <View style={styles.driverRouteTimeline}>
-            <View style={styles.driverRouteStep}>
-              <View style={styles.driverRouteTrack}>
-                <View style={styles.driverRouteDot} />
-                <View style={styles.driverRouteLine} />
-              </View>
-              <View style={styles.driverRouteCopy}>
-                <Text style={styles.driverRouteMeta} numberOfLines={1}>
-                  Embarque
-                </Text>
-                <Text style={styles.driverRouteAddress} numberOfLines={1}>
-                  {pickupLabel}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.driverRouteStep}>
-              <View style={styles.driverRouteTrack}>
-                <View style={[styles.driverRouteDot, styles.driverRouteDotDestination]} />
-              </View>
-              <View style={styles.driverRouteCopy}>
-                <Text style={styles.driverRouteMeta} numberOfLines={1}>
-                  Destino · {ridePreferenceSummary}
-                </Text>
-                <Text style={styles.driverRouteAddress} numberOfLines={1}>
-                  {dropoffLabel}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </>
-      );
-    }
-
-    return null;
-  };
-
   const renderCompactDriverCard = () => {
     const passengerMeta = normalizedBookingStatus === "started"
       ? "A bordo"
       : normalizedBookingStatus === "arrived"
         ? "No ponto de encontro"
         : `${etaLabel} · ${distanceLabel} até o embarque`;
-    const shouldShowPickupLine =
-      normalizedBookingStatus === "accepted" || normalizedBookingStatus === "arrived";
-    const secondaryActions = normalizedBookingStatus === "started"
-      ? (
-        <>
-          <IconActionButton
-            icon="navigate-outline"
-            label="Navegar"
-            onPress={handleOpenNavigation}
-            style={styles.compactSecondaryButton}
-            testID="driver-trip-navigation-button"
+    const isAccepted = normalizedBookingStatus === "accepted";
+    const isArrived = normalizedBookingStatus === "arrived";
+    const isStarted = normalizedBookingStatus === "started";
+
+    const renderExpandedActions = () => {
+      if (!detailsExpanded) {
+        return null;
+      }
+
+      if (isArrived) {
+        return (
+          <RobotaxiLifecycleSection title="OPÇÕES DE EMBARQUE">
+            <View style={styles.lifecycleActionGrid}>
+              <RobotaxiLifecycleButton
+                label="Chat"
+                icon="chatbubble-outline"
+                onPress={handleOpenDriverChat}
+                style={styles.lifecycleSecondaryAction}
+                testID="driver-trip-chat-button"
+              />
+              <RobotaxiLifecycleButton
+                label="No-show"
+                icon="person-remove-outline"
+                tone="danger"
+                onPress={handleNoShow}
+                style={styles.lifecycleSecondaryAction}
+                testID="driver-trip-no-show-button"
+              />
+            </View>
+          </RobotaxiLifecycleSection>
+        );
+      }
+
+      return (
+        <RobotaxiLifecycleSection title="DETALHES DA CORRIDA">
+          {isAccepted ? (
+            <>
+              <View style={styles.lifecycleExpandedMetrics}>
+                <RobotaxiLifecycleMetric
+                  label={tripFareCaption}
+                  value={tripFareLabel}
+                  tone="accent"
+                />
+              </View>
+              <View style={styles.lifecycleDetailBlock}>
+                <Text style={styles.lifecycleDetailLabel}>DESTINO</Text>
+                <Text
+                  style={styles.lifecycleDetailValue}
+                  numberOfLines={2}
+                  testID={driverCardFieldTestIDs.destination_preview}
+                >
+                  {dropoffLabel}
+                </Text>
+                <Text style={styles.lifecycleDetailMeta} numberOfLines={1}>
+                  {ridePreferenceSummary}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <>
+              <RobotaxiLifecycleIdentity
+                initial={passengerInitial}
+                photoUri={passengerPhotoUri}
+                name={passengerLabel}
+                meta={passengerMeta}
+                style={styles.lifecycleExpandedIdentity}
+                testID="driver-trip-passenger-identity"
+                fieldTestIDs={{
+                  avatar: driverCardFieldTestIDs.passenger_photo,
+                  name: driverCardFieldTestIDs.passenger_name,
+                }}
+              />
+              <View style={styles.lifecycleExpandedMetrics}>
+                <RobotaxiLifecycleMetric
+                  label={tripFareCaption}
+                  value={tripFareLabel}
+                  tone="accent"
+                  testID={driverCardFieldTestIDs.net_payout}
+                />
+              </View>
+            </>
+          )}
+
+          <View style={styles.lifecycleActionGrid}>
+            <RobotaxiLifecycleButton
+              label="Navegar"
+              icon="navigate-outline"
+              onPress={handleOpenNavigation}
+              style={styles.lifecycleSecondaryAction}
+              testID="driver-trip-navigation-button"
+            />
+            <RobotaxiLifecycleButton
+              label="Chat"
+              icon="chatbubble-outline"
+              onPress={handleOpenDriverChat}
+              style={styles.lifecycleSecondaryAction}
+              testID="driver-trip-chat-button"
+            />
+            {isAccepted ? (
+              <RobotaxiLifecycleButton
+                label="Cancelar"
+                icon="close-circle-outline"
+                tone="danger"
+                onPress={handleOpenDriverCancellation}
+                style={styles.lifecycleSecondaryActionFull}
+                testID="driver-trip-cancel-button"
+              />
+            ) : (
+              <RobotaxiLifecycleButton
+                label="Reportar"
+                icon="warning-outline"
+                tone="danger"
+                onPress={() => navigation.navigate("RobotaxiPrototypeSupport", driverSupportContext)}
+                style={styles.lifecycleSecondaryActionFull}
+                testID="driver-trip-report-button"
+              />
+            )}
+          </View>
+        </RobotaxiLifecycleSection>
+      );
+    };
+
+    return (
+      <>
+        {isArrived ? (
+          <>
+            <RobotaxiLifecycleSummary
+              eyebrow="Confirmar embarque"
+              title={pickupLabel}
+              titleTestID={driverCardFieldTestIDs.pickup_address}
+            />
+            <View style={styles.lifecyclePinHero}>
+              <View style={styles.lifecyclePinCopy}>
+                <Text style={styles.lifecyclePinLabel}>Código da corrida</Text>
+                <Text
+                  style={[
+                    styles.lifecyclePinHint,
+                    isBoardingTimerUrgent && styles.boardingTimerMessageUrgent,
+                    isBoardingTimerExpired && styles.boardingTimerMessageExpired,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {boardingTimerMessage}
+                </Text>
+              </View>
+              <Text
+                style={styles.lifecyclePinValue}
+                numberOfLines={1}
+                testID={driverCardFieldTestIDs.boarding_pin}
+              >
+                {boardingPin}
+              </Text>
+            </View>
+            <View style={styles.lifecycleMetricRow}>
+              <RobotaxiLifecycleMetric
+                label="tempo grátis"
+                value={boardingCountdownLabel || "--"}
+                tone={isBoardingTimerUrgent || isBoardingTimerExpired ? "danger" : "default"}
+                testID={driverCardFieldTestIDs.boarding_timer}
+              />
+            </View>
+            <RobotaxiLifecycleIdentity
+              initial={passengerInitial}
+              photoUri={passengerPhotoUri}
+              name={passengerLabel}
+              meta={passengerMeta}
+              style={styles.lifecycleIdentity}
+              testID="driver-trip-passenger-identity"
+              fieldTestIDs={{
+                avatar: driverCardFieldTestIDs.passenger_photo,
+                name: driverCardFieldTestIDs.passenger_name,
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <RobotaxiLifecycleSummary
+              eyebrow={isStarted ? "EM VIAGEM" : "Indo buscar"}
+              title={isStarted ? compactTripTitle : pickupLabel}
+              subtitle={isStarted ? driverArrivalSummary : passengerLabel}
+              titleTestID={isStarted
+                ? driverCardFieldTestIDs.destination_address
+                : driverCardFieldTestIDs.pickup_address}
+            />
+            <View testID={isStarted ? "driver-trip-route-progress" : undefined}>
+              <View
+                style={styles.lifecycleMetricRow}
+                testID={isStarted ? driverCardFieldTestIDs.route_progress : undefined}
+              >
+                <RobotaxiLifecycleMetric
+                  label={isStarted ? "ETA final" : "até chegar"}
+                  value={etaLabel}
+                  testID={isStarted
+                    ? driverCardFieldTestIDs.eta_final
+                    : driverCardFieldTestIDs.pickup_eta}
+                />
+                <RobotaxiLifecycleMetric
+                  label={isStarted ? "restante" : "até o embarque"}
+                  value={distanceLabel}
+                  testID={isStarted
+                    ? driverCardFieldTestIDs.distance_remaining
+                    : driverCardFieldTestIDs.pickup_distance}
+                />
+              </View>
+            </View>
+            {isAccepted ? (
+              <RobotaxiLifecycleIdentity
+                initial={passengerInitial}
+                photoUri={passengerPhotoUri}
+                name={passengerLabel}
+                meta={passengerMeta}
+                style={styles.lifecycleIdentity}
+                testID="driver-trip-passenger-identity"
+                fieldTestIDs={{
+                  avatar: driverCardFieldTestIDs.passenger_photo,
+                  name: driverCardFieldTestIDs.passenger_name,
+                }}
+              />
+            ) : null}
+          </>
+        )}
+
+        {renderExpandedActions()}
+
+        <View style={styles.lifecycleActionStack}>
+          <RobotaxiLifecycleDisclosure
+            expanded={detailsExpanded}
+            onPress={() => setDetailsExpanded(value => !value)}
+            testID="driver-trip-more-actions-button"
           />
-          <IconActionButton
-            icon="chatbubble-outline"
-            label="Chat"
-            onPress={handleOpenDriverChat}
-            style={styles.compactSecondaryButton}
-            testID="driver-trip-chat-button"
-          />
-          <IconActionButton
-            icon="warning-outline"
-            label="Reportar"
-            tone="danger"
-            onPress={() => navigation.navigate("RobotaxiPrototypeSupport", driverSupportContext)}
-            style={styles.compactSecondaryButton}
-            testID="driver-trip-report-button"
-          />
-          <LeafButton
+          <RobotaxiLifecycleButton
             label={primaryLabel}
             tone="primary"
             disabled={busyAction}
             onPress={handlePrimaryAction}
-            style={styles.compactPrimaryButton}
             testID={primaryActionTestID}
             accessibilityLabel={primaryActionTestID}
           />
-        </>
-      )
-      : normalizedBookingStatus === "arrived"
-        ? (
-          <>
-            <IconActionButton
-              icon="chatbubble-outline"
-              label="Chat"
-              onPress={handleOpenDriverChat}
-              style={styles.compactSecondaryButton}
-              testID="driver-trip-chat-button"
-            />
-            <IconActionButton
-              icon="person-remove-outline"
-              label="No-show"
-              tone="danger"
-              onPress={handleNoShow}
-              style={styles.compactSecondaryButton}
-              testID="driver-trip-no-show-button"
-            />
-            <LeafButton
-              label={primaryLabel}
-              tone="primary"
-              disabled={busyAction}
-              onPress={handlePrimaryAction}
-              style={styles.compactPrimaryButton}
-              testID={primaryActionTestID}
-              accessibilityLabel={primaryActionTestID}
-            />
-          </>
-        )
-        : (
-          <>
-            <IconActionButton
-              icon="navigate-outline"
-              label="Navegar"
-              onPress={handleOpenNavigation}
-              style={styles.compactSecondaryButton}
-              testID="driver-trip-navigation-button"
-            />
-            <IconActionButton
-              icon="chatbubble-outline"
-              label="Chat"
-              onPress={handleOpenDriverChat}
-              style={styles.compactSecondaryButton}
-              testID="driver-trip-chat-button"
-            />
-            <IconActionButton
-              icon="close-circle-outline"
-              label="Cancelar"
-              tone="danger"
-              onPress={handleOpenDriverCancellation}
-              style={styles.compactSecondaryButton}
-              testID="driver-trip-cancel-button"
-            />
-            <LeafButton
-              label={primaryLabel}
-              tone="primary"
-              disabled={busyAction}
-              onPress={handlePrimaryAction}
-              style={styles.compactPrimaryButton}
-              testID={primaryActionTestID}
-              accessibilityLabel={primaryActionTestID}
-            />
-          </>
-        );
-
-    return (
-      <>
-        <View style={styles.sheetHandle} />
-        <View style={styles.compactHeaderRow}>
-          <View style={styles.compactHeaderCopy}>
-            <Text
-              style={styles.compactTitle}
-              numberOfLines={1}
-              testID={
-                normalizedBookingStatus === "started"
-                  ? driverCardFieldTestIDs.destination_address
-                  : undefined
-              }
-            >
-              {compactTripTitle}
-            </Text>
-            {shouldShowPickupLine ? (
-              <Text
-                style={styles.compactSubtitle}
-                numberOfLines={1}
-                testID={driverCardFieldTestIDs.pickup_address}
-              >
-                {pickupLabel}
-              </Text>
-            ) : (
-              <Text style={styles.compactSubtitle} numberOfLines={1}>
-                {driverArrivalSummary}
-              </Text>
-            )}
-          </View>
-          <LeafAnimatedPressable
-            activeScale={0.96}
-            accessibilityRole="button"
-            accessibilityLabel={detailsExpanded ? "Ocultar detalhes" : "Ver detalhes"}
-            onPress={() => setDetailsExpanded(value => !value)}
-            style={styles.compactDetailsButton}
-          >
-            <Text style={styles.compactDetailsLabel} numberOfLines={1}>
-              {detailsExpanded ? "Menos" : "Detalhes"}
-            </Text>
-            <Ionicons
-              name={detailsExpanded ? "chevron-down" : "chevron-up"}
-              size={14}
-              color={leafRideColors.text}
-            />
-          </LeafAnimatedPressable>
-        </View>
-
-        <LeafPersonIdentity
-          initial={passengerInitial}
-          photoUri={passengerPhotoUri}
-          name={passengerLabel}
-          meta={passengerMeta}
-          compact
-          style={styles.compactPassengerIdentity}
-          testID="driver-trip-passenger-identity"
-          fieldTestIDs={{
-            avatar: driverCardFieldTestIDs.passenger_photo,
-            name: driverCardFieldTestIDs.passenger_name,
-          }}
-        />
-
-        {normalizedBookingStatus === "arrived" ? (
-          <View style={styles.compactPinRow}>
-            <View style={styles.pinCopy}>
-              <Text style={styles.pinLabel} numberOfLines={1}>
-                Código da corrida
-              </Text>
-              <Text
-                style={[
-                  styles.pinHint,
-                  isBoardingTimerUrgent && styles.boardingTimerMessageUrgent,
-                  isBoardingTimerExpired && styles.boardingTimerMessageExpired,
-                ]}
-                numberOfLines={1}
-              >
-                {boardingTimerMessage}
-              </Text>
-            </View>
-            <Text
-              style={styles.pinValue}
-              numberOfLines={1}
-              testID={driverCardFieldTestIDs.boarding_pin}
-            >
-              {boardingPin}
-            </Text>
-          </View>
-        ) : null}
-
-        <View style={styles.compactMetricRow}>
-          {renderCompactMetric(
-            compactTripEtaLabel,
-            compactTripEtaCaption,
-            null,
-            normalizedBookingStatus === "started"
-              ? driverCardFieldTestIDs.eta_final
-              : normalizedBookingStatus === "arrived"
-                ? driverCardFieldTestIDs.boarding_timer
-                : driverCardFieldTestIDs.pickup_eta,
-          )}
-          {normalizedBookingStatus !== "arrived"
-            ? renderCompactMetric(
-                distanceLabel,
-                compactTripMetaLabel,
-                null,
-                normalizedBookingStatus === "started"
-                  ? driverCardFieldTestIDs.distance_remaining
-                  : undefined,
-              )
-            : null}
-          {renderCompactMetric(
-            tripFareLabel,
-            tripFareCaption,
-            styles.compactMetricValueLeaf,
-            normalizedBookingStatus === "started"
-              ? driverCardFieldTestIDs.net_payout
-              : undefined,
-          )}
-        </View>
-
-        {normalizedBookingStatus === "started" ? (
-          <>
-            <LeafDivider style={styles.compactDetailsDivider} />
-            <LeafRouteProgress
-              originLabel={pickupLabel}
-              destinationLabel={dropoffTitle}
-              progress={routeProgress}
-              progressKey={liveRouteKey || "driver-trip-route"}
-              arrivalLabel={null}
-              style={styles.driverRouteProgress}
-              testID="driver-trip-route-progress"
-              fieldTestIDs={{
-                progress: driverCardFieldTestIDs.route_progress,
-              }}
-            />
-            <Text
-              style={styles.driverRouteSummaryText}
-              numberOfLines={1}
-            >
-              {driverStartedSummary}
-            </Text>
-          </>
-        ) : null}
-
-        {normalizedBookingStatus === "accepted" ? (
-          <Text style={styles.compactPreferenceText} numberOfLines={1}>
-            {ridePreferenceSummary}
-          </Text>
-        ) : null}
-
-        {renderCompactTripDetails()}
-
-        <View style={styles.compactActionsRow}>
-          {secondaryActions}
         </View>
       </>
     );
@@ -2574,35 +2534,60 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           onClose={handleDismiss}
           backdropDismissEnabled={!isLifecycleNavigationLocked}
           dragEnabled={!isLifecycleNavigationLocked}
-          sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
+          bottomGapFillColor={isActiveTripSurface ? "transparent" : "#FFFFFF"}
+          sheetStyle={[
+            styles.sheetWrap,
+            isActiveTripSurface && styles.lifecycleSheetWrap,
+            { bottom: driverTripCardBottom },
+          ]}
         >
-          <LeafRideSheet
-            onLayout={handleCardLayout}
-            style={[
-              styles.tripCard,
-              isCompactTripSurface && styles.compactTripCard,
-              {
-                maxHeight: driverTripSheetMaxHeight,
-                paddingBottom: 12 + safeBottom,
-              },
-            ]}
-            scrollEnabled
-            scrollStyle={[
-              styles.tripSheetScroll,
-              { maxHeight: driverTripSheetScrollMaxHeight },
-            ]}
-            showsVerticalScrollIndicator={
-              detailsExpanded || isOperationalHoldSurface || isProtectedStatusWithoutRideIdentity
-            }
-            testID="driver-live-trip-screen"
-            accessibilityLabel="driver-live-trip-screen"
-          >
-            {renderDriverCard()}
+          {isActiveTripSurface ? (
+            <RobotaxiLifecycleCard
+              onLayout={handleCardLayout}
+              style={{ maxHeight: driverTripCardMaxHeight }}
+              scrollEnabled={detailsExpanded}
+              scrollStyle={[
+                styles.tripSheetScroll,
+                { maxHeight: driverTripSheetScrollMaxHeight },
+              ]}
+              showsVerticalScrollIndicator={detailsExpanded}
+              testID="driver-live-trip-screen"
+              accessibilityLabel="driver-live-trip-screen"
+            >
+              {renderDriverCard()}
 
-            {visibleLastError ? (
-              <Text style={styles.errorText}>{visibleLastError}</Text>
-            ) : null}
-          </LeafRideSheet>
+              {visibleLastError ? (
+                <Text style={styles.errorText}>{visibleLastError}</Text>
+              ) : null}
+            </RobotaxiLifecycleCard>
+          ) : (
+            <LeafRideSheet
+              onLayout={handleCardLayout}
+              style={[
+                styles.tripCard,
+                {
+                  maxHeight: driverTripSheetMaxHeight,
+                  paddingBottom: 12 + safeBottom,
+                },
+              ]}
+              scrollEnabled
+              scrollStyle={[
+                styles.tripSheetScroll,
+                { maxHeight: driverTripSheetScrollMaxHeight },
+              ]}
+              showsVerticalScrollIndicator={
+                isOperationalHoldSurface || isProtectedStatusWithoutRideIdentity
+              }
+              testID="driver-live-trip-screen"
+              accessibilityLabel="driver-live-trip-screen"
+            >
+              {renderDriverCard()}
+
+              {visibleLastError ? (
+                <Text style={styles.errorText}>{visibleLastError}</Text>
+              ) : null}
+            </LeafRideSheet>
+          )}
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -2618,6 +2603,107 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
+  },
+  lifecycleSheetWrap: {
+    left: 24,
+    right: 24,
+  },
+  lifecycleMetricRow: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: leafRideColors.line,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 24,
+  },
+  lifecycleIdentity: {
+    marginTop: 16,
+  },
+  lifecycleExpandedIdentity: {
+    marginBottom: 14,
+  },
+  lifecycleExpandedMetrics: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  lifecycleDetailBlock: {
+    marginTop: 14,
+  },
+  lifecycleDetailLabel: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 0.5,
+  },
+  lifecycleDetailValue: {
+    marginTop: 4,
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  lifecycleDetailMeta: {
+    marginTop: 3,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  lifecyclePinHero: {
+    marginTop: 16,
+    minHeight: 68,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: leafRideColors.line,
+    backgroundColor: "#F8F6F1",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+  lifecyclePinCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  lifecyclePinLabel: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  lifecyclePinHint: {
+    marginTop: 3,
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  lifecyclePinValue: {
+    color: leafRideColors.text,
+    fontFamily: fonts.SemiBold,
+    fontSize: 28,
+    lineHeight: 34,
+    letterSpacing: 3,
+  },
+  lifecycleActionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  lifecycleSecondaryAction: {
+    flexGrow: 1,
+    flexBasis: "46%",
+  },
+  lifecycleSecondaryActionFull: {
+    width: "100%",
+  },
+  lifecycleActionStack: {
+    marginTop: 18,
+    gap: 10,
   },
   tripCard: {
     backgroundColor: "#FFFFFF",
@@ -2744,15 +2830,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  compactActionsExpanded: {
+    flexWrap: "wrap",
+  },
   compactSecondaryButton: {
     flex: 0.72,
     minWidth: 74,
+  },
+  expandedSecondaryButton: {
+    flexGrow: 1,
+    flexBasis: "46%",
+    minWidth: 0,
   },
   compactPrimaryButton: {
     flex: 1.22,
     minWidth: 112,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
+  },
+  expandedPrimaryButton: {
+    flexBasis: "100%",
+    width: "100%",
   },
   cardStateHeader: {
     flexDirection: "row",

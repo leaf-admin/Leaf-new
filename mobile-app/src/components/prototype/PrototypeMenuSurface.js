@@ -13,6 +13,7 @@ const LEAF_BG = '#F8F6F1';
 const LEAF_TEXT = '#171412';
 const LEAF_MUTED = '#827B73';
 const LEAF_SECONDARY = '#756F68';
+const TEXT_SCALE_CAP = 1.35;
 
 function isLoadingValue(value) {
   return value === null || value === undefined || String(value).trim() === '';
@@ -59,17 +60,17 @@ export function PrototypeMenuSurface({
     >
       <View style={styles.headerRow}>
         <View style={styles.headerCopyWrap}>
-          {eyebrow && !fullScreen ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
-          {eyebrow && fullScreen ? <Text style={styles.hiddenText}>{eyebrow}</Text> : null}
-          <Text style={styles.title}>{title}</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          {eyebrow && !fullScreen ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.eyebrow}>{eyebrow}</Text> : null}
+          {eyebrow && fullScreen ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.hiddenText}>{eyebrow}</Text> : null}
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.title}>{title}</Text>
+          {subtitle ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
 
         {headerAccessory ? (
           <View style={styles.headerAccessoryWrap}>{headerAccessory}</View>
         ) : badgeLabel ? (
           <View style={styles.badgePill}>
-            <Text style={styles.badgePillText}>{badgeLabel}</Text>
+            <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.badgePillText}>{badgeLabel}</Text>
           </View>
         ) : null}
       </View>
@@ -97,7 +98,7 @@ export function PrototypeMenuSurface({
 export function PrototypeMenuSection({ title, children, style }) {
   return (
     <View style={[styles.sectionBlock, style]}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.sectionTitle}>{title}</Text>
       <View style={styles.sectionDivider} />
       {children}
     </View>
@@ -110,40 +111,80 @@ export function PrototypeMenuRow({
   subtitle,
   onPress,
   badge,
+  badgeTone = 'neutral',
   trailing,
   active = false,
   compact = false,
   last = false,
   testID,
   accessibilityLabel,
+  accessibilityHint,
+  disabled = false,
 }) {
-  const RowComponent = onPress ? TouchableOpacity : View;
+  const isInteractiveRow = Boolean(onPress) || disabled;
+  const RowComponent = isInteractiveRow ? TouchableOpacity : View;
   const iconName = typeof icon === 'string' ? icon : null;
 
   return (
     <RowComponent
-      style={[styles.row, compact && styles.rowCompact, active && styles.rowActive, last && styles.rowLast]}
-      onPress={onPress}
-      activeOpacity={onPress ? 0.78 : 1}
+      style={[
+        styles.row,
+        compact && styles.rowCompact,
+        active && styles.rowActive,
+        disabled && styles.rowDisabled,
+        last && styles.rowLast,
+      ]}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      activeOpacity={!disabled && onPress ? 0.78 : 1}
       testID={testID}
       accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+      accessibilityRole={isInteractiveRow ? 'button' : undefined}
+      accessibilityState={isInteractiveRow ? { disabled } : undefined}
     >
       <View style={[styles.rowIconSlot, compact && styles.rowIconSlotCompact]}>
         {iconName ? (
           <Ionicons
             name={iconName}
             size={compact ? 16 : 17}
-            color={active ? color.accent.strong : '#4F5C54'}
+            color={disabled ? color.text.muted : active ? color.accent.strong : '#4F5C54'}
           />
         ) : null}
       </View>
 
       <View style={styles.rowCopyWrap}>
-        <Text style={[styles.rowTitle, active && styles.rowTitleActive]}>{title}</Text>
-        {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
+        <Text
+          maxFontSizeMultiplier={TEXT_SCALE_CAP}
+          style={[styles.rowTitle, active && styles.rowTitleActive, disabled && styles.rowTitleDisabled]}
+        >
+          {title}
+        </Text>
+        {subtitle ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.rowSubtitle}>{subtitle}</Text> : null}
       </View>
 
-      {badge ? <View style={styles.inlineBadge}><Text style={styles.inlineBadgeText}>{badge}</Text></View> : null}
+      {badge ? (
+        <View
+          style={[
+            styles.inlineBadge,
+            badgeTone === 'success' && styles.inlineBadgeSuccess,
+            badgeTone === 'warning' && styles.inlineBadgeWarning,
+            badgeTone === 'danger' && styles.inlineBadgeDanger,
+          ]}
+        >
+          <Text
+            maxFontSizeMultiplier={TEXT_SCALE_CAP}
+            style={[
+              styles.inlineBadgeText,
+              badgeTone === 'success' && styles.inlineBadgeTextSuccess,
+              badgeTone === 'warning' && styles.inlineBadgeTextWarning,
+              badgeTone === 'danger' && styles.inlineBadgeTextDanger,
+            ]}
+          >
+            {badge}
+          </Text>
+        </View>
+      ) : null}
       {trailing === null ? null : trailing ? trailing : <Ionicons name="chevron-forward" size={15} color={color.text.muted} />}
     </RowComponent>
   );
@@ -154,11 +195,11 @@ export function PrototypeMenuInfoRow({ label, value, last = false, loading = fal
 
   return (
     <View style={[styles.infoRow, last && styles.infoRowLast]}>
-      <Text style={styles.infoLabel}>{label}</Text>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.infoLabel}>{label}</Text>
       {showLoading ? (
         <PrototypeMenuSkeletonLine width={72} />
       ) : (
-        <Text style={styles.infoValue}>{value}</Text>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.infoValue}>{value}</Text>
       )}
     </View>
   );
@@ -170,11 +211,11 @@ export function PrototypeMenuStatRow({ items }) {
       {items.map((item, index) => (
         <React.Fragment key={item.key || item.label}>
           <View style={styles.statBlock}>
-            <Text style={styles.statLabel} numberOfLines={1}>{item.label}</Text>
+            <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.statLabel} numberOfLines={1}>{item.label}</Text>
             {item.loading || isLoadingValue(item.value) ? (
               <PrototypeMenuSkeletonLine width={item.skeletonWidth || 44} />
             ) : (
-              <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>
+              <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>
                 {item.value}
               </Text>
             )}
@@ -336,6 +377,9 @@ const styles = StyleSheet.create({
   rowActive: {
     backgroundColor: 'transparent',
   },
+  rowDisabled: {
+    opacity: 0.64,
+  },
   rowLast: {
     borderBottomWidth: 0,
     paddingBottom: 4,
@@ -361,6 +405,9 @@ const styles = StyleSheet.create({
   rowTitleActive: {
     color: color.accent.strong,
   },
+  rowTitleDisabled: {
+    color: color.text.secondary,
+  },
   rowSubtitle: {
     marginTop: 3,
     color: LEAF_SECONDARY,
@@ -375,14 +422,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F26672',
+    backgroundColor: color.surface.tertiary,
+    borderWidth: 1,
+    borderColor: color.border.subtle,
     marginRight: 8,
   },
   inlineBadgeText: {
-    color: '#FFFFFF',
+    color: color.text.secondary,
     fontFamily: fonts.SemiBold,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
+  },
+  inlineBadgeSuccess: {
+    backgroundColor: color.surface.activeStrong,
+    borderColor: color.accent.soft,
+  },
+  inlineBadgeWarning: {
+    backgroundColor: '#F7F2E8',
+    borderColor: '#E5D9BD',
+  },
+  inlineBadgeDanger: {
+    backgroundColor: '#FFF1F2',
+    borderColor: '#F2C8CE',
+  },
+  inlineBadgeTextSuccess: {
+    color: color.accent.primary,
+  },
+  inlineBadgeTextWarning: {
+    color: color.feedback.warning,
+  },
+  inlineBadgeTextDanger: {
+    color: color.feedback.danger,
   },
   infoRow: {
     paddingVertical: 12,

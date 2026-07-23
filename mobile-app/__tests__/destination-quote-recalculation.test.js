@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Alert } from "react-native";
 
 import RobotaxiDestinationScreen from "../src/screens/prototype/RobotaxiDestinationScreen";
@@ -1059,7 +1059,17 @@ describe("RobotaxiDestinationScreen", () => {
     );
   });
 
-  it("shows a preparing state while direct PIX auto-open waits for availability", async () => {
+  const verifyDirectPixAvailabilityTimeout = async () => {
+    jest.useFakeTimers();
+    const fakeSetTimeout = global.setTimeout;
+    let directPixTimeoutCallback = null;
+    global.setTimeout = (callback, delay, ...args) => {
+      if (delay === 15000) {
+        directPixTimeoutCallback = callback;
+        return 15000;
+      }
+      return fakeSetTimeout(callback, delay, ...args);
+    };
     const destination = {
       id: "destination_copacabana_palace",
       name: "Copacabana Palace",
@@ -1071,8 +1081,15 @@ describe("RobotaxiDestinationScreen", () => {
       eta: "4",
     };
     const checkRideAvailability = jest.fn(() => new Promise(() => {}));
+    const loadDestinationSuggestions = jest.fn().mockResolvedValue([destination]);
+    const loadRecentDestinations = jest.fn().mockResolvedValue([destination]);
+    const resolveDestinationInput = jest.fn().mockImplementation(async (item) => item);
+    const selectDestination = jest.fn().mockImplementation(async (item) => item);
+    const requestRide = jest.fn();
+    const requestTripExtension = jest.fn();
+    const clearFlowPreview = jest.fn();
 
-    usePrototypeRideRuntime.mockImplementation(() => ({
+    usePrototypeRideRuntime.mockReturnValue({
       bookingStatus: "idle",
       currentAddress: "Av. Meriti, 9 - Vila Kosmos",
       currentCoordinate: {
@@ -1091,15 +1108,15 @@ describe("RobotaxiDestinationScreen", () => {
       tripDistanceKm: 23.8,
       tripDurationMin: 22,
       tripArrivalText: "22:48",
-      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
-      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
-      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
-      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      loadDestinationSuggestions,
+      loadRecentDestinations,
+      resolveDestinationInput,
+      selectDestination,
       checkRideAvailability,
-      requestRide: jest.fn(),
-      requestTripExtension: jest.fn(),
-      clearFlowPreview: jest.fn(),
-    }));
+      requestRide,
+      requestTripExtension,
+      clearFlowPreview,
+    });
 
     const navigation = {
       navigate: jest.fn(),
@@ -1156,7 +1173,24 @@ describe("RobotaxiDestinationScreen", () => {
     expect(screen.queryByTestId("mock-pix-amount")).toBeNull();
     expect(screen.getByTestId("passenger-destination-direct-pix-preparing")).toBeTruthy();
     expect(screen.getByText("Preparando Pix")).toBeTruthy();
-  });
+
+    expect(directPixTimeoutCallback).toEqual(expect.any(Function));
+    act(() => directPixTimeoutCallback());
+
+    expect(navigation.replace).toHaveBeenCalledWith(
+      "RobotaxiPrototype",
+      expect.objectContaining({
+        passengerHomeAvailabilityNotice:
+          "A validação de motoristas demorou mais que o esperado. Tente solicitar novamente.",
+      }),
+    );
+    expect(screen.queryByTestId("passenger-destination-direct-pix-preparing")).toBeNull();
+    expect(screen.queryByTestId("mock-pix-amount")).toBeNull();
+    screen.unmount();
+    global.setTimeout = fakeSetTimeout;
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  };
 
   it("returns to the initial passenger home when a direct PIX payment expires", async () => {
     const destination = {
@@ -2059,6 +2093,118 @@ describe("RobotaxiDestinationScreen", () => {
     });
   });
 
+  it("marks a confirmed Pix createBooking failure for materialization-only retry", async () => {
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 19.38,
+      grossEstimatedFare: 19.38,
+      quoteLockId: "ql_queue_backpressure_retry",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
+
+    const destination = {
+      id: "destination_leblon_retry",
+      name: "Leblon",
+      address: "Leblon, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.984,
+        longitude: -43.223,
+      },
+      eta: "7",
+    };
+    const queueError = new Error(
+      "Estamos com alta demanda na sua região. Tente novamente em alguns segundos.",
+    );
+    queueError.code = "QUEUE_BACKPRESSURE";
+    const requestRide = jest.fn().mockRejectedValue(queueError);
+
+    usePrototypeRideRuntime.mockImplementation(() => ({
+      bookingStatus: "idle",
+      currentAddress: "Avenida Atlântica, Copacabana",
+      currentCoordinate: {
+        latitude: -22.971,
+        longitude: -43.182,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 19.38,
+      selectedDestination: destination,
+      tripDistanceKm: 7,
+      tripDurationMin: 19,
+      tripArrivalText: "03:18",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability: jest.fn().mockResolvedValue({ available: true }),
+      requestRide,
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    }));
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiDestinationScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Leblon")).toBeTruthy();
+    });
+    fireEvent.press(screen.getByText("Leblon"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-confirm-pix")).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId("mock-confirm-pix"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("passenger-preference-confirm-button")).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId("passenger-preference-confirm-button"));
+
+    await waitFor(() => {
+      expect(requestRide).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fare: 19.38,
+          paymentMethod: "pix",
+          paymentConfirmation: expect.objectContaining({
+            chargeId: "charge_test_1",
+            rideId: "ride_test_1",
+            amountInCents: 1938,
+            quoteLockId: "ql_queue_backpressure_retry",
+          }),
+        }),
+      );
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "RobotaxiPrototypePaymentFailed",
+        expect.objectContaining({
+          title: "Corrida não solicitada",
+          retryConfirmedBooking: true,
+          retryRouteName: "RobotaxiPrototype",
+        }),
+      );
+    });
+    expect(navigation.replace).not.toHaveBeenCalledWith(
+      "RobotaxiPrototype",
+      expect.anything(),
+    );
+  });
+
   it("blocks ride creation when the confirmed PIX amount differs from the locked quote", async () => {
     fetchDynamicPricingQuote.mockResolvedValueOnce({
       estimatedFare: 97.76,
@@ -2629,4 +2775,9 @@ describe("RobotaxiDestinationScreen", () => {
 
     expect(requestTripExtension).not.toHaveBeenCalled();
   });
+
+  it(
+    "returns home with retry guidance when direct PIX availability never settles",
+    verifyDirectPixAvailabilityTimeout,
+  );
 });

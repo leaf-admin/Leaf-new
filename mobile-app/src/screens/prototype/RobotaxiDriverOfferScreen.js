@@ -8,9 +8,17 @@ import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismi
 import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
 import {
   LeafButton,
-  LeafRideSheet,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
+import {
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  RobotaxiLifecycleDisclosure,
+  RobotaxiLifecycleIdentity,
+  RobotaxiLifecycleSection,
+  RobotaxiLifecycleSummary,
+  robotaxiLifecycleMetrics,
+} from "../../components/prototype/RobotaxiLifecycleUI";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from "./robotaxiPrototypeData";
@@ -35,8 +43,8 @@ import { useDriverOfferCountdown } from "./driverOfferCountdown";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
-const DRIVER_OFFER_MAP_SIDE_PADDING = 44;
-const DRIVER_OFFER_MAP_TOP_PADDING = 118;
+const DRIVER_OFFER_MAP_SIDE_PADDING = 24;
+const DRIVER_OFFER_MAP_TOP_PADDING = 72;
 const DRIVER_OFFER_MAP_MIN_VISIBLE_HEIGHT = 220;
 
 const DRIVER_OFFER_RENDERED_CARD_FIELD_IDS = Object.freeze([
@@ -405,8 +413,11 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   const [mapHeight, setMapHeight] = useState(windowHeight);
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [busyAction, setBusyAction] = useState("");
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
-  const sheetBottom = SHEET_BOTTOM_OFFSET;
+  const sheetBottom =
+    SHEET_BOTTOM_OFFSET + safeBottom + robotaxiLifecycleMetrics.cardBottomGap;
+  const offerCardMaxHeight = Math.max(352, Math.round(windowHeight * 0.66));
   const mapRef = useRef(null);
   const routeRequest = useMemo(() => {
     const candidate = buildDriverOfferFromRouteParams(route?.params);
@@ -762,6 +773,10 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       insets,
       viewportPadding: offerViewportPadding,
       minVisibleHeight: DRIVER_OFFER_MAP_MIN_VISIBLE_HEIGHT,
+      shortRouteLatitudeDeltaMultiplier: 1.55,
+      shortRouteLongitudeDeltaMultiplier: 1.6,
+      longRouteLatitudeDeltaMultiplier: 1.35,
+      longRouteLongitudeDeltaMultiplier: 1.4,
     }),
     [
       insets,
@@ -994,65 +1009,41 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
           onClose={handleDismiss}
           backdropDismissEnabled={!hasRequest}
           dragEnabled={!hasRequest}
+          bottomGapFillColor={hasRequest ? "transparent" : "#FFFFFF"}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <LeafRideSheet
+          <RobotaxiLifecycleCard
             onLayout={handleCardLayout}
-            style={[styles.offerCard, { paddingBottom: 18 + safeBottom }]}
+            style={[styles.offerCard, { maxHeight: offerCardMaxHeight }]}
+            scrollEnabled
+            showsVerticalScrollIndicator={detailsExpanded}
             testID="driver-offer-screen"
             accessibilityLabel="driver-offer-screen"
           >
             {hasRequest ? (
               <>
-                <View style={styles.sheetHandle} />
-                <View style={styles.offerHeader}>
-                  <View style={styles.offerHeaderCopy}>
-                    <Text style={styles.offerTitle} numberOfLines={1}>
-                      Nova solicitação
-                    </Text>
-                    <Text
-                      style={styles.offerTimer}
-                      numberOfLines={1}
-                      testID={DRIVER_OFFER_FIELD_TEST_IDS.response_timer}
-                    >
-                      {offerCountdown.label} para responder
-                    </Text>
-                  </View>
-                  <View
-                    style={styles.netPayout}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.net_payout}
-                    accessibilityLabel={`Líquido ${fareLabel}`}
-                  >
-                    <Text style={styles.netPayoutValue} numberOfLines={1}>
-                      {fareLabel} líquido
-                    </Text>
-                  </View>
-                </View>
+                <RobotaxiLifecycleSummary
+                  eyebrow="NOVA CORRIDA"
+                  title="Corrida próxima"
+                  subtitle={`${offerCountdown.label} para responder`}
+                  value={fareLabel}
+                  valueLabel="líquido"
+                  subtitleTestID={DRIVER_OFFER_FIELD_TEST_IDS.response_timer}
+                  valueTestID={DRIVER_OFFER_FIELD_TEST_IDS.net_payout}
+                />
 
-                <View style={styles.passengerRow}>
-                  <View
-                    style={styles.passengerAvatar}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_photo}
-                  >
-                    <Text style={styles.passengerAvatarText}>{passengerInitial}</Text>
-                  </View>
-                  <View style={styles.passengerCopy}>
-                    <Text
-                      style={styles.passengerName}
-                      numberOfLines={1}
-                      testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_name}
-                    >
-                      {passengerName}
-                    </Text>
-                    <Text
-                      style={styles.passengerMeta}
-                      numberOfLines={1}
-                      testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_rating}
-                    >
-                      Passageiro verificado · {passengerRatingLabel}
-                    </Text>
-                  </View>
-                </View>
+                <RobotaxiLifecycleIdentity
+                  name={passengerName}
+                  meta={`Passageiro verificado · ${passengerRatingLabel}`}
+                  initial={passengerInitial}
+                  style={styles.passengerIdentity}
+                  testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_verified_badge}
+                  fieldTestIDs={{
+                    avatar: DRIVER_OFFER_FIELD_TEST_IDS.passenger_photo,
+                    name: DRIVER_OFFER_FIELD_TEST_IDS.passenger_name,
+                    meta: DRIVER_OFFER_FIELD_TEST_IDS.passenger_rating,
+                  }}
+                />
 
                 <View
                   style={styles.routeSummary}
@@ -1063,10 +1054,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     style={styles.routeStep}
                     testID={DRIVER_OFFER_FIELD_TEST_IDS.pickup_eta}
                   >
-                    <View style={styles.routeIcon}>
-                      <Ionicons name="locate-outline" size={15} color={leafRideColors.text} />
-                    </View>
+                    <Ionicons name="locate-outline" size={17} color={leafRideColors.text} />
                     <View style={styles.routeCopy}>
+                      <Text style={styles.routeLabel}>EMBARQUE</Text>
                       <Text
                         style={styles.routeAddress}
                         numberOfLines={1}
@@ -1088,10 +1078,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     style={styles.routeStep}
                     testID={DRIVER_OFFER_FIELD_TEST_IDS.trip_duration}
                   >
-                    <View style={styles.routeIcon}>
-                      <Ionicons name="location-outline" size={15} color={leafRideColors.leaf} />
-                    </View>
+                    <Ionicons name="location-outline" size={17} color={leafRideColors.leaf} />
                     <View style={styles.routeCopy}>
+                      <Text style={styles.routeLabel}>DESTINO</Text>
                       <Text
                         style={styles.routeAddress}
                         numberOfLines={1}
@@ -1110,59 +1099,72 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                   </View>
                 </View>
 
-                <View
-                  style={styles.confirmedLine}
-                  testID={DRIVER_OFFER_FIELD_TEST_IDS.payment_confirmed}
-                >
-                  <Ionicons name="checkmark-circle" size={15} color={leafRideColors.leaf} />
-                  <Text style={styles.confirmedText} numberOfLines={1}>
-                    PIX confirmado
-                  </Text>
-                </View>
+                <RobotaxiLifecycleDisclosure
+                  expanded={detailsExpanded}
+                  onPress={() => setDetailsExpanded((current) => !current)}
+                  label="Ver detalhes"
+                  expandedLabel="Ocultar detalhes"
+                  style={styles.detailsButton}
+                  testID="driver-offer-details-button"
+                />
 
-                {ridePreferenceItems.length > 0 ? (
-                  <View
-                    style={styles.preferencePanel}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.ride_preferences}
-                    accessibilityLabel="Preferências do passageiro"
-                  >
-                    <Text style={styles.hiddenText}>Preferências</Text>
-                    <View style={styles.preferenceRow}>
-                      {ridePreferenceItems.map((item) => (
-                        <View key={item.key} style={styles.preferenceChip}>
-                          <Text style={styles.preferenceChipText} numberOfLines={1}>
-                            {item.label}
-                          </Text>
-                        </View>
-                      ))}
+                {detailsExpanded ? (
+                  <RobotaxiLifecycleSection title="DETALHES DA CORRIDA">
+                    <View
+                      style={styles.confirmedLine}
+                      testID={DRIVER_OFFER_FIELD_TEST_IDS.payment_confirmed}
+                    >
+                      <Ionicons name="checkmark-circle-outline" size={17} color={leafRideColors.leaf} />
+                      <View style={styles.confirmedCopy}>
+                        <Text style={styles.confirmedTitle}>Pagamento confirmado</Text>
+                        <Text
+                          style={styles.confirmedText}
+                          testID={DRIVER_OFFER_FIELD_TEST_IDS.gross_fare}
+                        >
+                          Passageiro pagou {grossFareLabel} via Pix
+                        </Text>
+                      </View>
                     </View>
-                  </View>
+
+                    {ridePreferenceItems.length > 0 ? (
+                      <View
+                        style={styles.preferencePanel}
+                        testID={DRIVER_OFFER_FIELD_TEST_IDS.ride_preferences}
+                        accessibilityLabel="Preferências do passageiro"
+                      >
+                        <Text style={styles.preferenceLabel}>Preferências</Text>
+                        <Text style={styles.preferenceText}>
+                          {ridePreferenceItems.map((item) => item.label).join(" · ")}
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    <RobotaxiLifecycleButton
+                      label={busyAction === "reject" ? "Recusando..." : "Recusar"}
+                      tone="danger"
+                      disabled={Boolean(busyAction) || offerExpired}
+                      onPress={handleReject}
+                      style={styles.rejectButton}
+                      testID={DRIVER_OFFER_FIELD_TEST_IDS.reject_action}
+                      accessibilityLabel="driver-offer-screen-reject-button"
+                    />
+                  </RobotaxiLifecycleSection>
                 ) : null}
 
-                <View style={styles.offerActionsRow}>
-                  <LeafButton
-                    label={busyAction === "reject" ? "Recusando..." : "Recusar"}
-                    tone="ghost"
-                    disabled={Boolean(busyAction) || offerExpired}
-                    onPress={handleReject}
-                    style={styles.rejectButton}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.reject_action}
-                    accessibilityLabel="driver-offer-screen-reject-button"
-                  />
-                  <LeafButton
-                    label={
-                      busyAction === "accept"
-                        ? "Aceitando..."
-                        : "Aceitar corrida"
-                    }
-                    tone="primary"
-                    disabled={Boolean(busyAction) || offerExpired}
-                    onPress={handleAccept}
-                    style={styles.acceptButton}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.accept_action}
-                    accessibilityLabel="driver-offer-screen-accept-button"
-                  />
-                </View>
+                <RobotaxiLifecycleButton
+                  label={
+                    busyAction === "accept"
+                      ? "Aceitando..."
+                      : "Aceitar corrida"
+                  }
+                  tone="primary"
+                  icon="checkmark-outline"
+                  disabled={Boolean(busyAction) || offerExpired}
+                  onPress={handleAccept}
+                  style={styles.acceptButton}
+                  testID={DRIVER_OFFER_FIELD_TEST_IDS.accept_action}
+                  accessibilityLabel="driver-offer-screen-accept-button"
+                />
               </>
             ) : (
               <View style={styles.emptyWrap}>
@@ -1182,7 +1184,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
             {visibleLastError ? (
               <Text style={styles.errorText}>{visibleLastError}</Text>
             ) : null}
-          </LeafRideSheet>
+          </RobotaxiLifecycleCard>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -1200,105 +1202,13 @@ const styles = StyleSheet.create({
     right: 0,
   },
   offerCard: {
-    minHeight: 318,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    paddingTop: 12,
-    paddingBottom: 18,
+    marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
-  sheetHandle: {
-    width: 50,
-    height: 4,
-    borderRadius: 3,
-    backgroundColor: "#D8D0C7",
-    alignSelf: "center",
-    marginBottom: 18,
-  },
-  offerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 14,
-    marginBottom: 12,
-  },
-  offerHeaderCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  offerTimer: {
-    color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 10.5,
-    lineHeight: 14,
-    marginTop: 2,
-  },
-  offerTitle: {
-    color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 23,
-  },
-  netPayout: {
-    minWidth: 108,
-    minHeight: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: "#D9E3D3",
-    backgroundColor: "#EEF3EA",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    marginTop: 2,
-  },
-  netPayoutValue: {
-    color: leafRideColors.leaf,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 14,
-  },
-  passengerRow: {
-    minHeight: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  passengerAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "#E5DCD2",
-    backgroundColor: "#EFEAE2",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  passengerAvatarText: {
-    color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 20,
-  },
-  passengerCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 12,
-  },
-  passengerName: {
-    color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  passengerMeta: {
-    marginTop: 2,
-    color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 16,
+  passengerIdentity: {
+    marginTop: 16,
   },
   routeSummary: {
+    marginTop: 16,
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: leafRideColors.line,
@@ -1308,13 +1218,7 @@ const styles = StyleSheet.create({
   routeStep: {
     flexDirection: "row",
     alignItems: "flex-start",
-  },
-  routeIcon: {
-    width: 24,
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
+    gap: 12,
   },
   routeCopy: {
     flex: 1,
@@ -1329,65 +1233,65 @@ const styles = StyleSheet.create({
   },
   routeAddress: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 14,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
     lineHeight: 18,
   },
-  confirmedLine: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+  routeLabel: {
+    color: leafRideColors.muted,
+    fontFamily: fonts.Medium,
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0.5,
   },
-  confirmedText: {
+  detailsButton: {
+    marginTop: 16,
+  },
+  confirmedLine: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  confirmedCopy: {
     flex: 1,
     minWidth: 0,
-    color: leafRideColors.secondary,
+  },
+  confirmedTitle: {
+    color: leafRideColors.text,
     fontFamily: fonts.Medium,
     fontSize: 12,
     lineHeight: 16,
   },
-  confirmedSecurePaymentBadge: {
-    marginLeft: 4,
-  },
-  preferencePanel: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  preferenceRow: {
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-  },
-  preferenceChip: {
-    minHeight: 24,
-    borderRadius: 12,
-    paddingHorizontal: 0,
-    justifyContent: "center",
-  },
-  preferenceChipText: {
+  confirmedText: {
+    marginTop: 2,
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
     fontSize: 12,
     lineHeight: 16,
   },
-  offerActionsRow: {
+  preferencePanel: {
     marginTop: 14,
-    flexDirection: "row",
-    gap: 12,
+  },
+  preferenceLabel: {
+    color: leafRideColors.muted,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  preferenceText: {
+    marginTop: 3,
+    color: leafRideColors.text,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16,
   },
   rejectButton: {
-    width: 116,
-    height: 48,
-    borderRadius: 24,
+    marginTop: 14,
+    width: "100%",
   },
   acceptButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 24,
+    marginTop: 12,
+    width: "100%",
   },
   emptyWrap: {
     paddingTop: 6,
@@ -1408,12 +1312,6 @@ const styles = StyleSheet.create({
   emptyButton: {
     marginTop: 18,
     alignSelf: "flex-start",
-  },
-  hiddenText: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    opacity: 0,
   },
   errorText: {
     marginTop: 10,

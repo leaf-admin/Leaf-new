@@ -3,7 +3,6 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,11 +11,11 @@ import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import {
-  CardHandle,
-  PrototypeCard,
-  PrototypePrimaryButton,
-} from "../../components/prototype/PrototypeUI";
-import { leafButtonMetrics } from "../../components/prototype/LeafRideUI";
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  RobotaxiLifecycleDisclosure,
+  robotaxiLifecycleMetrics,
+} from "../../components/prototype/RobotaxiLifecycleUI";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
@@ -25,6 +24,34 @@ import { resolvePassengerAutoRoute } from "./passengerFlowRouting";
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 286;
+const DEFAULT_NO_DRIVERS_MESSAGE =
+  "Ainda não encontramos um motorista disponível perto de você.";
+
+function formatNoDriversReason(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return DEFAULT_NO_DRIVERS_MESSAGE;
+  }
+
+  const normalized = raw.toLowerCase();
+  if (
+    [
+      "no_drivers",
+      "no_drivers_available",
+      "driver_unavailable",
+      "search_timeout",
+      "driver_search_timeout",
+    ].includes(normalized)
+  ) {
+    return DEFAULT_NO_DRIVERS_MESSAGE;
+  }
+
+  if (/^[a-z0-9_-]+$/i.test(raw)) {
+    return "Não foi possível encontrar um motorista agora. Tente outro destino ou volte ao mapa.";
+  }
+
+  return raw;
+}
 
 export default function RobotaxiNoDriversScreen({ navigation, route }) {
   const {
@@ -45,9 +72,9 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
-  const reason =
-    route?.params?.reason || "Ainda não encontramos um motorista disponível perto de você.";
+  const sheetBottom =
+    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+  const reason = formatNoDriversReason(route?.params?.reason);
   const refundStatus = String(route?.params?.refundStatus || "")
     .trim()
     .toUpperCase();
@@ -229,8 +256,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
           onClose={handleDismiss}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <PrototypeCard onLayout={handleCardLayout} style={styles.card}>
-            <CardHandle />
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={styles.card}>
 
             <View style={styles.iconWrap}>
               <Ionicons
@@ -254,68 +280,48 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
               </View>
             ) : null}
 
-            <PrototypePrimaryButton
+            <RobotaxiLifecycleButton
               label="Tentar com outro destino"
               icon="search-outline"
+              tone="primary"
               onPress={handleRetryDestination}
               style={styles.primaryButton}
               testID="passenger-no-drivers-retry-button"
               accessibilityLabel="passenger-no-drivers-retry-button"
             />
 
-            <TouchableOpacity
-              style={styles.moreOptionsButton}
-              activeOpacity={0.86}
+            <RobotaxiLifecycleDisclosure
+              expanded={secondaryActionsVisible}
               onPress={() => setSecondaryActionsVisible((visible) => !visible)}
+              label="Mais opções"
+              expandedLabel="Ocultar opções"
+              style={styles.moreOptionsButton}
               testID="passenger-no-drivers-more-options-button"
               accessibilityLabel="passenger-no-drivers-more-options-button"
-              accessibilityRole="button"
-              accessibilityState={{ expanded: secondaryActionsVisible }}
-            >
-              <Text style={styles.moreOptionsButtonText}>
-                {secondaryActionsVisible ? "Ocultar opções" : "Mais opções"}
-              </Text>
-              <Ionicons
-                name={secondaryActionsVisible ? "chevron-up" : "chevron-down"}
-                size={16}
-                color={color.text.secondary}
-              />
-            </TouchableOpacity>
+            />
 
             {secondaryActionsVisible ? (
               <View style={styles.rowButtons}>
-              <TouchableOpacity
+              <RobotaxiLifecycleButton
+                label="Suporte"
+                icon="help-circle-outline"
                 style={styles.secondaryButton}
-                activeOpacity={0.86}
                 onPress={() => navigation.navigate("RobotaxiPrototypeSupport")}
                 testID="passenger-no-drivers-support-button"
                 accessibilityLabel="passenger-no-drivers-support-button"
-              >
-                <Ionicons
-                  name="help-circle-outline"
-                  size={16}
-                  color={color.text.primary}
-                />
-                <Text style={styles.secondaryButtonText}>Suporte</Text>
-              </TouchableOpacity>
+              />
 
-              <TouchableOpacity
+              <RobotaxiLifecycleButton
+                label="Voltar ao mapa"
+                icon="map-outline"
                 style={styles.secondaryButton}
-                activeOpacity={0.86}
                 onPress={handleDismiss}
                 testID="passenger-no-drivers-back-to-map-button"
                 accessibilityLabel="passenger-no-drivers-back-to-map-button"
-              >
-                <Ionicons
-                  name="map-outline"
-                  size={16}
-                  color={color.text.primary}
-                />
-                <Text style={styles.secondaryButtonText}>Voltar ao mapa</Text>
-              </TouchableOpacity>
+              />
               </View>
             ) : null}
-          </PrototypeCard>
+          </RobotaxiLifecycleCard>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -333,13 +339,7 @@ const styles = StyleSheet.create({
     right: 0,
   },
   card: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 16,
+    marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
   iconWrap: {
     alignSelf: "center",
@@ -356,8 +356,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 15.5,
+    lineHeight: 20,
     textAlign: "center",
   },
   subtitle: {
@@ -393,19 +393,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   moreOptionsButton: {
-    minHeight: 38,
-    marginTop: 4,
-    alignSelf: "center",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  moreOptionsButtonText: {
-    color: color.text.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    marginTop: 10,
+    width: "100%",
   },
   rowButtons: {
     marginTop: 8,
@@ -414,20 +403,6 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 1,
-    minHeight: leafButtonMetrics.height,
-    borderRadius: leafButtonMetrics.radius,
-    borderWidth: 1,
-    borderColor: color.border.strong,
-    backgroundColor: color.surface.secondary,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: leafButtonMetrics.iconGap,
-  },
-  secondaryButtonText: {
-    color: color.text.primary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    minWidth: 0,
   },
 });

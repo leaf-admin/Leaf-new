@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import Animated, { Easing, FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, FadeOut, useReducedMotion } from 'react-native-reanimated';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const { motion } = robotaxiPrototypeTokens;
@@ -12,7 +12,9 @@ export default function PrototypeScreenTransition({
   style,
   animated = true
 }) {
-  if (!animated) {
+  const reduceMotion = useReducedMotion();
+
+  if (!animated || reduceMotion) {
     return <View style={[styles.container, style]}>{children}</View>;
   }
 

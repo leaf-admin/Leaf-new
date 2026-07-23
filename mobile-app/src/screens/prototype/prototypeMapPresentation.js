@@ -41,7 +41,7 @@ export function resolvePrototypeMapPresentation({ role, status } = {}) {
       return Object.freeze({
         event: MAP_PRESENTATION_EVENTS.DRIVER_TRIP_NAVIGATION,
         interactionEnabled: true,
-        animateRoute: true,
+        animateRoute: false,
         manualCameraHoldMs: DEFAULT_MANUAL_CAMERA_HOLD_MS,
       });
     }
@@ -85,7 +85,10 @@ export function resolvePrototypeMapPresentation({ role, status } = {}) {
     return Object.freeze({
       event: MAP_PRESENTATION_EVENTS.PASSENGER_TRIP_NAVIGATION,
       interactionEnabled: true,
-      animateRoute: true,
+      // Live location heartbeats replace route-array identities frequently.
+      // Navigation must render the complete sealed route immediately instead
+      // of restarting a progressive draw on every heartbeat.
+      animateRoute: false,
       manualCameraHoldMs: DEFAULT_MANUAL_CAMERA_HOLD_MS,
     });
   }

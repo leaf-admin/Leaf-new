@@ -152,4 +152,27 @@ describe('prototypeMapRoute', () => {
     expect(getPrototypeMapRoute().coordinates).toEqual([]);
     expect(getPrototypeMapRoute().trafficSegments).toEqual([]);
   });
+
+  it('preserves recovery provenance for explicitly supplied provisional coordinates', () => {
+    const origin = { latitude: -22.97045, longitude: -43.18276 };
+    const destination = { latitude: -22.9842698, longitude: -43.223168 };
+
+    setPrototypeMapRoute({
+      origin,
+      destination,
+      coordinates: [
+        origin,
+        { latitude: -22.975, longitude: -43.195 },
+        destination,
+      ],
+      routeSource: 'recovery',
+    });
+
+    expect(getPrototypeMapRoute()).toEqual(
+      expect.objectContaining({
+        routeSource: 'recovery',
+        synthetic: true,
+      }),
+    );
+  });
 });

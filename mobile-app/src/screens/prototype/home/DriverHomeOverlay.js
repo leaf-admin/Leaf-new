@@ -386,6 +386,30 @@ function isDriverWorkLocked(value) {
   return Boolean(value);
 }
 
+function resolveBlockedActivationLabel(remoteActivation) {
+  const activationState = String(
+    remoteActivation?.activationState || remoteActivation?.state || "",
+  )
+    .trim()
+    .toUpperCase();
+  const hasFailedDocument = Object.values(
+    remoteActivation?.documents || {},
+  ).some((document) =>
+    ["failed", "rejected", "denied"].includes(
+      String(document?.status || "").trim().toLowerCase(),
+    ),
+  );
+
+  if (
+    hasFailedDocument ||
+    ["REJECTED", "SUSPENDED", "BLOCKED"].includes(activationState)
+  ) {
+    return "Ação necessária";
+  }
+
+  return "Em análise";
+}
+
 function DriverHomeOverlay({
   driverId = "",
   insetsBottom = 0,
@@ -396,6 +420,7 @@ function DriverHomeOverlay({
   driverRealtimeAuthenticated = true,
   driverCanGoOnline = false,
   driverActivationResolved = false,
+  driverActivationRemote = null,
   driverWorkInProgress = false,
   suppressDaySummary = false,
   ridesCount = 0,
@@ -470,7 +495,7 @@ function DriverHomeOverlay({
   const sliderLabel = hasDriverWorkInProgress
     ? "Em corrida"
     : isActivationBlocked
-    ? "Em análise"
+    ? resolveBlockedActivationLabel(driverActivationRemote)
     : pendingOfflineActivation || pendingOnlineRealtime
       ? pendingOnlineRealtime
         ? "Reconectando"

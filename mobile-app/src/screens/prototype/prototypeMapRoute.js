@@ -166,6 +166,7 @@ export function setPrototypeMapRoute(payload) {
     ? payload.coordinates.filter(isCoordinateValid)
     : [];
   const explicitTrafficSegments = normalizeTrafficSegments(payload?.trafficSegments);
+  const explicitRouteSource = String(payload?.routeSource || '').trim().toLowerCase();
   const allowFallbackRoute = payload?.allowFallback !== false;
   const canReuseCurrentRouteCoordinates = Boolean(
     explicitCoordinates.length < 2 &&
@@ -192,7 +193,7 @@ export function setPrototypeMapRoute(payload) {
         : [];
   const routeSource =
     explicitCoordinates.length >= 2
-      ? 'explicit'
+      ? explicitRouteSource || 'explicit'
       : canReuseCurrentRouteCoordinates
         ? currentRoute.routeSource || 'reused'
         : allowFallbackRoute
@@ -214,7 +215,9 @@ export function setPrototypeMapRoute(payload) {
     trafficSegments,
     destinationLabel: payload?.destinationLabel || '',
     destinationAddress: payload?.destinationAddress || '',
-    synthetic: routeSource === 'fallback',
+    synthetic:
+      payload?.synthetic === true ||
+      ['fallback', 'recovery', 'backend_partial'].includes(routeSource),
     routeSource
   };
 

@@ -120,9 +120,116 @@ const {
   buildDriverRoutePlanWithCanonicalDestination,
   resolveCanonicalDestinationRouteSnapshot,
   resolveCanonicalBookingRouteForRequest,
+  mergeCanonicalBookingRouteSnapshot,
+  buildNoDriversFoundPaymentState,
+  buildConfirmedBookingMaterializationRetryContext,
+  normalizeDestinationItem,
+  resolveDestinationCoordinate,
 } = require('../src/screens/prototype/prototypeRideRuntime');
+const {
+  fetchCoordsfromPlace,
+} = require('../src/services/runtime/locationRouteBridge');
 
 describe('prototype ride runtime financial snapshot', () => {
+  it('selects a cached destination with location coordinates without requesting place details', async () => {
+    fetchCoordsfromPlace.mockClear();
+    const cachedResult = normalizeDestinationItem({
+      place_id: 'cached_shopping_leblon',
+      description: 'Shopping Leblon, Rio de Janeiro',
+      structured_formatting: {
+        main_text: 'Shopping Leblon',
+        secondary_text: 'Leblon, Rio de Janeiro',
+      },
+      location: {
+        lat: -22.9826,
+        lng: -43.2167,
+      },
+      locationSource: 'place_coordinates',
+    });
+
+    expect(cachedResult.coordinate).toEqual({
+      latitude: -22.9826,
+      longitude: -43.2167,
+    });
+
+    const selectedDestination = await resolveDestinationCoordinate(cachedResult);
+
+    expect(selectedDestination).toBe(cachedResult);
+    expect(fetchCoordsfromPlace).not.toHaveBeenCalled();
+  });
+
+  it('keeps an in-memory createBooking retry only for a complete confirmed Pix context', () => {
+    const context = buildConfirmedBookingMaterializationRetryContext({
+      destination: {
+        name: 'Leblon',
+        coordinate: { latitude: -22.984, longitude: -43.223 },
+      },
+      originCoordinate: { latitude: -22.971, longitude: -43.182 },
+      fare: 19.38,
+      paymentMethod: 'pix',
+      paymentConfirmation: {
+        chargeId: 'charge_confirmed_retry',
+        rideId: 'temp_ride_confirmed_retry',
+        amountInCents: 1938,
+        quoteLockId: 'quote_lock_confirmed_retry',
+        paymentSessionId: 'payment_session_confirmed_retry',
+        paymentContextKey: 'payment_context_confirmed_retry',
+      },
+    });
+
+    expect(context).toEqual(expect.objectContaining({
+      bookingPayload: expect.objectContaining({
+        fare: 19.38,
+        paymentMethod: 'pix',
+      }),
+      paymentSession: {
+        chargeId: 'charge_confirmed_retry',
+        paymentSessionId: 'payment_session_confirmed_retry',
+        contextKey: 'payment_context_confirmed_retry',
+      },
+    }));
+  });
+
+  it.each([
+    ['missing charge', { chargeId: '' }],
+    ['missing payment reference', { rideId: '', paymentIntentId: '' }],
+    ['missing quote lock', { quoteLockId: '' }],
+    ['amount mismatch', { amountInCents: 1900 }],
+  ])('fails closed for %s in a confirmed Pix booking retry', (_label, override) => {
+    expect(buildConfirmedBookingMaterializationRetryContext({
+      destination: {
+        name: 'Leblon',
+        coordinate: { latitude: -22.984, longitude: -43.223 },
+      },
+      originCoordinate: { latitude: -22.971, longitude: -43.182 },
+      fare: 19.38,
+      paymentMethod: 'pix',
+      paymentConfirmation: {
+        chargeId: 'charge_confirmed_retry',
+        rideId: 'temp_ride_confirmed_retry',
+        amountInCents: 1938,
+        quoteLockId: 'quote_lock_confirmed_retry',
+        ...override,
+      },
+    })).toBeNull();
+  });
+
+  it('maps the organic noDriversFound refund payload into the current runtime payment state', () => {
+    expect(buildNoDriversFoundPaymentState({
+      bookingId: 'booking_no_drivers_refund',
+      refundStatus: 'REFUNDED',
+      refundId: 'refund_no_drivers_1',
+      refundAmountInCents: 1915,
+      refundAmountInReais: '19.15',
+    }, 'pix')).toEqual(expect.objectContaining({
+      method: 'pix',
+      errorCode: 'NO_DRIVERS_FOUND',
+      refundStatus: 'REFUNDED',
+      refundAmount: 19.15,
+      refundId: 'refund_no_drivers_1',
+    }));
+  });
+
   it('only treats explicit backend liveness evidence as an approved facial validation', () => {
     expect(isRemoteLivenessPassed({
       state: 'APPROVED_NEEDS_LIVENESS',
@@ -286,6 +393,78 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(snapshot.finalFare).toBeCloseTo(14.22, 2);
     expect(snapshot.driverNetAmount).toBeCloseTo(12.73, 2);
     expect(snapshot.totalFees).toBeCloseTo(1.49, 2);
+  });
+
+  it('uses the backend-final executed settlement after an operational interruption', () => {
+    const interruptedRideLeg = {
+      source: 'operational_interrupt',
+      grossAmount: 0.84,
+      operationalFee: 0.79,
+      paymentIntermediationFee: 0.05,
+      totalFees: 0.84,
+      driverNetAmount: 0,
+      metadata: {
+        settlementType: 'INTERRUPTED_OPERATIONAL',
+      },
+    };
+    const snapshot = resolveCompletedTripFinancialSnapshot(
+      {
+        bookingId: 'booking_operational_interruption_ended',
+        completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
+        grossAmount: 0.84,
+        operationalFee: 0.79,
+        paymentIntermediationFee: 0.05,
+        totalFees: 0.84,
+        driverNetAmount: 0,
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        settlement: {
+          settlementType: 'INTERRUPTED_OPERATIONAL_ENDED',
+          originalFare: 17.69,
+          prepaidAmount: 17.69,
+          executedFare: 0.84,
+          estimatedRefund: 16.85,
+          remainingReservedAmount: 16.85,
+          rideLegSettlements: [interruptedRideLeg],
+        },
+        operationalContinuation: {
+          status: 'PASSENGER_ENDED_RIDE',
+          executedFare: 0.84,
+          estimatedRefund: 16.85,
+          remainingReservedAmount: 16.85,
+          closedRideLeg: interruptedRideLeg,
+        },
+        rideLegs: [interruptedRideLeg],
+      },
+      {
+        paymentState: {
+          status: 'confirmed',
+          paymentId: 'pix_original_charge',
+          amount: 17.69,
+        },
+        activeBooking: {
+          grossAmount: 17.69,
+          estimatedFare: 17.69,
+        },
+        driverActiveRide: {
+          grossAmount: 17.69,
+          totalFees: 1.49,
+          driverNetAmount: 16.2,
+          pricingSnapshotLocked: true,
+        },
+      },
+    );
+
+    expect(snapshot.finalFare).toBeCloseTo(0.84, 2);
+    expect(snapshot.operationalFee).toBeCloseTo(0.79, 2);
+    expect(snapshot.paymentIntermediationFee).toBeCloseTo(0.05, 2);
+    expect(snapshot.totalFees).toBeCloseTo(0.84, 2);
+    expect(snapshot.driverNetAmount).toBe(0);
+    expect(snapshot.estimatedRefund).toBeCloseTo(16.85, 2);
+    expect(snapshot.remainingReservedAmount).toBeCloseTo(16.85, 2);
+    expect(snapshot.originalPaidAmount).toBeCloseTo(17.69, 2);
+    expect(snapshot.authoritativeSnapshot).toBe(true);
+    expect(snapshot.financialSnapshotSource).toBe('backend_final');
   });
 
   it('keeps backend-final zero toll instead of a stale locked estimate', () => {
@@ -625,6 +804,40 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(routePlan.destinationDistanceKm).toBeCloseTo(27.1, 1);
     expect(routePlan.destinationDurationMinutes).toBe(34);
     expect(routePlan.pickupCoordinates).toEqual([driverCoordinate, pickupCoordinate]);
+  });
+
+  it('keeps the sealed booking route when createBooking returns a compact acknowledgement', () => {
+    const pickupCoordinate = { latitude: -22.97045, longitude: -43.18276 };
+    const destinationCoordinate = { latitude: -22.9842698, longitude: -43.223168 };
+    const sealedRoute = [
+      pickupCoordinate,
+      { latitude: -22.9721, longitude: -43.1884 },
+      { latitude: -22.9753, longitude: -43.1978 },
+      { latitude: -22.9788, longitude: -43.2074 },
+      { latitude: -22.9822, longitude: -43.2165 },
+      destinationCoordinate,
+    ];
+
+    const materializedBooking = mergeCanonicalBookingRouteSnapshot(
+      {
+        bookingId: 'booking_compact_ack',
+        status: 'SEARCHING',
+      },
+      {
+        bookingId: 'booking_compact_ack',
+        status: 'SEARCHING',
+      },
+      {
+        routeCoordinates: sealedRoute,
+        routeDistanceKm: 5.2,
+        routeDurationSecs: 780,
+      },
+    );
+
+    expect(materializedBooking.routeCoordinates).toEqual(sealedRoute);
+    expect(materializedBooking.routeDistanceKm).toBe(5.2);
+    expect(materializedBooking.routeDurationSecs).toBe(780);
+    expect(materializedBooking.tripDurationMin).toBe(13);
   });
 
   it('does not replace an already rich active route with a poorer fallback snapshot', () => {

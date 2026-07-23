@@ -1,4 +1,6 @@
 import {
+  isNoDriversBookingError,
+  NO_DRIVERS_BOOKING_ERROR_CODES,
   shouldIgnoreTransientBookingError,
   TRANSIENT_BOOKING_ERROR_CODES,
 } from "../src/screens/prototype/bookingErrorPolicy";
@@ -33,5 +35,20 @@ describe("bookingErrorPolicy", () => {
       true,
     );
     expect(TRANSIENT_BOOKING_ERROR_CODES.has("BOOKING_TIMEOUT")).toBe(true);
+  });
+
+  it("classifies only genuine no-driver failures as no-drivers outcomes", () => {
+    expect(isNoDriversBookingError({ code: "NO_DRIVERS_AVAILABLE" })).toBe(
+      true,
+    );
+    expect(
+      isNoDriversBookingError({
+        payload: { message: "Não há motoristas disponíveis agora." },
+      }),
+    ).toBe(true);
+    expect(isNoDriversBookingError({ code: "QUEUE_BACKPRESSURE" })).toBe(
+      false,
+    );
+    expect(NO_DRIVERS_BOOKING_ERROR_CODES.has("NO_DRIVERS_FOUND")).toBe(true);
   });
 });

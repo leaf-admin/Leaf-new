@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiDriverDocumentsScreen from '../src/screens/prototype/RobotaxiDriverDocumentsScreen';
 import RobotaxiDriverActivationScreen from '../src/screens/prototype/RobotaxiDriverActivationScreen';
@@ -15,6 +15,18 @@ import RobotaxiVehiclesScreen from '../src/screens/prototype/RobotaxiVehiclesScr
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
 import { createReferralInvite, loadMyReferralInvites } from '../src/services/runtime/referralProgramService';
 import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../src/services/runtime/driverWaitlistService';
+
+const mockListVehicles = jest.fn();
+
+jest.mock('../src/services/MobileVehicleService', () => ({
+  __esModule: true,
+  default: {
+    listVehicles: (...args) => mockListVehicles(...args),
+    addVehicle: jest.fn(),
+    selectVehicle: jest.fn(),
+    removeVehicle: jest.fn(),
+  },
+}));
 
 jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
   usePrototypeRideRuntime: jest.fn(),
@@ -71,6 +83,7 @@ jest.mock('../src/services/runtime/driverWaitlistService', () => ({
     waitListStatus: 'none',
     position: null,
     city: { cityLabel: 'Rio de Janeiro', pendingDrivers: 11, approvedDrivers: 42 },
+    criteria: { cityActive: true, waitListEnabled: true, documentsComplete: true },
   }),
   leaveDriverWaitlist: jest.fn().mockResolvedValue({ success: true }),
 }));
@@ -138,6 +151,17 @@ describe('prototype new surfaces', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     usePrototypeRideRuntime.mockReturnValue(buildRuntime());
+    mockListVehicles.mockResolvedValue([
+      {
+        id: 'vehicle_1',
+        brand: 'Nissan',
+        model: 'Leaf',
+        plate: 'LEF-2042',
+        year: 2025,
+        status: 'approved',
+        isActive: true,
+      },
+    ]);
   });
 
   it('renders the dedicated share trip surface and opens the public preview', () => {
@@ -151,6 +175,9 @@ describe('prototype new surfaces', () => {
 
     expect(screen.getByText('Acompanhar viagem')).toBeTruthy();
     expect(screen.getByText('Copiar link')).toBeTruthy();
+    expect(screen.queryByText('WhatsApp')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('robotaxi-share-more-actions'));
     expect(screen.getByText('WhatsApp')).toBeTruthy();
 
     fireEvent.press(screen.getByText('Prévia'));
@@ -262,6 +289,9 @@ describe('prototype new surfaces', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Rio de Janeiro')).toBeTruthy();
+      expect(screen.getByText('Ativa')).toBeTruthy();
+      expect(screen.getByText('Habilitada')).toBeTruthy();
+      expect(screen.getByText('Completos')).toBeTruthy();
     });
 
     fireEvent.press(screen.getByText('Entrar na waitlist'));
@@ -282,6 +312,27 @@ describe('prototype new surfaces', () => {
       );
       expect(screen.getByText('DRV-123')).toBeTruthy();
     });
+  });
+
+  it('blocks waitlist entry when city criteria cannot be confirmed', async () => {
+    loadDriverWaitlistStatus.mockResolvedValueOnce(null);
+
+    const screen = render(
+      <RobotaxiDriverWaitlistScreen
+        navigation={buildNavigation()}
+        route={{ key: 'driver-waitlist-unavailable', params: {} }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('robotaxi-driver-waitlist-unavailable-state')).toBeTruthy();
+      expect(screen.getByText('Indisponível')).toBeTruthy();
+    });
+
+    const joinButton = screen.getByTestId('robotaxi-driver-waitlist-join-button');
+    expect(joinButton.props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+    fireEvent.press(joinButton);
+    expect(joinDriverWaitlist).not.toHaveBeenCalled();
   });
 
   it('renders the isolated driver waitlist status surface and joins from the app', async () => {
@@ -348,16 +399,98 @@ describe('prototype new surfaces', () => {
       expect(screen.getByText('Ticket #SUP-123 criado')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Abrir chat'));
+    fireEvent.press(screen.getByText('Acompanhar ticket'));
 
     expect(navigation.replace).toHaveBeenCalledWith(
-      'RobotaxiPrototypeChat',
+      'RobotaxiPrototypeSupportThread',
       expect.objectContaining({
+        ticketId: 'SUP-123',
         bookingId: 'booking_1',
         source: 'passenger-trip',
         bookingStatus: 'started',
       })
     );
+  });
+
+  it('opens a prefilled identity review ticket without offering another support decision', async () => {
+    const runtime = buildRuntime();
+    usePrototypeRideRuntime.mockReturnValue(runtime);
+    const screen = render(
+      <RobotaxiSupportTicketScreen
+        navigation={buildNavigation()}
+        route={{
+          key: 'support-ticket-identity-review',
+          params: {
+            type: 'account',
+            subject: 'Revisão de identidade',
+            description: 'A validação de identidade não foi concluída. Acredito que houve um engano e solicito uma análise.',
+            source: 'kyc_identity_mismatch_appeal',
+            kycEvidenceId: 'evidence_01HZX9',
+            kycReviewCaseId: 'case_01HZX9',
+            kycChallengeId: 'challenge_01HZX9',
+            requirement: 'IDENTITY_REVERIFICATION',
+            reviewAvailable: true,
+            similarityScore: 0.12,
+            referenceImageUrl: 'https://storage.example/private-selfie.jpg',
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByLabelText('robotaxi-support-ticket-subject').props.value).toBe(
+      'Revisão de identidade',
+    );
+    expect(screen.getByLabelText('robotaxi-support-ticket-description').props.value).toContain(
+      'solicito uma análise',
+    );
+    expect(screen.getByTestId('robotaxi-support-ticket-type-account')).toBeTruthy();
+    expect(screen.queryByTestId('robotaxi-support-ticket-type-payment')).toBeNull();
+    expect(screen.queryByTestId('robotaxi-support-ticket-type-trip')).toBeNull();
+
+    fireEvent.press(screen.getByLabelText('robotaxi-support-ticket-submit'));
+
+    await waitFor(() => {
+      expect(runtime.openSupportTicket).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'account',
+          priority: 'N2',
+          subject: 'Revisão de identidade',
+          source: 'kyc_identity_mismatch_appeal',
+          kycEvidenceId: 'evidence_01HZX9',
+          kycReviewCaseId: 'case_01HZX9',
+          kycChallengeId: 'challenge_01HZX9',
+          requirement: 'IDENTITY_REVERIFICATION',
+          reviewAvailable: true,
+        }),
+      );
+    });
+
+    const submittedPayload = runtime.openSupportTicket.mock.calls[0][0];
+    expect(submittedPayload).not.toHaveProperty('similarityScore');
+    expect(submittedPayload).not.toHaveProperty('referenceImageUrl');
+  });
+
+  it('does not expose a technical backend error in the identity review ticket', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime({
+      supportError: 'AWS CompareFaces evidence signedUrl is unavailable (status 503)',
+    }));
+    const screen = render(
+      <RobotaxiSupportTicketScreen
+        navigation={buildNavigation()}
+        route={{
+          key: 'support-ticket-identity-review-error',
+          params: {
+            source: 'kyc_identity_mismatch_appeal',
+            kycEvidenceId: 'evidence_01HZX9',
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText(
+      'Não foi possível solicitar a análise agora. Tente novamente em instantes.',
+    )).toBeTruthy();
+    expect(screen.queryByText(/AWS|CompareFaces|signedUrl|status 503/i)).toBeNull();
   });
 
   it('returns a direct support ticket close to the canonical active ride route', () => {
@@ -449,7 +582,7 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-open-ticket'));
+    fireEvent.press(screen.getByLabelText('robotaxi-support-primary-action'));
 
     expect(navigation.navigate).toHaveBeenCalledWith(
       'RobotaxiPrototypeSupportTicket',
@@ -463,30 +596,32 @@ describe('prototype new surfaces', () => {
       })
     );
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-report-incident'));
+    fireEvent.press(screen.getByTestId('robotaxi-support-option-safety'));
+    fireEvent.press(screen.getByLabelText('robotaxi-support-primary-action'));
 
     await waitFor(() => {
       expect(runtime.reportIncident).toHaveBeenCalledWith(
         expect.objectContaining({
           bookingId: 'trip_1',
           bookingStatus: 'completed',
-          priority: 'N2',
-          severity: 'payment',
+          priority: 'N1',
+          severity: 'safety',
           source: 'receipt',
-          type: 'payment',
+          type: 'safety',
         })
       );
     });
 
+    fireEvent.press(screen.getByLabelText('robotaxi-support-more-actions'));
     fireEvent.press(screen.getByLabelText('robotaxi-support-open-complain'));
     expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeComplain',
       expect.objectContaining({
         bookingId: 'trip_1',
-        priority: 'N2',
-        severity: 'payment',
+        priority: 'N1',
+        severity: 'safety',
         source: 'receipt',
-        type: 'payment',
+        type: 'safety',
       })
     );
 
@@ -500,7 +635,7 @@ describe('prototype new surfaces', () => {
     );
   });
 
-  it('routes general support chat to the support center instead of trip chat without a booking', () => {
+  it('routes general support chat to the current ticket composer without a booking', () => {
     usePrototypeRideRuntime.mockReturnValue(buildRuntime({
       activeBookingId: null,
       activeBooking: null,
@@ -519,13 +654,15 @@ describe('prototype new surfaces', () => {
       />
     );
 
+    expect(screen.queryByLabelText('robotaxi-support-open-chat')).toBeNull();
+    fireEvent.press(screen.getByLabelText('robotaxi-support-more-actions'));
     fireEvent.press(screen.getByLabelText('robotaxi-support-open-chat'));
 
     expect(navigation.replace).toHaveBeenCalledWith(
-      'Support',
+      'RobotaxiPrototypeSupportTicket',
       expect.objectContaining({
-        initialTab: 'chat',
         source: 'support',
+        type: 'payment',
       })
     );
     expect(navigation.replace).not.toHaveBeenCalledWith(
@@ -534,7 +671,7 @@ describe('prototype new surfaces', () => {
     );
   });
 
-  it('opens the support center chat after a general ticket without trip scope', async () => {
+  it('opens the current ticket thread after a general ticket without trip scope', async () => {
     const runtime = buildRuntime({
       activeBookingId: null,
       activeBooking: null,
@@ -565,14 +702,14 @@ describe('prototype new surfaces', () => {
       expect(screen.getByText('Ticket #SUP-123 criado')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Abrir chat'));
+    fireEvent.press(screen.getByText('Acompanhar ticket'));
 
     expect(navigation.replace).toHaveBeenCalledWith(
-      'Support',
+      'RobotaxiPrototypeSupportThread',
       expect.objectContaining({
-        initialTab: 'chat',
         source: 'support-ticket',
         ticketId: 'SUP-123',
+        ticket: expect.objectContaining({ id: 'SUP-123' }),
       })
     );
     expect(navigation.replace).not.toHaveBeenCalledWith(
@@ -690,7 +827,7 @@ describe('prototype new surfaces', () => {
     });
   });
 
-  it('renders driver documents and vehicle management surfaces', () => {
+  it('renders driver documents and vehicle management surfaces', async () => {
     const navigation = buildNavigation();
     const docs = render(
       <RobotaxiDriverDocumentsScreen
@@ -711,9 +848,11 @@ describe('prototype new surfaces', () => {
     );
 
     expect(vehicles.getByText('Veículos')).toBeTruthy();
-    expect(vehicles.getAllByText('Nissan Leaf').length).toBeGreaterThan(0);
-    expect(vehicles.getAllByText('LEF-2042').length).toBeGreaterThan(0);
-    expect(vehicles.getByText('Adicionar ou trocar veículo')).toBeTruthy();
+    await waitFor(() => {
+      expect(vehicles.getAllByText('Nissan Leaf').length).toBeGreaterThan(0);
+      expect(vehicles.getAllByText(/LEF-2042/).length).toBeGreaterThan(0);
+      expect(vehicles.getByText('Adicionar veículo')).toBeTruthy();
+    });
   });
 
   it('uses the canonical CRLV vehicle identity on driver activation instead of a hardcoded vehicle label', async () => {
@@ -744,6 +883,10 @@ describe('prototype new surfaces', () => {
           },
         },
         driverActivationRemote: {
+          activationState: 'ACTIVE',
+          checklist: {
+            vehicleRegistration: true,
+          },
           documents: {
             cnh: { status: 'approved' },
             crlv: {
@@ -771,6 +914,151 @@ describe('prototype new surfaces', () => {
       expect(screen.getByText('Nissan Leaf PRATA · LEF-2042')).toBeTruthy();
     });
     expect(screen.queryByText('Honda City branco')).toBeNull();
+  });
+
+  it('keeps the canonical vehicle pending after CRLV approval until the backend vehicle gate is complete', async () => {
+    const navigation = buildNavigation();
+    const localActivation = {
+      stages: {
+        driver_data_activation: {
+          status: 'approved',
+          checklist: {
+            cnhEar: true,
+            vehicleRegistration: true,
+            backgroundCheckConsent: true,
+          },
+        },
+        face_validation: {
+          status: 'action_required',
+          checklist: { facialValidation: false },
+        },
+        vehicle_activation: {
+          status: 'approved',
+          checklist: { crlv: true },
+        },
+      },
+    };
+    const crlvDocument = {
+      status: 'approved',
+      data: {
+        modelo: 'Honda City',
+        cor: 'BRANCO',
+        placa: 'RJA-2D41',
+      },
+    };
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildRuntime({
+        driverActivation: localActivation,
+        driverActivationRemote: {
+          activationState: 'VEHICLE_PENDING',
+          checklist: { vehicleRegistration: false },
+          blockingReason: 'Cadastro canônico do veículo pendente.',
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: crlvDocument,
+          },
+          vehicle: {
+            approved: false,
+            model: 'Honda City',
+            color: 'BRANCO',
+            plate: 'RJA-2D41',
+          },
+        },
+      })
+    );
+
+    const screen = render(
+      <RobotaxiDriverActivationScreen
+        navigation={navigation}
+        route={{ key: 'driver-activation-partial', params: {} }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Cadastro do veículo pendente')).toBeTruthy();
+    });
+    expect(screen.queryByText('Atualizado após CRLV')).toBeNull();
+    expect(screen.queryByText('Automático')).toBeNull();
+    expect(screen.queryByText('Honda City BRANCO · RJA-2D41')).toBeNull();
+    expect(screen.queryByText('Iniciar validação')).toBeNull();
+    fireEvent.press(screen.getByTestId('driver-activation-continue-button'));
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({ requirement: 'LIVENESS_REQUIRED' }),
+    );
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildRuntime({
+        driverActivation: localActivation,
+        driverActivationRemote: {
+          activationState: 'APPROVED_NEEDS_LIVENESS',
+          requiresLiveness: true,
+          checklist: { vehicleRegistration: true },
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: crlvDocument,
+          },
+          vehicle: {
+            approved: true,
+            active: true,
+            model: 'Honda City',
+            color: 'BRANCO',
+            plate: 'RJA-2D41',
+          },
+        },
+      })
+    );
+    screen.rerender(
+      <RobotaxiDriverActivationScreen
+        navigation={navigation}
+        route={{ key: 'driver-activation-partial', params: {} }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Honda City BRANCO · RJA-2D41')).toBeTruthy();
+      expect(screen.getByText('Iniciar validação')).toBeTruthy();
+    });
+    expect(screen.queryByText('Cadastro do veículo pendente')).toBeNull();
+  });
+
+  it('refreshes driver activation again whenever the activation screen receives focus', async () => {
+    const refreshDriverActivationRemote = jest.fn().mockResolvedValue(undefined);
+    let focusHandler = null;
+    const navigation = buildNavigation({
+      addListener: jest.fn((eventName, handler) => {
+        if (eventName === 'focus') {
+          focusHandler = handler;
+        }
+        return jest.fn();
+      }),
+    });
+    usePrototypeRideRuntime.mockReturnValue(
+      buildRuntime({
+        profile: { uid: 'driver_focus_refresh' },
+        refreshDriverActivationRemote,
+      })
+    );
+
+    render(
+      <RobotaxiDriverActivationScreen
+        navigation={navigation}
+        route={{ key: 'driver-activation-focus', params: {} }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(refreshDriverActivationRemote).toHaveBeenCalledTimes(1);
+      expect(focusHandler).toEqual(expect.any(Function));
+    });
+
+    await act(async () => {
+      focusHandler();
+      await Promise.resolve();
+    });
+
+    expect(refreshDriverActivationRemote).toHaveBeenCalledTimes(2);
   });
 
   it('surfaces rejected driver documents as actionable review states instead of pending', async () => {
@@ -858,9 +1146,18 @@ describe('prototype new surfaces', () => {
               checklist: { facialValidation: false },
             },
             vehicle_activation: {
-              status: 'locked',
-              checklist: { crlv: false },
+              status: 'approved',
+              checklist: { crlv: true },
             },
+          },
+        },
+        driverActivationRemote: {
+          activationState: 'APPROVED_NEEDS_LIVENESS',
+          requiresLiveness: true,
+          checklist: { vehicleRegistration: true },
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: { status: 'approved' },
           },
         },
       })

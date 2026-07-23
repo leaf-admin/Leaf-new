@@ -5,6 +5,7 @@ import {
   buildVisibleRouteEdgePadding,
   buildVisibleRouteViewportFrame,
   distanceBetweenCoordinatesKm,
+  validateRoadRouteGeometry,
 } from '../src/screens/prototype/prototypeRouteViewport';
 
 describe('prototype route viewport', () => {
@@ -18,6 +19,157 @@ describe('prototype route viewport', () => {
   const projectX = ({ coordinate, region, mapWidth }) => (
     mapWidth / 2 + ((coordinate.longitude - region.longitude) / region.longitudeDelta) * mapWidth
   );
+
+  it('rejects a continental outlier and keeps only a local camera fallback without a fake polyline', () => {
+    const origin = { latitude: -22.9868, longitude: -43.2254 };
+    const destination = { latitude: -22.9844, longitude: -43.2236 };
+    const geometry = validateRoadRouteGeometry({
+      origin,
+      destination,
+      coordinates: [
+        origin,
+        { latitude: 0.2, longitude: 12.4 },
+        { latitude: -22.9852, longitude: -43.2242 },
+        destination,
+      ],
+    });
+
+    expect(geometry).toEqual(expect.objectContaining({
+      valid: false,
+      reason: 'implausible_extent',
+      coordinates: [],
+    }));
+    expect(buildRouteViewportRegion({ coordinates: geometry.coordinates })).toBeNull();
+
+    const localCamera = buildRouteViewportRegion({
+      coordinates: [origin, destination],
+      mapWidth: 390,
+      mapHeight: 844,
+      activeOcclusion: { top: 0, bottom: 348 },
+      insets: { top: 24, bottom: 34 },
+      viewportPadding: { top: 96, right: 24, bottom: 348, left: 24 },
+    });
+    expect(localCamera).toBeTruthy();
+    expect(localCamera.latitudeDelta).toBeLessThan(0.08);
+    expect(localCamera.longitudeDelta).toBeLessThan(0.08);
+  });
+
+  it('rejects swapped endpoint coordinates before fitting the route', () => {
+    const origin = { latitude: -22.9868, longitude: -43.2254 };
+    const destination = { latitude: -22.9844, longitude: -43.2236 };
+    const geometry = validateRoadRouteGeometry({
+      origin,
+      destination,
+      coordinates: [
+        { latitude: -43.2254, longitude: -22.9868 },
+        { latitude: -22.9857, longitude: -43.2248 },
+        destination,
+      ],
+    });
+
+    expect(geometry.valid).toBe(false);
+    expect(geometry.reason).toBe('endpoint_mismatch');
+  });
+
+  it('rejects two-point straight-line geometry for active ride maps', () => {
+    const origin = { latitude: -22.9836, longitude: -43.2192 };
+    const destination = { latitude: -22.98488, longitude: -43.22215 };
+
+    expect(validateRoadRouteGeometry({
+      origin,
+      destination,
+      coordinates: [origin, destination],
+    })).toEqual(expect.objectContaining({
+      valid: false,
+      reason: 'insufficient_geometry',
+      coordinates: [],
+    }));
+  });
+
+  it('rejects the four-point locally generated fallback curve', () => {
+    const origin = { latitude: -22.9836, longitude: -43.2192 };
+    const destination = { latitude: -22.98488, longitude: -43.22215 };
+    const latitudeDelta = destination.latitude - origin.latitude;
+    const longitudeDelta = destination.longitude - origin.longitude;
+    const syntheticFallback = [
+      origin,
+      {
+        latitude: origin.latitude + latitudeDelta * 0.34 - longitudeDelta * 0.14,
+        longitude: origin.longitude + longitudeDelta * 0.34 + latitudeDelta * 0.14,
+      },
+      {
+        latitude: origin.latitude + latitudeDelta * 0.68 - longitudeDelta * 0.14 * 0.55,
+        longitude: origin.longitude + longitudeDelta * 0.68 + latitudeDelta * 0.14 * 0.55,
+      },
+      destination,
+    ];
+
+    expect(validateRoadRouteGeometry({
+      origin,
+      destination,
+      coordinates: syntheticFallback,
+    })).toEqual(expect.objectContaining({
+      valid: false,
+      reason: 'synthetic_fallback',
+      coordinates: [],
+    }));
+  });
+
+  it('accepts plausible backend road geometry with intermediate shape points', () => {
+    const origin = { latitude: -22.9836, longitude: -43.2192 };
+    const destination = { latitude: -22.98488, longitude: -43.22215 };
+    const backendRoadGeometry = [
+      origin,
+      { latitude: -22.98378, longitude: -43.21992 },
+      { latitude: -22.98412, longitude: -43.22074 },
+      { latitude: -22.98466, longitude: -43.22153 },
+      destination,
+    ];
+
+    expect(validateRoadRouteGeometry({
+      origin,
+      destination,
+      coordinates: backendRoadGeometry,
+    })).toEqual(expect.objectContaining({
+      valid: true,
+      reason: 'road_geometry',
+      coordinates: backendRoadGeometry,
+    }));
+  });
+
+  it('caps an oversized card occlusion before it can inflate a Leblon route to continental scale', () => {
+    const route = [
+      { latitude: -22.9836, longitude: -43.2192 },
+      { latitude: -22.9836222, longitude: -43.2203822 },
+      { latitude: -22.98424325, longitude: -43.22130456 },
+      { latitude: -22.98488, longitude: -43.22215 },
+    ];
+    const viewport = {
+      mapWidth: 390,
+      mapHeight: 844,
+      activeOcclusion: { top: 0, bottom: 900 },
+      insets: { top: 59, bottom: 34 },
+      viewportPadding: { top: 96, right: 24, bottom: 900, left: 24 },
+      minVisibleHeight: 220,
+    };
+    const frame = buildVisibleRouteViewportFrame(viewport);
+    const region = buildRouteViewportRegion({
+      ...viewport,
+      coordinates: route,
+      shortRouteMaxDistanceKm: 10,
+      shortRouteLatitudeDeltaMultiplier: 1.1,
+      shortRouteLongitudeDeltaMultiplier: 1.2,
+    });
+
+    expect(frame.height).toBeGreaterThanOrEqual(220);
+    expect(region).toBeTruthy();
+    expect(region.latitude).toBeGreaterThan(-23.1);
+    expect(region.latitude).toBeLessThan(-22.8);
+    expect(region.longitude).toBeGreaterThan(-43.4);
+    expect(region.longitude).toBeLessThan(-43.0);
+    expect(region.latitudeDelta).toBeLessThanOrEqual(0.12);
+    expect(region.longitudeDelta).toBeLessThanOrEqual(0.12);
+  });
 
   it('defines the explicit map frame that remains visible above overlays', () => {
     const frame = buildVisibleRouteViewportFrame({
@@ -551,22 +703,24 @@ describe('prototype route viewport', () => {
       viewportPadding,
       minVisibleHeight: 220,
     });
-    const actualTop = Math.max(insets.top, activeOcclusion.top, viewportPadding.top);
-    const actualBottom = Math.min(
-      Math.max(insets.bottom, activeOcclusion.bottom, viewportPadding.bottom),
-      mapHeight - actualTop - 1,
-    );
-    const visibleBottom = mapHeight - actualBottom;
+    const frame = buildVisibleRouteViewportFrame({
+      mapWidth,
+      mapHeight,
+      activeOcclusion,
+      insets,
+      viewportPadding,
+      minVisibleHeight: 220,
+    });
 
     expect(region).toBeTruthy();
-    expect(visibleBottom).toBeLessThan(actualTop + 220);
+    expect(frame.height).toBeGreaterThanOrEqual(220);
     route.forEach(coordinate => {
       const x = projectX({ coordinate, region, mapWidth });
       const y = projectY({ coordinate, region, mapHeight });
-      expect(x).toBeGreaterThanOrEqual(viewportPadding.left);
-      expect(x).toBeLessThanOrEqual(mapWidth - viewportPadding.right);
-      expect(y).toBeGreaterThanOrEqual(actualTop);
-      expect(y).toBeLessThanOrEqual(visibleBottom);
+      expect(x).toBeGreaterThanOrEqual(frame.left);
+      expect(x).toBeLessThanOrEqual(frame.right);
+      expect(y).toBeGreaterThanOrEqual(frame.top);
+      expect(y).toBeLessThanOrEqual(frame.bottom);
     });
   });
 });

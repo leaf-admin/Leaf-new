@@ -12,7 +12,7 @@ import {
   PrototypeMenuSection,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
-import { leafRideColors } from '../../components/prototype/LeafRideUI';
+import { LeafButton, leafRideColors } from '../../components/prototype/LeafRideUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
@@ -118,7 +118,7 @@ function resolveSupportReturnRoute(context = {}) {
     return 'RobotaxiPrototypeReceipt';
   }
   if (source === 'driver-trip') {
-    return 'RobotaxiPrototypeDriverTrip';
+    return 'RobotaxiPrototype';
   }
   if (context.bookingId) {
     return 'RobotaxiPrototypeTrip';
@@ -154,7 +154,10 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [selectedOptionId, setSelectedOptionId] = useState(() => resolveInitialSupportOptionId(route?.params));
+  const [showSecondaryActions, setShowSecondaryActions] = useState(false);
   const selectedOption = useMemo(() => SUPPORT_OPTIONS.find(item => item.id === selectedOptionId) || SUPPORT_OPTIONS[0], [selectedOptionId]);
+  const incidentIsPrimary = selectedOption.id === 'safety';
+  const primaryActionLabel = incidentIsPrimary ? 'Registrar incidente' : 'Abrir ticket';
   const supportRideContext = useMemo(
     () => resolveSupportRideContext(route?.params, runtime),
     [
@@ -165,6 +168,9 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
       runtime.activeBooking,
       runtime.driverTripMeta,
     ],
+  );
+  const hasRideChatContext = Boolean(
+    supportRideContext.bookingId || supportRideContext.rideId || supportRideContext.tripId,
   );
 
   usePrototypeMapOcclusion({
@@ -208,16 +214,39 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
   ]);
 
   const handleOpenChat = useCallback(() => {
-    if (supportRideContext.bookingId || supportRideContext.rideId || supportRideContext.tripId) {
+    if (hasRideChatContext) {
       navigation.replace('RobotaxiPrototypeChat', supportRideContext);
       return;
     }
 
-    navigation.replace('Support', {
-      initialTab: 'chat',
+    if (supportLastTicket?.id) {
+      navigation.replace('RobotaxiPrototypeSupportThread', {
+        ticketId: supportLastTicket.id,
+        ticket: supportLastTicket,
+        source: supportRideContext.source || 'prototype-support',
+      });
+      return;
+    }
+
+    navigation.replace('RobotaxiPrototypeSupportTicket', {
+      type: selectedOption.id,
+      priority: selectedOption.priority,
+      severity: selectedOption.severity,
+      subject: selectedOption.title,
+      description: selectedOption.subtitle,
       source: supportRideContext.source || 'prototype-support',
     });
-  }, [navigation, supportRideContext]);
+  }, [
+    hasRideChatContext,
+    navigation,
+    selectedOption.id,
+    selectedOption.priority,
+    selectedOption.severity,
+    selectedOption.subtitle,
+    selectedOption.title,
+    supportLastTicket,
+    supportRideContext,
+  ]);
 
   const handleReportIncident = useCallback(async () => {
     try {
@@ -234,6 +263,10 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
       Alert.alert('Não foi possível registrar', error?.message || 'Tente novamente em instantes.');
     }
   }, [reportIncident, selectedOption.id, selectedOption.priority, selectedOption.severity, selectedOption.title, supportRideContext]);
+
+  const handlePrimarySupportAction = incidentIsPrimary
+    ? handleReportIncident
+    : handleCreateTicket;
 
   return (
     <PrototypeScreenTransition>
@@ -287,49 +320,52 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                 ))}
               </PrototypeMenuSection>
 
-              <PrototypeMenuSection title="Canais">
-                <PrototypeMenuRow
-                  icon="chatbubble-ellipses-outline"
-                  title="Falar no chat"
-                  subtitle="Abrir conversa em tempo real com motorista ou suporte."
-                  onPress={handleOpenChat}
-                  testID="robotaxi-support-open-chat"
-                  accessibilityLabel="robotaxi-support-open-chat"
-                />
-                <PrototypeMenuRow
-                  icon="warning-outline"
-                  title="Abrir reclamacao"
-                  subtitle="Registrar um relato mais completo com evidências."
-                  last
-                  onPress={() => navigation.replace('RobotaxiPrototypeComplain', {
-                    ...supportRideContext,
-                    type: selectedOption.id,
-                    priority: selectedOption.priority,
-                    severity: selectedOption.severity,
-                  })}
-                  testID="robotaxi-support-open-complain"
-                  accessibilityLabel="robotaxi-support-open-complain"
-                />
-              </PrototypeMenuSection>
-
               <View style={styles.actionsBlock}>
                 <PrototypePrimaryButton
-                  label={supportLoading ? 'Enviando...' : 'Registrar incidente'}
-                  icon="alert-circle-outline"
-                  onPress={supportLoading ? undefined : handleReportIncident}
+                  label={supportLoading ? 'Enviando...' : primaryActionLabel}
+                  icon={incidentIsPrimary ? 'alert-circle-outline' : 'document-text-outline'}
+                  onPress={supportLoading ? undefined : handlePrimarySupportAction}
                   style={styles.primaryButton}
-                  testID="robotaxi-support-report-incident"
-                  accessibilityLabel="robotaxi-support-report-incident"
+                  testID="robotaxi-support-primary-action"
+                  accessibilityLabel="robotaxi-support-primary-action"
                 />
-                <PrototypePrimaryButton
-                  label={supportLoading ? 'Enviando...' : 'Abrir ticket'}
-                  icon="document-text-outline"
-                  onPress={supportLoading ? undefined : handleCreateTicket}
-                  style={styles.primaryButton}
-                  testID="robotaxi-support-open-ticket"
-                  accessibilityLabel="robotaxi-support-open-ticket"
+                <LeafButton
+                  label={showSecondaryActions ? 'Ocultar opções' : 'Mais opções'}
+                  icon={showSecondaryActions ? 'chevron-up-outline' : 'ellipsis-horizontal'}
+                  tone="ghost"
+                  onPress={() => setShowSecondaryActions(value => !value)}
+                  style={styles.secondaryActionsDisclosure}
+                  testID="robotaxi-support-more-actions"
+                  accessibilityLabel="robotaxi-support-more-actions"
                 />
               </View>
+
+              {showSecondaryActions ? (
+                <PrototypeMenuSection title="Outras formas de ajuda">
+                  <PrototypeMenuRow
+                    icon="chatbubble-ellipses-outline"
+                    title={hasRideChatContext ? 'Falar com motorista' : supportLastTicket?.id ? 'Acompanhar ticket' : 'Abrir conversa com suporte'}
+                    subtitle={hasRideChatContext ? 'Enviar mensagem no chat desta corrida.' : 'Usar a thread de atendimento da Leaf.'}
+                    onPress={handleOpenChat}
+                    testID="robotaxi-support-open-chat"
+                    accessibilityLabel="robotaxi-support-open-chat"
+                  />
+                  <PrototypeMenuRow
+                    icon="warning-outline"
+                    title="Abrir reclamação"
+                    subtitle="Registrar um relato mais completo com evidências."
+                    last
+                    onPress={() => navigation.replace('RobotaxiPrototypeComplain', {
+                      ...supportRideContext,
+                      type: selectedOption.id,
+                      priority: selectedOption.priority,
+                      severity: selectedOption.severity,
+                    })}
+                    testID="robotaxi-support-open-complain"
+                    accessibilityLabel="robotaxi-support-open-complain"
+                  />
+                </PrototypeMenuSection>
+              ) : null}
 
               {supportLoading ? (
                 <View style={styles.feedbackRow}>
@@ -409,6 +445,9 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     marginTop: 0,
+  },
+  secondaryActionsDisclosure: {
+    width: '100%',
   },
   feedbackRow: {
     marginTop: 10,

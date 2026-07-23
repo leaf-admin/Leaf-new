@@ -18,10 +18,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import {
-  CardHandle,
-  PrototypeCard,
-  PrototypePrimaryButton,
-} from "../../components/prototype/PrototypeUI";
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  RobotaxiLifecycleDisclosure,
+  robotaxiLifecycleMetrics,
+} from "../../components/prototype/RobotaxiLifecycleUI";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
@@ -143,8 +144,10 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   );
   const [airConditioningOk, setAirConditioningOk] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
   const qaAutoSubmitStartedRef = useRef(false);
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const sheetBottom =
+    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
   const cardMaxHeight = Math.max(
     340,
     windowHeight - insets.top - insets.bottom - 86,
@@ -411,7 +414,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
           keyboardVerticalOffset={Math.max(0, insets.top - 4)}
           style={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <PrototypeCard
+          <RobotaxiLifecycleCard
             onLayout={handleCardLayout}
             style={[styles.card, { maxHeight: cardMaxHeight }]}
             testID={
@@ -430,8 +433,6 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.cardScroll}
             >
-              <CardHandle />
-
               <Text style={styles.title}>
               {reviewerType === "driver"
                 ? "Avalie o passageiro"
@@ -553,30 +554,36 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 : "Selecione uma opção ou escreva um comentário."}
             </Text>
 
-            <PrototypePrimaryButton
+            <RobotaxiLifecycleButton
               label={isSubmitting ? "Enviando..." : "Enviar avaliação"}
               icon="checkmark-outline"
+              tone="primary"
               onPress={handleSubmit}
               disabled={isSubmitting}
               style={styles.submitButton}
               testID="passenger-rating-submit-button"
               accessibilityLabel="passenger-rating-submit-button"
             />
-            <TouchableOpacity
-              activeOpacity={0.86}
-              disabled={isSubmitting}
-              onPress={handleDismiss}
-              style={[
-                styles.skipButton,
-                isSubmitting && styles.skipButtonDisabled,
-              ]}
-              testID="rating-skip-to-map-button"
-              accessibilityLabel="rating-skip-to-map-button"
-            >
-              <Text style={styles.skipButtonText}>Agora não</Text>
-            </TouchableOpacity>
+            <RobotaxiLifecycleDisclosure
+              expanded={secondaryActionsVisible}
+              onPress={() => setSecondaryActionsVisible((visible) => !visible)}
+              style={styles.ratingMoreOptions}
+              label="Mais opções"
+              expandedLabel="Ocultar opções"
+              testID="rating-more-options-button"
+            />
+            {secondaryActionsVisible ? (
+              <RobotaxiLifecycleButton
+                label="Agora não"
+                disabled={isSubmitting}
+                onPress={handleDismiss}
+                style={styles.skipButton}
+                testID="rating-skip-to-map-button"
+                accessibilityLabel="rating-skip-to-map-button"
+              />
+            ) : null}
             </ScrollView>
-          </PrototypeCard>
+          </RobotaxiLifecycleCard>
         </KeyboardAvoidingView>
       </View>
     </PrototypeScreenTransition>
@@ -594,13 +601,7 @@ const styles = StyleSheet.create({
     right: 0,
   },
   card: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 16,
+    marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
   cardScroll: {
     paddingBottom: 2,
@@ -608,8 +609,8 @@ const styles = StyleSheet.create({
   title: {
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 15.5,
+    lineHeight: 20,
     textAlign: "center",
   },
   subtitle: {
@@ -724,23 +725,10 @@ const styles = StyleSheet.create({
   submitButton: {
     marginTop: 10,
   },
+  ratingMoreOptions: {
+    marginTop: 8,
+  },
   skipButton: {
     marginTop: 8,
-    minHeight: 42,
-    borderRadius: 21,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    backgroundColor: color.surface.secondary,
-  },
-  skipButtonDisabled: {
-    opacity: 0.5,
-  },
-  skipButtonText: {
-    color: color.text.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
   },
 });

@@ -4,7 +4,9 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 
-import WooviPaymentModal from '../src/components/payment/WooviPaymentModal';
+import WooviPaymentModal, {
+  getQaPaymentProgressLabel,
+} from '../src/components/payment/WooviPaymentModal';
 import WooviService from '../src/services/WooviService';
 import Logger from '../src/utils/Logger';
 import {
@@ -88,6 +90,9 @@ jest.mock('../src/services/PaymentBypassService', () => ({
 
 jest.mock('../src/config/runtimeAccessPolicy', () => ({
   allowForcedPaymentBypass: jest.fn(() => false),
+  allowTestUserTools: jest.fn(() => true),
+  isE2ETestBuild: jest.fn(() => true),
+  isSimulatorBuild: jest.fn(() => true),
 }));
 
 jest.mock('../src/services/WooviService', () => ({
@@ -102,6 +107,10 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     jest.clearAllTimers();
+    const runtimeAccessPolicy = jest.requireMock('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.allowTestUserTools.mockReturnValue(true);
+    runtimeAccessPolicy.isE2ETestBuild.mockReturnValue(true);
+    runtimeAccessPolicy.isSimulatorBuild.mockReturnValue(true);
     mockFirebaseCurrentUserUid = 'passenger_1';
     WooviService.resolvePaymentRuntimeProfile.mockResolvedValue({
       success: true,
@@ -131,6 +140,13 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
         .replace(/\//g, '_');
     return `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode(payload)}.signature`;
   };
+
+  it('maps internal QA payment states to user-facing copy', () => {
+    expect(getQaPaymentProgressLabel('awaiting_backend')).toBe('Confirmando pagamento');
+    expect(getQaPaymentProgressLabel('webhook_error')).toBe('Aguardando confirmação');
+    expect(getQaPaymentProgressLabel('unknown_internal_state')).toBe('Aguardando pagamento');
+    expect(getQaPaymentProgressLabel('awaiting_backend')).not.toContain('awaiting_backend');
+  });
 
   it('reopens the persisted charge without creating a second Pix charge', async () => {
     WooviService.processAdvancePayment.mockResolvedValue({
@@ -286,7 +302,7 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     const onPaymentConfirmed = jest.fn();
     const onClose = jest.fn();
 
-    render(
+    const screen = render(
       <WooviPaymentModal
         visible
         onClose={onClose}
@@ -337,7 +353,17 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
         }),
       );
       expect(WooviService.getPaymentStatus).toHaveBeenCalledWith('charge_123');
+      expect(screen.UNSAFE_getByProps({ testID: 'payment-modal-qa-debug' }).props.children).toMatch(
+        /^(Confirmando pagamento|Pagamento confirmado)$/,
+      );
     });
+    expect(
+      screen.UNSAFE_getByProps({ testID: 'payment-modal-qa-debug' }).props.accessibilityLabel,
+    ).toMatch(
+      /^(Confirmando pagamento|Pagamento confirmado)$/,
+    );
+    expect(screen.queryByText(/awaiting_backend/i)).toBeNull();
+    expect(screen.queryByText(/^QA\b/i)).toBeNull();
 
     expect(onPaymentConfirmed).not.toHaveBeenCalled();
 
@@ -764,6 +790,21 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
   });
 
   it('fails closed before creating Pix when authenticated user does not match the passenger', async () => {
+    const runtimeAccessPolicy = jest.requireMock('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.allowTestUserTools.mockReturnValue(false);
+    runtimeAccessPolicy.isE2ETestBuild.mockReturnValue(false);
+    runtimeAccessPolicy.isSimulatorBuild.mockReturnValue(false);
+    await AsyncStorage.setItem('@test_mode', 'true');
+    await AsyncStorage.setItem('@auth_uid', 'other_passenger');
+    await AsyncStorage.setItem(
+      '@qa_socket_id_token',
+      buildTestJwt({
+        sub: 'other_passenger',
+        user_id: 'other_passenger',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      }),
+    );
+
     const screen = render(
       <WooviPaymentModal
         visible
@@ -1077,4 +1118,42 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
 	      )).toBeTruthy();
 	    });
 	  });
+
+    it('keeps the Robotaxi Pix card to one visible decision before expansion', async () => {
+      WooviService.getPaymentStatus.mockResolvedValue({ success: true, status: 'ACTIVE' });
+      const screen = render(
+        <WooviPaymentModal
+          visible
+          onClose={jest.fn()}
+          onPaymentConfirmed={jest.fn()}
+          tripData={{
+            rideId: 'temp_ride_robotaxi_card',
+            pickup: { add: 'Origem' },
+            drop: { add: 'Destino' },
+            carType: 'Leaf Plus',
+            estimatedFare: 13.42,
+          }}
+          estimates={{ estimateFare: 13.42 }}
+          passengerId="passenger_1"
+          passengerName="Passageira Leaf"
+          passengerEmail="passageira@leaf.app.br"
+          prefilledPaymentData={{
+            chargeId: 'charge_robotaxi_card',
+            rideId: 'temp_ride_robotaxi_card',
+            amount: 13.42,
+            amountInCents: 1342,
+            qrCodeText: 'pix-code',
+          }}
+          robotaxiLifecycleCard
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('payment-modal-copy-code-button')).toBeTruthy();
+      });
+      expect(screen.queryByTestId('payment-modal-open-bank-button')).toBeNull();
+
+      fireEvent.press(screen.getByTestId('payment-modal-more-options-button'));
+      expect(screen.getByTestId('payment-modal-open-bank-button')).toBeTruthy();
+    });
 	});

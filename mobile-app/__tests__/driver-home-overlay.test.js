@@ -136,6 +136,26 @@ describe("DriverHomeOverlay", () => {
     expect(onToggleOnline).not.toHaveBeenCalled();
   });
 
+  it('shows an actionable label when the canonical activation is rejected', () => {
+    const { getByText, queryByText } = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline={false}
+        driverActivationResolved
+        driverActivationRemote={{
+          activationState: "REJECTED",
+          documents: { cnh: { status: "failed" } },
+        }}
+        onToggleOnline={() => {}}
+        onOpenActivation={() => {}}
+      />,
+    );
+
+    expect(getByText("Ação necessária")).toBeTruthy();
+    expect(queryByText("Em análise")).toBeNull();
+  });
+
   it("keeps the online toggle interactive while activation is still resolving", () => {
     const onToggleOnline = jest.fn();
     const onOpenActivation = jest.fn();

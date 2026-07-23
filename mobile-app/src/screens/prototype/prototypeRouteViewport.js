@@ -94,16 +94,129 @@ export function distanceBetweenCoordinatesKm(origin, destination) {
   return 2 * earthRadiusKm * Math.asin(Math.sqrt(haversine));
 }
 
+export function validateRoadRouteGeometry({
+  coordinates,
+  origin,
+  destination,
+} = {}) {
+  const points = Array.isArray(coordinates)
+    ? coordinates.filter(isFiniteRouteCoordinate)
+    : [];
+  if (points.length < 3 || !isFiniteRouteCoordinate(origin) || !isFiniteRouteCoordinate(destination)) {
+    return { valid: false, reason: 'insufficient_geometry', coordinates: [] };
+  }
+  if (
+    points.some(point =>
+      Math.abs(Number(point.latitude)) > 90 || Math.abs(Number(point.longitude)) > 180,
+    )
+  ) {
+    return { valid: false, reason: 'invalid_coordinate_range', coordinates: [] };
+  }
+
+  const directDistanceKm = distanceBetweenCoordinatesKm(origin, destination);
+  if (!Number.isFinite(directDistanceKm)) {
+    return { valid: false, reason: 'invalid_endpoints', coordinates: [] };
+  }
+  const endpointToleranceKm = Math.max(0.75, directDistanceKm * 0.5);
+  if (
+    distanceBetweenCoordinatesKm(origin, points[0]) > endpointToleranceKm ||
+    distanceBetweenCoordinatesKm(destination, points[points.length - 1]) > endpointToleranceKm
+  ) {
+    return { valid: false, reason: 'endpoint_mismatch', coordinates: [] };
+  }
+
+  const pathDistanceKm = points.slice(1).reduce(
+    (total, point, index) =>
+      total + distanceBetweenCoordinatesKm(points[index], point),
+    0,
+  );
+  const latitudeValues = points.map(point => point.latitude);
+  const longitudeValues = points.map(point => point.longitude);
+  const extentKm = distanceBetweenCoordinatesKm(
+    {
+      latitude: Math.min(...latitudeValues),
+      longitude: Math.min(...longitudeValues),
+    },
+    {
+      latitude: Math.max(...latitudeValues),
+      longitude: Math.max(...longitudeValues),
+    },
+  );
+  const maxPathDistanceKm = Math.max(8, directDistanceKm * 8 + 3);
+  const maxExtentKm = Math.max(5, directDistanceKm * 6 + 2);
+  const maxEndpointCorridorKm = Math.max(2.5, directDistanceKm * 3 + 1);
+  const hasCorridorOutlier = points.some(point =>
+    Math.min(
+      distanceBetweenCoordinatesKm(origin, point),
+      distanceBetweenCoordinatesKm(destination, point),
+    ) > maxEndpointCorridorKm,
+  );
+  if (
+    !Number.isFinite(pathDistanceKm) ||
+    !Number.isFinite(extentKm) ||
+    pathDistanceKm > maxPathDistanceKm ||
+    extentKm > maxExtentKm ||
+    hasCorridorOutlier
+  ) {
+    return {
+      valid: false,
+      reason: 'implausible_extent',
+      coordinates: [],
+      directDistanceKm,
+      pathDistanceKm,
+      extentKm,
+    };
+  }
+
+  if (points.length === 4) {
+    const latitudeDelta = destination.latitude - origin.latitude;
+    const longitudeDelta = destination.longitude - origin.longitude;
+    const fallback = [
+      origin,
+      {
+        latitude: origin.latitude + latitudeDelta * 0.34 - longitudeDelta * 0.14,
+        longitude: origin.longitude + longitudeDelta * 0.34 + latitudeDelta * 0.14,
+      },
+      {
+        latitude: origin.latitude + latitudeDelta * 0.68 - longitudeDelta * 0.14 * 0.55,
+        longitude: origin.longitude + longitudeDelta * 0.68 + latitudeDelta * 0.14 * 0.55,
+      },
+      destination,
+    ];
+    const isSyntheticFallback = fallback.every((expected, index) =>
+      Math.abs(expected.latitude - points[index].latitude) <= 0.00001 &&
+      Math.abs(expected.longitude - points[index].longitude) <= 0.00001,
+    );
+    if (isSyntheticFallback) {
+      return { valid: false, reason: 'synthetic_fallback', coordinates: [] };
+    }
+  }
+
+  return {
+    valid: true,
+    reason: 'road_geometry',
+    coordinates: points,
+    directDistanceKm,
+    pathDistanceKm,
+    extentKm,
+  };
+}
+
 function normalizeVisibleInsets({
   mapWidth,
   mapHeight,
   activeOcclusion,
   insets,
   viewportPadding,
+  minVisibleHeight = DEFAULT_MIN_VISIBLE_HEIGHT,
 }) {
   const effectiveHeight = Math.max(1, Number(mapHeight) || 1);
   const effectiveWidth = Math.max(1, Number(mapWidth) || effectiveHeight * 0.5);
-  const maxTop = Math.max(0, effectiveHeight - 1);
+  const preservedVisibleHeight = Math.min(
+    effectiveHeight,
+    Math.max(1, Number(minVisibleHeight) || DEFAULT_MIN_VISIBLE_HEIGHT),
+  );
+  const maxTop = Math.max(0, effectiveHeight - preservedVisibleHeight);
   const topInset = Math.min(
     Math.max(
       Number(insets?.top) || 0,
@@ -112,7 +225,10 @@ function normalizeVisibleInsets({
     ),
     maxTop,
   );
-  const maxBottom = Math.max(0, effectiveHeight - topInset - 1);
+  const maxBottom = Math.max(
+    0,
+    effectiveHeight - topInset - preservedVisibleHeight,
+  );
   const bottomInset = Math.min(
     Math.max(
       Number(insets?.bottom) || 0,
@@ -161,6 +277,7 @@ export function buildVisibleRouteViewportFrame({
   activeOcclusion,
   insets,
   viewportPadding,
+  minVisibleHeight = DEFAULT_MIN_VISIBLE_HEIGHT,
 } = {}) {
   const {
     effectiveWidth,
@@ -177,6 +294,7 @@ export function buildVisibleRouteViewportFrame({
     activeOcclusion,
     insets,
     viewportPadding,
+    minVisibleHeight,
   });
 
   return {
@@ -260,14 +378,23 @@ function buildVisibleRouteRegion({
   // inside the exposed area above overlays. Expand its span by that ratio first.
   const verticalFitScale = effectiveHeight / availableHeight;
   const horizontalFitScale = effectiveWidth / availableWidth;
-  const latitudeDelta = Math.max(
+  const rawLatitudeDelta = Math.max(
     safeMinLatitudeDelta,
     (maxLatitude - minLatitude) * latitudeDeltaMultiplier,
   ) * verticalFitScale;
-  const longitudeDelta = Math.max(
+  const rawLongitudeDelta = Math.max(
     (maxLongitude - minLongitude) * longitudeDeltaMultiplier * horizontalFitScale,
-    (latitudeDelta * effectiveWidth) / (effectiveHeight * latitudeCosine),
+    (rawLatitudeDelta * effectiveWidth) / (effectiveHeight * latitudeCosine),
   );
+  const routeDistanceKm = sumRouteDistanceKm(points);
+  const localLatitudeDeltaCap = routeDistanceKm <= 25
+    ? Math.max(0.12, (routeDistanceKm / 111) * 6 + 0.06)
+    : 120;
+  const localLongitudeDeltaCap = routeDistanceKm <= 25
+    ? Math.max(0.12, (routeDistanceKm / (111 * latitudeCosine)) * 6 + 0.06)
+    : 120;
+  const latitudeDelta = Math.min(rawLatitudeDelta, localLatitudeDeltaCap);
+  const longitudeDelta = Math.min(rawLongitudeDelta, localLongitudeDeltaCap);
   const desiredRouteCenterY = topInset + availableHeight / 2;
   const baseCenterY = effectiveHeight / 2;
   const latitudeOffset = (latitudeDelta * (desiredRouteCenterY - baseCenterY)) / effectiveHeight;
@@ -275,9 +402,17 @@ function buildVisibleRouteRegion({
   const baseCenterX = effectiveWidth / 2;
   const longitudeOffset = (longitudeDelta * (baseCenterX - desiredRouteCenterX)) / effectiveWidth;
 
+  const latitudeMargin = latitudeDelta / 2;
+  const longitudeMargin = longitudeDelta / 2;
   return {
-    latitude: centerLatitude + latitudeOffset,
-    longitude: centerLongitude + longitudeOffset,
+    latitude: Math.min(
+      maxLatitude + latitudeMargin,
+      Math.max(minLatitude - latitudeMargin, centerLatitude + latitudeOffset),
+    ),
+    longitude: Math.min(
+      maxLongitude + longitudeMargin,
+      Math.max(minLongitude - longitudeMargin, centerLongitude + longitudeOffset),
+    ),
     latitudeDelta,
     longitudeDelta,
   };

@@ -20,7 +20,12 @@ import { WooviService, PaymentBypassService } from '../../services/canonical/pay
 import WebSocketManager from '../../services/WebSocketManager';
 import QRCode from 'react-native-qrcode-svg';
 import { fonts } from '../../theme/runtimeTokens';
-import { allowForcedPaymentBypass } from '../../config/runtimeAccessPolicy';
+import {
+    allowForcedPaymentBypass,
+    allowTestUserTools,
+    isE2ETestBuild,
+    isSimulatorBuild,
+} from '../../config/runtimeAccessPolicy';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import { formatCurrencyBRL } from '../../screens/prototype/tripFinancialSummary';
 import SecurePaymentBadge from './SecurePaymentBadge';
@@ -45,6 +50,19 @@ const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const CONFIRMED_PAYMENT_STATUSES = new Set(['completed', 'confirmed', 'paid', 'in_holding']);
 const TERMINAL_PAYMENT_STATUSES = new Set(['cancelled', 'canceled', 'expired', 'refunded']);
 const PAYMENT_ERROR_DIAGNOSTIC_PREFIX = 'payment-error:';
+const QA_PAYMENT_PROGRESS_LABELS = Object.freeze({
+    idle: 'Confirmando pagamento',
+    opening: 'Confirmando pagamento',
+    scheduled: 'Confirmando pagamento',
+    confirming: 'Confirmando pagamento',
+    awaiting_backend: 'Confirmando pagamento',
+    confirmed: 'Pagamento confirmado',
+    webhook_error: 'Aguardando confirmação',
+    closed: 'Aguardando pagamento',
+    disabled: 'Aguardando pagamento',
+});
+const canUseDivergentQaPaymentIdentity = () =>
+    allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild();
 const PIX_SURFACE = {
     bg: '#F8FBF9',
     sheet: 'rgba(255,255,255,0.97)',
@@ -68,6 +86,10 @@ function isSandboxPaymentRuntimeProfile(runtimeProfile) {
         '',
     ).trim().toLowerCase();
     return environment === 'sandbox';
+}
+
+export function getQaPaymentProgressLabel(status) {
+    return QA_PAYMENT_PROGRESS_LABELS[String(status || '').trim()] || 'Aguardando pagamento';
 }
 
 function sanitizePaymentDiagnosticValue(value) {
@@ -220,7 +242,8 @@ export default function WooviPaymentModal({
     quoteSessionId = null,
     quoteLockId = null,
     onPaymentExpired = null,
-    onPaymentAborted = null
+    onPaymentAborted = null,
+    robotaxiLifecycleCard = false
 }) {
     const qaAutoConfirmEnabled = Boolean(qaAutoConfirm);
     // Estados
@@ -232,6 +255,8 @@ export default function WooviPaymentModal({
     const [isCheckingPayment, setIsCheckingPayment] = useState(false);
     const [paymentStatus, setPaymentStatus] = useState('pending'); // pending, confirmed, expired, cancelled
     const [qaDebugStatus, setQaDebugStatus] = useState('idle');
+    const [bankActionVisible, setBankActionVisible] = useState(false);
+    const qaPaymentProgressLabel = getQaPaymentProgressLabel(qaDebugStatus);
     const normalizedQuoteLockId = String(quoteLockId || '').trim();
     
     // Refs
@@ -302,6 +327,12 @@ export default function WooviPaymentModal({
     useEffect(() => {
         paymentStatusRef.current = paymentStatus;
     }, [paymentStatus]);
+
+    useEffect(() => {
+        if (!visible) {
+            setBankActionVisible(false);
+        }
+    }, [visible]);
 
     useEffect(() => {
         paymentDataRef.current = paymentData;
@@ -411,28 +442,30 @@ export default function WooviPaymentModal({
         }
 
         if (directPassengerId && firebasePassengerId && directPassengerId !== firebasePassengerId) {
-            try {
-                const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw] = await Promise.all([
-                    AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
-                    AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
-                    AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
-                ]);
-                const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
-                const qaTokenSubject = getJwtSubject(qaSocketIdTokenRaw);
-                const persistedUid = String(persistedUidRaw || '').trim();
-                const qaIdentityMatchesPassenger =
-                    qaModeEnabled &&
-                    qaTokenSubject === directPassengerId &&
-                    (!persistedUid || persistedUid === directPassengerId);
+            if (canUseDivergentQaPaymentIdentity()) {
+                try {
+                    const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw] = await Promise.all([
+                        AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+                        AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+                        AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
+                    ]);
+                    const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
+                    const qaTokenSubject = getJwtSubject(qaSocketIdTokenRaw);
+                    const persistedUid = String(persistedUidRaw || '').trim();
+                    const qaIdentityMatchesPassenger =
+                        qaModeEnabled &&
+                        qaTokenSubject === directPassengerId &&
+                        (!persistedUid || persistedUid === directPassengerId);
 
-                if (qaIdentityMatchesPassenger) {
-                    Logger.warn(
-                        '⚠️ [WooviPaymentModal] Firebase currentUser diverge, mas token QA assinado corresponde ao passageiro; usando identidade QA.',
-                    );
-                    return directPassengerId;
+                    if (qaIdentityMatchesPassenger) {
+                        Logger.warn(
+                            '⚠️ [WooviPaymentModal] Firebase currentUser diverge, mas token QA assinado corresponde ao passageiro; usando identidade QA.',
+                        );
+                        return directPassengerId;
+                    }
+                } catch (qaIdentityError) {
+                    Logger.warn('⚠️ [WooviPaymentModal] Falha ao validar identidade QA:', qaIdentityError);
                 }
-            } catch (qaIdentityError) {
-                Logger.warn('⚠️ [WooviPaymentModal] Falha ao validar identidade QA:', qaIdentityError);
             }
 
             const mismatchError = new Error('Sua sessão mudou. Entre novamente para gerar o Pix desta corrida.');
@@ -1589,7 +1622,10 @@ export default function WooviPaymentModal({
                 <View style={styles.paymentHeader}>
                     <View>
                         <Text
-                            style={styles.paymentTitle}
+                            style={[
+                                styles.paymentTitle,
+                                robotaxiLifecycleCard && styles.robotaxiPaymentTitle,
+                            ]}
                             testID="payment-modal-title"
                             accessibilityLabel="Pague com PIX"
                         >
@@ -1618,7 +1654,10 @@ export default function WooviPaymentModal({
                     </View>
                     <View style={styles.paymentRightColumn}>
                         <Text
-                            style={styles.paymentAmount}
+                            style={[
+                                styles.paymentAmount,
+                                robotaxiLifecycleCard && styles.robotaxiPaymentAmount,
+                            ]}
                             testID="payment-modal-amount"
                             accessibilityLabel={`Valor PIX ${formatCurrencyBRL(paymentData.amount)}`}
                         >
@@ -1701,25 +1740,64 @@ export default function WooviPaymentModal({
                     </Text>
                 </View>
 
-                <View style={styles.actionButtons}>
+                <View style={[
+                    styles.actionButtons,
+                    robotaxiLifecycleCard && styles.robotaxiActionButtons,
+                ]}>
                     <TouchableOpacity
-                        style={styles.primaryAction}
+                        style={[
+                            styles.primaryAction,
+                            robotaxiLifecycleCard && styles.robotaxiAction,
+                        ]}
                         onPress={copyPixCode}
                         activeOpacity={0.88}
                         testID="payment-modal-copy-code-button"
                         accessibilityLabel="Copiar código PIX"
                     >
-                        <Text style={styles.primaryActionText}>Copiar código</Text>
+                        <Text style={[
+                            styles.primaryActionText,
+                            robotaxiLifecycleCard && styles.robotaxiActionText,
+                        ]}>Copiar código</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.secondaryAction}
-                        onPress={openPaymentLink}
-                        activeOpacity={0.88}
-                        testID="payment-modal-open-bank-button"
-                        accessibilityLabel="Abrir banco"
-                    >
-                        <Text style={styles.secondaryActionText}>Abrir banco</Text>
-                    </TouchableOpacity>
+                    {robotaxiLifecycleCard ? (
+                        <>
+                            <TouchableOpacity
+                                style={[styles.secondaryAction, styles.robotaxiAction]}
+                                onPress={() => setBankActionVisible((visible) => !visible)}
+                                activeOpacity={0.88}
+                                testID="payment-modal-more-options-button"
+                                accessibilityLabel={bankActionVisible ? 'Ocultar opções' : 'Mais opções'}
+                                accessibilityState={{ expanded: bankActionVisible }}
+                            >
+                                <Text style={[styles.secondaryActionText, styles.robotaxiActionText]}>
+                                    {bankActionVisible ? 'Ocultar opções' : 'Mais opções'}
+                                </Text>
+                            </TouchableOpacity>
+                            {bankActionVisible ? (
+                                <TouchableOpacity
+                                    style={[styles.secondaryAction, styles.robotaxiAction]}
+                                    onPress={openPaymentLink}
+                                    activeOpacity={0.88}
+                                    testID="payment-modal-open-bank-button"
+                                    accessibilityLabel="Abrir banco"
+                                >
+                                    <Text style={[styles.secondaryActionText, styles.robotaxiActionText]}>
+                                        Abrir banco
+                                    </Text>
+                                </TouchableOpacity>
+                            ) : null}
+                        </>
+                    ) : (
+                        <TouchableOpacity
+                            style={styles.secondaryAction}
+                            onPress={openPaymentLink}
+                            activeOpacity={0.88}
+                            testID="payment-modal-open-bank-button"
+                            accessibilityLabel="Abrir banco"
+                        >
+                            <Text style={styles.secondaryActionText}>Abrir banco</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
 
                 <View style={styles.countdownContainer}>
@@ -1753,16 +1831,19 @@ export default function WooviPaymentModal({
             onRequestClose={handleCancel}
         >
             <View style={styles.modalOverlay}>
-                <View style={styles.modalContent}>
-                    <View style={styles.handle} />
+                <View style={[
+                    styles.modalContent,
+                    robotaxiLifecycleCard && styles.robotaxiModalContent,
+                ]}>
+                    {robotaxiLifecycleCard ? null : <View style={styles.handle} />}
                     <View style={styles.modalHeader}>
-                        {qaAutoConfirmEnabled ? (
+                        {__DEV__ && qaAutoConfirmEnabled ? (
                             <Text
                                 style={[styles.qaDebugBadge, { color: color.feedback.success }]}
                                 testID="payment-modal-qa-debug"
-                                accessibilityLabel="payment-modal-qa-debug"
+                                accessibilityLabel={qaPaymentProgressLabel}
                             >
-                                QA {qaDebugStatus}
+                                {qaPaymentProgressLabel}
                             </Text>
                         ) : null}
                         <TouchableOpacity
@@ -1807,6 +1888,15 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.1,
         shadowRadius: 42,
         elevation: 8,
+    },
+    robotaxiModalContent: {
+        width: width - 48,
+        maxWidth: width - 48,
+        maxHeight: height - 64,
+        marginBottom: 16,
+        paddingHorizontal: 18,
+        paddingTop: 10,
+        paddingBottom: 18,
     },
     handle: {
         width: 54,
@@ -1955,6 +2045,11 @@ const styles = StyleSheet.create({
         fontSize: 20,
         lineHeight: 31,
     },
+    robotaxiPaymentTitle: {
+        fontFamily: fonts.SemiBold,
+        fontSize: 15.5,
+        lineHeight: 20,
+    },
     securePaymentBadge: {
         marginTop: 1,
     },
@@ -1984,6 +2079,11 @@ const styles = StyleSheet.create({
         fontSize: 20,
         lineHeight: 31,
         textAlign: 'right',
+    },
+    robotaxiPaymentAmount: {
+        fontFamily: fonts.SemiBold,
+        fontSize: 17,
+        lineHeight: 22,
     },
     expiryText: {
         marginTop: 8,
@@ -2099,6 +2199,23 @@ const styles = StyleSheet.create({
         marginTop: 18,
         flexDirection: 'row',
         gap: 14,
+    },
+    robotaxiActionButtons: {
+        flexDirection: 'column',
+        gap: 10,
+    },
+    robotaxiAction: {
+        flex: 0,
+        width: '100%',
+        height: 48,
+        borderRadius: 24,
+        borderWidth: 1,
+        borderColor: PIX_SURFACE.line,
+    },
+    robotaxiActionText: {
+        fontFamily: fonts.SemiBold,
+        fontSize: 13,
+        lineHeight: 17,
     },
     primaryAction: {
         flex: 1,

@@ -25,14 +25,13 @@ const screenSourceByRoute = {
   RobotaxiPrototypeReceipt: 'RobotaxiReceiptScreen.js',
   RobotaxiPrototypeCancellation: 'RobotaxiCancellationScreen.js',
   RobotaxiPrototypeNoDrivers: 'RobotaxiNoDriversScreen.js',
-  RobotaxiPrototypeDriverOffer: 'RobotaxiDriverOfferScreen.js',
-  RobotaxiPrototypeDriverTrip: 'RobotaxiDriverTripScreen.js',
 };
 
 const homeSurfaceSourceFiles = [
   'RobotaxiHomeScreen.js',
   path.join('home', 'PassengerHomeOverlay.js'),
   path.join('home', 'DriverHomeOverlay.js'),
+  path.join('home', 'DriverLiveRideOverlay.js'),
 ];
 
 function readPrototypeSource(relativeFile) {

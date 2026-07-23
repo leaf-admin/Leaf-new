@@ -6,6 +6,7 @@ import {
   formatDriverOfferCountdown,
   getDriverOfferRemainingSeconds,
   resolveDriverOfferDeadlineMs,
+  resolveStableDriverOfferDeadlineMs,
   toDriverOfferIsoTimestamp,
   useDriverOfferCountdown,
 } from "../src/screens/prototype/driverOfferCountdown";
@@ -84,5 +85,94 @@ describe("driver offer countdown", () => {
     });
 
     expect(screen.getByTestId("countdown-probe").props.children).toBe("00:00");
+  });
+
+  it("does not extend an active offer when a heartbeat sends a later deadline", () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(nowMs);
+
+    expect(
+      resolveStableDriverOfferDeadlineMs(
+        nowMs + 20000,
+        nowMs + 6 * 60 * 60 * 1000,
+        nowMs + 5000,
+      ),
+    ).toBe(nowMs + 20000);
+
+    const screen = render(
+      <CountdownProbe
+        offer={{
+          bookingId: "booking_stable_deadline",
+          offerExpiresAt: new Date(nowMs + 20000).toISOString(),
+        }}
+      />,
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(5000);
+    });
+
+    screen.rerender(
+      <CountdownProbe
+        offer={{
+          bookingId: "booking_stable_deadline",
+          offerExpiresAt: new Date(
+            nowMs + 6 * 60 * 60 * 1000,
+          ).toISOString(),
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("countdown-probe").props.children).toBe("00:15");
+
+    act(() => {
+      jest.advanceTimersByTime(15000);
+    });
+
+    expect(screen.getByTestId("countdown-probe").props.children).toBe("00:00");
+  });
+
+  it("reopens an expired offer when the same booking is reoffered with a new deadline", () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(nowMs);
+
+    expect(
+      resolveStableDriverOfferDeadlineMs(
+        nowMs + 1000,
+        nowMs + 21000,
+        nowMs + 1000,
+      ),
+    ).toBe(nowMs + 21000);
+    expect(resolveStableDriverOfferDeadlineMs(null, nowMs + 1000, nowMs)).toBe(
+      nowMs + 1000,
+    );
+
+    const screen = render(
+      <CountdownProbe
+        offer={{
+          bookingId: "booking_reoffered",
+          offerExpiresAt: new Date(nowMs + 1000).toISOString(),
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("countdown-probe").props.children).toBe("00:01");
+
+    act(() => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(screen.getByTestId("countdown-probe").props.children).toBe("00:00");
+
+    screen.rerender(
+      <CountdownProbe
+        offer={{
+          bookingId: "booking_reoffered",
+          offerExpiresAt: new Date(nowMs + 21000).toISOString(),
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("countdown-probe").props.children).toBe("00:20");
   });
 });

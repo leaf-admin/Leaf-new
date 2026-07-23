@@ -12,6 +12,8 @@ import {
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
+import { getPilotLaunchFeatureSnapshot } from '../../config/pilotLaunchProfile';
+import { isCurrentSurfaceUnavailable } from './currentSurfaceStatus';
 import { getMenuSectionsByRole, resolveMenuTargetRoute } from './robotaxiMenuConfig';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
@@ -20,6 +22,7 @@ const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 28;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
+const TEXT_SCALE_CAP = 1.35;
 
 export default function RobotaxiMenuScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
@@ -27,6 +30,7 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
   const { activeRole } = usePrototypeRideRuntime();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const isDriverRole = activeRole === 'driver';
+  const referralProgramsEnabled = getPilotLaunchFeatureSnapshot().referralProgramsEnabled;
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -34,7 +38,15 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
     occludedBottom: panelHeight,
   });
 
-  const roleMenuSections = useMemo(() => getMenuSectionsByRole(activeRole), [activeRole]);
+  const roleMenuSections = useMemo(
+    () => getMenuSectionsByRole(activeRole, { referralProgramsEnabled })
+      .map(section => ({
+        ...section,
+        items: section.items.filter(item => !isCurrentSurfaceUnavailable(item.status)),
+      }))
+      .filter(section => section.items.length > 0),
+    [activeRole, referralProgramsEnabled]
+  );
 
   const handleDismiss = useCallback(() => {
     navigation.navigate('RobotaxiPrototype');
@@ -99,7 +111,7 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
             ]}
             bodyStyle={styles.body}
             footer={
-              <Text style={styles.footerNote}>
+              <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.footerNote}>
                 {isDriverRole ? 'Leaf motorista' : 'Leaf passageiro'}
               </Text>
             }
@@ -107,7 +119,7 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-menu-close-button"
-                accessibilityLabel="robotaxi-menu-close-button"
+                accessibilityLabel="Fechar menu"
               />
             )}
           >
@@ -130,7 +142,8 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
                       last={index === section.items.length - 1}
                       onPress={() => handleOpenItem(item)}
                       testID={`robotaxi-menu-item-${item.key}`}
-                      accessibilityLabel={`robotaxi-menu-item-${item.key}`}
+                      accessibilityLabel={item.title}
+                      accessibilityHint={item.subtitle}
                     />
                   ))}
                 </PrototypeMenuSection>

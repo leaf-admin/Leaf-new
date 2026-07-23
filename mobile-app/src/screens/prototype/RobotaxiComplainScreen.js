@@ -80,7 +80,7 @@ function resolveComplainReturnRoute({ bookingId, bookingStatus, source } = {}) {
     return 'RobotaxiPrototypeReceipt';
   }
   if (normalizedSource === 'driver-trip') {
-    return 'RobotaxiPrototypeDriverTrip';
+    return 'RobotaxiPrototype';
   }
   if (bookingId) {
     return 'RobotaxiPrototypeTrip';

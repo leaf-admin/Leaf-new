@@ -103,8 +103,12 @@ function formatPaymentMethod(method) {
   return "PIX confirmado";
 }
 
+function decodePersistedSlashEntities(value = "") {
+  return String(value || "").replace(/&#(?:x0*2f|0*47);/gi, "/");
+}
+
 function splitLocationLabel(label = "") {
-  const clean = String(label || "").trim();
+  const clean = decodePersistedSlashEntities(label).trim();
   if (!clean) {
     return {
       title: "Endereço indisponível",
@@ -378,6 +382,99 @@ function hasBackendFinalReceiptFinancialContract(receipt, grossAmount) {
   );
 }
 
+function firstFiniteMoney(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") {
+      continue;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      return numeric;
+    }
+  }
+
+  return null;
+}
+
+function resolveCanonicalOperationalInterruptionSettlement(receipt = {}) {
+  const continuationStatus = String(
+    receipt?.operationalContinuation?.status || "",
+  )
+    .trim()
+    .toUpperCase();
+  const rideLegs = Array.isArray(receipt?.rideLegs)
+    ? receipt.rideLegs
+    : Array.isArray(receipt?.settlement?.rideLegSettlements)
+      ? receipt.settlement.rideLegSettlements
+      : [];
+  const hasCanonicalInterruptedRideLeg = rideLegs.some((rideLeg) => {
+    const source = String(rideLeg?.source || "").trim().toLowerCase();
+    const settlementType = String(
+      rideLeg?.metadata?.settlementType || "",
+    )
+      .trim()
+      .toUpperCase();
+    return (
+      source === "operational_interrupt" &&
+      settlementType === "INTERRUPTED_OPERATIONAL"
+    );
+  });
+
+  if (
+    continuationStatus !== "PASSENGER_ENDED_RIDE" ||
+    !hasCanonicalInterruptedRideLeg
+  ) {
+    return null;
+  }
+
+  const originalPaidAmount = firstFiniteMoney(
+    receipt?.originalPaidAmount,
+    receipt?.settlement?.prepaidAmount,
+    receipt?.settlement?.originalFare,
+  );
+  const refundAmount = firstFiniteMoney(
+    receipt?.estimatedRefund,
+    receipt?.settlement?.estimatedRefund,
+    receipt?.operationalContinuation?.estimatedRefund,
+    receipt?.remainingReservedAmount,
+    receipt?.settlement?.remainingReservedAmount,
+    receipt?.operationalContinuation?.remainingReservedAmount,
+  );
+  const finalAmount = firstFiniteMoney(
+    receipt?.finalFare,
+    receipt?.fare,
+    receipt?.grossAmount,
+  );
+
+  if (
+    originalPaidAmount === null ||
+    refundAmount === null ||
+    finalAmount === null
+  ) {
+    return null;
+  }
+
+  const refundStatus = String(
+    receipt?.refundStatus ||
+      receipt?.settlement?.refundStatus ||
+      receipt?.operationalContinuation?.refundStatus ||
+      "",
+  )
+    .trim()
+    .toUpperCase();
+
+  return {
+    originalPaidAmount,
+    refundAmount,
+    finalAmount,
+    refundLabel: ["PENDING", "PROCESSING", "REQUESTED", "INITIATED"].includes(
+      refundStatus,
+    )
+      ? "Reembolso pendente"
+      : "Reembolso estimado",
+  };
+}
+
 function normalizeReceiptIdentityVariants(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -630,6 +727,12 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const hasReceiptFinancialContract = hasBackendFinalReceiptFinancialContract(
     selected,
     resolvedGrossAmount,
+  );
+  const operationalInterruptionSettlement = hasReceiptFinancialContract
+    ? resolveCanonicalOperationalInterruptionSettlement(selected)
+    : null;
+  const showPassengerOperationalSettlement = Boolean(
+    !isDriverView && operationalInterruptionSettlement,
   );
   const receiptNeedsRecovery = Boolean(
     !hasSelectedReceipt || !hasReceiptFinancialContract,
@@ -990,6 +1093,16 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     const unsubscribe = navigation.addListener("beforeRemove", event => {
       if (terminalExitRef.current) {
         terminalExitRef.current = false;
+        return;
+      }
+
+      const actionType = String(event?.data?.action?.type || "")
+        .trim()
+        .toUpperCase();
+      const isExplicitBackAction = ["GO_BACK", "POP", "POP_TO_TOP"].includes(
+        actionType,
+      );
+      if (!isExplicitBackAction) {
         return;
       }
 
@@ -1402,13 +1515,25 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     </>
   );
 
-  const renderCleanValueRow = ({ title, subtitle, value, muted }) => (
-    <View style={styles.receiptCleanValueRow}>
+  const renderCleanValueRow = ({
+    title,
+    subtitle,
+    value,
+    muted,
+    testID,
+    valueTestID,
+  }) => (
+    <View style={styles.receiptCleanValueRow} testID={testID}>
       <View style={styles.receiptCleanValueCopy}>
         <Text style={[styles.receiptCleanValueTitle, muted && styles.receiptCleanValueTitleMuted]}>{title}</Text>
         {subtitle ? <Text style={styles.receiptCleanValueSubtitle}>{subtitle}</Text> : null}
       </View>
-      <Text style={[styles.receiptCleanValueAmount, muted && styles.receiptCleanValueAmountMuted]}>{value}</Text>
+      <Text
+        style={[styles.receiptCleanValueAmount, muted && styles.receiptCleanValueAmountMuted]}
+        testID={valueTestID}
+      >
+        {value}
+      </Text>
     </View>
   );
 
@@ -1467,8 +1592,23 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           <View style={styles.receiptCleanSheet}>
             <View style={styles.receiptCleanTotalRow}>
               <View>
-                <Text style={styles.receiptCleanTotalLabel}>{isDriverView ? driverReceiptAmountLabel : "Total pago"}</Text>
-                <Text style={styles.receiptCleanTotalValue}>{receiptTotalLabel}</Text>
+                <Text style={styles.receiptCleanTotalLabel}>
+                  {isDriverView
+                    ? driverReceiptAmountLabel
+                    : showPassengerOperationalSettlement
+                      ? "Pix pago original"
+                      : "Total pago"}
+                </Text>
+                <Text
+                  style={styles.receiptCleanTotalValue}
+                  testID={showPassengerOperationalSettlement
+                    ? "passenger-receipt-original-paid-amount"
+                    : undefined}
+                >
+                  {showPassengerOperationalSettlement
+                    ? formatCurrency(operationalInterruptionSettlement.originalPaidAmount)
+                    : receiptTotalLabel}
+                </Text>
               </View>
               <View style={styles.receiptCleanPillColumn}>
                 <TouchableOpacity
@@ -1596,23 +1736,42 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   })}
                 </>
               ) : (
-                <>
-                  {renderCleanValueRow({
-                    title: "Corrida",
-                    subtitle: "Trajeto e serviço",
-                    value: formatReceiptMoney(passengerRideSubtotal),
-                  })}
-                  {renderCleanValueRow({
-                    title: "Pedágio",
-                    subtitle: "Incluso no total pago",
-                    value: formatReceiptMoney(safeTollAmount),
-                  })}
-                  {renderCleanValueRow({
-                    title: "Taxa Leaf",
-                    subtitle: "Inclusa no total pago",
-                    value: formatReceiptMoney(safeFeeAmount),
-                  })}
-                </>
+                showPassengerOperationalSettlement ? (
+                  <>
+                    {renderCleanValueRow({
+                      title: operationalInterruptionSettlement.refundLabel,
+                      subtitle: "Devolução referente ao trecho não realizado",
+                      value: formatCurrency(operationalInterruptionSettlement.refundAmount),
+                      testID: "passenger-receipt-refund-row",
+                      valueTestID: "passenger-receipt-refund-amount",
+                    })}
+                    {renderCleanValueRow({
+                      title: "Valor final",
+                      subtitle: "Trecho executado e taxas confirmadas",
+                      value: formatCurrency(operationalInterruptionSettlement.finalAmount),
+                      testID: "passenger-receipt-final-row",
+                      valueTestID: "passenger-receipt-final-amount",
+                    })}
+                  </>
+                ) : (
+                  <>
+                    {renderCleanValueRow({
+                      title: "Corrida",
+                      subtitle: "Trajeto e serviço",
+                      value: formatReceiptMoney(passengerRideSubtotal),
+                    })}
+                    {renderCleanValueRow({
+                      title: "Pedágio",
+                      subtitle: "Incluso no total pago",
+                      value: formatReceiptMoney(safeTollAmount),
+                    })}
+                    {renderCleanValueRow({
+                      title: "Taxa Leaf",
+                      subtitle: "Inclusa no total pago",
+                      value: formatReceiptMoney(safeFeeAmount),
+                    })}
+                  </>
+                )
               )}
             </View>
 

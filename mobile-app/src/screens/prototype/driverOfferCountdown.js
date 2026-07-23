@@ -84,6 +84,43 @@ export function getDriverOfferRemainingSeconds(deadlineMs, nowMs = Date.now()) {
   return Math.max(0, Math.ceil((Number(deadlineMs) - Number(nowMs)) / 1000));
 }
 
+export function resolveStableDriverOfferDeadlineMs(
+  previousDeadlineMs,
+  candidateDeadlineMs,
+  nowMs = Date.now(),
+) {
+  const previous = Number(previousDeadlineMs);
+  const candidate = Number(candidateDeadlineMs);
+  const now = Number(nowMs);
+  const hasPrevious =
+    previousDeadlineMs !== null &&
+    previousDeadlineMs !== undefined &&
+    previousDeadlineMs !== "" &&
+    Number.isFinite(previous);
+  const hasCandidate =
+    candidateDeadlineMs !== null &&
+    candidateDeadlineMs !== undefined &&
+    candidateDeadlineMs !== "" &&
+    Number.isFinite(candidate);
+
+  if (!hasPrevious) {
+    return hasCandidate ? candidate : null;
+  }
+
+  if (!hasCandidate) {
+    return previous;
+  }
+
+  const previousExpired = Number.isFinite(now) && previous <= now;
+  const candidateReopensOffer =
+    Number.isFinite(now) && candidate > now && candidate > previous;
+  if (previousExpired && candidateReopensOffer) {
+    return candidate;
+  }
+
+  return Math.min(previous, candidate);
+}
+
 export function formatDriverOfferCountdown(remainingSeconds) {
   if (remainingSeconds === null || remainingSeconds === undefined) {
     return "--:--";
@@ -102,11 +139,11 @@ export function formatDriverOfferCountdown(remainingSeconds) {
 export function useDriverOfferCountdown(offer) {
   const offerKey = String(offer?.bookingId || offer?.rideId || offer?.id || "").trim();
   const receivedAnchorRef = useRef({ offerKey, receivedAtMs: Date.now() });
-  if (receivedAnchorRef.current.offerKey !== offerKey) {
+  if (offerKey && receivedAnchorRef.current.offerKey !== offerKey) {
     receivedAnchorRef.current = { offerKey, receivedAtMs: Date.now() };
   }
 
-  const deadlineMs = useMemo(
+  const candidateDeadlineMs = useMemo(
     () =>
       resolveDriverOfferDeadlineMs(
         offer,
@@ -127,6 +164,31 @@ export function useDriverOfferCountdown(offer) {
       offerKey,
     ],
   );
+  const stableDeadlineRef = useRef({
+    offerKey,
+    deadlineMs: candidateDeadlineMs,
+    observedCandidateDeadlineMs: candidateDeadlineMs,
+  });
+  if (offerKey && stableDeadlineRef.current.offerKey !== offerKey) {
+    stableDeadlineRef.current = {
+      offerKey,
+      deadlineMs: candidateDeadlineMs,
+      observedCandidateDeadlineMs: candidateDeadlineMs,
+    };
+  } else if (
+    offerKey &&
+    !Object.is(
+      stableDeadlineRef.current.observedCandidateDeadlineMs,
+      candidateDeadlineMs,
+    )
+  ) {
+    stableDeadlineRef.current.deadlineMs = resolveStableDriverOfferDeadlineMs(
+      stableDeadlineRef.current.deadlineMs,
+      candidateDeadlineMs,
+    );
+    stableDeadlineRef.current.observedCandidateDeadlineMs = candidateDeadlineMs;
+  }
+  const deadlineMs = offerKey ? stableDeadlineRef.current.deadlineMs : null;
   const [remainingSeconds, setRemainingSeconds] = useState(() =>
     getDriverOfferRemainingSeconds(deadlineMs),
   );
