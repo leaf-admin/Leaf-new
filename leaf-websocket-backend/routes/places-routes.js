@@ -48,7 +48,10 @@ function requiresCanonicalDirectionsRoute(routeScope = '') {
     'passenger_quote_preview',
     'pricing_quote',
     'payment_quote',
-  ].includes(normalizedScope);
+    'active_ride_navigation',
+  ].includes(normalizedScope) ||
+    normalizedScope.startsWith('active_ride_navigation:') ||
+    normalizedScope.startsWith('passenger_active:');
 }
 
 function isTrafficAwareRoutingEnabled() {
@@ -804,7 +807,10 @@ router.post('/api/places/directions', async (req, res) => {
         cacheOnly: true,
       });
 
-      if (cacheOnlyResult?.data) {
+      if (
+        cacheOnlyResult?.data &&
+        placesCacheService.hasUsableDirectionsGeometry(cacheOnlyResult.data)
+      ) {
         result = cacheOnlyResult;
       } else if (requiresCanonicalDirectionsRoute(routeScope)) {
         const operationalTelemetryCaptured = await captureBookingOperationalTelemetry({
@@ -888,7 +894,10 @@ router.post('/api/places/directions', async (req, res) => {
       });
     }
 
-    if (!result || !result.data) {
+    const hasUsableGeometry = Boolean(
+      result?.data && placesCacheService.hasUsableDirectionsGeometry(result.data),
+    );
+    if (!result || !hasUsableGeometry) {
       await captureBookingOperationalTelemetry({
         bookingId: telemetry.bookingId,
         sourceKey: telemetrySourceKey,
@@ -904,9 +913,18 @@ router.post('/api/places/directions', async (req, res) => {
           writes: Number(result?.stats?.redisWrites || 0),
         },
       });
+      if (requiresCanonicalDirectionsRoute(routeScope)) {
+        return res.status(503).json({
+          status: 'unavailable',
+          code: 'canonical_route_required',
+          message: 'Rota canônica indisponível para navegação. Tente novamente em instantes.',
+          telemetryCaptured: false,
+        });
+      }
       return res.status(404).json({
         status: 'not_found',
-        message: 'Não foi possível obter rota para os pontos informados.',
+        code: 'invalid_route_geometry',
+        message: 'Não foi possível obter rota válida para os pontos informados.',
       });
     }
 

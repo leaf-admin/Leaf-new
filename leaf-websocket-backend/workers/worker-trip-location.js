@@ -47,7 +47,14 @@ workerManager.registerListener('trip.location.v1', async (event) => {
         receivedAt: payload.receivedAt,
         accuracy: payload.accuracy,
         heading: payload.heading,
-        speed: payload.speed
+        speed: payload.speed,
+        financialContext: payload.financialContext,
+        financialNamespace: payload.financialNamespace,
+        financialContextId: payload.financialContextId,
+        providerEnvironment:
+            payload.paymentProviderEnvironment || payload.providerEnvironment,
+        paymentProfileId: payload.paymentProfileId,
+        testUserSandbox: payload.testUserSandbox
     };
 
     return await tripLocationPersistenceService.bufferLocationEvent(normalized);

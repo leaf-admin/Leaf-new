@@ -19,6 +19,7 @@ const DriverNotificationDispatcher = require('./driver-notification-dispatcher')
 const { logger } = require('../utils/logger');
 const { clearOfferReservationsForBooking } = require('./offer-reservation-service');
 const { recordDispatchWave } = require('./dispatch-wave-trace-service');
+const { resolveRidePersistenceScope } = require('./sandbox-persistence-context');
 const {
     getDriverResponseTimeoutSeconds,
     getDriverSearchDriversPerWave,
@@ -849,8 +850,29 @@ class GradualRadiusExpander {
         };
 
         try {
+            const parsedFinancialContext = this.safeJSONParse(
+                bookingData.financialContext,
+                null
+            );
+            const persistenceScope = resolveRidePersistenceScope({
+                financialContext: parsedFinancialContext,
+                financialNamespace: bookingData.financialNamespace || null,
+                financialContextId: bookingData.financialContextId || null,
+                providerEnvironment:
+                    bookingData.paymentProviderEnvironment ||
+                    bookingData.providerEnvironment ||
+                    null,
+                paymentProfileId: bookingData.paymentProfileId || null,
+                testUserSandbox:
+                    bookingData.testUserSandbox === true ||
+                    String(bookingData.testUserSandbox || '').trim().toLowerCase() === 'true'
+            });
+            const financialContext = persistenceScope.financialContext;
             const paymentService = new PaymentService();
-            const paymentRecord = await paymentService.getStoredPayment(bookingId);
+            const paymentRecord = await paymentService.getStoredPayment(
+                bookingId,
+                financialContext
+            );
             if (!paymentRecord) {
                 return baseSummary;
             }
@@ -915,6 +937,7 @@ class GradualRadiusExpander {
                 reason: reasonCode,
                 status: 'REFUNDED_FULL',
                 passengerId: bookingData.customerId || bookingData.passengerId || null,
+                financialContext,
                 metadata: {
                     source: 'gradual_radius_expander',
                     reasonCode
@@ -1156,6 +1179,26 @@ class GradualRadiusExpander {
             }
         } catch (error) {
             logger.warn(`⚠️ [GradualExpander] Falha ao persistir metadata de noDriversFound para ${bookingId}: ${error.message}`);
+        }
+
+        // Espelhar no Firestore a mesma transição terminal já confirmada no Redis.
+        // O serviço resolve o namespace pelo contexto selado do booking, inclusive sandbox.
+        try {
+            const ridePersistenceService = require('./ride-persistence-service');
+            const persistenceResult = await ridePersistenceService.markRideCancelled(
+                bookingId,
+                reasonCode,
+                bookingData
+            );
+            if (!persistenceResult?.success) {
+                logger.warn(
+                    `⚠️ [GradualExpander] Falha ao espelhar noDriversFound no Firestore para ${bookingId}: ${persistenceResult?.error || 'persist_failed'}`
+                );
+            }
+        } catch (persistError) {
+            logger.warn(
+                `⚠️ [GradualExpander] Erro ao espelhar noDriversFound no Firestore para ${bookingId}: ${persistError.message}`
+            );
         }
 
         try {

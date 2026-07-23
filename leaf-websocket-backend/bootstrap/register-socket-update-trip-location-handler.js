@@ -46,7 +46,7 @@ function registerSocketUpdateTripLocationHandler({
 
     const resolveBookingParties = async (bookingId) => {
         if (!bookingId || !redisPool) {
-            return { customerId: null, driverId: null };
+            return { customerId: null, driverId: null, persistenceContext: {} };
         }
 
         const cached = getCachedBookingParties(bookingId);
@@ -57,7 +57,7 @@ function registerSocketUpdateTripLocationHandler({
         const redis = redisPool.getConnection();
         const bookingData = await redis.hgetall(`booking:${bookingId}`);
         if (!bookingData || Object.keys(bookingData).length === 0) {
-            return { customerId: null, driverId: null };
+            return { customerId: null, driverId: null, persistenceContext: {} };
         }
 
         const customerId = bookingData.customerId
@@ -71,7 +71,16 @@ function registerSocketUpdateTripLocationHandler({
             || parseBookingParticipant(bookingData.driverData)
             || null;
 
-        const value = { customerId, driverId };
+        const persistenceContext = {
+            financialContext: bookingData.financialContext,
+            financialNamespace: bookingData.financialNamespace,
+            financialContextId: bookingData.financialContextId,
+            providerEnvironment:
+                bookingData.paymentProviderEnvironment || bookingData.providerEnvironment,
+            paymentProfileId: bookingData.paymentProfileId,
+            testUserSandbox: bookingData.testUserSandbox
+        };
+        const value = { customerId, driverId, persistenceContext };
         setCachedBookingParties(bookingId, value);
         return value;
     };
@@ -123,7 +132,17 @@ function registerSocketUpdateTripLocationHandler({
             };
 
             // Notificar somente participante(s) da corrida.
-            const { customerId, driverId } = await resolveBookingParties(bookingId);
+            const { customerId, driverId, persistenceContext } = await resolveBookingParties(bookingId);
+            if (!driverId || !socket.userId || String(socket.userId) !== String(driverId)) {
+                logStructured('warn', 'Atualização de localização rejeitada para socket não motorista da corrida', {
+                    service: 'websocket',
+                    operation: 'updateLocationAuthorization',
+                    bookingId,
+                    socketUserId: socket.userId || null,
+                    bookingDriverId: driverId || null
+                });
+                return;
+            }
             if (customerId) {
                 io.to(`customer_${customerId}`).emit('tripLocationUpdated', payload);
             }
@@ -131,7 +150,7 @@ function registerSocketUpdateTripLocationHandler({
                 io.to(`driver_${driverId}`).emit('tripLocationUpdated', payload);
             }
 
-            const persistenceDriverId = driverId || socket.userId || data?.driverId || null;
+            const persistenceDriverId = driverId;
             if (persistenceDriverId) {
                 void tripLocationPersistenceService.bufferLocationEvent({
                     tripId: bookingId,
@@ -146,7 +165,8 @@ function registerSocketUpdateTripLocationHandler({
                     seq: Number.isFinite(Number(seq)) ? Number(seq) : null,
                     capturedAt: capturedAt || tripLocationData.timestamp,
                     receivedAt: tripLocationData.timestamp,
-                    source: 'updateTripLocation'
+                    source: 'updateTripLocation',
+                    ...persistenceContext
                 }).catch((persistenceError) => {
                     logStructured('warn', 'Falha ao persistir localização da viagem', {
                         service: 'websocket',

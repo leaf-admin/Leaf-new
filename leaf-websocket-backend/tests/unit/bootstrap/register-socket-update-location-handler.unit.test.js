@@ -56,6 +56,8 @@ function createHarness() {
     xadd: jest.fn().mockResolvedValue('stream-id-1')
   };
   const saveDriverLocation = jest.fn().mockResolvedValue(undefined);
+  const enforceSubscriptionForOnline = jest.fn().mockResolvedValue({ allowed: true });
+  const enforceDailyKYCForOnline = jest.fn().mockResolvedValue({ allowed: true });
   const roomEmit = jest.fn();
   const io = {
     to: jest.fn(() => ({ emit: roomEmit }))
@@ -71,12 +73,21 @@ function createHarness() {
     redisPool: {
       getConnection: jest.fn(() => redis)
     },
-    enforceSubscriptionForOnline: jest.fn().mockResolvedValue({ allowed: true }),
-    enforceDailyKYCForOnline: jest.fn().mockResolvedValue({ allowed: true }),
+    enforceSubscriptionForOnline,
+    enforceDailyKYCForOnline,
     saveDriverLocation
   });
 
-  return { handlers, io, redis, roomEmit, saveDriverLocation, socket };
+  return {
+    handlers,
+    io,
+    redis,
+    roomEmit,
+    saveDriverLocation,
+    socket,
+    enforceSubscriptionForOnline,
+    enforceDailyKYCForOnline
+  };
 }
 
 describe('registerSocketUpdateLocationHandler', () => {
@@ -135,6 +146,7 @@ describe('registerSocketUpdateLocationHandler', () => {
     await handlers.updateLocationBatch({
       bookingId: 'booking_batch_rejected',
       tripStatus: 'available',
+      isInTrip: false,
       batchId: 'batch_rejected',
       locations: [
         {
@@ -242,7 +254,13 @@ describe('registerSocketUpdateLocationHandler', () => {
           bookingId: 'booking_batch_1',
           driverId: 'driver_1',
           customerId: 'customer_1',
-          status: 'IN_PROGRESS'
+          status: 'IN_PROGRESS',
+          financialContext: '{"version":1,"namespace":"sandbox","contextId":"sandbox-context-id"}',
+          financialNamespace: 'sandbox',
+          financialContextId: 'sandbox-context-id',
+          paymentProviderEnvironment: 'sandbox',
+          paymentProfileId: 'qa-sandbox',
+          testUserSandbox: 'true'
         };
       }
       return {};
@@ -276,6 +294,17 @@ describe('registerSocketUpdateLocationHandler', () => {
 
     expect(saveDriverLocation).toHaveBeenCalledTimes(2);
     expect(redis.xadd).toHaveBeenCalledTimes(2);
+    const firstStreamCall = redis.xadd.mock.calls[0];
+    const streamDataIndex = firstStreamCall.indexOf('data');
+    const firstStreamPayload = JSON.parse(firstStreamCall[streamDataIndex + 1]);
+    expect(firstStreamPayload).toEqual(expect.objectContaining({
+      financialContext: '{"version":1,"namespace":"sandbox","contextId":"sandbox-context-id"}',
+      financialNamespace: 'sandbox',
+      financialContextId: 'sandbox-context-id',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox',
+      testUserSandbox: 'true'
+    }));
     expect(redis.zadd).toHaveBeenCalledWith(
       'ride_health:driver_signal_active',
       1710000000000,
@@ -304,6 +333,402 @@ describe('registerSocketUpdateLocationHandler', () => {
         totalCount: 2,
         acceptedCount: 2
       })
+    );
+  });
+
+  it('uses the backend trip index to defer KYC even when the client says it is not in trip', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: 'booking_active_backend',
+      customerId: 'customer_1'
+    });
+    const harness = createHarness();
+    harness.redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'driver:driver_1') {
+        return {
+          id: 'driver_1',
+          isOnline: 'false',
+          dispatchEligible: 'true',
+          lat: '-22.91',
+          lng: '-43.17'
+        };
+      }
+      if (key === 'booking:booking_active_backend') {
+        return {
+          bookingId: 'booking_active_backend',
+          driverId: 'driver_1',
+          customerId: 'customer_1',
+          status: 'IN_PROGRESS'
+        };
+      }
+      return {};
+    });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'available',
+      isInTrip: false
+    });
+
+    expect(harness.enforceSubscriptionForOnline).not.toHaveBeenCalled();
+    expect(harness.enforceDailyKYCForOnline).not.toHaveBeenCalled();
+    expect(harness.saveDriverLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.91,
+      -43.17,
+      0,
+      0,
+      expect.any(Number),
+      true,
+      true
+    );
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        kycRecheckPendingAfterTrip: 'true',
+        activeTripId: 'booking_active_backend'
+      })
+    );
+    expect(harness.redis.geoadd).not.toHaveBeenCalledWith(
+      'driver_locations_eligible',
+      expect.anything(),
+      expect.anything(),
+      'driver_1'
+    );
+  });
+
+  it('fails safe when the active-trip index is unavailable without KYC or offline transitions', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockRejectedValueOnce(new Error('redis unavailable'));
+    const harness = createHarness();
+    harness.redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'driver:driver_1') {
+        return {
+          id: 'driver_1',
+          status: 'IN_PROGRESS',
+          isOnline: 'true',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+          lat: '-22.91',
+          lng: '-43.17'
+        };
+      }
+      return {};
+    });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'available',
+      isInTrip: false
+    });
+
+    expect(harness.enforceSubscriptionForOnline).not.toHaveBeenCalled();
+    expect(harness.enforceDailyKYCForOnline).not.toHaveBeenCalled();
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(harness.saveDriverLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.91,
+      -43.17,
+      0,
+      0,
+      expect.any(Number),
+      true,
+      true
+    );
+    expect(harness.redis.zrem).not.toHaveBeenCalledWith('driver_locations', 'driver_1');
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        isOnline: 'true',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        kycRecheckPendingAfterTrip: 'true'
+      })
+    );
+    expect(harness.socket.emit).not.toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.anything()
+    );
+  });
+
+  it('preserves active-trip continuity when KYC discovers the trip after the initial lookup', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue(null);
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
+      eligible: false,
+      code: 'DRIVER_ACTIVATION_REJECTED'
+    });
+    const harness = createHarness();
+    harness.redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'driver:driver_1') {
+        return {
+          id: 'driver_1',
+          isOnline: 'false',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'CACHED',
+          lat: '-22.91',
+          lng: '-43.17'
+        };
+      }
+      if (key === 'booking:booking_race_1') {
+        return {
+          bookingId: 'booking_race_1',
+          driverId: 'driver_1',
+          customerId: 'customer_1',
+          status: 'IN_PROGRESS'
+        };
+      }
+      return {};
+    });
+    harness.enforceDailyKYCForOnline.mockResolvedValue({
+      allowed: true,
+      deferred: true,
+      continuityOnly: true,
+      activeTripId: 'booking_race_1'
+    });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'available',
+      isInTrip: false
+    });
+
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(harness.saveDriverLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.91,
+      -43.17,
+      0,
+      0,
+      expect.any(Number),
+      true,
+      true
+    );
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        isOnline: 'true',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        kycRecheckPendingAfterTrip: 'true',
+        activeTripId: 'booking_race_1'
+      })
+    );
+    expect(harness.redis.geoadd).not.toHaveBeenCalledWith(
+      'driver_locations_eligible',
+      expect.anything(),
+      expect.anything(),
+      'driver_1'
+    );
+  });
+
+  it('applies the deferred KYC before a completed trip can rejoin dispatch', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue(null);
+    const harness = createHarness();
+    harness.redis.hgetall.mockResolvedValue({
+      id: 'driver_1',
+      isOnline: 'true',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+      kycRecheckPendingAfterTrip: 'true',
+      lat: '-22.91',
+      lng: '-43.17'
+    });
+    harness.enforceDailyKYCForOnline.mockResolvedValue({
+      allowed: false,
+      code: 'kycRequired',
+      reason: 'Validacao aleatoria necessaria',
+      requirement: 'LIVENESS_REQUIRED',
+      challenge: { challengeId: 'challenge-random' }
+    });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'available',
+      isInTrip: false
+    });
+
+    expect(harness.enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
+    expect(harness.saveDriverLocation).not.toHaveBeenCalled();
+    expect(harness.redis.geoadd).not.toHaveBeenCalledWith(
+      'driver_locations_eligible',
+      expect.anything(),
+      expect.anything(),
+      'driver_1'
+    );
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        code: 'kycRequired',
+        challengeId: 'challenge-random'
+      })
+    );
+  });
+
+  it('applies post-trip KYC from the prior IN_TRIP code even when the marker is missing', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue(null);
+    const harness = createHarness();
+    harness.redis.hgetall.mockResolvedValue({
+      id: 'driver_1',
+      isOnline: 'true',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'IN_TRIP',
+      lat: '-22.91',
+      lng: '-43.17'
+    });
+    harness.enforceDailyKYCForOnline.mockResolvedValue({
+      allowed: false,
+      code: 'kycRequired',
+      reason: 'Validacao facial necessaria'
+    });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'available',
+      isInTrip: false
+    });
+
+    expect(harness.enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
+    expect(harness.saveDriverLocation).not.toHaveBeenCalled();
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        isOnline: 'false',
+        dispatchEligibilityCode: 'kycRequired'
+      })
+    );
+  });
+
+  it('preserves the post-trip retry marker when deferred KYC cannot be read yet', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue(null);
+    const harness = createHarness();
+    harness.redis.hgetall.mockResolvedValue({
+      id: 'driver_1',
+      isOnline: 'true',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+      kycRecheckPendingAfterTrip: 'true',
+      lat: '-22.91',
+      lng: '-43.17'
+    });
+    harness.enforceDailyKYCForOnline.mockResolvedValue({
+      allowed: false,
+      retryRequired: true,
+      code: 'KYC_REVERIFY_STATE_UNAVAILABLE',
+      reason: 'Revalidacao pendente'
+    });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'available',
+      isInTrip: false
+    });
+
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        isOnline: 'false',
+        kycRecheckPendingAfterTrip: 'true'
+      })
+    );
+  });
+
+  it('does not run the post-trip KYC gate while the location state still reports an active trip', async () => {
+    const harness = createHarness();
+    harness.redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'driver:driver_1') {
+        return {
+          id: 'driver_1',
+          status: 'IN_PROGRESS',
+          isOnline: 'true',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'IN_TRIP',
+          kycRecheckPendingAfterTrip: 'true',
+          lat: '-22.91',
+          lng: '-43.17'
+        };
+      }
+      return {};
+    });
+    harness.enforceDailyKYCForOnline.mockResolvedValue({
+      allowed: false,
+      code: 'kycRequired'
+    });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'started',
+      isInTrip: true,
+      tripId: 'booking_client_active'
+    });
+
+    expect(harness.enforceDailyKYCForOnline).not.toHaveBeenCalled();
+    expect(harness.saveDriverLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.91,
+      -43.17,
+      0,
+      0,
+      expect.any(Number),
+      true,
+      true
+    );
+    expect(harness.redis.hset).not.toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({ isOnline: 'false' })
+    );
+  });
+
+  it('recovers dispatch eligibility from IN_TRIP_KYC_DEFERRED after post-trip KYC passes', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue(null);
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
+      eligible: true,
+      code: 'ELIGIBLE'
+    });
+    const harness = createHarness();
+    harness.redis.hgetall.mockResolvedValue({
+      id: 'driver_1',
+      isOnline: 'true',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+      lat: '-22.91',
+      lng: '-43.17'
+    });
+    harness.enforceDailyKYCForOnline.mockResolvedValue({ allowed: true });
+
+    await harness.handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'available',
+      isInTrip: false
+    });
+
+    expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith(
+      'driver_1',
+      null,
+      expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
+    );
+    expect(harness.redis.geoadd).toHaveBeenCalledWith(
+      'driver_locations_eligible',
+      -43.17,
+      -22.91,
+      'driver_1'
+    );
+    expect(harness.saveDriverLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.91,
+      -43.17,
+      0,
+      0,
+      expect.any(Number),
+      true,
+      false
     );
   });
 });

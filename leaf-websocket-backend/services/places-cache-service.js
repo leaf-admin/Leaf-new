@@ -155,6 +155,111 @@ function decodeEncodedPolyline(encoded = '') {
   ));
 }
 
+function encodePolylineCoordinateDelta(delta) {
+  let value = Math.round(Number(delta) * 1e5);
+  value <<= 1;
+  if (delta < 0) {
+    value = ~value;
+  }
+
+  let encoded = '';
+  while (value >= 0x20) {
+    encoded += String.fromCharCode((0x20 | (value & 0x1f)) + 63);
+    value >>= 5;
+  }
+  return encoded + String.fromCharCode(value + 63);
+}
+
+function encodePolylineCoordinates(coordinates = []) {
+  let previousLatitude = 0;
+  let previousLongitude = 0;
+
+  return coordinates.reduce((encoded, coordinate) => {
+    const latitude = Number(coordinate?.latitude);
+    const longitude = Number(coordinate?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return encoded;
+    }
+
+    const latitudeDelta = latitude - previousLatitude;
+    const longitudeDelta = longitude - previousLongitude;
+    previousLatitude = latitude;
+    previousLongitude = longitude;
+    return encoded +
+      encodePolylineCoordinateDelta(latitudeDelta) +
+      encodePolylineCoordinateDelta(longitudeDelta);
+  }, '');
+}
+
+function hasStrictPolylineEncoding(encoded = '') {
+  const value = String(encoded || '').trim();
+  if (!value || [...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 63 || code > 126;
+  })) {
+    return false;
+  }
+
+  let index = 0;
+  let componentCount = 0;
+  while (index < value.length) {
+    let terminated = false;
+    let shift = 0;
+    while (index < value.length && shift <= 30) {
+      const byte = value.charCodeAt(index++) - 63;
+      shift += 5;
+      if (byte < 0x20) {
+        terminated = true;
+        break;
+      }
+    }
+    if (!terminated) {
+      return false;
+    }
+    componentCount += 1;
+  }
+
+  return componentCount >= 4 && componentCount % 2 === 0;
+}
+
+function hasUsableDirectionsGeometry(data = null) {
+  const encoded = String(data?.polylinePoints || '').trim();
+  if (!hasStrictPolylineEncoding(encoded)) {
+    return false;
+  }
+
+  const coordinates = decodeEncodedPolyline(encoded);
+  return coordinates.length >= 2 && coordinates.every((coordinate) => (
+    Number.isFinite(coordinate.latitude) &&
+    Number.isFinite(coordinate.longitude) &&
+    Math.abs(coordinate.latitude) <= 90 &&
+    Math.abs(coordinate.longitude) <= 180
+  ));
+}
+
+function buildLegacyLegPolyline(leg = {}, normalizedSteps = []) {
+  const explicitPolyline = String(leg?.polyline?.points || '').trim();
+  if (hasStrictPolylineEncoding(explicitPolyline)) {
+    return explicitPolyline;
+  }
+
+  const coordinates = [];
+  normalizedSteps.forEach((step) => {
+    decodeEncodedPolyline(step?.polylinePoints).forEach((coordinate) => {
+      const previous = coordinates[coordinates.length - 1];
+      if (
+        !previous ||
+        previous.latitude !== coordinate.latitude ||
+        previous.longitude !== coordinate.longitude
+      ) {
+        coordinates.push(coordinate);
+      }
+    });
+  });
+
+  return coordinates.length >= 2 ? encodePolylineCoordinates(coordinates) : null;
+}
+
 function normalizeRoutesTrafficSpeed(value) {
   const normalized = String(value || '').trim().toUpperCase();
   if (normalized === 'TRAFFIC_JAM') {
@@ -516,6 +621,10 @@ class PlacesCacheService {
     
     // Chave Redis para métricas persistentes
     this.metricsKey = 'places_cache:metrics';
+  }
+
+  hasUsableDirectionsGeometry(data = null) {
+    return hasUsableDirectionsGeometry(data);
   }
 
   /**
@@ -1174,9 +1283,22 @@ class PlacesCacheService {
         start_address: '',
         end_address: '',
         steps: [],
+        polylinePoints: legPolyline,
         trafficSegments: legTrafficSegments,
       };
     });
+
+    if (!hasUsableDirectionsGeometry({ polylinePoints: routePolyline })) {
+      logger.warn('⚠️ [PlacesCache] Routes API retornou polyline ausente ou inválida');
+      return {
+        cached: false,
+        routeCount: 0,
+        waypointsCount: waypoints.length,
+        data: null,
+        status: 'routes_invalid_polyline',
+        stats,
+      };
+    }
 
     const distanceMeters = Number(bestRoute?.distanceMeters);
     const durationInTraffic = parseGoogleDurationSeconds(bestRoute?.duration);
@@ -1231,11 +1353,6 @@ class PlacesCacheService {
 
   async fetchDirectionsRoute(options = {}) {
     try {
-      if (!this.googleApiKey) {
-        logger.warn('⚠️ [PlacesCache] GOOGLE_MAPS_API_KEY ausente para directions');
-        return null;
-      }
-
       const origin = parseLatLngPair(options?.startLoc);
       const destination = parseLatLngPair(options?.destLoc);
       if (!origin || !destination) {
@@ -1277,7 +1394,11 @@ class PlacesCacheService {
             const parsed = JSON.parse(cached);
             if (parsed?.data) {
               const enrichedData = enrichDirectionsDataWithTolls(parsed.data);
-              if (trafficEnabled && !hasDirectionsTrafficTiming(enrichedData)) {
+              if (!hasUsableDirectionsGeometry(enrichedData)) {
+                stats.cacheBypasses += 1;
+                cachePolicy.invalidGeometryCacheBypassed = true;
+                logger.warn('⚠️ [PlacesCache] Cache de directions sem polyline válida; tratando como miss.');
+              } else if (trafficEnabled && !hasDirectionsTrafficTiming(enrichedData)) {
                 stats.cacheBypasses += 1;
                 cachePolicy.staleTrafficCacheBypassed = true;
                 logger.warn('⚠️ [PlacesCache] Cache de directions com trânsito sem timings; buscando rota fresh.');
@@ -1299,6 +1420,11 @@ class PlacesCacheService {
         } catch (cacheError) {
           logger.warn(`⚠️ [PlacesCache] Falha ao ler cache de directions: ${cacheError.message}`);
         }
+      }
+
+      if (!this.googleApiKey) {
+        logger.warn('⚠️ [PlacesCache] GOOGLE_MAPS_API_KEY ausente para directions');
+        return null;
       }
 
       if (cacheOnly) {
@@ -1432,6 +1558,7 @@ class PlacesCacheService {
           leg?.duration?.value ??
           0,
         );
+        const normalizedSteps = normalizeGoogleSteps(leg?.steps);
         return {
           distance_in_km: Number(leg?.distance?.value || 0) / 1000,
           time_in_secs: Number.isFinite(legDuration) ? legDuration : 0,
@@ -1457,7 +1584,8 @@ class PlacesCacheService {
               : null,
           start_address: leg?.start_address || '',
           end_address: leg?.end_address || '',
-          steps: normalizeGoogleSteps(leg?.steps),
+          steps: normalizedSteps,
+          polylinePoints: buildLegacyLegPolyline(leg, normalizedSteps),
         };
       });
       const steps = normalizedLegs.flatMap((leg) => (
@@ -1491,6 +1619,19 @@ class PlacesCacheService {
         legs: normalizedLegs,
         steps,
       });
+
+      if (!hasUsableDirectionsGeometry(data)) {
+        logger.warn('⚠️ [PlacesCache] Directions retornou polyline ausente ou inválida');
+        return {
+          cached: false,
+          routeCount: 0,
+          waypointsCount: waypoints.length,
+          data: null,
+          status: 'invalid_polyline',
+          stats,
+          cachePolicy,
+        };
+      }
 
       const payload = {
         cached: false,

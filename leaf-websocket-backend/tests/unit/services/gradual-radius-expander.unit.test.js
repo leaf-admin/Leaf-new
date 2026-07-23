@@ -46,6 +46,15 @@ jest.mock('../../../services/ride-queue-manager', () => ({
   dequeueRide: jest.fn().mockResolvedValue(undefined)
 }));
 
+const mockMarkRideCancelled = jest.fn().mockResolvedValue({
+  success: true,
+  financialNamespace: 'sandbox'
+});
+
+jest.mock('../../../services/ride-persistence-service', () => ({
+  markRideCancelled: (...args) => mockMarkRideCancelled(...args)
+}));
+
 jest.mock('../../../services/driver-lock-manager', () => ({}));
 
 const mockNotifyMultipleDrivers = jest.fn().mockResolvedValue({ notified: 1 });
@@ -100,6 +109,7 @@ jest.mock('../../../utils/logger', () => ({
 const redisPool = require('../../../utils/redis-pool');
 const RideStateManager = require('../../../services/ride-state-manager');
 const eventSourcing = require('../../../services/event-sourcing');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 const GradualRadiusExpander = require('../../../services/gradual-radius-expander');
 
 describe('gradual-radius-expander', () => {
@@ -121,6 +131,10 @@ describe('gradual-radius-expander', () => {
       success: true,
       refundId: 'refund_default',
       ledgerRecorded: true
+    });
+    mockMarkRideCancelled.mockResolvedValue({
+      success: true,
+      financialNamespace: 'sandbox'
     });
     mockNormalizePaymentAmountCents.mockImplementation((value) => {
       const numeric = Number(value);
@@ -464,6 +478,119 @@ describe('gradual-radius-expander', () => {
         refundAmountInReais: '87.85',
         refundLedgerRecorded: 'true'
       })
+    );
+  });
+
+  it('keeps an operational payment poison out of a sandbox no-driver refund', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox-profile',
+      paymentProfileSource: 'test',
+      testUserSandbox: true
+    });
+    const sandboxPayment = {
+      rideId: 'booking_sandbox_no_driver',
+      chargeId: 'charge_sandbox_no_driver',
+      amount: 8785,
+      passengerId: 'customer_sandbox',
+      status: 'PAID',
+      financialContext
+    };
+    const operationalPoison = {
+      rideId: 'booking_sandbox_no_driver',
+      chargeId: 'charge_operational_poison',
+      amount: 99999,
+      passengerId: 'customer_sandbox',
+      status: 'PAID'
+    };
+
+    mockGetStoredPayment.mockImplementation(async (_bookingId, receivedContext) => (
+      receivedContext?.contextId === financialContext.contextId
+        ? sandboxPayment
+        : operationalPoison
+    ));
+    mockProcessRideRefund.mockResolvedValue({
+      success: true,
+      refundId: 'refund_sandbox_no_driver',
+      ledgerRecorded: true
+    });
+
+    const result = await expander.processNoDriversRefund(
+      'booking_sandbox_no_driver',
+      {
+        customerId: 'customer_sandbox',
+        estimatedFare: '87.85',
+        financialContext: JSON.stringify(financialContext),
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
+        providerEnvironment: financialContext.providerEnvironment,
+        paymentProfileId: financialContext.paymentProfileId,
+        testUserSandbox: 'true'
+      }
+    );
+
+    expect(mockGetStoredPayment).toHaveBeenCalledWith(
+      'booking_sandbox_no_driver',
+      financialContext
+    );
+    expect(mockProcessRideRefund).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'booking_sandbox_no_driver',
+      chargeId: 'charge_sandbox_no_driver',
+      amount: 8785,
+      financialContext
+    }));
+    expect(mockProcessRideRefund).not.toHaveBeenCalledWith(expect.objectContaining({
+      chargeId: 'charge_operational_poison'
+    }));
+    expect(result).toMatchObject({
+      status: 'REFUNDED',
+      refundId: 'refund_sandbox_no_driver'
+    });
+  });
+
+  it('terminalizes a sandbox no-driver ride through scoped persistence', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox-profile',
+      paymentProfileSource: 'test',
+      testUserSandbox: true
+    });
+    const bookingData = {
+      customerId: 'customer_sandbox',
+      status: 'SEARCHING',
+      pickupLocation: JSON.stringify({ lat: -23.55, lng: -46.63 }),
+      destinationLocation: JSON.stringify({ lat: -23.56, lng: -46.64 }),
+      estimatedFare: '87.85',
+      paymentMethod: 'pix',
+      financialContext: JSON.stringify(financialContext),
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId,
+      providerEnvironment: financialContext.providerEnvironment,
+      paymentProfileId: financialContext.paymentProfileId,
+      testUserSandbox: 'true'
+    };
+    redis.hgetall.mockImplementation(async (key) => (
+      key === 'booking:booking_sandbox_terminal'
+        ? bookingData
+        : {}
+    ));
+
+    await expander.handleMaxRadiusReached('booking_sandbox_terminal', {
+      searchedRadius: 30,
+      pickupLocation: { lat: -23.55, lng: -46.63 },
+      limit: 1
+    });
+
+    expect(mockMarkRideCancelled).toHaveBeenCalledTimes(1);
+    expect(mockMarkRideCancelled).toHaveBeenCalledWith(
+      'booking_sandbox_terminal',
+      'NO_DRIVERS_AVAILABLE',
+      bookingData
+    );
+    expect(mockMarkRideCancelled).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ financialNamespace: 'operational' })
     );
   });
 
