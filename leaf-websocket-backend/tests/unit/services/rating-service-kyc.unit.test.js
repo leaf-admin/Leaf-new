@@ -1,5 +1,6 @@
 const mockMarkDriverForPhotoMismatch = jest.fn().mockResolvedValue({ success: true });
 const mockIsPhotoMismatchReport = jest.fn();
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 jest.mock('../../../services/kyc-policy-service', () => ({
   isPhotoMismatchReport: (...args) => mockIsPhotoMismatchReport(...args),
@@ -141,5 +142,42 @@ describe('rating-service KYC escalation', () => {
       reviewerType: 'passenger',
       targetUserId: 'driver-1'
     });
+  });
+
+  test('should not mutate operational KYC state from a sandbox rating', async () => {
+    mockIsPhotoMismatchReport.mockReturnValue(true);
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+
+    const result = await ratingService.submitRating({
+      tripId: 'trip-sandbox',
+      rating: 1,
+      selectedOptions: ['motorista diferente da foto'],
+      comment: 'Nao era a mesma pessoa'
+    }, {
+      socketUserId: 'passenger-sandbox',
+      socketUserType: 'passenger',
+      tripScope: {
+        bookingId: 'trip-sandbox',
+        customerId: 'passenger-sandbox',
+        driverId: 'driver-sandbox',
+        status: 'COMPLETED',
+        raw: {
+          bookingId: 'trip-sandbox',
+          financialContext,
+          financialNamespace: 'sandbox',
+          financialContextId: financialContext.contextId
+        }
+      }
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockMarkDriverForPhotoMismatch).not.toHaveBeenCalled();
+    const updates = mockUpdateRealtimeDBRoot.mock.calls[0][0];
+    expect(Object.keys(updates).every((path) => path.startsWith('sandbox_'))).toBe(true);
   });
 });

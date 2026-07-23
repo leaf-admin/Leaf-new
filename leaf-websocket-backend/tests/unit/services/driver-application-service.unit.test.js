@@ -235,4 +235,73 @@ describe('driver-application-service', () => {
       activeVehicleIdentitySource: 'crlv_pdf_ocr',
     }));
   });
+
+  it('enriches a partial RTDB activation user from the allowlisted canonical Firestore profile', async () => {
+    mockCollectionDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        usertype: 'driver',
+        name: 'Motorista Canônico',
+        mobile: '+5500000000000',
+        cpf: '00000000000',
+        createdAt: '2026-07-14T18:00:00.000Z',
+        internalOnlyMarker: 'do-not-project',
+      }),
+    });
+    mockRealtimeOnce
+      .mockResolvedValueOnce({
+        val: () => ({
+          status: 'approved',
+          data: {
+            nome: 'Nome CNH',
+            cpf: '11111111111',
+            dataNascimento: '01/02/1990',
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        val: () => ({
+          usertype: 'driver',
+          userType: 'driver',
+          role: 'driver',
+          documents: {
+            cnh: {
+              status: 'approved',
+              fileUrl: 'https://storage.test/cnh.pdf',
+            },
+          },
+          driverActivation: { activationState: 'APPROVED_NEEDS_LIVENESS' },
+        }),
+      })
+      .mockResolvedValueOnce({ val: () => ({}) })
+      .mockResolvedValueOnce({ val: () => ({}) });
+
+    const application = await service.syncDriverApplication('driver_partial', {
+      includeRatings: false,
+    });
+
+    expect(mockFirestoreCollection).toHaveBeenCalledWith('users');
+    expect(application).toMatchObject({
+      driverId: 'driver_partial',
+      source: 'firestore_profile_rtdb_activation',
+      driver: {
+        name: 'Motorista Canônico',
+        phone: '+5500000000000',
+        cpf: '00000000000',
+        birthDate: '1990-02-01',
+        registrationDate: '2026-07-14T18:00:00.000Z',
+      },
+    });
+    expect(JSON.stringify(application.driver)).not.toContain('do-not-project');
+    expect(mockCollectionDocSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        driver: expect.objectContaining({
+          name: 'Motorista Canônico',
+          phone: '+5500000000000',
+          cpf: '00000000000',
+        }),
+      }),
+      { merge: true },
+    );
+  });
 });

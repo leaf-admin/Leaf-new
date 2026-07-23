@@ -5,13 +5,31 @@ const redisPool = require('../utils/redis-pool');
 const IntegratedKYCService = require('./IntegratedKYCService');
 const KYCNotificationService = require('./KYCNotificationService');
 const supportTicketService = require('./support-ticket-service');
-const { resolveActiveTripForDriver } = require('../utils/active-trip-index');
+const {
+  resolveActiveTripForDriver,
+  claimIdentityPolicyMutationWindow,
+  releaseIdentityPolicyMutationWindow
+} = require('../utils/active-trip-index');
 const { logStructured, logError } = require('../utils/logger');
 
 const IDENTITY_REVERIFY_PUBLIC_REASON = 'Por segurança, precisamos validar sua identidade.';
 const IDENTITY_REVERIFY_REASON_CODE = 'passenger_photo_mismatch_report';
 const LIVENESS_ATTEMPTS_EXHAUSTED_REASON_CODE = 'aws_liveness_attempts_exhausted';
 const IDENTITY_REVERIFY_REQUIREMENT = 'IDENTITY_REVERIFICATION';
+const MANUAL_REVIEW_RETRY_SCOPE_PREFIX = 'manual_review_retry_';
+const ORPHAN_HOLD_RETRY_SCOPE_PREFIX = 'orphan_hold_retry_';
+
+function normalizeAuthorizedRetryScope(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  const acceptedPrefixes = [
+    MANUAL_REVIEW_RETRY_SCOPE_PREFIX,
+    ORPHAN_HOLD_RETRY_SCOPE_PREFIX
+  ];
+  return acceptedPrefixes.some((prefix) =>
+    new RegExp(`^${prefix}[a-z0-9_]{8,45}$`).test(normalized))
+    ? normalized
+    : null;
+}
 
 const DEFAULTS = {
   challengeTtlSeconds: 20 * 60,
@@ -33,7 +51,9 @@ const KYC_POLICY_FIELDS = [
   'kycStatus',
   'kyc_status',
   'kycBlocked',
+  'kyc_blocked',
   'kycReverifyRequired',
+  'kyc_reverify_required',
   'kycReverifyReason',
   'kycReverifySource',
   'kycPhotoMismatchReportedAt',
@@ -52,6 +72,27 @@ const BLOCKING_KYC_STATUSES = new Set([
   'pending_reverify',
   'in_review',
   'review'
+]);
+
+const TERMINAL_KYC_STATUSES = new Set([
+  'blocked',
+  'rejected',
+  'failed',
+  'denied',
+  'suspended',
+  'disabled'
+]);
+
+const RECONCILABLE_IDENTITY_STATUSES = new Set([
+  'requested',
+  'validating',
+  'passed'
+]);
+
+const APPROVABLE_IDENTITY_KYC_STATUSES = new Set([
+  '',
+  'approved',
+  'pending_reverify'
 ]);
 
 function getIntEnv(name, fallback) {
@@ -108,6 +149,21 @@ function normalizeKycStatus(value) {
   return normalizeText(value).replace(/\s+/g, '_');
 }
 
+function isTrueFlag(value) {
+  return value === true || String(value || '').trim().toLowerCase() === 'true';
+}
+
+function canApplyApprovedIdentityResult(source = {}) {
+  const kycStatus = normalizeKycStatus(source.kycStatus ?? source.kyc_status);
+  const accountStatus = normalizeKycStatus(source.status);
+  const identityStatus = normalizeKycStatus(source.identityReverification?.status);
+  return RECONCILABLE_IDENTITY_STATUSES.has(identityStatus)
+    && !isTrueFlag(source.kycBlocked ?? source.kyc_blocked)
+    && !isTrueFlag(source.blocked)
+    && APPROVABLE_IDENTITY_KYC_STATUSES.has(kycStatus)
+    && !TERMINAL_KYC_STATUSES.has(accountStatus);
+}
+
 async function readRealtimeKycPolicyFields(driverId) {
   const entries = await Promise.all(
     KYC_POLICY_FIELDS.map(async (field) => {
@@ -133,6 +189,8 @@ class KYCPolicyService {
     this.notificationService = new KYCNotificationService();
     this.challengePrefix = 'kyc:stepup:challenge:';
     this.activeChallengePrefix = 'kyc:stepup:active:';
+    this.challengeCreateLockPrefix = 'kyc:stepup:create-lock:';
+    this.challengeCreationInFlight = new Map();
   }
 
   getConfig() {
@@ -208,11 +266,132 @@ class KYCPolicyService {
     }
   }
 
+  getStrictRealtimeDatabase() {
+    const database = firebaseConfig.getRealtimeDB?.();
+    if (!database || typeof database.ref !== 'function') {
+      const error = new Error('Realtime Database indisponivel para politica KYC critica');
+      error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+      throw error;
+    }
+    return database;
+  }
+
+  async readRealtimeStrict(path) {
+    const snapshot = await this.getStrictRealtimeDatabase().ref(path).once('value');
+    return snapshot?.exists?.() ? snapshot.val() : null;
+  }
+
+  async transactCurrentIdentityReverification(driverId, challengeId, mutateUser) {
+    if (!challengeId) {
+      return {
+        committed: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
+
+    const userRef = this.getStrictRealtimeDatabase().ref(`users/${driverId}`);
+    let matchedCurrentChallenge = false;
+    const transaction = await userRef.transaction((currentUser) => {
+      const currentState = currentUser?.identityReverification;
+      if (!currentState || String(currentState.challengeId || '') !== String(challengeId)) {
+        return undefined;
+      }
+      matchedCurrentChallenge = true;
+      return mutateUser(currentUser || {}, currentState);
+    });
+
+    if (transaction?.committed !== true || !matchedCurrentChallenge) {
+      return {
+        committed: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
+    return {
+      committed: true,
+      stale: false,
+      snapshot: transaction.snapshot?.val?.() || null
+    };
+  }
+
+  async persistCurrentIdentityFirestore(
+    driverId,
+    challengeId,
+    payload,
+    { requireApprovalSafe = false, dryRun = false } = {}
+  ) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) return { committed: true, skipped: true };
+
+    const refs = [
+      firestore.collection('users').doc(driverId),
+      firestore.collection('drivers').doc(driverId)
+    ];
+    return firestore.runTransaction(async (transaction) => {
+      const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+      const hasConflictingChallenge = snapshots.some((snapshot) => {
+        if (!snapshot?.exists) return false;
+        const currentChallengeId = snapshot.data()?.identityReverification?.challengeId;
+        return currentChallengeId && String(currentChallengeId) !== String(challengeId);
+      });
+      if (hasConflictingChallenge) {
+        return {
+          committed: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+      const hasLaterBlockingState = requireApprovalSafe && snapshots.some((snapshot) => (
+        snapshot?.exists && !canApplyApprovedIdentityResult(snapshot.data() || {})
+      ));
+      if (hasLaterBlockingState) {
+        return {
+          committed: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK'
+        };
+      }
+      if (dryRun) return { committed: true, stale: false, dryRun: true };
+      refs.forEach((ref) => transaction.set(ref, payload, { merge: true }));
+      return { committed: true, stale: false };
+    });
+  }
+
+  async persistCurrentIdentityRedis(
+    driverId,
+    challengeId,
+    fields = {},
+    { requireApprovalSafe = false } = {}
+  ) {
+    if (!this.redis || typeof this.redis.eval !== 'function') {
+      const error = new Error('Redis atomico indisponivel para concluir revalidacao');
+      error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+      throw error;
+    }
+    const flattenedFields = Object.entries(fields).flatMap(([field, value]) => [
+      String(field),
+      value == null ? '' : String(value)
+    ]);
+    const approvalGuard = requireApprovalSafe
+      ? 'local kyc_status = string.lower(tostring(redis.call("hget", KEYS[1], "kyc_status") or "")); local kyc_blocked = string.lower(tostring(redis.call("hget", KEYS[1], "kyc_blocked") or "")); local identity_status = string.lower(tostring(redis.call("hget", KEYS[1], "identity_reverification_status") or "requested")); local account_status = string.lower(tostring(redis.call("hget", KEYS[1], "status") or "")); local kyc_status_owned = kyc_status == "" or kyc_status == "approved" or kyc_status == "pending_reverify"; local identity_status_owned = identity_status == "requested" or identity_status == "validating" or identity_status == "passed"; local account_status_safe = account_status ~= "blocked" and account_status ~= "rejected" and account_status ~= "denied" and account_status ~= "suspended" and account_status ~= "disabled"; if kyc_blocked == "true" or not kyc_status_owned or not identity_status_owned or not account_status_safe then return -1 end; '
+      : '';
+    const result = await this.redis.eval(
+      `if tostring(redis.call("hget", KEYS[1], "identity_reverification_challenge_id") or "") ~= tostring(ARGV[1]) then return 0 end; ${approvalGuard}if #ARGV > 1 then redis.call("hset", KEYS[1], unpack(ARGV, 2)) end; return 1`,
+      1,
+      `driver:${driverId}`,
+      String(challengeId || ''),
+      ...flattenedFields
+    );
+    return Number(result) === 1;
+  }
+
   async getDriverKycState(driverId) {
     const firestore = firebaseConfig.getFirestore();
     let usersDoc = {};
     let driversDoc = {};
     let realtimeUser = {};
+    let redisDriver = {};
 
     if (firestore) {
       const [usersSnap, driversSnap] = await Promise.all([
@@ -225,11 +404,15 @@ class KYCPolicyService {
     }
 
     realtimeUser = await readRealtimeKycPolicyFields(driverId);
+    if (this.redis && typeof this.redis.hgetall === 'function') {
+      redisDriver = await this.redis.hgetall(`driver:${driverId}`) || {};
+    }
 
     return {
       usersDoc: pickKycPolicyFields(usersDoc),
       driversDoc: pickKycPolicyFields(driversDoc),
-      realtimeUser: pickKycPolicyFields(realtimeUser)
+      realtimeUser: pickKycPolicyFields(realtimeUser),
+      redisDriver: pickKycPolicyFields(redisDriver)
     };
   }
 
@@ -240,14 +423,21 @@ class KYCPolicyService {
       kycState.driversDoc?.kycStatus,
       kycState.driversDoc?.kyc_status,
       kycState.realtimeUser?.kycStatus,
-      kycState.realtimeUser?.kyc_status
+      kycState.realtimeUser?.kyc_status,
+      kycState.redisDriver?.kycStatus,
+      kycState.redisDriver?.kyc_status
     ].map(normalizeKycStatus).filter(Boolean);
 
-    const blocked = Boolean(
-      kycState.usersDoc?.kycBlocked
-      || kycState.driversDoc?.kycBlocked
-      || kycState.realtimeUser?.kycBlocked
-    );
+    const blocked = [
+      kycState.usersDoc?.kycBlocked,
+      kycState.usersDoc?.kyc_blocked,
+      kycState.driversDoc?.kycBlocked,
+      kycState.driversDoc?.kyc_blocked,
+      kycState.realtimeUser?.kycBlocked,
+      kycState.realtimeUser?.kyc_blocked,
+      kycState.redisDriver?.kycBlocked,
+      kycState.redisDriver?.kyc_blocked
+    ].some(isTrueFlag);
 
     const approved = statusCandidates.some((status) => status === 'approved');
     const blockingStatus = statusCandidates.find((status) => BLOCKING_KYC_STATUSES.has(status));
@@ -261,7 +451,7 @@ class KYCPolicyService {
       };
     }
 
-    if (!approved) {
+    if (blockingStatus || !approved) {
       return {
         allowed: false,
         code: blockingStatus === 'rejected' ? 'KYC_REJECTED' : 'KYC_NOT_APPROVED',
@@ -283,11 +473,16 @@ class KYCPolicyService {
   async requireApprovedKyc(driverId) {
     const kycState = await this.getDriverKycState(driverId);
     const approvalGate = this.resolveKycApprovalGate(kycState);
-    const reverifyRequired = Boolean(
-      kycState.usersDoc?.kycReverifyRequired
-      || kycState.driversDoc?.kycReverifyRequired
-      || kycState.realtimeUser?.kycReverifyRequired
-    );
+    const reverifyRequired = [
+      kycState.usersDoc?.kycReverifyRequired,
+      kycState.usersDoc?.kyc_reverify_required,
+      kycState.driversDoc?.kycReverifyRequired,
+      kycState.driversDoc?.kyc_reverify_required,
+      kycState.realtimeUser?.kycReverifyRequired,
+      kycState.realtimeUser?.kyc_reverify_required,
+      kycState.redisDriver?.kycReverifyRequired,
+      kycState.redisDriver?.kyc_reverify_required
+    ].some(isTrueFlag);
 
     if (approvalGate.allowed && reverifyRequired) {
       return {
@@ -476,11 +671,75 @@ class KYCPolicyService {
     };
   }
 
-  async createStepUpChallenge({ driverId, requirement, score, signals, source }) {
+  normalizeChallengeSource(source) {
+    const normalizedSource = String(source || '').trim();
+    return normalizedSource || 'legacy';
+  }
+
+  normalizeChallengeMetadata(metadata, source) {
+    const normalizedMetadata = metadata
+      && typeof metadata === 'object'
+      && !Array.isArray(metadata)
+      ? { ...metadata }
+      : {};
+
+    return {
+      ...normalizedMetadata,
+      challengeSource: this.normalizeChallengeSource(source)
+    };
+  }
+
+  normalizeChallengePayload(challenge) {
+    if (!challenge || typeof challenge !== 'object') return challenge;
+
+    const source = this.normalizeChallengeSource(challenge.source);
+    return {
+      ...challenge,
+      source,
+      metadata: this.normalizeChallengeMetadata(challenge.metadata, source)
+    };
+  }
+
+  buildChallengeInFlightKey({ driverId, requirement, source }) {
+    return JSON.stringify([
+      String(driverId || '').trim(),
+      String(requirement || '').trim(),
+      this.normalizeChallengeSource(source)
+    ]);
+  }
+
+  getReusableChallengeForFlow(activeChallenge, { requirement, source }) {
+    if (
+      !activeChallenge
+      || activeChallenge.status !== 'pending'
+      || activeChallenge.requirement !== requirement
+    ) {
+      return null;
+    }
+
+    const normalizedChallenge = this.normalizeChallengePayload(activeChallenge);
+    const requestedSource = this.normalizeChallengeSource(source);
+    if (normalizedChallenge.source !== requestedSource) {
+      const error = new Error('Challenge KYC ativo pertence a outro fluxo');
+      error.code = 'KYC_CHALLENGE_SOURCE_CONFLICT';
+      error.activeChallengeId = normalizedChallenge.challengeId || null;
+      error.activeSource = normalizedChallenge.source;
+      error.requestedSource = requestedSource;
+      error.requirement = requirement;
+      throw error;
+    }
+
+    return normalizedChallenge;
+  }
+
+  async createStepUpChallenge({ driverId, requirement, score, signals, source, metadata = {} }) {
     const config = this.getConfig();
     const challengeId = this.createChallengeId();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + (config.challengeTtlSeconds * 1000));
+    const normalizedSource = this.normalizeChallengeSource(source);
+    const normalizedMetadata = this.normalizeChallengeMetadata(metadata, normalizedSource);
+    const durablePersistenceRequired = normalizedMetadata.canonicalEvidenceRequired === true;
 
     const challengePayload = {
       challengeId,
@@ -488,7 +747,8 @@ class KYCPolicyService {
       requirement,
       score,
       signals,
-      source,
+      source: normalizedSource,
+      metadata: normalizedMetadata,
       status: 'pending',
       createdAt: now.toISOString(),
       expiresAt: expiresAt.toISOString()
@@ -515,11 +775,23 @@ class KYCPolicyService {
         driverId,
         challengeId
       });
+      if (durablePersistenceRequired) {
+        error.code = error.code || 'KYC_CHALLENGE_REDIS_PERSIST_FAILED';
+        throw error;
+      }
     }
 
     const firestore = firebaseConfig.getFirestore();
+    if (!firestore && durablePersistenceRequired) {
+      await this.redis.del(`${this.challengePrefix}${challengeId}`).catch(() => null);
+      await this.redis.del(`${this.activeChallengePrefix}${driverId}`).catch(() => null);
+      const error = new Error('Firestore indisponivel para challenge KYC canonico');
+      error.code = 'KYC_CHALLENGE_DURABLE_STORE_UNAVAILABLE';
+      throw error;
+    }
     if (firestore) {
-      await firestore
+      try {
+        await firestore
         .collection('kyc_stepup_challenges')
         .doc(challengeId)
         .set(
@@ -529,17 +801,126 @@ class KYCPolicyService {
             expiresAt: admin.firestore.Timestamp.fromDate(expiresAt)
           },
           { merge: true }
-        )
-        .catch((error) => {
-          logError(error, 'Falha ao salvar challenge KYC no Firestore', {
-            service: 'kyc-policy-service',
-            driverId,
-            challengeId
-          });
+        );
+      } catch (error) {
+        logError(error, 'Falha ao salvar challenge KYC no Firestore', {
+          service: 'kyc-policy-service',
+          driverId,
+          challengeId
         });
+        if (durablePersistenceRequired) {
+          await this.redis.del(`${this.challengePrefix}${challengeId}`).catch(() => null);
+          await this.redis.del(`${this.activeChallengePrefix}${driverId}`).catch(() => null);
+          error.code = error.code || 'KYC_CHALLENGE_DURABLE_PERSIST_FAILED';
+          throw error;
+        }
+      }
     }
 
     return challengePayload;
+  }
+
+  async getOrCreateStepUpChallenge({
+    driverId,
+    requirement,
+    score,
+    signals,
+    source,
+    metadata = {}
+  }) {
+    const normalizedSource = this.normalizeChallengeSource(source);
+    const normalizedMetadata = this.normalizeChallengeMetadata(metadata, normalizedSource);
+    const inFlightKey = this.buildChallengeInFlightKey({
+      driverId,
+      requirement,
+      source: normalizedSource
+    });
+    const inFlight = this.challengeCreationInFlight.get(inFlightKey);
+    if (inFlight) return inFlight;
+
+    const operation = this.getOrCreateStepUpChallengeDistributed({
+      driverId,
+      requirement,
+      score,
+      signals,
+      source: normalizedSource,
+      metadata: normalizedMetadata
+    }).finally(() => {
+      if (this.challengeCreationInFlight.get(inFlightKey) === operation) {
+        this.challengeCreationInFlight.delete(inFlightKey);
+      }
+    });
+    this.challengeCreationInFlight.set(inFlightKey, operation);
+    return operation;
+  }
+
+  async getOrCreateStepUpChallengeDistributed({
+    driverId,
+    requirement,
+    score,
+    signals,
+    source,
+    metadata = {}
+  }) {
+    const normalizedSource = this.normalizeChallengeSource(source);
+    const normalizedMetadata = this.normalizeChallengeMetadata(metadata, normalizedSource);
+    const activeChallenge = await this.getStepUpChallenge(null, driverId).catch(() => null);
+    const reusableActiveChallenge = this.getReusableChallengeForFlow(activeChallenge, {
+      requirement,
+      source: normalizedSource
+    });
+    if (reusableActiveChallenge) return reusableActiveChallenge;
+
+    const lockKey = `${this.challengeCreateLockPrefix}${driverId}`;
+    const lockToken = crypto.randomBytes(16).toString('hex');
+    const lockAcquired = await this.redis.set(lockKey, lockToken, 'EX', 5, 'NX');
+
+    if (lockAcquired !== 'OK') {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+        const winnerChallenge = await this.getStepUpChallenge(null, driverId).catch(() => null);
+        const reusableWinnerChallenge = this.getReusableChallengeForFlow(winnerChallenge, {
+          requirement,
+          source: normalizedSource
+        });
+        if (reusableWinnerChallenge) return reusableWinnerChallenge;
+      }
+      const error = new Error('Criacao de challenge KYC ja esta em andamento');
+      error.code = 'KYC_CHALLENGE_CREATE_BUSY';
+      throw error;
+    }
+
+    try {
+      const challengeAfterLock = await this.getStepUpChallenge(null, driverId).catch(() => null);
+      const reusableChallengeAfterLock = this.getReusableChallengeForFlow(challengeAfterLock, {
+        requirement,
+        source: normalizedSource
+      });
+      if (reusableChallengeAfterLock) return reusableChallengeAfterLock;
+
+      return await this.createStepUpChallenge({
+        driverId,
+        requirement,
+        score,
+        signals,
+        source: normalizedSource,
+        metadata: normalizedMetadata
+      });
+    } finally {
+      if (typeof this.redis.eval === 'function') {
+        await this.redis.eval(
+          'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end',
+          1,
+          lockKey,
+          lockToken
+        ).catch(() => null);
+      } else {
+        const currentToken = await this.redis.get(lockKey).catch(() => null);
+        if (currentToken === lockToken) {
+          await this.redis.del(lockKey).catch(() => null);
+        }
+      }
+    }
   }
 
   async getStepUpChallenge(challengeId, driverId = null) {
@@ -560,7 +941,9 @@ class KYCPolicyService {
       try {
         const parsed = JSON.parse(redisValue);
         if (driverId && parsed.driverId !== driverId) return null;
-        return parsed;
+        if (parsed.status && parsed.status !== 'pending') return null;
+        if (toMillis(parsed.expiresAt) <= Date.now()) return null;
+        return this.normalizeChallengePayload(parsed);
       } catch (_error) {
         return null;
       }
@@ -578,18 +961,21 @@ class KYCPolicyService {
     if (!challengeSnap || !challengeSnap.exists) return null;
     const data = challengeSnap.data() || {};
     if (driverId && data.driverId !== driverId) return null;
+    if (data.status && data.status !== 'pending') return null;
+    if (toMillis(data.expiresAt) <= Date.now()) return null;
 
-    return {
+    return this.normalizeChallengePayload({
       challengeId: challengeSnap.id,
       driverId: data.driverId,
       requirement: data.requirement,
       score: Number(data.score || 0),
       signals: Array.isArray(data.signals) ? data.signals : [],
       source: data.source || null,
+      metadata: data.metadata && typeof data.metadata === 'object' ? data.metadata : {},
       status: data.status || 'pending',
       createdAt: data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || null,
       expiresAt: data.expiresAt?.toDate?.()?.toISOString?.() || data.expiresAt || null
-    };
+    });
   }
 
   isLivenessSatisfied(payload = {}) {
@@ -620,7 +1006,7 @@ class KYCPolicyService {
       };
     }
 
-    const effectiveRequirement = requirement || challenge.requirement || 'VERIFY_REQUIRED';
+    const effectiveRequirement = challenge.requirement || requirement || 'VERIFY_REQUIRED';
     if (effectiveRequirement === 'LIVENESS_REQUIRED' && !this.isLivenessSatisfied(verificationPayload)) {
       return {
         success: false,
@@ -661,7 +1047,9 @@ class KYCPolicyService {
     await this.recordVerificationSuccess(challenge.driverId, {
       source: `challenge:${effectiveRequirement}`,
       verifiedAt: nowIso,
-      clearReverify: true
+      // Compatibility challenges may record freshness, but only canonical
+      // AWS + trusted server-side compare may clear an identity reverify gate.
+      clearReverify: false
     });
 
     return {
@@ -858,18 +1246,24 @@ class KYCPolicyService {
       kycUpdatedAt: verifiedAtIso
     };
 
-    const firestorePayload = {
-      kycLastVerificationAt: admin.firestore.FieldValue.serverTimestamp(),
-      kycUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
+    const firestorePayload = firestore
+      ? {
+        kycLastVerificationAt: admin.firestore.FieldValue.serverTimestamp(),
+        kycUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }
+      : null;
 
     if (options.markFirstAccess) {
       realtimePayload.kycFirstAccessVerifiedAt = verifiedAtIso;
-      firestorePayload.kycFirstAccessVerifiedAt = admin.firestore.FieldValue.serverTimestamp();
+      if (firestorePayload) {
+        firestorePayload.kycFirstAccessVerifiedAt = admin.firestore.FieldValue.serverTimestamp();
+      }
     }
 
     if (options.clearReverify) {
       realtimePayload.kycReverifyRequired = false;
+      realtimePayload.kycReverifyPendingAfterTrip = false;
+      realtimePayload.kycRecheckPendingAfterTrip = false;
       realtimePayload.kycReverifyReason = null;
       realtimePayload.kycReverifySource = null;
       realtimePayload.kycPhotoMismatchReportedAt = null;
@@ -877,13 +1271,17 @@ class KYCPolicyService {
       realtimePayload.kycStatus = 'approved';
       realtimePayload.kycBlocked = false;
 
-      firestorePayload.kycReverifyRequired = false;
-      firestorePayload.kycReverifyReason = admin.firestore.FieldValue.delete();
-      firestorePayload.kycReverifySource = admin.firestore.FieldValue.delete();
-      firestorePayload.kycPhotoMismatchReportedAt = admin.firestore.FieldValue.delete();
-      firestorePayload.kycReverifyRequestedAt = admin.firestore.FieldValue.delete();
-      firestorePayload.kycStatus = 'approved';
-      firestorePayload.kycBlocked = false;
+      if (firestorePayload) {
+        firestorePayload.kycReverifyRequired = false;
+        firestorePayload.kycReverifyPendingAfterTrip = false;
+        firestorePayload.kycRecheckPendingAfterTrip = false;
+        firestorePayload.kycReverifyReason = admin.firestore.FieldValue.delete();
+        firestorePayload.kycReverifySource = admin.firestore.FieldValue.delete();
+        firestorePayload.kycPhotoMismatchReportedAt = admin.firestore.FieldValue.delete();
+        firestorePayload.kycReverifyRequestedAt = admin.firestore.FieldValue.delete();
+        firestorePayload.kycStatus = 'approved';
+        firestorePayload.kycBlocked = false;
+      }
     }
 
     await firebaseConfig.updateRealtimeDB(`users/${driverId}`, realtimePayload).catch((error) => {
@@ -905,12 +1303,21 @@ class KYCPolicyService {
       });
     }
 
-    await this.redis.hset(`driver:${driverId}`, {
-      kyc_reverify_required: String(false),
-      kyc_status: 'approved',
-      kyc_blocked: String(false),
+    const redisPayload = {
       kyc_last_verification: verifiedAtIso
-    }).catch(() => null);
+    };
+    if (options.clearReverify) {
+      Object.assign(redisPayload, {
+        kyc_reverify_required: String(false),
+        kyc_status: 'approved',
+        kyc_blocked: String(false),
+        kyc_recheck_pending_after_trip: String(false),
+        kycRecheckPendingAfterTrip: String(false),
+        kycReverifyPendingAfterTrip: String(false),
+        identity_reverification_pending_after_trip: String(false)
+      });
+    }
+    await this.redis.hset(`driver:${driverId}`, redisPayload).catch(() => null);
 
     return {
       success: true,
@@ -988,6 +1395,7 @@ class KYCPolicyService {
     const firestore = firebaseConfig.getFirestore();
     const reason = payload.publicReason || IDENTITY_REVERIFY_PUBLIC_REASON;
     const reasonCode = payload.reasonCode || IDENTITY_REVERIFY_REASON_CODE;
+    const attemptScope = normalizeAuthorizedRetryScope(payload.attemptScope);
     const eventType = reasonCode === LIVENESS_ATTEMPTS_EXHAUSTED_REASON_CODE
       ? 'AWS_LIVENESS_ATTEMPTS_EXHAUSTED'
       : (status === 'deferred_until_trip_end'
@@ -1035,6 +1443,7 @@ class KYCPolicyService {
       tripId,
       reporterId,
       reporterType,
+      attemptScope,
       requestedAt: nowIso,
       notificationSentAt,
       validationStartedAt: null,
@@ -1047,20 +1456,20 @@ class KYCPolicyService {
       }
     };
 
-    await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
+    const realtimePersisted = await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
       identityReverification,
       kycReverifyPendingAfterTrip: status === 'deferred_until_trip_end',
+      kycRecheckPendingAfterTrip: status === 'deferred_until_trip_end',
       kycReverifyReason: reason,
       kycReverifySource: reasonCode,
       kycPhotoMismatchReportedAt: nowIso,
       kycUpdatedAt: nowIso
-    }).catch((error) => {
-      logError(error, 'Falha ao persistir estado de revalidacao no Realtime DB', {
-        service: 'kyc-policy-service',
-        driverId,
-        supportTicketId
-      });
     });
+    if (realtimePersisted !== true) {
+      const error = new Error('Nao foi possivel persistir o estado critico de revalidacao');
+      error.code = 'KYC_REVERIFY_STATE_PERSIST_FAILED';
+      throw error;
+    }
 
     return identityReverification;
   }
@@ -1079,6 +1488,7 @@ class KYCPolicyService {
     const effectiveChallengeId = challengeId || this.buildIdentityReverificationChallengeId(driverId);
     const reason = payload.publicReason || IDENTITY_REVERIFY_PUBLIC_REASON;
     const reasonCode = payload.reasonCode || IDENTITY_REVERIFY_REASON_CODE;
+    const attemptScope = normalizeAuthorizedRetryScope(payload.attemptScope);
     const firestore = firebaseConfig.getFirestore();
 
     await this.persistIdentityReverificationEvent({
@@ -1109,6 +1519,7 @@ class KYCPolicyService {
           status: 'requested',
           requirement: IDENTITY_REVERIFY_REQUIREMENT,
           reasonCode,
+          attemptScope,
           supportTicketId,
           tripId
         }
@@ -1121,10 +1532,12 @@ class KYCPolicyService {
           service: 'kyc-policy-service',
           driverId
         });
+        error.code = error.code || 'KYC_REVERIFY_STATE_PERSIST_FAILED';
+        throw error;
       });
     }
 
-    await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
+    const realtimeGatePersisted = await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
       kycReverifyRequired: true,
       kycReverifyReason: reason,
       kycReverifySource: reasonCode,
@@ -1132,17 +1545,18 @@ class KYCPolicyService {
       kycStatus: 'pending_reverify',
       kycBlocked: false,
       kycReverifyPendingAfterTrip: false,
+      kycRecheckPendingAfterTrip: false,
       kycUpdatedAt: nowIso
-    }).catch((error) => {
-      logError(error, 'Falha ao aplicar gate de revalidacao no Realtime DB', {
-        service: 'kyc-policy-service',
-        driverId
-      });
     });
+    if (realtimeGatePersisted !== true) {
+      const error = new Error('Nao foi possivel aplicar o gate critico de revalidacao');
+      error.code = 'KYC_REVERIFY_STATE_PERSIST_FAILED';
+      throw error;
+    }
 
     await this.integratedKycService.invalidateVerificationCache(driverId).catch(() => null);
 
-    await Promise.resolve().then(() => this.redis.hset(`driver:${driverId}`, {
+    await this.redis.hset(`driver:${driverId}`, {
       kyc_reverify_required: String(true),
       kyc_reverify_source: reasonCode,
       kyc_status: 'pending_reverify',
@@ -1150,8 +1564,13 @@ class KYCPolicyService {
       dispatchEligible: String(false),
       dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
       identity_reverification_challenge_id: effectiveChallengeId,
-      identity_reverification_requested_at: nowIso
-    })).catch(() => null);
+      identity_reverification_attempt_scope: attemptScope || '',
+      identity_reverification_requested_at: nowIso,
+      identity_reverification_pending_after_trip: String(false),
+      kyc_recheck_pending_after_trip: String(false),
+      kycRecheckPendingAfterTrip: String(false),
+      kycReverifyPendingAfterTrip: String(false)
+    });
 
     await Promise.resolve().then(() => this.redis.zrem(
       process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
@@ -1278,12 +1697,55 @@ class KYCPolicyService {
 
     const nowIso = new Date().toISOString();
     const challengeId = this.buildIdentityReverificationChallengeId(driverId);
-    const activeTrip = await resolveActiveTripForDriver(this.redis, driverId).catch(() => ({
-      tripId: null,
-      customerId: null
-    }));
+    let activeTrip = null;
+    let activeTripLookupFailed = false;
+    let deferredCode = null;
+    let policyWindowClaim = null;
+    try {
+      activeTrip = await resolveActiveTripForDriver(this.redis, driverId);
+    } catch (error) {
+      activeTripLookupFailed = true;
+      logStructured('warn', 'Revalidacao facial adiada: indice de corrida indisponivel', {
+        service: 'kyc-policy-service',
+        driverId,
+        error: error?.message || String(error)
+      });
+    }
 
-    if (activeTrip?.tripId) {
+    if (!activeTripLookupFailed && !activeTrip?.tripId) {
+      try {
+        policyWindowClaim = await claimIdentityPolicyMutationWindow(
+          this.redis,
+          driverId,
+          crypto.randomBytes(24).toString('hex')
+        );
+        if (policyWindowClaim.activeTripId) {
+          activeTrip = { tripId: policyWindowClaim.activeTripId };
+        } else if (!policyWindowClaim.acquired) {
+          return {
+            success: false,
+            retryable: true,
+            deferred: false,
+            driverId,
+            reason: IDENTITY_REVERIFY_PUBLIC_REASON,
+            reasonCode: IDENTITY_REVERIFY_REASON_CODE,
+            requirement: IDENTITY_REVERIFY_REQUIREMENT,
+            code: 'KYC_POLICY_MUTATION_IN_PROGRESS'
+          };
+        }
+      } catch (error) {
+        activeTripLookupFailed = true;
+        deferredCode = 'KYC_ACTIVE_TRIP_STATE_UNAVAILABLE';
+        logStructured('warn', 'Revalidacao facial adiada: trava corrida-KYC indisponivel', {
+          service: 'kyc-policy-service',
+          driverId,
+          error: error?.message || String(error)
+        });
+      }
+    }
+
+    if (activeTripLookupFailed || activeTrip?.tripId) {
+      const activeTripId = activeTrip?.tripId || tripId || null;
       await this.persistIdentityReverificationEvent({
         driverId,
         tripId,
@@ -1295,16 +1757,19 @@ class KYCPolicyService {
         challengeId,
         nowIso
       });
-      await Promise.resolve().then(() => this.redis.hset(`driver:${driverId}`, {
+      await this.redis.hset(`driver:${driverId}`, {
         identity_reverification_pending_after_trip: String(true),
+        kyc_recheck_pending_after_trip: String(true),
+        kycRecheckPendingAfterTrip: String(true),
+        kycReverifyPendingAfterTrip: String(true),
         identity_reverification_challenge_id: challengeId,
         identity_reverification_requested_at: nowIso
-      })).catch(() => null);
+      });
 
       logStructured('warn', 'Revalidacao facial adiada ate fim da corrida ativa', {
         service: 'kyc-policy-service',
         driverId,
-        activeTripId: activeTrip.tripId,
+        activeTripId,
         supportTicketId
       });
 
@@ -1317,28 +1782,49 @@ class KYCPolicyService {
         challengeId,
         reverifyRequired: false,
         deferred: true,
-        activeTripId: activeTrip.tripId
+        activeTripId,
+        ...(activeTripLookupFailed
+          ? { code: deferredCode || 'KYC_ACTIVE_TRIP_STATE_UNAVAILABLE' }
+          : {})
       };
     }
 
-    return this.applyIdentityReverificationGate({
-      driverId,
-      tripId,
-      reporterId,
-      reporterType,
-      payload,
-      supportTicketId,
-      challengeId
-    });
+    try {
+      return await this.applyIdentityReverificationGate({
+        driverId,
+        tripId,
+        reporterId,
+        reporterType,
+        payload,
+        supportTicketId,
+        challengeId
+      });
+    } finally {
+      if (policyWindowClaim?.acquired) {
+        await releaseIdentityPolicyMutationWindow(this.redis, policyWindowClaim).catch(() => null);
+      }
+    }
   }
 
   async applyDeferredIdentityReverificationIfSafe(driverId, context = {}) {
     if (!driverId) return { success: false, error: 'driverId e obrigatorio' };
 
-    const activeTrip = await resolveActiveTripForDriver(this.redis, driverId).catch(() => ({
-      tripId: null,
-      customerId: null
-    }));
+    let activeTrip = null;
+    try {
+      activeTrip = await resolveActiveTripForDriver(this.redis, driverId);
+    } catch (error) {
+      logStructured('warn', 'Revalidacao KYC mantida adiada: indice de corrida indisponivel', {
+        service: 'kyc-policy-service',
+        driverId,
+        error: error?.message || String(error)
+      });
+      return {
+        success: true,
+        applied: false,
+        deferred: true,
+        code: 'KYC_ACTIVE_TRIP_STATE_UNAVAILABLE'
+      };
+    }
     if (activeTrip?.tripId) {
       return {
         success: true,
@@ -1347,25 +1833,87 @@ class KYCPolicyService {
       };
     }
 
-    const state = await firebaseConfig.getFromRealtimeDB(`users/${driverId}/identityReverification`)
-      .catch(() => null);
+    let state = null;
+    try {
+      state = await this.readRealtimeStrict(`users/${driverId}/identityReverification`);
+    } catch (error) {
+      logStructured('warn', 'Revalidacao KYC mantida adiada: estado duravel indisponivel', {
+        service: 'kyc-policy-service',
+        driverId,
+        error: error?.message || String(error)
+      });
+      return {
+        success: true,
+        applied: false,
+        deferred: true,
+        code: 'KYC_REVERIFY_STATE_UNAVAILABLE'
+      };
+    }
     if (!state || state.status !== 'deferred_until_trip_end') {
       return { success: true, applied: false };
     }
 
-    return this.applyIdentityReverificationGate({
-      driverId,
-      tripId: context.tripId || state.tripId || null,
-      reporterId: state.reporterId || null,
-      reporterType: state.reporterType || 'passenger',
-      supportTicketId: state.supportTicketId || null,
-      payload: {
-        selectedOptions: ['identity_reverification_deferred'],
-        comment: 'Revalidacao aplicada apos fim da corrida',
-        source: context.source || 'post_trip'
-      },
-      challengeId: state.challengeId || null
-    });
+    let policyWindowClaim = null;
+    try {
+      policyWindowClaim = await claimIdentityPolicyMutationWindow(
+        this.redis,
+        driverId,
+        crypto.randomBytes(24).toString('hex')
+      );
+    } catch (error) {
+      logStructured('warn', 'Revalidacao KYC mantida adiada: trava corrida-KYC indisponivel', {
+        service: 'kyc-policy-service',
+        driverId,
+        error: error?.message || String(error)
+      });
+      return {
+        success: true,
+        applied: false,
+        deferred: true,
+        code: 'KYC_ACTIVE_TRIP_STATE_UNAVAILABLE'
+      };
+    }
+    if (policyWindowClaim.activeTripId || !policyWindowClaim.acquired) {
+      return {
+        success: true,
+        applied: false,
+        deferred: true,
+        activeTripId: policyWindowClaim.activeTripId || null,
+        ...(!policyWindowClaim.activeTripId ? { code: 'KYC_POLICY_MUTATION_IN_PROGRESS' } : {})
+      };
+    }
+
+    try {
+      let lockedState = null;
+      try {
+        lockedState = await this.readRealtimeStrict(`users/${driverId}/identityReverification`);
+      } catch (error) {
+        return {
+          success: true,
+          applied: false,
+          deferred: true,
+          code: 'KYC_REVERIFY_STATE_UNAVAILABLE'
+        };
+      }
+      if (!lockedState || lockedState.status !== 'deferred_until_trip_end') {
+        return { success: true, applied: false };
+      }
+      return await this.applyIdentityReverificationGate({
+        driverId,
+        tripId: context.tripId || lockedState.tripId || null,
+        reporterId: lockedState.reporterId || null,
+        reporterType: lockedState.reporterType || 'passenger',
+        supportTicketId: lockedState.supportTicketId || null,
+        payload: {
+          selectedOptions: ['identity_reverification_deferred'],
+          comment: 'Revalidacao aplicada apos fim da corrida',
+          source: context.source || 'post_trip'
+        },
+        challengeId: lockedState.challengeId || null
+      });
+    } finally {
+      await releaseIdentityPolicyMutationWindow(this.redis, policyWindowClaim).catch(() => null);
+    }
   }
 
   async recordIdentityReverificationResult(driverId, verificationResult = {}) {
@@ -1375,79 +1923,187 @@ class KYCPolicyService {
     if (requirement !== IDENTITY_REVERIFY_REQUIREMENT && !challengeId) {
       return { success: true, recorded: false };
     }
+    if (!challengeId) {
+      return {
+        success: true,
+        recorded: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
 
     const nowIso = new Date().toISOString();
-    const state = await firebaseConfig.getFromRealtimeDB(`users/${driverId}/identityReverification`)
-      .catch(() => null);
-    const notificationSentAtMs = toMillis(state?.notificationSentAt);
-    const validationStartedAtMs = toMillis(state?.validationStartedAt) || Date.now();
     const score = Number(verificationResult.similarityScore ?? verificationResult.confidence ?? 0);
     const isApproved = verificationResult.isMatch === true && verificationResult.needsReview !== true;
     const status = isApproved ? 'passed' : 'failed';
-    const baseUpdate = {
-      'identityReverification/status': status,
-      'identityReverification/validationCompletedAt': nowIso,
-      'identityReverification/lastSimilarityScore': Number.isFinite(score) ? score : null,
-      'identityReverification/lastDecision': verificationResult.decision || null,
-      'identityReverification/metrics/notificationToValidationCompletedSeconds': notificationSentAtMs
-        ? Math.max(0, Math.round((Date.now() - notificationSentAtMs) / 1000))
-        : null,
-      'identityReverification/metrics/validationDurationSeconds': Math.max(
-        0,
-        Math.round((Date.now() - validationStartedAtMs) / 1000)
-      ),
-      kycUpdatedAt: nowIso
-    };
-
     if (isApproved) {
-      await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
-        ...baseUpdate,
-        kycReverifyRequired: false,
-        kycReverifyPendingAfterTrip: false,
-        kycReverifyReason: null,
-        kycReverifySource: null,
-        kycStatus: 'approved',
-        kycBlocked: false,
-        kycLastVerificationAt: nowIso
-      }).catch(() => null);
-      await Promise.resolve().then(() => this.redis.hset(`driver:${driverId}`, {
-        kyc_reverify_required: String(false),
-        kyc_status: 'approved',
-        kyc_blocked: String(false),
-        identity_reverification_status: 'passed'
-      })).catch(() => null);
-      return { success: true, driverId, status };
+      const firestore = firebaseConfig.getFirestore();
+      if (firestore) {
+        const firestorePreflight = await this.persistCurrentIdentityFirestore(
+          driverId,
+          challengeId,
+          {},
+          { requireApprovalSafe: true, dryRun: true }
+        );
+        if (!firestorePreflight.committed) {
+          return {
+            success: true,
+            driverId,
+            recorded: false,
+            ...firestorePreflight
+          };
+        }
+      }
+      const redisPreflight = await this.persistCurrentIdentityRedis(
+        driverId,
+        challengeId,
+        {},
+        { requireApprovalSafe: true }
+      );
+      if (!redisPreflight) {
+        return {
+          success: true,
+          driverId,
+          recorded: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK'
+        };
+      }
+    }
+    let approvalSuperseded = false;
+    const realtimeResult = await this.transactCurrentIdentityReverification(
+      driverId,
+      challengeId,
+      (currentUser, currentState) => {
+        if (isApproved && !canApplyApprovedIdentityResult(currentUser)) {
+          approvalSuperseded = true;
+          return undefined;
+        }
+        const notificationSentAtMs = toMillis(currentState.notificationSentAt);
+        const validationStartedAtMs = toMillis(currentState.validationStartedAt) || Date.now();
+        const nextIdentityState = {
+          ...currentState,
+          status,
+          validationCompletedAt: nowIso,
+          lastSimilarityScore: Number.isFinite(score) ? score : null,
+          lastDecision: verificationResult.decision || null,
+          metrics: {
+            ...(currentState.metrics || {}),
+            notificationToValidationCompletedSeconds: notificationSentAtMs
+              ? Math.max(0, Math.round((Date.now() - notificationSentAtMs) / 1000))
+              : null,
+            validationDurationSeconds: Math.max(
+              0,
+              Math.round((Date.now() - validationStartedAtMs) / 1000)
+            )
+          }
+        };
+        if (isApproved) {
+          return {
+            ...currentUser,
+            identityReverification: nextIdentityState,
+            kycReverifyRequired: false,
+            kycReverifyPendingAfterTrip: false,
+            kycRecheckPendingAfterTrip: false,
+            kycReverifyReason: null,
+            kycReverifySource: null,
+            kycStatus: 'approved',
+            kycBlocked: false,
+            kycLastVerificationAt: nowIso,
+            kycUpdatedAt: nowIso
+          };
+        }
+        return {
+          ...currentUser,
+          identityReverification: nextIdentityState,
+          kycStatus: 'blocked',
+          kycBlocked: true,
+          kycBlockedReason: 'identity_reverification_failed',
+          kycLastVerificationAt: nowIso,
+          kycUpdatedAt: nowIso
+        };
+      }
+    );
+    if (!realtimeResult.committed) {
+      return {
+        success: true,
+        driverId,
+        recorded: false,
+        ...realtimeResult,
+        ...(approvalSuperseded
+          ? { code: 'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK' }
+          : {})
+      };
     }
 
-    const firestore = firebaseConfig.getFirestore();
-    if (firestore) {
-      const blockPayload = {
-        kycStatus: 'blocked',
-        kycBlocked: true,
-        kycBlockedReason: 'identity_reverification_failed',
+    if (isApproved) {
+      const firestore = firebaseConfig.getFirestore();
+      const firestoreResult = firestore
+        ? await this.persistCurrentIdentityFirestore(driverId, challengeId, {
+        kycReverifyRequired: false,
+        kycReverifyPendingAfterTrip: false,
+        kycRecheckPendingAfterTrip: false,
+        kycReverifyReason: admin.firestore.FieldValue.delete(),
+        kycReverifySource: admin.firestore.FieldValue.delete(),
+        kycStatus: 'approved',
+        kycBlocked: false,
         kycLastVerificationAt: admin.firestore.FieldValue.serverTimestamp(),
+        kycUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
         identityReverification: {
-          ...(state && typeof state === 'object' ? state : {}),
-          status: 'failed',
-          failedAt: nowIso,
+          challengeId,
+          status: 'passed',
+          validationCompletedAt: nowIso,
           lastSimilarityScore: Number.isFinite(score) ? score : null,
           lastDecision: verificationResult.decision || null
         }
-      };
-      await Promise.all([
-        firestore.collection('users').doc(driverId).set(blockPayload, { merge: true }),
-        firestore.collection('drivers').doc(driverId).set(blockPayload, { merge: true })
-      ]).catch(() => null);
+      }, { requireApprovalSafe: true })
+        : { committed: true, skipped: true };
+      if (!firestoreResult.committed) {
+        return { success: true, driverId, recorded: false, ...firestoreResult };
+      }
+      const redisCommitted = await this.persistCurrentIdentityRedis(driverId, challengeId, {
+        kyc_reverify_required: String(false),
+        kyc_status: 'approved',
+        kyc_blocked: String(false),
+        identity_reverification_status: 'passed',
+        identity_reverification_pending_after_trip: String(false),
+        kyc_recheck_pending_after_trip: String(false),
+        kycRecheckPendingAfterTrip: String(false),
+        kycReverifyPendingAfterTrip: String(false)
+      }, { requireApprovalSafe: true });
+      if (!redisCommitted) {
+        return {
+          success: true,
+          driverId,
+          recorded: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+      return { success: true, driverId, status, recorded: true };
     }
 
-    await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
-      ...baseUpdate,
+    const firestore = firebaseConfig.getFirestore();
+    const firestoreResult = firestore
+      ? await this.persistCurrentIdentityFirestore(driverId, challengeId, {
       kycStatus: 'blocked',
       kycBlocked: true,
       kycBlockedReason: 'identity_reverification_failed',
-      kycLastVerificationAt: nowIso
-    }).catch(() => null);
-    await Promise.resolve().then(() => this.redis.hset(`driver:${driverId}`, {
+      kycLastVerificationAt: admin.firestore.FieldValue.serverTimestamp(),
+      kycUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      identityReverification: {
+        challengeId,
+        status: 'failed',
+        failedAt: nowIso,
+        lastSimilarityScore: Number.isFinite(score) ? score : null,
+        lastDecision: verificationResult.decision || null
+      }
+    })
+      : { committed: true, skipped: true };
+    if (!firestoreResult.committed) {
+      return { success: true, driverId, recorded: false, ...firestoreResult };
+    }
+    const redisCommitted = await this.persistCurrentIdentityRedis(driverId, challengeId, {
       kyc_status: 'blocked',
       kyc_blocked: String(true),
       kyc_reverify_required: String(false),
@@ -1456,7 +2112,16 @@ class KYCPolicyService {
       dispatchEligible: String(false),
       dispatchEligibilityCode: 'KYC_REVERIFY_FAILED',
       identity_reverification_status: 'failed'
-    })).catch(() => null);
+    });
+    if (!redisCommitted) {
+      return {
+        success: true,
+        driverId,
+        recorded: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
     await Promise.resolve().then(() => this.redis.zrem('drivers:available', driverId)).catch(() => null);
     await Promise.resolve().then(() => this.redis.zrem(
       process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
@@ -1476,7 +2141,7 @@ class KYCPolicyService {
       }
     ).catch(() => null);
 
-    return { success: true, driverId, status };
+    return { success: true, driverId, status, recorded: true };
   }
 
   async recordIdentityReverificationStarted(driverId, payload = {}) {
@@ -1486,21 +2151,52 @@ class KYCPolicyService {
     if (requirement !== IDENTITY_REVERIFY_REQUIREMENT && !challengeId) {
       return { success: true, recorded: false };
     }
+    if (!challengeId) {
+      return {
+        success: true,
+        recorded: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
 
     const nowIso = new Date().toISOString();
-    const state = await firebaseConfig.getFromRealtimeDB(`users/${driverId}/identityReverification`)
-      .catch(() => null);
-    const notificationSentAtMs = toMillis(state?.notificationSentAt);
-    await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
-      'identityReverification/validationStartedAt': nowIso,
-      'identityReverification/metrics/notificationToValidationStartedSeconds': notificationSentAtMs
-        ? Math.max(0, Math.round((Date.now() - notificationSentAtMs) / 1000))
-        : null,
-      kycUpdatedAt: nowIso
-    }).catch(() => null);
-    await Promise.resolve().then(() => this.redis.hset(`driver:${driverId}`, {
+    const realtimeResult = await this.transactCurrentIdentityReverification(
+      driverId,
+      challengeId,
+      (currentUser, currentState) => {
+        const notificationSentAtMs = toMillis(currentState.notificationSentAt);
+        return {
+          ...currentUser,
+          identityReverification: {
+            ...currentState,
+            validationStartedAt: nowIso,
+            metrics: {
+              ...(currentState.metrics || {}),
+              notificationToValidationStartedSeconds: notificationSentAtMs
+                ? Math.max(0, Math.round((Date.now() - notificationSentAtMs) / 1000))
+                : null
+            }
+          },
+          kycUpdatedAt: nowIso
+        };
+      }
+    );
+    if (!realtimeResult.committed) {
+      return { success: true, driverId, recorded: false, ...realtimeResult };
+    }
+    const redisCommitted = await this.persistCurrentIdentityRedis(driverId, challengeId, {
       identity_reverification_validation_started_at: nowIso
-    })).catch(() => null);
+    });
+    if (!redisCommitted) {
+      return {
+        success: true,
+        driverId,
+        recorded: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
 
     return { success: true, driverId, recorded: true };
   }

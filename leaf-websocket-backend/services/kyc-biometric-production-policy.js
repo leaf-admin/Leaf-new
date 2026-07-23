@@ -1,7 +1,12 @@
 const AWS_LIVENESS_PROVIDER = 'aws_rekognition_face_liveness';
+const AWS_COMPARE_FACES_PROVIDER = 'aws_rekognition_compare_faces';
 const DEFAULT_TRUSTED_MATCH_PROVIDERS = Object.freeze([
   'biometric-face-service',
   'leaf_face_compare_service'
+]);
+const DEFAULT_CANONICAL_TRUSTED_MATCH_PROVIDERS = Object.freeze([
+  ...DEFAULT_TRUSTED_MATCH_PROVIDERS,
+  AWS_COMPARE_FACES_PROVIDER
 ]);
 
 function readBooleanLike(value, fallback = false) {
@@ -50,6 +55,12 @@ function resolveBiometricPolicy(env = process.env) {
     trustedMatchProviders: readList(
       env.KYC_TRUSTED_BIOMETRIC_MATCH_PROVIDERS,
       DEFAULT_TRUSTED_MATCH_PROVIDERS
+    ),
+    // Kept separate from device payload providers: AWS CompareFaces is trusted
+    // only when produced by the canonical server-side route.
+    canonicalTrustedMatchProviders: readList(
+      env.KYC_CANONICAL_TRUSTED_BIOMETRIC_MATCH_PROVIDERS,
+      DEFAULT_CANONICAL_TRUSTED_MATCH_PROVIDERS
     )
   };
 }
@@ -164,14 +175,28 @@ function evaluateProductionReadiness(env = process.env) {
   if (!String(env.KYC_AWS_LIVENESS_ASSUME_ROLE_ARN || env.AWS_LIVENESS_ASSUME_ROLE_ARN || '').trim()) {
     blockers.push('KYC_AWS_LIVENESS_ASSUME_ROLE_ARN obrigatório para emitir credenciais temporárias AWS.');
   }
-  if (!String(env.BIOMETRIC_FACE_SERVICE_URL || '').trim()) {
-    blockers.push('BIOMETRIC_FACE_SERVICE_URL obrigatório para comparação biométrica.');
-  }
-  if (!String(env.BIOMETRIC_FACE_SERVICE_API_KEY || '').trim()) {
-    blockers.push('BIOMETRIC_FACE_SERVICE_API_KEY obrigatório para comparação biométrica.');
-  }
-  if (!readBooleanLike(env.ENABLE_CNH_FACE_BIOMETRICS, false)) {
-    blockers.push('ENABLE_CNH_FACE_BIOMETRICS=true obrigatório para gerar embedding da CNH.');
+  const faceCompareProvider = String(
+    env.KYC_FACE_COMPARE_PROVIDER || 'leaf_face_compare_service'
+  ).trim().toLowerCase();
+  if (faceCompareProvider === AWS_COMPARE_FACES_PROVIDER) {
+    if (!readBooleanLike(env.KYC_AWS_COMPARE_FACES_ENABLED, false)) {
+      blockers.push('KYC_AWS_COMPARE_FACES_ENABLED=true obrigatório para usar AWS CompareFaces.');
+    }
+    if (!policy.canonicalTrustedMatchProviders.includes(AWS_COMPARE_FACES_PROVIDER)) {
+      blockers.push('AWS CompareFaces precisa estar na allowlist biométrica canônica server-side.');
+    }
+  } else if (['leaf_face_compare_service', 'biometric-face-service'].includes(faceCompareProvider)) {
+    if (!String(env.BIOMETRIC_FACE_SERVICE_URL || '').trim()) {
+      blockers.push('BIOMETRIC_FACE_SERVICE_URL obrigatório para comparação biométrica.');
+    }
+    if (!String(env.BIOMETRIC_FACE_SERVICE_API_KEY || '').trim()) {
+      blockers.push('BIOMETRIC_FACE_SERVICE_API_KEY obrigatório para comparação biométrica.');
+    }
+    if (!readBooleanLike(env.ENABLE_CNH_FACE_BIOMETRICS, false)) {
+      blockers.push('ENABLE_CNH_FACE_BIOMETRICS=true obrigatório para gerar embedding da CNH.');
+    }
+  } else {
+    blockers.push(`KYC_FACE_COMPARE_PROVIDER não suportado: ${faceCompareProvider || '(vazio)'}.`);
   }
   if (readBooleanLike(env.MOBILE_FACE_EMBEDDING_ENABLED, true)) {
     blockers.push('MOBILE_FACE_EMBEDDING_ENABLED=false obrigatório até homologação do modelo/runtime nativo.');
@@ -192,10 +217,20 @@ function evaluateProductionReadiness(env = process.env) {
     blockers.push('Embedding facial local/do dispositivo deve permanecer desabilitado em produção.');
   }
 
-  const approveThreshold = Number(env.BIOMETRIC_FACE_APPROVE_THRESHOLD || 0.61);
-  const reviewThreshold = Number(env.BIOMETRIC_FACE_REVIEW_THRESHOLD || 0.40);
+  const approveThreshold = faceCompareProvider === AWS_COMPARE_FACES_PROVIDER
+    ? Number(env.KYC_AWS_COMPARE_FACES_APPROVE_THRESHOLD || 0.95)
+    : Number(env.BIOMETRIC_FACE_APPROVE_THRESHOLD || 0.61);
+  const reviewThreshold = faceCompareProvider === AWS_COMPARE_FACES_PROVIDER
+    ? Number(env.KYC_AWS_COMPARE_FACES_REVIEW_THRESHOLD || 0.80)
+    : Number(env.BIOMETRIC_FACE_REVIEW_THRESHOLD || 0.40);
   if (!(Number.isFinite(approveThreshold) && Number.isFinite(reviewThreshold) && reviewThreshold < approveThreshold)) {
-    blockers.push('BIOMETRIC_FACE_REVIEW_THRESHOLD precisa ser menor que BIOMETRIC_FACE_APPROVE_THRESHOLD.');
+    blockers.push('O threshold de revisão precisa ser menor que o threshold de aprovação facial.');
+  }
+  if (
+    faceCompareProvider === AWS_COMPARE_FACES_PROVIDER
+    && !(reviewThreshold >= 0 && approveThreshold <= 1)
+  ) {
+    blockers.push('Thresholds do AWS CompareFaces devem estar normalizados entre 0 e 1.');
   }
 
   return {
@@ -208,7 +243,9 @@ function evaluateProductionReadiness(env = process.env) {
 }
 
 module.exports = {
+  AWS_COMPARE_FACES_PROVIDER,
   AWS_LIVENESS_PROVIDER,
+  DEFAULT_CANONICAL_TRUSTED_MATCH_PROVIDERS,
   DEFAULT_TRUSTED_MATCH_PROVIDERS,
   evaluateDeviceVerificationTrust,
   evaluateProductionReadiness,

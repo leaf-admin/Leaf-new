@@ -1,4 +1,10 @@
 const sharp = require('sharp');
+const crypto = require('crypto');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const ocrService = require('./ocr-service');
 const BiometricFaceClient = require('./biometric-face-client');
 const { logStructured, logError } = require('../utils/logger');
@@ -9,6 +15,87 @@ const DEFAULT_CNH_PHOTO_CROP = Object.freeze({
   width: Number(process.env.CNH_DIGITAL_PHOTO_CROP_WIDTH || 0.219841),
   height: Number(process.env.CNH_DIGITAL_PHOTO_CROP_HEIGHT || 0.396786)
 });
+const DEFAULT_CNH_A4_PHOTO_CROP = Object.freeze({
+  left: Number(process.env.CNH_DIGITAL_A4_PHOTO_CROP_LEFT || 0.115),
+  top: Number(process.env.CNH_DIGITAL_A4_PHOTO_CROP_TOP || 0.142),
+  width: Number(process.env.CNH_DIGITAL_A4_PHOTO_CROP_WIDTH || 0.12),
+  height: Number(process.env.CNH_DIGITAL_A4_PHOTO_CROP_HEIGHT || 0.12)
+});
+const CNH_PORTRAIT_CROP_VERSION = 'cnh_digital_photo_crop_v1';
+const CNH_A4_PORTRAIT_CROP_VERSION = 'cnh_digital_a4_photo_crop_v1';
+const A4_PORTRAIT_MIN_ASPECT_RATIO = 0.68;
+const A4_PORTRAIT_MAX_ASPECT_RATIO = 0.75;
+const LEGACY_FRONT_MIN_ASPECT_RATIO = 1.2;
+const LEGACY_FRONT_MAX_ASPECT_RATIO = 1.8;
+const MIN_EMBEDDED_CNH_PAGE_WIDTH = 600;
+const MIN_EMBEDDED_CNH_PAGE_HEIGHT = 400;
+const MIN_EMBEDDED_CNH_PAGE_AREA = 240000;
+const execFileAsync = promisify(execFile);
+
+async function readImageDimensions(imageBuffer) {
+  try {
+    const metadata = await sharp(imageBuffer).metadata();
+    const width = Number(metadata.width || 0);
+    const height = Number(metadata.height || 0);
+    if (!width || !height) throw new Error('Dimensoes ausentes');
+    return { width, height, aspectRatio: width / height };
+  } catch (cause) {
+    const error = new Error('Nao foi possivel ler dimensoes da pagina da CNH');
+    error.code = 'KYC_CNH_PORTRAIT_EXTRACTION_FAILED';
+    error.cause = cause;
+    throw error;
+  }
+}
+
+async function isSupportedEmbeddedCnhPageImage(imageBuffer) {
+  try {
+    const { width, height, aspectRatio } = await readImageDimensions(imageBuffer);
+    return width >= MIN_EMBEDDED_CNH_PAGE_WIDTH
+      && height >= MIN_EMBEDDED_CNH_PAGE_HEIGHT
+      && width * height >= MIN_EMBEDDED_CNH_PAGE_AREA
+      && aspectRatio >= LEGACY_FRONT_MIN_ASPECT_RATIO
+      && aspectRatio <= LEGACY_FRONT_MAX_ASPECT_RATIO;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function convertPdfFirstPageToImage(pdfBuffer) {
+  const embeddedImage = typeof ocrService.extractLargestEmbeddedImageFromPDF === 'function'
+    ? ocrService.extractLargestEmbeddedImageFromPDF(pdfBuffer)
+    : null;
+  if (embeddedImage && await isSupportedEmbeddedCnhPageImage(embeddedImage)) {
+    return embeddedImage;
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'leaf-cnh-'));
+  const pdfPath = path.join(tempDir, 'document.pdf');
+  const outputPrefix = path.join(tempDir, 'page');
+  const outputPath = `${outputPrefix}.jpg`;
+  try {
+    await fs.writeFile(pdfPath, pdfBuffer, { mode: 0o600 });
+    await execFileAsync('pdftoppm', [
+      '-jpeg',
+      '-r', '300',
+      '-f', '1',
+      '-l', '1',
+      '-singlefile',
+      pdfPath,
+      outputPrefix
+    ], {
+      timeout: 30000,
+      maxBuffer: 1024 * 1024
+    });
+    return await fs.readFile(outputPath);
+  } catch (cause) {
+    const error = new Error('Falha ao converter a primeira pagina da CNH PDF');
+    error.code = 'KYC_CNH_PDF_CONVERSION_FAILED';
+    error.cause = cause;
+    throw error;
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => null);
+  }
+}
 
 function clampRatio(value, fallback) {
   const numeric = Number(value);
@@ -16,11 +103,11 @@ function clampRatio(value, fallback) {
   return Math.max(0, Math.min(1, numeric));
 }
 
-function normalizeCrop(crop = DEFAULT_CNH_PHOTO_CROP) {
-  const left = clampRatio(crop.left, DEFAULT_CNH_PHOTO_CROP.left);
-  const top = clampRatio(crop.top, DEFAULT_CNH_PHOTO_CROP.top);
-  const width = clampRatio(crop.width, DEFAULT_CNH_PHOTO_CROP.width);
-  const height = clampRatio(crop.height, DEFAULT_CNH_PHOTO_CROP.height);
+function normalizeCrop(crop = DEFAULT_CNH_PHOTO_CROP, fallback = DEFAULT_CNH_PHOTO_CROP) {
+  const left = clampRatio(crop.left, fallback.left);
+  const top = clampRatio(crop.top, fallback.top);
+  const width = clampRatio(crop.width, fallback.width);
+  const height = clampRatio(crop.height, fallback.height);
   return {
     left,
     top,
@@ -33,14 +120,111 @@ function isPdfBuffer(buffer) {
   return Buffer.isBuffer(buffer) && buffer.slice(0, 4).toString('utf8') === '%PDF';
 }
 
+async function resolvePdfCropProfile(pageImageBuffer, { legacyCrop, a4Crop }) {
+  const { width, height, aspectRatio } = await readImageDimensions(pageImageBuffer);
+
+  if (
+    width < MIN_EMBEDDED_CNH_PAGE_WIDTH
+    || height < MIN_EMBEDDED_CNH_PAGE_HEIGHT
+    || width * height < MIN_EMBEDDED_CNH_PAGE_AREA
+  ) {
+    const error = new Error('Imagem da pagina da CNH-e abaixo da resolucao canonica minima');
+    error.code = 'KYC_CNH_PORTRAIT_LAYOUT_UNSUPPORTED';
+    throw error;
+  }
+
+  if (
+    aspectRatio >= A4_PORTRAIT_MIN_ASPECT_RATIO
+    && aspectRatio <= A4_PORTRAIT_MAX_ASPECT_RATIO
+  ) {
+    return {
+      crop: a4Crop,
+      cropVersion: CNH_A4_PORTRAIT_CROP_VERSION
+    };
+  }
+
+  if (
+    aspectRatio >= LEGACY_FRONT_MIN_ASPECT_RATIO
+    && aspectRatio <= LEGACY_FRONT_MAX_ASPECT_RATIO
+  ) {
+    return {
+      crop: legacyCrop,
+      cropVersion: CNH_PORTRAIT_CROP_VERSION
+    };
+  }
+
+  const error = new Error('Layout da CNH-e nao suportado para extracao canonica do retrato');
+  error.code = 'KYC_CNH_PORTRAIT_LAYOUT_UNSUPPORTED';
+  throw error;
+}
+
 class CnhFaceBiometricService {
   constructor(options = {}) {
     this.client = options.client || new BiometricFaceClient(options.clientOptions || {});
     this.crop = normalizeCrop(options.crop);
+    this.a4Crop = normalizeCrop(
+      options.a4Crop || DEFAULT_CNH_A4_PHOTO_CROP,
+      DEFAULT_CNH_A4_PHOTO_CROP
+    );
+    this.pdfPageConverter = options.pdfPageConverter || convertPdfFirstPageToImage;
   }
 
   isConfigured() {
     return typeof this.client.isConfigured === 'function' && this.client.isConfigured();
+  }
+
+  /**
+   * Extrai somente o retrato da CNH para comparacao facial server-side.
+   * O caminho canonico deve manter allowFullPageFallback=false para nunca
+   * enviar a pagina/documento inteiro ao provedor biometrico.
+   */
+  async extractCnhPortraitImage(documentBuffer, options = {}) {
+    if (!Buffer.isBuffer(documentBuffer) || documentBuffer.length === 0) {
+      const error = new Error('documentBuffer deve ser um Buffer nao vazio');
+      error.code = 'KYC_CNH_DOCUMENT_BUFFER_REQUIRED';
+      throw error;
+    }
+
+    const documentIsPdf = isPdfBuffer(documentBuffer);
+    const pageImageBuffer = documentIsPdf
+      ? await this.pdfPageConverter(documentBuffer)
+      : documentBuffer;
+    const legacyCrop = normalizeCrop(options.crop || this.crop);
+    const a4Crop = normalizeCrop(
+      options.a4Crop || this.a4Crop,
+      DEFAULT_CNH_A4_PHOTO_CROP
+    );
+    const cropProfile = documentIsPdf
+      ? await resolvePdfCropProfile(pageImageBuffer, { legacyCrop, a4Crop })
+      : { crop: legacyCrop, cropVersion: CNH_PORTRAIT_CROP_VERSION };
+    const { crop, cropVersion } = cropProfile;
+
+    try {
+      const imageBuffer = await this.#cropCnhPhoto(pageImageBuffer, crop);
+      return {
+        imageBuffer,
+        source: documentIsPdf ? 'approved_cnh_pdf_crop_v1' : 'approved_cnh_image_crop_v1',
+        crop,
+        cropVersion,
+        imageSha256: crypto.createHash('sha256').update(imageBuffer).digest('hex')
+      };
+    } catch (cropError) {
+      if (options.allowFullPageFallback !== true) {
+        cropError.code = cropError.code || 'KYC_CNH_PORTRAIT_EXTRACTION_FAILED';
+        throw cropError;
+      }
+
+      const imageBuffer = await sharp(pageImageBuffer)
+        .jpeg({ quality: 95 })
+        .toBuffer();
+      return {
+        imageBuffer,
+        source: 'cnh_pdf_full_page_fallback',
+        crop: null,
+        cropVersion: null,
+        imageSha256: crypto.createHash('sha256').update(imageBuffer).digest('hex')
+      };
+    }
   }
 
   async generateCnhFaceEmbeddingFromPdf(pdfBuffer, options = {}) {
@@ -49,13 +233,13 @@ class CnhFaceBiometricService {
     }
 
     const startedAt = Date.now();
-    const pageImageBuffer = isPdfBuffer(pdfBuffer)
-      ? await ocrService.convertPDFToImage(pdfBuffer)
-      : pdfBuffer;
-
     try {
-      const cnhPhotoBuffer = await this.#cropCnhPhoto(pageImageBuffer, options.crop || this.crop);
-      const embedding = await this.client.generateEmbedding(cnhPhotoBuffer, {
+      const portrait = await this.extractCnhPortraitImage(pdfBuffer, {
+        crop: options.crop || this.crop,
+        a4Crop: options.a4Crop || this.a4Crop,
+        allowFullPageFallback: options.disableFullPageFallback !== true
+      });
+      const embedding = await this.client.generateEmbedding(portrait.imageBuffer, {
         filename: options.filename || 'cnh-face.jpg',
         contentType: 'image/jpeg'
       });
@@ -69,29 +253,17 @@ class CnhFaceBiometricService {
 
       return {
         ...embedding,
-        source: 'cnh_pdf_crop',
-        crop: normalizeCrop(options.crop || this.crop)
+        source: portrait.source === 'cnh_pdf_full_page_fallback'
+          ? portrait.source
+          : 'cnh_pdf_crop',
+        crop: portrait.crop
       };
-    } catch (cropError) {
-      if (options.disableFullPageFallback === true) {
-        throw cropError;
-      }
-
-      logStructured('warn', 'Crop da foto da CNH falhou; tentando pagina inteira', {
+    } catch (error) {
+      logError(error, 'Falha ao extrair ou processar foto da CNH Digital', {
         service: 'cnh-face-biometric-service',
-        error: cropError.message
+        fullPageFallbackAllowed: options.disableFullPageFallback !== true
       });
-
-      const fallbackEmbedding = await this.client.generateEmbedding(pageImageBuffer, {
-        filename: options.filename || 'cnh-page.jpg',
-        contentType: 'image/jpeg'
-      });
-
-      return {
-        ...fallbackEmbedding,
-        source: 'cnh_pdf_full_page_fallback',
-        crop: null
-      };
+      throw error;
     }
   }
 

@@ -12,6 +12,7 @@ const {
   recomputeDriverActivationStatus
 } = require('../services/driver-document-analysis-queue');
 const driverApplicationService = require('../services/driver-application-service');
+const kycIdentityReviewWorkflowService = require('../services/kyc-identity-review-workflow-service');
 
 const router = express.Router();
 
@@ -71,6 +72,101 @@ function createActivationStorageError(message, cause = null) {
   return error;
 }
 
+function normalizeUserType(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function resolveProfileUserType(profile = {}) {
+  return normalizeUserType(
+    profile?.usertype ||
+      profile?.userType ||
+      profile?.role ||
+      profile?.profileSelection?.userType ||
+      ''
+  );
+}
+
+function resolveClaimsUserType(decoded = {}) {
+  return normalizeUserType(
+    decoded?.usertype ||
+      decoded?.userType ||
+      decoded?.user_type ||
+      decoded?.role ||
+      ''
+  );
+}
+
+function createDriverProfileLookupError(message, cause = null) {
+  const error = new Error(message);
+  error.code = 'DRIVER_PROFILE_LOOKUP_FAILED';
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
+}
+
+async function resolveDriverAuthProfile(uid, decoded) {
+  let firestore = null;
+  try {
+    firestore = firebaseConfig?.getFirestore?.() || admin.firestore?.();
+  } catch (cause) {
+    throw createDriverProfileLookupError(
+      'Falha ao obter o Firestore para validar o perfil do motorista.',
+      cause
+    );
+  }
+
+  if (!firestore) {
+    throw createDriverProfileLookupError(
+      'Firestore indisponível para validar o perfil do motorista.'
+    );
+  }
+
+  let firestoreProfile = null;
+  try {
+    const userDoc = await firestore.collection('users').doc(uid).get();
+    firestoreProfile = userDoc?.exists ? userDoc.data() || {} : null;
+  } catch (cause) {
+    throw createDriverProfileLookupError(
+      'Falha ao consultar o perfil canônico do motorista.',
+      cause
+    );
+  }
+
+  const firestoreUserType = resolveProfileUserType(firestoreProfile || {});
+  const claimsUserType = resolveClaimsUserType(decoded);
+  const userType = firestoreUserType || claimsUserType;
+
+  // O RTDB legado pode complementar dados de exibição quando o documento canônico
+  // ainda não existe, mas nunca participa da decisão de autorização.
+  let compatibilityProfile = null;
+  if (!firestoreProfile) {
+    try {
+      const db = firebaseConfig?.getRealtimeDB?.();
+      if (db) {
+        const userSnapshot = await db.ref(`users/${uid}`).once('value');
+        compatibilityProfile = userSnapshot?.val?.() || null;
+      }
+    } catch (error) {
+      logStructured('warn', 'Perfil legado indisponível durante autenticação de ativação', {
+        service: 'driver-activation-routes',
+        driverId: uid,
+        error: error?.message || String(error)
+      });
+    }
+  }
+
+  return {
+    profile: firestoreProfile || compatibilityProfile || {},
+    profileSource: firestoreProfile
+      ? 'firestore'
+      : compatibilityProfile
+        ? 'rtdb_compatibility'
+        : 'claims',
+    userType
+  };
+}
+
 async function requireDriverAuth(req, res, next) {
   try {
     ensureFirebaseInitialized();
@@ -101,26 +197,11 @@ async function requireDriverAuth(req, res, next) {
       });
     }
 
-    const db = firebaseConfig?.getRealtimeDB?.();
-    if (!db) {
-      return res.status(503).json({
-        success: false,
-        message: 'Realtime Database indisponível.'
-      });
-    }
-
-    const userSnapshot = await db.ref(`users/${uid}`).once('value');
-    const userProfile = userSnapshot.val() || {};
-    const userType = String(
-      userProfile?.usertype ||
-        userProfile?.userType ||
-        userProfile?.profileSelection?.userType ||
-        decoded?.usertype ||
-        decoded?.userType ||
-        ''
-    )
-      .trim()
-      .toLowerCase();
+    const {
+      profile: userProfile,
+      profileSource,
+      userType
+    } = await resolveDriverAuthProfile(uid, decoded);
 
     if (userType !== 'driver') {
       return res.status(403).json({
@@ -134,6 +215,7 @@ async function requireDriverAuth(req, res, next) {
       token,
       decoded,
       profile: userProfile,
+      profileSource,
       userType
     };
 
@@ -142,6 +224,15 @@ async function requireDriverAuth(req, res, next) {
     logError(error, 'Falha na autenticação do motorista para ativação', {
       service: 'driver-activation-routes'
     });
+
+    if (error?.code === 'DRIVER_PROFILE_LOOKUP_FAILED') {
+      return res.status(503).json({
+        success: false,
+        code: 'DRIVER_PROFILE_LOOKUP_FAILED',
+        message: 'Não foi possível validar o perfil do motorista agora. Tente novamente.'
+      });
+    }
+
     return res.status(401).json({
       success: false,
       message: 'Token inválido ou expirado.'
@@ -209,6 +300,27 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
 router.post(
   '/api/drivers/me/activation/documents/:type',
   requireDriverAuth,
+  async (req, res, next) => {
+    const documentType = sanitizeDocumentType(req.params.type);
+    if (documentType !== 'cnh') return next();
+    try {
+      await kycIdentityReviewWorkflowService.assertCnhUploadAllowed(req.user.uid);
+      return next();
+    } catch (error) {
+      const permanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
+      const reviewHold = error?.code === 'KYC_IDENTITY_REVIEW_HOLD';
+      const statusCode = permanentlyBlocked || reviewHold ? 423 : 503;
+      return res.status(statusCode).json({
+        success: false,
+        code: error?.code || 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
+        message: permanentlyBlocked
+          ? 'Esta conta nao pode substituir a CNH.'
+          : reviewHold
+            ? 'A CNH nao pode ser alterada enquanto sua solicitacao de analise estiver em andamento.'
+            : 'Nao foi possivel validar a troca da CNH agora.'
+      });
+    }
+  },
   (req, res, next) => {
     upload.single('pdf')(req, res, err => {
       if (!err) {
@@ -396,7 +508,15 @@ router.post(
 router.post('/api/drivers/me/activation/consent/background-check', requireDriverAuth, async (req, res) => {
   try {
     const driverId = req.user.uid;
-    const accepted = parseBoolean(req.body?.accepted, true);
+    if (typeof req.body?.accepted !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        code: 'BACKGROUND_CHECK_CONSENT_BOOLEAN_REQUIRED',
+        message: 'O consentimento deve ser informado explicitamente como verdadeiro ou falso.'
+      });
+    }
+
+    const accepted = req.body.accepted;
     const io = req.app.get('io') || req.app.locals?.io || null;
 
     const snapshot = await driverDocumentAnalysisQueue.setConsentBackgroundCheck({

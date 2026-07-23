@@ -5,6 +5,10 @@
 
 const { logger } = require('../utils/logger');
 
+const MIN_EMBEDDED_DOCUMENT_IMAGE_WIDTH = 600;
+const MIN_EMBEDDED_DOCUMENT_IMAGE_HEIGHT = 400;
+const MIN_EMBEDDED_DOCUMENT_IMAGE_AREA = 240000;
+
 class OCRService {
   constructor() {
     this.visionClient = null;
@@ -277,6 +281,20 @@ class OCRService {
       }
 
       if (!best) return null;
+
+      const isDocumentSizedImage =
+        best.width >= MIN_EMBEDDED_DOCUMENT_IMAGE_WIDTH &&
+        best.height >= MIN_EMBEDDED_DOCUMENT_IMAGE_HEIGHT &&
+        best.width * best.height >= MIN_EMBEDDED_DOCUMENT_IMAGE_AREA;
+
+      if (!isDocumentSizedImage) {
+        logger.info('Imagem embutida pequena ignorada; renderizando a pagina completa do PDF', {
+          width: best.width || null,
+          height: best.height || null
+        });
+        return null;
+      }
+
       const imageBuffer = pdfBuffer.slice(best.streamStart, best.streamEnd);
       if (!imageBuffer || imageBuffer.length < 1024) return null;
 

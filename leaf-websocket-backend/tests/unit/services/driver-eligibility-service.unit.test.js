@@ -143,13 +143,21 @@ describe('driver-eligibility-service', () => {
     expect(profile.vehiclePlate).toBe('TES3003');
   });
 
-  it('blocks the driver when the active vehicle is assigned to another driver', async () => {
+  it('allows the same approved vehicle to be selected in another profile before the online lock', async () => {
     firebaseConfig.getRealtimeDB.mockReturnValue(
       createRealtimeDB({
         'driver_activation/driver_2': {
           documents: {
             cnh: { status: 'approved' },
-            crlv: { status: 'approved' }
+            crlv: {
+              status: 'approved',
+              data: {
+                plate: 'LEF9999',
+                renavam: '12345678901',
+                model: 'Leaf Plus',
+                color: 'PRETO'
+              }
+            }
           },
           consent: {
             backgroundCheck: { acceptedAt: '2026-06-24T12:00:00.000Z' }
@@ -188,9 +196,9 @@ describe('driver-eligibility-service', () => {
       { carType: 'Leaf Plus' }
     );
 
-    expect(eligibility.eligible).toBe(false);
-    expect(eligibility.code).toBe('VEHICLE_ASSIGNED_TO_ANOTHER_DRIVER');
-    expect(eligibility.profile.assignmentConflict).toBe(true);
+    expect(eligibility.eligible).toBe(true);
+    expect(eligibility.code).toBe('PLUS_MATCH');
+    expect(eligibility.profile.assignmentConflict).toBe(false);
   });
 
   it('falls back to user_vehicles plate when vehicles document is missing or incomplete', async () => {
@@ -271,13 +279,21 @@ describe('driver-eligibility-service', () => {
     expect(profile.vehiclePlate).toBe('CACHE123');
   });
 
-  it('blocks ride eligibility when canonical KYC is still in manual review', async () => {
+  it('blocks ride eligibility during manual KYC review without classifying the driver as rejected', async () => {
     firebaseConfig.getRealtimeDB.mockReturnValue(
       createRealtimeDB({
         'users/driver_kyc_review': {
           approved: true,
           kycStatus: 'pending_review',
           carType: 'Leaf Plus'
+        },
+        'driver_activation/driver_kyc_review': {
+          documents: {
+            cnh: { status: 'approved' }
+          },
+          consent: {
+            backgroundCheck: { acceptedAt: '2026-07-14T12:00:00.000Z' }
+          }
         },
         'user_vehicles/driver_kyc_review': {
           uv_1: {
@@ -307,12 +323,15 @@ describe('driver-eligibility-service', () => {
     );
 
     expect(eligibility.eligible).toBe(false);
-    expect(eligibility.code).toBe('DRIVER_ACTIVATION_REJECTED');
+    expect(eligibility.code).toBe('DRIVER_ACTIVATION_DRIVER_DOCS_IN_REVIEW');
     expect(eligibility.activationState).toEqual(
       expect.objectContaining({
         canGoOnline: false,
+        canAttemptOnline: false,
         kyc: expect.objectContaining({
-          blocked: true,
+          approved: false,
+          blocked: false,
+          pending: true,
           status: 'pending_review'
         })
       })

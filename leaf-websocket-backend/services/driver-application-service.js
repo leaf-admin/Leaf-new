@@ -31,6 +31,27 @@ function normalizeId(value) {
   return String(value || '').trim();
 }
 
+function firstText(...values) {
+  for (const value of values) {
+    const normalized = String(value ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function normalizeProfileUserType(profile = {}) {
+  const normalized = firstText(
+    profile?.usertype,
+    profile?.userType,
+    profile?.role,
+    profile?.user_role,
+    profile?.accountType
+  ).toLowerCase();
+
+  if (normalized === 'passenger') return 'customer';
+  return ['customer', 'driver'].includes(normalized) ? normalized : '';
+}
+
 function toIso(value, fallback = null) {
   if (!value) return fallback;
   if (typeof value === 'string') return value;
@@ -96,6 +117,96 @@ function genderCodeToLabel(code) {
   if (code === 'M') return 'Masculino';
   if (code === 'X') return 'Outro';
   return null;
+}
+
+function resolveDriverProfileProjection({
+  canonicalProfile = {},
+  realtimeUser = {},
+  documents = {},
+  canonicalCnhData = null
+} = {}) {
+  const mirroredCnhData =
+    documents?.cnh?.extractedData ||
+    documents?.cnh?.analysisData ||
+    {};
+  const cnhData = canonicalCnhData && typeof canonicalCnhData === 'object'
+    ? canonicalCnhData
+    : mirroredCnhData;
+
+  const canonicalFirstName = firstText(canonicalProfile?.firstName);
+  const canonicalLastName = firstText(canonicalProfile?.lastName);
+  const realtimeFirstName = firstText(realtimeUser?.firstName);
+  const realtimeLastName = firstText(realtimeUser?.lastName);
+
+  return {
+    name: firstText(
+      canonicalProfile?.name,
+      canonicalProfile?.fullName,
+      canonicalProfile?.displayName,
+      [canonicalFirstName, canonicalLastName].filter(Boolean).join(' '),
+      realtimeUser?.name,
+      realtimeUser?.fullName,
+      realtimeUser?.displayName,
+      [realtimeFirstName, realtimeLastName].filter(Boolean).join(' '),
+      cnhData?.nome,
+      cnhData?.name
+    ),
+    email: firstText(canonicalProfile?.email, realtimeUser?.email),
+    phone: firstText(
+      canonicalProfile?.mobile,
+      canonicalProfile?.phone,
+      canonicalProfile?.phoneNumber,
+      realtimeUser?.mobile,
+      realtimeUser?.phone,
+      realtimeUser?.phoneNumber
+    ),
+    cpf: firstText(
+      canonicalProfile?.cpf,
+      canonicalProfile?.document,
+      canonicalProfile?.documentNumber,
+      realtimeUser?.cpf,
+      realtimeUser?.document,
+      realtimeUser?.documentNumber,
+      cnhData?.cpf
+    ),
+    birthDate: firstText(
+      canonicalProfile?.birthDate,
+      canonicalProfile?.dateOfBirth,
+      canonicalProfile?.dob,
+      canonicalProfile?.dataNascimento,
+      realtimeUser?.birthDate,
+      realtimeUser?.dateOfBirth,
+      realtimeUser?.dob,
+      realtimeUser?.dataNascimento,
+      cnhData?.dataNascimento,
+      cnhData?.birthDate,
+      cnhData?.dateOfBirth
+    ),
+    motherName: firstText(
+      canonicalProfile?.motherName,
+      canonicalProfile?.nomeMae,
+      canonicalProfile?.nomeDaMae,
+      realtimeUser?.motherName,
+      realtimeUser?.nomeMae,
+      realtimeUser?.nomeDaMae,
+      cnhData?.nomeMae,
+      cnhData?.nomeDaMae,
+      cnhData?.motherName
+    ),
+    gender: firstText(
+      canonicalProfile?.gender,
+      canonicalProfile?.genero,
+      realtimeUser?.gender,
+      realtimeUser?.genero,
+      cnhData?.genero,
+      cnhData?.sexo,
+      cnhData?.gender,
+      cnhData?.sex
+    ),
+    city: firstText(canonicalProfile?.city, realtimeUser?.city),
+    state: firstText(canonicalProfile?.state, realtimeUser?.state),
+    registrationDate: toIso(canonicalProfile?.createdAt) || toIso(realtimeUser?.createdAt)
+  };
 }
 
 function resolveDriverIdentityData(userData = {}, documents = {}) {
@@ -243,6 +354,8 @@ class DriverApplicationService {
   async buildApplication(driverId, {
     db = null,
     userData = null,
+    canonicalProfileData = null,
+    canonicalCnhData = null,
     carsByDriverId = null,
     userVehiclesRaw = null,
     vehiclesRaw = null,
@@ -254,7 +367,11 @@ class DriverApplicationService {
 
     const user = userData || (await realtimeDb.ref(`users/${safeDriverId}`).once('value')).val();
     if (!user || typeof user !== 'object') return null;
-    if (String(user.usertype || user.userType || '').toLowerCase() !== 'driver') return null;
+    const canonicalProfile = canonicalProfileData && typeof canonicalProfileData === 'object'
+      ? canonicalProfileData
+      : {};
+    const userType = normalizeProfileUserType(canonicalProfile) || normalizeProfileUserType(user);
+    if (userType !== 'driver') return null;
 
     let carsIndex = carsByDriverId;
     if (!carsIndex) {
@@ -357,7 +474,13 @@ class DriverApplicationService {
       }))
     };
 
-    const driverIdentity = resolveDriverIdentityData(user, documents);
+    const profileProjection = resolveDriverProfileProjection({
+      canonicalProfile,
+      realtimeUser: user,
+      documents,
+      canonicalCnhData
+    });
+    const driverIdentity = resolveDriverIdentityData(profileProjection, documents);
 
     const userVehicleEntries = Object.keys(resolvedUserVehiclesRaw).map((userVehicleId) => {
       const userVehicle = resolvedUserVehiclesRaw[userVehicleId] || {};
@@ -452,17 +575,17 @@ class DriverApplicationService {
       driverId: safeDriverId,
       driver: {
         id: safeDriverId,
-        name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-        email: user.email || '',
-        phone: user.mobile || '',
-        cpf: user.cpf || user.document || user.documentNumber || '',
+        name: profileProjection.name,
+        email: profileProjection.email,
+        phone: profileProjection.phone,
+        cpf: profileProjection.cpf,
         birthDate: driverIdentity.birthDate,
         motherName: driverIdentity.motherName,
         gender: driverIdentity.gender,
         genderLabel: driverIdentity.genderLabel,
-        city: user.city || '',
-        state: user.state || '',
-        registrationDate: user.createdAt ? new Date(user.createdAt).toISOString() : null,
+        city: profileProjection.city,
+        state: profileProjection.state,
+        registrationDate: profileProjection.registrationDate,
         rating: resolvedRating != null ? Number(resolvedRating).toFixed(1) : null,
         ratingCount,
         approved: user.approved === true,
@@ -471,7 +594,7 @@ class DriverApplicationService {
       vehicle: dashboardVehicle,
       documents: normalizedDocuments,
       status: applicationStatus,
-      submissionDate: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
+      submissionDate: profileProjection.registrationDate || new Date().toISOString(),
       reviewDate: user.approvedAt ? new Date(user.approvedAt).toISOString() : null,
       reviewedBy: user.approvedBy || null,
       rejectionReason: user.rejectionReason || null,
@@ -504,20 +627,35 @@ class DriverApplicationService {
         vehicles: userVehicleEntries
       },
       totalDocuments: Object.keys(normalizedDocuments).length,
-      source: 'rtdb_mirror',
+      source: canonicalProfileData ? 'firestore_profile_rtdb_activation' : 'rtdb_mirror',
       syncedAt: new Date().toISOString()
     };
   }
 
   async syncDriverApplication(driverId, { db = null, includeRatings = false } = {}) {
     const realtimeDb = db || this.getRealtimeDb();
-    const ratingsRaw = includeRatings
-      ? (await realtimeDb.ref(`user_ratings/${driverId}`).once('value')).val() || {}
-      : null;
-    const application = await this.buildApplication(driverId, { db: realtimeDb, ratingsRaw });
+    const safeDriverId = normalizeId(driverId);
+    if (!safeDriverId) return null;
+
+    const [ratingsSnapshot, canonicalProfileSnapshot, canonicalCnhSnapshot] = await Promise.all([
+      includeRatings
+        ? realtimeDb.ref(`user_ratings/${safeDriverId}`).once('value')
+        : Promise.resolve(null),
+      this.getFirestore().collection('users').doc(safeDriverId).get(),
+      realtimeDb.ref(`driver_activation/${safeDriverId}/documents/cnh`).once('value')
+    ]);
+    const canonicalCnhNode = canonicalCnhSnapshot?.val?.() || {};
+    const application = await this.buildApplication(safeDriverId, {
+      db: realtimeDb,
+      ratingsRaw: ratingsSnapshot?.val?.() || null,
+      canonicalProfileData: canonicalProfileSnapshot?.exists
+        ? canonicalProfileSnapshot.data() || {}
+        : null,
+      canonicalCnhData: canonicalCnhNode?.data || canonicalCnhNode?.extractedData || null
+    });
     if (!application) return null;
 
-    await this.collection().doc(String(driverId)).set({
+    await this.collection().doc(safeDriverId).set({
       ...application,
       syncedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });

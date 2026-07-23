@@ -117,6 +117,16 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
     expect(documentUpdate['users/driver_1/documents/crlv'].analysisData).toEqual(
       documentUpdate['users/driver_1/documents/crlv'].extractedData
     );
+    expect(documentUpdate).toEqual(expect.objectContaining({
+      'vehicle_plate_index/RJA2D41': 'vehicle_crlv_RJA2D41',
+      'vehicles/vehicle_crlv_RJA2D41/plate': 'RJA2D41',
+      'vehicles/vehicle_crlv_RJA2D41/model': 'Honda City',
+      'vehicles/vehicle_crlv_RJA2D41/color': 'BRANCO',
+      'user_vehicles/driver_1/crlv_RJA2D41/vehicleId': 'vehicle_crlv_RJA2D41',
+      'user_vehicles/driver_1/crlv_RJA2D41/status': 'pending',
+      'user_vehicles/driver_1/crlv_RJA2D41/approved': false,
+      'user_vehicles/driver_1/crlv_RJA2D41/isActive': false
+    }));
     expect(driverApplicationService.syncDriverApplication).toHaveBeenCalledWith('driver_1', {
       db,
       includeRatings: false
@@ -169,5 +179,8 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
         status: 'rejected'
       })
     );
+    expect(Object.keys(documentUpdate).some((path) => path.startsWith('vehicles/'))).toBe(false);
+    expect(Object.keys(documentUpdate).some((path) => path.startsWith('user_vehicles/'))).toBe(false);
+    expect(Object.keys(documentUpdate).some((path) => path.startsWith('vehicle_plate_index/'))).toBe(false);
   });
 });

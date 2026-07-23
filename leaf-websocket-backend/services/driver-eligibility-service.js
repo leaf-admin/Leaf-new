@@ -207,28 +207,21 @@ class DriverEligibilityService {
         });
 
         let vehicle = null;
-        let activeAssignment = null;
         if (activeUserVehicle?.vehicleId) {
             try {
-                const [vehicleSnapshot, assignmentSnapshot] = await Promise.race([
-                    Promise.all([
-                        db.ref(`vehicles/${activeUserVehicle.vehicleId}`).once('value'),
-                        db.ref(`vehicle_active_assignment/${activeUserVehicle.vehicleId}`).once('value')
-                    ]),
-                    timeoutPromise('vehicle_and_assignment')
+                const vehicleSnapshot = await Promise.race([
+                    db.ref(`vehicles/${activeUserVehicle.vehicleId}`).once('value'),
+                    timeoutPromise('vehicle')
                 ]);
                 if (vehicleSnapshot?.exists()) {
                     vehicle = vehicleSnapshot.val();
                 }
-                if (assignmentSnapshot?.exists()) {
-                    activeAssignment = assignmentSnapshot.val();
-                }
             } catch (error) {
-                logStructured('warn', 'DriverEligibility: timeout/falha ao consultar veículo/assignment no Firebase (fallback local)', {
+                logStructured('warn', 'DriverEligibility: timeout/falha ao consultar veículo no Firebase (fallback local)', {
                     service: 'driver-eligibility-service',
                     driverId,
                     vehicleId: activeUserVehicle.vehicleId,
-                    stage: 'vehicle_and_assignment',
+                    stage: 'vehicle',
                     timeoutMs: FIREBASE_PROFILE_TIMEOUT_MS,
                     error: error.message
                 });
@@ -238,8 +231,7 @@ class DriverEligibilityService {
         return {
             user,
             activeUserVehicle,
-            vehicle,
-            activeAssignment
+            vehicle
         };
     }
 
@@ -264,7 +256,7 @@ class DriverEligibilityService {
                 vehicleColor: cached.vehicleColor || fallbackDriverData.vehicleColor || fallbackDriverData.carColor || null,
                 vehicleIdentitySource: cached.vehicleIdentitySource || 'eligibility_cache_legacy',
                 vehicleIdentityCanonical: toBoolean(cached.vehicleIdentityCanonical, false),
-                assignmentConflict: toBoolean(cached.assignmentConflict, false)
+                assignmentConflict: false
             };
             const cachedIdentity = buildDriverVehicleIdentity(cachedProfile);
             return {
@@ -319,23 +311,15 @@ class DriverEligibilityService {
             return fallbackProfile;
         }
 
-        const { user, activeUserVehicle, vehicle, activeAssignment } = firebaseProfile;
+        const { user, activeUserVehicle, vehicle } = firebaseProfile;
 
         const userApprovedFlag = user?.approved ?? user?.isApproved ?? user?.profileApproved ?? null;
         const userStatus = String(user?.status || '').toLowerCase();
         const driverApproved = userApprovedFlag === null ? userStatus === 'approved' : toBoolean(userApprovedFlag, false);
 
-        const assignedUserId = activeAssignment
-            ? String(activeAssignment.userId || activeAssignment.driverId || '')
-            : '';
-        const assignmentConflict = Boolean(
-            activeUserVehicle?.vehicleId &&
-            assignedUserId &&
-            assignedUserId !== String(driverId)
-        );
         const uvStatus = String(activeUserVehicle?.status || '').toLowerCase();
         const vehicleApproved = activeUserVehicle
-            ? ((toBoolean(activeUserVehicle?.approved, false) || uvStatus === 'approved' || uvStatus === 'active') && !assignmentConflict)
+            ? (toBoolean(activeUserVehicle?.approved, false) || uvStatus === 'approved' || uvStatus === 'active')
             : false;
 
         const catalogCategory = await this._resolveCategoryFromCatalog(vehicle);
@@ -428,7 +412,7 @@ class DriverEligibilityService {
             vehicleIdentityCanonical: ['crlv_pdf_ocr', 'qa_crlv_fixture', 'vehicles_catalog', 'user_vehicles'].includes(
                 vehicleIdentitySource
             ),
-            assignmentConflict
+            assignmentConflict: false
         };
         profile.vehicleIdentityComplete = buildDriverVehicleIdentity(profile).complete;
 
@@ -475,10 +459,6 @@ class DriverEligibilityService {
 
         if (!profile.driverApproved) {
             return { eligible: false, code: 'DRIVER_NOT_APPROVED', profile: profileWithActivation };
-        }
-
-        if (profile.assignmentConflict) {
-            return { eligible: false, code: 'VEHICLE_ASSIGNED_TO_ANOTHER_DRIVER', profile: profileWithActivation };
         }
 
         if (!profile.vehicleApproved) {

@@ -173,6 +173,51 @@ const PROFILE_DERIVED_FORBIDDEN_FIELDS = new Set([
   'faceCompareResult'
 ]);
 
+const PROFILE_IMMUTABLE_AFTER_CREATION_FIELDS = new Set([
+  'role',
+  'user_role',
+  'accountType',
+  'usertype',
+  'userType',
+  'mobile',
+  'phone',
+  'phoneNumber',
+  'phoneValidated',
+  'onboardingCompleted',
+  'profileComplete'
+]);
+
+const PROFILE_ROLE_FIELDS = [
+  'role',
+  'user_role',
+  'accountType',
+  'usertype',
+  'userType'
+];
+
+const DEFAULT_APP_PREFERENCES = Object.freeze({
+  notificationsEnabled: true,
+  trafficLayerEnabled: true,
+  voiceGuidanceEnabled: false,
+  schemaVersion: 1
+});
+const APP_PREFERENCE_FIELDS = new Set([
+  'notificationsEnabled',
+  'trafficLayerEnabled',
+  'voiceGuidanceEnabled'
+]);
+const ONLINE_DRIVER_STATUSES = new Set([
+  'online',
+  'available',
+  'busy',
+  'accepted',
+  'arrived',
+  'started',
+  'in_trip',
+  'em viagem'
+]);
+const MAX_VEHICLES_PER_PROFILE = 4;
+
 const FIRESTORE_PROTECTED_FIELDS = new Set([
   'status',
   'accountDisabled',
@@ -193,6 +238,51 @@ function normalizeUserType(value) {
   if (normalized === 'passenger') return 'customer';
   if (normalized === 'customer' || normalized === 'driver') return normalized;
   return null;
+}
+
+function isIncompleteOtpBootstrapProfile(profile) {
+  return Boolean(
+    profile &&
+      String(profile.createdVia || '').trim().toLowerCase() === 'otp_verify' &&
+      profile.profileComplete === false &&
+      profile.onboardingCompleted === false
+  );
+}
+
+function resolveExplicitProfileRole(input = {}) {
+  const suppliedRoles = PROFILE_ROLE_FIELDS
+    .filter((field) => Object.prototype.hasOwnProperty.call(input, field))
+    .map((field) => ({ field, value: input[field], role: normalizeUserType(input[field]) }));
+
+  if (suppliedRoles.length === 0) {
+    return { role: null, error: 'missing', fields: [] };
+  }
+
+  const invalidFields = suppliedRoles.filter(({ role }) => !role).map(({ field }) => field);
+  if (invalidFields.length > 0) {
+    return { role: null, error: 'invalid', fields: invalidFields };
+  }
+
+  const distinctRoles = [...new Set(suppliedRoles.map(({ role }) => role))];
+  if (distinctRoles.length !== 1) {
+    return {
+      role: null,
+      error: 'conflict',
+      fields: suppliedRoles.map(({ field }) => field)
+    };
+  }
+
+  return { role: distinctRoles[0], error: null, fields: [] };
+}
+
+function findMissingProfileCompletionConsents(input, role) {
+  const missingConsents = [];
+  if (input.acceptTerms !== true) missingConsents.push('acceptTerms');
+  if (input.acceptPrivacy !== true) missingConsents.push('acceptPrivacy');
+  if (role === 'driver' && input.consentBackgroundCheck !== true) {
+    missingConsents.push('consentBackgroundCheck');
+  }
+  return missingConsents;
 }
 
 function splitName(fullName) {
@@ -234,6 +324,36 @@ function findForbiddenProfileFields(input = {}) {
     .sort();
 }
 
+function findImmutableProfileFields(input = {}, existingProfile = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return [];
+  }
+
+  const existingRole = normalizeUserType(
+    existingProfile.userType ||
+      existingProfile.usertype ||
+      existingProfile.role ||
+      existingProfile.user_role ||
+      existingProfile.accountType
+  );
+  const existingPhone = normalizePhone(
+    existingProfile.phoneNumber || existingProfile.phone || existingProfile.mobile
+  );
+
+  return Object.keys(input)
+    .filter((key) => PROFILE_IMMUTABLE_AFTER_CREATION_FIELDS.has(key))
+    .filter((key) => {
+      if (PROFILE_ROLE_FIELDS.includes(key)) {
+        return normalizeUserType(input[key]) !== existingRole;
+      }
+      if (key === 'mobile' || key === 'phone' || key === 'phoneNumber') {
+        return normalizePhone(input[key]) !== existingPhone;
+      }
+      return input[key] !== existingProfile[key];
+    })
+    .sort();
+}
+
 function stripProtectedFields(input = {}) {
   const next = { ...input };
   FIRESTORE_PROTECTED_FIELDS.forEach((key) => {
@@ -260,6 +380,138 @@ function serializeForClient(value) {
   }
 
   return value;
+}
+
+function normalizeVehiclePlate(value) {
+  return String(value || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
+function normalizeVehicleInput(input = {}) {
+  const plate = normalizeVehiclePlate(input.plate || input.vehiclePlate || input.vehicleNumber);
+  const year = Number.parseInt(input.year || input.modelYear || input.anoModelo, 10);
+  return {
+    plate,
+    plateNormalized: plate,
+    brand: String(input.brand || input.make || input.marca || '').trim(),
+    model: String(input.model || input.modelo || '').trim(),
+    color: String(input.color || input.cor || '').trim(),
+    year: Number.isFinite(year) ? year : null,
+    vehicleType: String(input.vehicleType || 'carro').trim().toLowerCase() || 'carro'
+  };
+}
+
+function validateVehicleInput(vehicle) {
+  const errors = [];
+  if (!/^[A-Z]{3}(?:\d{4}|\d[A-Z]\d{2})$/.test(vehicle.plate)) errors.push('plate');
+  if (!vehicle.brand) errors.push('brand');
+  if (!vehicle.model) errors.push('model');
+  if (!vehicle.color) errors.push('color');
+  const currentYear = new Date().getFullYear();
+  if (!vehicle.year || vehicle.year < 1990 || vehicle.year > currentYear + 1) errors.push('year');
+  return errors;
+}
+
+function sanitizePreferencePatch(input = {}) {
+  return Object.fromEntries(
+    Object.entries(input || {}).filter(([key, value]) =>
+      APP_PREFERENCE_FIELDS.has(key) && typeof value === 'boolean'
+    )
+  );
+}
+
+async function readUserVehicles(userId) {
+  const snapshot = await admin.database().ref(`user_vehicles/${userId}`).once('value');
+  if (!snapshot.exists()) return [];
+  const records = [];
+  snapshot.forEach((childSnapshot) => {
+    records.push({ userVehicleId: childSnapshot.key, ...(childSnapshot.val() || {}) });
+  });
+  return records;
+}
+
+async function readVehicleCatalogRecord(vehicleId) {
+  const snapshot = await admin.database().ref(`vehicles/${vehicleId}`).once('value');
+  return snapshot.exists() ? { id: vehicleId, ...(snapshot.val() || {}) } : null;
+}
+
+async function findVehicleCatalogRecordByPlate(plate) {
+  const indexed = await admin.database().ref(`vehicle_plate_index/${plate}`).once('value');
+  const indexedVehicleId = indexed.exists() ? String(indexed.val() || '').trim() : '';
+  if (indexedVehicleId) {
+    const indexedVehicle = await readVehicleCatalogRecord(indexedVehicleId);
+    if (indexedVehicle) return indexedVehicle;
+  }
+
+  const catalogSnapshot = await admin.database().ref('vehicles').once('value');
+  if (!catalogSnapshot.exists()) return null;
+  let match = null;
+  catalogSnapshot.forEach((childSnapshot) => {
+    const vehicle = childSnapshot.val() || {};
+    if (normalizeVehiclePlate(vehicle.plateNormalized || vehicle.plate) === plate) {
+      match = { id: childSnapshot.key, ...vehicle };
+      return true;
+    }
+    return false;
+  });
+  return match;
+}
+
+async function requireDriverOffline(req, res, next) {
+  try {
+    await redisPool.ensureConnection?.();
+    const redis = redisPool.getConnection?.();
+    if (!redis?.hgetall) {
+      throw new Error('redis_unavailable');
+    }
+    const driverState = await redis.hgetall(`driver:${req.user.uid}`);
+    const status = String(driverState?.status || 'offline').trim().toLowerCase();
+    const isOnline = driverState?.isOnline === true || driverState?.isOnline === 'true' || ONLINE_DRIVER_STATUSES.has(status);
+    if (isOnline) {
+      return res.status(409).json({
+        success: false,
+        code: 'DRIVER_MUST_BE_OFFLINE',
+        message: 'Fique offline para alterar os veículos do perfil.'
+      });
+    }
+    return next();
+  } catch (error) {
+    logger.warn(`Falha ao confirmar status offline para gestão de veículo: ${error.message}`);
+    return res.status(503).json({
+      success: false,
+      code: 'DRIVER_STATUS_UNAVAILABLE',
+      message: 'Não foi possível confirmar seu status agora. Tente novamente.'
+    });
+  }
+}
+
+async function requireDriverAccount(req, res, next) {
+  try {
+    const result = await resolveAccountProfile(req.user.uid, req.user);
+    const role = normalizeUserType(
+      result.profile?.usertype ||
+        result.profile?.userType ||
+        req.user?.usertype ||
+        req.user?.userType ||
+        req.user?.role
+    );
+    if (role !== 'driver') {
+      return res.status(403).json({
+        success: false,
+        code: 'DRIVER_ACCOUNT_REQUIRED',
+        message: 'A gestão de veículos está disponível apenas para contas de motorista.'
+      });
+    }
+
+    req.accountProfile = result.profile;
+    return next();
+  } catch (error) {
+    logger.warn(`Falha ao confirmar papel de motorista para gestão de veículo: ${error.message}`);
+    return res.status(503).json({
+      success: false,
+      code: 'DRIVER_ACCOUNT_ROLE_UNAVAILABLE',
+      message: 'Não foi possível validar sua conta agora. Tente novamente.'
+    });
+  }
 }
 
 async function findUserVehicleIdForVehicle(userId, vehicleId) {
@@ -305,8 +557,10 @@ function composeProfileRecord(userId, existingProfile = {}, incomingProfile = {}
     normalizeUserType(
       mergedInput.userType ||
         mergedInput.usertype ||
+        existingProfile.role ||
         tokenClaims.userType ||
-        tokenClaims.usertype
+        tokenClaims.usertype ||
+        tokenClaims.role
     ) || 'customer';
 
   const rawName =
@@ -418,6 +672,26 @@ async function mirrorProfileToRealtimeDB(userId, profile) {
   }
 }
 
+async function projectCanonicalDriverRoleToRealtimeDB(userId, profile) {
+  const canonicalRole = normalizeUserType(
+    profile?.usertype ||
+      profile?.userType ||
+      profile?.role ||
+      profile?.user_role ||
+      profile?.accountType
+  );
+
+  if (canonicalRole !== 'driver') {
+    return;
+  }
+
+  await admin.database().ref(`users/${userId}`).update({
+    usertype: canonicalRole,
+    userType: canonicalRole,
+    role: canonicalRole
+  });
+}
+
 async function removeRealtimeProfile(userId) {
   try {
     const db = admin.database();
@@ -516,15 +790,81 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
     }
 
     const existingResult = await resolveAccountProfile(userId, req.user);
+    const isFirstProfileCompletion =
+      !existingResult.profile || isIncompleteOtpBootstrapProfile(existingResult.profile);
+    const immutableFields = findImmutableProfileFields(
+      incomingProfile,
+      existingResult.profile || {}
+    );
+    if (!isFirstProfileCompletion && immutableFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'PROFILE_IDENTITY_FIELD_IMMUTABLE',
+        message: 'Papel da conta, telefone e conclusão do onboarding não podem ser alterados pelo perfil.',
+        immutableFields
+      });
+    }
+
     const sanitizedPatch = sanitizeProfilePatch(incomingProfile);
+    let baseProfile = existingResult.profile || {};
+    if (isFirstProfileCompletion) {
+      const explicitRole = resolveExplicitProfileRole(incomingProfile);
+      if (explicitRole.error) {
+        return res.status(400).json({
+          success: false,
+          code: 'PROFILE_ROLE_REQUIRED_FOR_COMPLETION',
+          message: 'Informe explicitamente um único papel válido para concluir o perfil.',
+          invalidRoleFields: explicitRole.fields
+        });
+      }
+
+      const missingConsents = findMissingProfileCompletionConsents(
+        incomingProfile,
+        explicitRole.role
+      );
+      if (missingConsents.length > 0) {
+        return res.status(400).json({
+          success: false,
+          code: 'PROFILE_REQUIRED_CONSENTS_MISSING',
+          message: 'As permissões obrigatórias devem ser concedidas para concluir o perfil.',
+          missingConsents
+        });
+      }
+
+      const tokenPhone = String(req.user?.phone_number || '').trim();
+      const verifiedPhone = tokenPhone || String(
+        baseProfile.phoneNumber || baseProfile.phone || baseProfile.mobile || ''
+      ).trim();
+      sanitizedPatch.usertype = explicitRole.role;
+      sanitizedPatch.userType = explicitRole.role;
+      sanitizedPatch.mobile = verifiedPhone;
+      sanitizedPatch.phone = verifiedPhone;
+      sanitizedPatch.phoneNumber = verifiedPhone;
+      sanitizedPatch.phoneValidated = Boolean(verifiedPhone);
+      sanitizedPatch.onboardingCompleted = true;
+      sanitizedPatch.profileComplete = true;
+      sanitizedPatch.acceptTerms = true;
+      sanitizedPatch.acceptPrivacy = true;
+
+      if (explicitRole.role === 'driver') {
+        sanitizedPatch.consentBackgroundCheck = true;
+        baseProfile = {
+          ...baseProfile,
+          approved: false,
+          isApproved: false,
+          canGoOnline: false
+        };
+      }
+    }
     const nextProfile = composeProfileRecord(
       userId,
-      existingResult.profile || {},
+      baseProfile,
       sanitizedPatch,
       req.user
     );
 
     await admin.firestore().collection('users').doc(userId).set(nextProfile, { merge: true });
+    await projectCanonicalDriverRoleToRealtimeDB(userId, nextProfile);
     await mirrorProfileToRealtimeDB(userId, nextProfile);
     const storedDoc = await admin.firestore().collection('users').doc(userId).get();
     const responseProfile = composeProfileRecord(
@@ -547,6 +887,216 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
       success: false,
       message: 'Erro ao atualizar perfil da conta'
     });
+  }
+});
+
+router.get('/api/account/preferences', requireFirebase, async (req, res) => {
+  try {
+    const userDoc = await admin.firestore().collection('users').doc(req.user.uid).get();
+    const stored = userDoc.exists ? userDoc.data()?.appPreferences || {} : {};
+    return res.json({
+      success: true,
+      preferences: serializeForClient({
+        ...DEFAULT_APP_PREFERENCES,
+        ...sanitizePreferencePatch(stored),
+        schemaVersion: 1,
+        updatedAt: stored.updatedAt || null
+      })
+    });
+  } catch (error) {
+    logger.error('Erro ao obter preferências da conta:', error);
+    return res.status(500).json({ success: false, message: 'Erro ao obter preferências da conta' });
+  }
+});
+
+router.patch('/api/account/preferences', requireFirebase, async (req, res) => {
+  try {
+    const patch = sanitizePreferencePatch(req.body?.preferences || req.body || {});
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ success: false, message: 'Nenhuma preferência válida foi informada' });
+    }
+
+    const userRef = admin.firestore().collection('users').doc(req.user.uid);
+    const userDoc = await userRef.get();
+    const current = userDoc.exists ? userDoc.data()?.appPreferences || {} : {};
+    const updatedAt = new Date().toISOString();
+    const preferences = {
+      ...DEFAULT_APP_PREFERENCES,
+      ...sanitizePreferencePatch(current),
+      ...patch,
+      schemaVersion: 1,
+      updatedAt
+    };
+    await userRef.set({
+      appPreferences: {
+        ...preferences,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }
+    }, { merge: true });
+
+    return res.json({ success: true, preferences });
+  } catch (error) {
+    logger.error('Erro ao atualizar preferências da conta:', error);
+    return res.status(500).json({ success: false, message: 'Erro ao atualizar preferências da conta' });
+  }
+});
+
+router.get('/api/account/vehicles', requireFirebase, requireDriverAccount, async (req, res) => {
+  try {
+    const userVehicles = await readUserVehicles(req.user.uid);
+    const vehicles = (await Promise.all(userVehicles.map(async (link) => {
+      const vehicleId = String(link.vehicleId || link.id || '').trim();
+      if (!vehicleId) return null;
+      const catalog = await readVehicleCatalogRecord(vehicleId);
+      return {
+        id: vehicleId,
+        vehicleId,
+        userVehicleId: link.userVehicleId,
+        plate: catalog?.plate || catalog?.plateNormalized || link.plate || '',
+        brand: catalog?.brand || catalog?.make || link.brand || '',
+        model: catalog?.model || link.model || '',
+        color: catalog?.color || link.color || '',
+        year: catalog?.year || link.year || null,
+        vehicleType: catalog?.vehicleType || link.vehicleType || 'carro',
+        status: link.status || (link.approved === true ? 'approved' : 'pending'),
+        approved: link.approved === true || ['approved', 'active'].includes(String(link.status || '').toLowerCase()),
+        isActive: link.isActive === true,
+        createdAt: link.createdAt || catalog?.createdAt || null,
+        updatedAt: link.updatedAt || catalog?.updatedAt || null
+      };
+    }))).filter(Boolean);
+
+    return res.json({ success: true, vehicles, total: vehicles.length });
+  } catch (error) {
+    logger.error('Erro ao listar veículos da conta:', error);
+    return res.status(500).json({ success: false, message: 'Erro ao listar veículos da conta' });
+  }
+});
+
+router.post('/api/account/vehicles', requireFirebase, requireDriverAccount, requireDriverOffline, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const vehicleInput = normalizeVehicleInput(req.body?.vehicle || req.body || {});
+    const invalidFields = validateVehicleInput(vehicleInput);
+    if (invalidFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'VEHICLE_INPUT_INVALID',
+        message: 'Confira placa, marca, modelo, cor e ano.',
+        invalidFields
+      });
+    }
+
+    const userVehicles = await readUserVehicles(userId);
+    if (userVehicles.length >= MAX_VEHICLES_PER_PROFILE) {
+      return res.status(409).json({
+        success: false,
+        code: 'VEHICLE_PROFILE_LIMIT_REACHED',
+        message: `O perfil pode ter até ${MAX_VEHICLES_PER_PROFILE} veículos.`
+      });
+    }
+
+    let catalog = await findVehicleCatalogRecordByPlate(vehicleInput.plate);
+    if (catalog && userVehicles.some(link => String(link.vehicleId || link.id) === String(catalog.id))) {
+      return res.status(409).json({
+        success: false,
+        code: 'VEHICLE_ALREADY_LINKED',
+        message: 'Este veículo já está no seu perfil.'
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const vehicleId = catalog?.id || `vehicle_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const userVehicleId = `${userId}_${vehicleId}_${Date.now()}`;
+    const updates = {};
+    if (!catalog) {
+      catalog = { id: vehicleId, ...vehicleInput, status: 'idle', createdAt: nowIso, updatedAt: nowIso };
+      updates[`vehicles/${vehicleId}`] = catalog;
+      updates[`vehicle_plate_index/${vehicleInput.plate}`] = vehicleId;
+    }
+    updates[`user_vehicles/${userId}/${userVehicleId}`] = {
+      id: userVehicleId,
+      userId,
+      vehicleId,
+      status: 'pending',
+      approved: false,
+      isActive: false,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+    await admin.database().ref().update(updates);
+    await invalidateDriverEligibilityCache(userId);
+
+    return res.status(201).json({
+      success: true,
+      vehicle: {
+        id: vehicleId,
+        vehicleId,
+        userVehicleId,
+        ...catalog,
+        status: 'pending',
+        approved: false,
+        isActive: false
+      }
+    });
+  } catch (error) {
+    logger.error('Erro ao adicionar veículo à conta:', error);
+    return res.status(500).json({ success: false, message: 'Erro ao adicionar veículo à conta' });
+  }
+});
+
+router.patch('/api/account/vehicles/:vehicleId/active', requireFirebase, requireDriverAccount, requireDriverOffline, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const vehicleId = String(req.params.vehicleId || '').trim();
+    const userVehicles = await readUserVehicles(userId);
+    const target = userVehicles.find(link => String(link.vehicleId || link.id) === vehicleId);
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'Veículo não encontrado no perfil' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const updates = {};
+    userVehicles.forEach(link => {
+      updates[`user_vehicles/${userId}/${link.userVehicleId}/isActive`] = link.userVehicleId === target.userVehicleId;
+      updates[`user_vehicles/${userId}/${link.userVehicleId}/updatedAt`] = nowIso;
+    });
+    updates[`users/${userId}/activeVehicleId`] = vehicleId;
+    updates[`users/${userId}/updatedAt`] = nowIso;
+    await admin.database().ref().update(updates);
+    await invalidateDriverEligibilityCache(userId);
+
+    return res.json({ success: true, activeVehicleId: vehicleId });
+  } catch (error) {
+    logger.error('Erro ao selecionar veículo da conta:', error);
+    return res.status(500).json({ success: false, message: 'Erro ao selecionar veículo da conta' });
+  }
+});
+
+router.delete('/api/account/vehicles/:vehicleId', requireFirebase, requireDriverAccount, requireDriverOffline, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const vehicleId = String(req.params.vehicleId || '').trim();
+    const userVehicles = await readUserVehicles(userId);
+    const target = userVehicles.find(link => String(link.vehicleId || link.id) === vehicleId);
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'Veículo não encontrado no perfil' });
+    }
+
+    const updates = {
+      [`user_vehicles/${userId}/${target.userVehicleId}`]: null,
+      [`users/${userId}/updatedAt`]: new Date().toISOString()
+    };
+    if (target.isActive === true) {
+      updates[`users/${userId}/activeVehicleId`] = '';
+    }
+    await admin.database().ref().update(updates);
+    await invalidateDriverEligibilityCache(userId);
+
+    return res.json({ success: true, removedVehicleId: vehicleId });
+  } catch (error) {
+    logger.error('Erro ao remover veículo da conta:', error);
+    return res.status(500).json({ success: false, message: 'Erro ao remover veículo da conta' });
   }
 });
 

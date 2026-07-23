@@ -3,6 +3,7 @@ jest.useFakeTimers();
 jest.mock('../../../services/driver-lock-manager', () => ({
   acquireLock: jest.fn(),
   getLockedBooking: jest.fn(),
+  renewLock: jest.fn(),
   releaseLock: jest.fn()
 }));
 
@@ -33,6 +34,10 @@ jest.mock('../../../services/payment-service', () => {
   return jest.fn().mockImplementation(() => ({}));
 });
 
+jest.mock('../../../services/driver-eligibility-service', () => ({
+  isDriverEligibleForRide: jest.fn()
+}));
+
 jest.mock('../../../services/ride-state-manager', () => ({
   STATES: {
     SEARCHING: 'SEARCHING',
@@ -62,6 +67,7 @@ jest.mock('../../../services/ride-state-manager', () => ({
 }));
 
 const driverLockManager = require('../../../services/driver-lock-manager');
+const driverEligibilityService = require('../../../services/driver-eligibility-service');
 const RideStateManager = require('../../../services/ride-state-manager');
 const DriverNotificationDispatcher = require('../../../services/driver-notification-dispatcher');
 const nowMs = Date.parse('2026-04-08T20:00:00.000Z');
@@ -151,8 +157,13 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
 
     dispatcher = new DriverNotificationDispatcher(redis, null);
     RideStateManager.getBookingState.mockResolvedValue(RideStateManager.STATES.SEARCHING);
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
+      eligible: true,
+      code: 'ELIGIBLE'
+    });
     driverLockManager.acquireLock.mockResolvedValue(true);
     driverLockManager.getLockedBooking.mockResolvedValue('booking_123');
+    driverLockManager.renewLock.mockResolvedValue(true);
     driverLockManager.releaseLock.mockResolvedValue(true);
   });
 
@@ -337,6 +348,186 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     );
   });
 
+  it.each([
+    ['missing', null],
+    ['empty', ''],
+    ['false', 'false'],
+  ])('does not notify when dispatchEligible is %s', async (_label, dispatchEligible) => {
+    redis.pipeline.mockImplementationOnce(() =>
+      createPipelineMock((signature) => {
+        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+          return [
+            [null, null],
+            [null, 0],
+            [null, 0],
+            [null, ['true', dispatchEligible, 'online', String(nowMs), new Date(nowMs).toISOString()]],
+            [null, -2],
+            [null, -2],
+            [null, '0'],
+          ];
+        }
+        return [];
+      })
+    );
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({
+      ok: true,
+      bookingData: { bookingId: 'booking_123' },
+    });
+    const outcomeSpy = jest.fn();
+
+    const notified = await dispatcher.notifyDriver('driver_1', 'booking_123', {
+      bookingId: 'booking_123',
+    }, {
+      onNotificationOutcome: outcomeSpy
+    });
+
+    expect(notified).toBe(false);
+    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(outcomeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        reason: 'DRIVER_NOT_ELIGIBLE',
+        isDriverDispatchEligible: false
+      })
+    );
+  });
+
+  it('blocks the offer when canonical eligibility rejects a driver without a requested category', async () => {
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({
+      ok: true,
+      bookingData: { bookingId: 'booking_123' },
+    });
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValueOnce({
+      eligible: false,
+      code: 'DRIVER_ACTIVATION_BLOCKED'
+    });
+    const outcomeSpy = jest.fn();
+
+    const notified = await dispatcher.notifyDriver('driver_1', 'booking_123', {
+      bookingId: 'booking_123',
+    }, {
+      onNotificationOutcome: outcomeSpy
+    });
+
+    expect(notified).toBe(false);
+    expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith('driver_1', null);
+    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
+    expect(outcomeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        reason: 'DRIVER_ACTIVATION_BLOCKED'
+      })
+    );
+  });
+
+  it('fails closed when canonical eligibility cannot be checked before the offer', async () => {
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({
+      ok: true,
+      bookingData: { bookingId: 'booking_123' },
+    });
+    driverEligibilityService.isDriverEligibleForRide.mockRejectedValueOnce(
+      new Error('eligibility unavailable')
+    );
+    const outcomeSpy = jest.fn();
+
+    const notified = await dispatcher.notifyDriver('driver_1', 'booking_123', {
+      bookingId: 'booking_123',
+    }, {
+      onNotificationOutcome: outcomeSpy
+    });
+
+    expect(notified).toBe(false);
+    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
+    expect(outcomeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        reason: 'DRIVER_ELIGIBILITY_CHECK_FAILED'
+      })
+    );
+  });
+
+  it('renews an existing lock for the same booking before re-notifying', async () => {
+    const emit = jest.fn();
+    const to = jest.fn(() => ({ emit }));
+    dispatcher = new DriverNotificationDispatcher(redis, { to });
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({
+      ok: true,
+      state: RideStateManager.STATES.SEARCHING,
+      bookingData: {
+        bookingId: 'booking_123',
+        customerId: 'customer_1',
+        pickupLocation: JSON.stringify({ lat: -22.857, lng: -43.309 }),
+        destinationLocation: JSON.stringify({ lat: -22.9, lng: -43.2 }),
+        estimatedFare: '20.00',
+      },
+    });
+    driverLockManager.acquireLock.mockResolvedValueOnce(false);
+    driverLockManager.getLockedBooking.mockResolvedValue('booking_123');
+    driverLockManager.renewLock.mockResolvedValue(true);
+
+    const notified = await dispatcher.notifyDriver('driver_1', 'booking_123', {
+      bookingId: 'booking_123',
+      customerId: 'customer_1',
+    });
+
+    expect(notified).toBe(true);
+    expect(driverLockManager.renewLock).toHaveBeenCalledWith('driver_1', 20);
+    expect(driverLockManager.releaseLock).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('newRideRequest', expect.objectContaining({
+      bookingId: 'booking_123',
+    }));
+  });
+
+  it('releases a renewed same-booking lock when post-lock validation rejects the offer', async () => {
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({
+      ok: true,
+      state: RideStateManager.STATES.SEARCHING,
+      bookingData: { bookingId: 'booking_123' },
+    });
+    driverLockManager.acquireLock.mockResolvedValueOnce(false);
+    driverLockManager.getLockedBooking.mockResolvedValue('booking_123');
+    driverLockManager.renewLock.mockResolvedValue(true);
+    redis.pipeline
+      .mockImplementationOnce(() =>
+        createPipelineMock((signature) => {
+          if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+            return [
+              [null, null],
+              [null, 0],
+              [null, 0],
+              [null, ['true', 'true', 'online', String(nowMs), new Date(nowMs).toISOString()]],
+              [null, -2],
+              [null, -2],
+              [null, '0'],
+            ];
+          }
+          return [];
+        })
+      )
+      .mockImplementationOnce(() =>
+        createPipelineMock((signature) => {
+          if (signature === 'get|sismember|ttl|hget') {
+            return [
+              [null, 'booking_other'],
+              [null, 0],
+              [null, -2],
+              [null, '0'],
+            ];
+          }
+          return [];
+        })
+      );
+
+    const notified = await dispatcher.notifyDriver('driver_1', 'booking_123', {
+      bookingId: 'booking_123',
+    });
+
+    expect(notified).toBe(false);
+    expect(driverLockManager.renewLock).toHaveBeenCalledWith('driver_1', 20);
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+  });
+
   it('cancels a timeout scheduled by another dispatcher instance', async () => {
     const anotherDispatcher = new DriverNotificationDispatcher(redis, null);
 
@@ -482,6 +673,18 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     dispatcher.scoreWeights.rating = 0;
     dispatcher.scoreWeights.acceptanceRate = 0;
     dispatcher.scoreWeights.responseTime = 0;
+    redis.pipeline.mockImplementationOnce(() =>
+      createPipelineMock((signature) => {
+        if (signature === 'get|get|hget') {
+          return [
+            [null, null],
+            [null, null],
+            [null, 'true'],
+          ];
+        }
+        return [];
+      })
+    );
 
     const result = await dispatcher.findAndScoreDrivers(
       { lat: -22.857, lng: -43.309 },
@@ -506,5 +709,36 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
         score: expect.any(Number),
       }),
     ]);
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+  });
+
+  it('filters the shortlist by Redis dispatchEligible without canonical per-candidate reads', async () => {
+    redis.georadius.mockResolvedValue([
+      ['driver_blocked', '0.2', ['-43.309', '-22.857']],
+    ]);
+    redis.pipeline.mockImplementationOnce(() =>
+      createPipelineMock((signature) => {
+        if (signature === 'get|get|hget') {
+          return [
+            [null, null],
+            [null, null],
+            [null, 'false'],
+          ];
+        }
+        return [];
+      })
+    );
+
+    const result = await dispatcher.findAndScoreDrivers(
+      { lat: -22.857, lng: -43.309 },
+      2,
+      1,
+      'booking_123',
+      {}
+    );
+
+    expect(result).toEqual([]);
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(redis.hgetall).not.toHaveBeenCalledWith('driver:driver_blocked');
   });
 });
