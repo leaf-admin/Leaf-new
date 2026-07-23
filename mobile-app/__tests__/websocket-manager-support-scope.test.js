@@ -102,6 +102,88 @@ describe('WebSocketManager support scope', () => {
     });
   });
 
+  it('forwards only safe opaque KYC review references with an identity ticket', async () => {
+    const manager = WebSocketManager.getInstance();
+    const socket = createSocketMock();
+    manager.socket = socket;
+
+    const promise = manager.createSupportTicket(
+      'account',
+      'N2',
+      'Solicito análise da validação de identidade.',
+      [],
+      {
+        source: 'kyc_identity_mismatch_appeal',
+        subject: 'Revisão de identidade',
+        kycEvidenceId: 'evidence_01HZX9',
+        kycReviewCaseId: 'case_01HZX9',
+        kycChallengeId: 'challenge_01HZX9',
+        requirement: 'identity_reverification',
+        reviewAvailable: true,
+        similarityScore: 0.12,
+        sourceImageHash: 'sensitive-hash',
+        referenceImageUrl: 'https://storage.example/private-selfie.jpg',
+      },
+    );
+
+    expect(socket.emit).toHaveBeenCalledWith(
+      'createSupportTicket',
+      expect.objectContaining({
+        type: 'account',
+        priority: 'N2',
+        source: 'kyc_identity_mismatch_appeal',
+        kycEvidenceId: 'evidence_01HZX9',
+        kycReviewCaseId: 'case_01HZX9',
+        kycChallengeId: 'challenge_01HZX9',
+        requirement: 'IDENTITY_REVERIFICATION',
+        reviewAvailable: true,
+      }),
+    );
+    const emittedPayload = socket.emit.mock.calls[0][1];
+    expect(emittedPayload).not.toHaveProperty('similarityScore');
+    expect(emittedPayload).not.toHaveProperty('sourceImageHash');
+    expect(emittedPayload).not.toHaveProperty('referenceImageUrl');
+
+    socket.trigger('supportTicketCreated', {
+      success: true,
+      ticketId: 'SUP-KYC-1',
+    });
+
+    await expect(promise).resolves.toMatchObject({
+      success: true,
+      ticketId: 'SUP-KYC-1',
+    });
+  });
+
+  it('drops URL-like or path-like KYC review references', async () => {
+    const manager = WebSocketManager.getInstance();
+    const socket = createSocketMock();
+    manager.socket = socket;
+
+    const promise = manager.createSupportTicket(
+      'account',
+      'N2',
+      'Solicito análise da validação de identidade.',
+      [],
+      {
+        kycEvidenceId: 'https://storage.example/selfie.jpg',
+        kycReviewCaseId: '../case-from-another-driver',
+        kycChallengeId: 'challenge_valid-1',
+      },
+    );
+
+    const emittedPayload = socket.emit.mock.calls[0][1];
+    expect(emittedPayload).not.toHaveProperty('kycEvidenceId');
+    expect(emittedPayload).not.toHaveProperty('kycReviewCaseId');
+    expect(emittedPayload.kycChallengeId).toBe('challenge_valid-1');
+
+    socket.trigger('supportTicketCreated', {
+      success: true,
+      ticketId: 'SUP-KYC-2',
+    });
+    await expect(promise).resolves.toMatchObject({ success: true });
+  });
+
   it('sends booking scope with incident reports and rejects backend scope errors immediately', async () => {
     const manager = WebSocketManager.getInstance();
     const socket = createSocketMock();

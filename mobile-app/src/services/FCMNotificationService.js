@@ -19,13 +19,9 @@ const POST_NOTIFICATIONS_PERMISSION =
     PermissionsAndroid?.PERMISSIONS?.POST_NOTIFICATIONS || 'android.permission.POST_NOTIFICATIONS';
 const ANDROID_13_API_LEVEL = 33;
 const ALLOWED_NOTIFICATION_ROUTES = new Set([
-    'Notifications',
     'RobotaxiPrototype',
     'RobotaxiPrototypeTrip',
-    'RobotaxiPrototypeDriverTrip',
-    'RobotaxiPrototypeDriverOffer',
     'RobotaxiPrototypeDriverSearch',
-    'RobotaxiPrototypePayment',
     'RobotaxiPrototypePaymentSuccess',
     'RobotaxiPrototypePaymentFailed',
     'RobotaxiPrototypeReceipt',
@@ -49,9 +45,12 @@ const NOTIFICATION_SCREEN_ALIASES = {
     ride_status: 'RobotaxiPrototypeTrip',
     trip_update: 'RobotaxiPrototypeTrip',
     driver_trip: 'RobotaxiPrototype',
-    driver_offer: 'RobotaxiPrototypeDriverOffer',
-    new_ride_offer: 'RobotaxiPrototypeDriverOffer',
-    payment: 'RobotaxiPrototypePayment',
+    driver_offer: 'RobotaxiPrototype',
+    new_ride_offer: 'RobotaxiPrototype',
+    robotaxiprototypedriveroffer: 'RobotaxiPrototype',
+    robotaxiprototypedrivertrip: 'RobotaxiPrototype',
+    payment: 'RobotaxiPrototype',
+    robotaxiprototypepayment: 'RobotaxiPrototype',
     payment_confirmation: 'RobotaxiPrototypePaymentSuccess',
     payment_success: 'RobotaxiPrototypePaymentSuccess',
     payment_failed: 'RobotaxiPrototypePaymentFailed',
@@ -799,11 +798,11 @@ class FCMNotificationService {
                 ? 'RobotaxiPrototype'
                 : data.bookingId
                     ? 'RobotaxiPrototypeTrip'
-                    : 'Notifications');
+                    : 'RobotaxiPrototype');
 
         if (!ALLOWED_NOTIFICATION_ROUTES.has(resolvedRouteName)) {
             return {
-                routeName: 'Notifications',
+                routeName: 'RobotaxiPrototype',
                 params: { source: 'push', originalScreen: explicitScreen || null }
             };
         }

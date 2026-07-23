@@ -4,6 +4,7 @@ const mockGetIdToken = jest.fn();
 let mockAuthState = {
   currentUser: null,
 };
+let mockQaAuthRuntimeAllowed = true;
 
 const mockInstance = {
   interceptors: {
@@ -31,6 +32,12 @@ jest.mock('axios', () => ({
 
 jest.mock('@react-native-firebase/auth', () => () => mockAuthState);
 
+jest.mock('../src/config/runtimeAccessPolicy', () => ({
+  allowTestUserTools: jest.fn(() => mockQaAuthRuntimeAllowed),
+  isE2ETestBuild: jest.fn(() => mockQaAuthRuntimeAllowed),
+  isSimulatorBuild: jest.fn(() => mockQaAuthRuntimeAllowed),
+}));
+
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: (...args) => mockAsyncStorageGetItem(...args),
 }));
@@ -57,6 +64,7 @@ describe('axiosInterceptor auth token resolution', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockAuthState = { currentUser: null };
+    mockQaAuthRuntimeAllowed = true;
     mockGetIdToken.mockReset();
     mockAsyncStorageGetItem.mockResolvedValue(null);
     requestFulfilled = null;
@@ -133,6 +141,32 @@ describe('axiosInterceptor auth token resolution', () => {
     expect(config._authTokenSource).toBe('qa_storage');
   });
 
+  it('ignores a divergent QA token on a physical build and uses native Firebase', async () => {
+    mockQaAuthRuntimeAllowed = false;
+    mockAuthState.currentUser = {
+      uid: 'firebase-user-b',
+      getIdToken: mockGetIdToken.mockResolvedValue('firebase-user-b-token'),
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@qa_socket_id_token') return 'cached-user-a-token';
+      if (key === '@auth_uid') return 'cached-user-a';
+      return null;
+    });
+
+    createAxiosInstance({ baseURL: 'https://api.test' });
+
+    const config = await requestFulfilled({
+      headers: {},
+      method: 'get',
+      url: '/api/account/profile',
+    });
+
+    expect(mockGetIdToken).toHaveBeenCalledWith(false);
+    expect(config.headers.Authorization).toBe('Bearer firebase-user-b-token');
+    expect(config._authTokenSource).toBe('firebase');
+  });
+
   it('ignores an expired QA idToken and falls back to Firebase for HTTP calls', async () => {
     mockAuthState.currentUser = {
       getIdToken: mockGetIdToken.mockResolvedValue('fresh-firebase-token'),
@@ -158,6 +192,44 @@ describe('axiosInterceptor auth token resolution', () => {
 
     expect(mockGetIdToken).toHaveBeenCalledWith(false);
     expect(config.headers.Authorization).toBe('Bearer fresh-firebase-token');
+    expect(config._authTokenSource).toBe('firebase');
+  });
+
+  it('uses the matching Firebase session when the persisted QA passenger token expired', async () => {
+    const passengerFirebaseToken = buildJwt({
+      sub: 'passenger_uid',
+      user_id: 'passenger_uid',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    mockAuthState.currentUser = {
+      getIdToken: mockGetIdToken.mockResolvedValue(passengerFirebaseToken),
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@auth_uid') return 'passenger_uid';
+      if (key === '@qa_socket_id_token') {
+        return buildJwt({
+          sub: 'passenger_uid',
+          user_id: 'passenger_uid',
+          exp: Math.floor(Date.now() / 1000) - 60,
+        });
+      }
+      return null;
+    });
+
+    createAxiosInstance({ baseURL: 'https://api.test' });
+
+    const config = await requestFulfilled({
+      headers: {},
+      method: 'post',
+      url: '/api/payment/advance',
+      data: {
+        passengerId: 'passenger_uid',
+      },
+    });
+
+    expect(mockGetIdToken).toHaveBeenCalledWith(false);
+    expect(config.headers.Authorization).toBe(`Bearer ${passengerFirebaseToken}`);
     expect(config._authTokenSource).toBe('firebase');
   });
 
@@ -203,7 +275,7 @@ describe('axiosInterceptor auth token resolution', () => {
         },
       },
     });
-    expect(mockGetIdToken).not.toHaveBeenCalled();
+    expect(mockGetIdToken).toHaveBeenCalledWith(false);
   });
 
   it('blocks payment advance when the bearer token subject differs from passengerId', async () => {

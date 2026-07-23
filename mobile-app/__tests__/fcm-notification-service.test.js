@@ -667,7 +667,7 @@ describe('FCMNotificationService initialization', () => {
     });
 
     expect(navigationRef.navigate).toHaveBeenCalledWith(
-      'Notifications',
+      'RobotaxiPrototype',
       expect.objectContaining({
         originalScreen: 'DangerousInternalRoute',
       })

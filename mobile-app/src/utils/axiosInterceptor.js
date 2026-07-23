@@ -4,12 +4,20 @@ import { Platform } from 'react-native';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { toUserFriendlyError } from './friendlyErrorMessages';
+import {
+    allowTestUserTools,
+    isE2ETestBuild,
+    isSimulatorBuild,
+} from '../config/runtimeAccessPolicy';
 
 const TEST_MODE_STORAGE_KEY = '@test_mode';
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const QA_AUTH_TOKEN_MIN_TTL_MS = 60000;
+
+const canUsePersistedQaAuthToken = () =>
+    allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild();
 
 function decodeBase64UrlJson(segment) {
     const normalized = String(segment || '').replace(/-/g, '+').replace(/_/g, '/');
@@ -133,82 +141,105 @@ function isCanceledAxiosError(error) {
         || error?.message === 'canceled';
 }
 
-async function resolveRequestAuthToken({ forceRefresh = false, expectedSubject = '' } = {}) {
-    try {
-        const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw, storedUserDataRaw] = await Promise.all([
-            AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
-            AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
-            AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
-            AsyncStorage.getItem(USER_DATA_STORAGE_KEY)
-        ]);
+export async function resolveRequestAuthToken({ forceRefresh = false, expectedSubject = '' } = {}) {
+    let expiredQaTokenSubject = '';
 
-        let storedUserData = null;
-        if (storedUserDataRaw) {
-            try {
-                storedUserData = JSON.parse(storedUserDataRaw);
-            } catch (_error) {
-                storedUserData = null;
+    if (canUsePersistedQaAuthToken()) {
+        try {
+            const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw, storedUserDataRaw] =
+                await Promise.all([
+                    AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+                    AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+                    AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
+                    AsyncStorage.getItem(USER_DATA_STORAGE_KEY),
+                ]);
+
+            let storedUserData = null;
+            if (storedUserDataRaw) {
+                try {
+                    storedUserData = JSON.parse(storedUserDataRaw);
+                } catch (_error) {
+                    storedUserData = null;
+                }
             }
-        }
 
-        const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
-        const qaSocketIdToken = String(qaSocketIdTokenRaw || '').trim();
-        const tokenSubject = getJwtSubject(qaSocketIdToken);
-        const persistedUid = String(
-            storedUserData?.uid ||
-            storedUserData?.id ||
-            persistedUidRaw ||
-            '',
-        ).trim();
-        const isPersistedTestUser =
-            storedUserData?.isTestUser === true ||
-            storedUserData?.qaUser === true ||
-            storedUserData?.testUser === true;
-        const canUsePersistedTestUserToken =
-            Boolean(qaSocketIdToken) &&
-            isPersistedTestUser &&
-            Boolean(tokenSubject) &&
-            Boolean(persistedUid) &&
-            tokenSubject === persistedUid;
+            const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
+            const qaSocketIdToken = String(qaSocketIdTokenRaw || '').trim();
+            const tokenSubject = getJwtSubject(qaSocketIdToken);
+            const persistedUid = String(
+                storedUserData?.uid ||
+                storedUserData?.id ||
+                persistedUidRaw ||
+                '',
+            ).trim();
+            const isPersistedTestUser =
+                storedUserData?.isTestUser === true ||
+                storedUserData?.qaUser === true ||
+                storedUserData?.testUser === true;
+            const canUsePersistedTestUserToken =
+                Boolean(qaSocketIdToken) &&
+                isPersistedTestUser &&
+                Boolean(tokenSubject) &&
+                Boolean(persistedUid) &&
+                tokenSubject === persistedUid;
 
-        if (!forceRefresh && (qaModeEnabled || canUsePersistedTestUserToken) && qaSocketIdToken) {
-            if (isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
-                Logger.warn('⚠️ [Axios] Token QA persistido expirado; usando autenticação alternativa.');
-                if (expectedSubject && tokenSubject === expectedSubject) {
+            if (!forceRefresh && (qaModeEnabled || canUsePersistedTestUserToken) && qaSocketIdToken) {
+                if (isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
+                    Logger.warn('⚠️ [Axios] Token QA persistido expirado; usando autenticação alternativa.');
+                    if (expectedSubject && tokenSubject === expectedSubject) {
+                        expiredQaTokenSubject = tokenSubject;
+                    }
+                } else {
                     return {
-                        token: null,
-                        source: 'qa_storage_expired',
+                        token: qaSocketIdToken,
+                        source: 'qa_storage',
                         tokenSubject,
                     };
                 }
-            } else {
-                return {
-                    token: qaSocketIdToken,
-                    source: 'qa_storage',
-                    tokenSubject,
-                };
             }
+        } catch (qaTokenError) {
+            Logger.warn('⚠️ [Axios] Falha ao recuperar token QA persistido:', qaTokenError);
         }
-    } catch (qaTokenError) {
-        Logger.warn('⚠️ [Axios] Falha ao recuperar token QA persistido:', qaTokenError);
     }
 
     try {
         const currentUser = auth().currentUser;
         if (currentUser) {
+            const firebaseToken = await currentUser.getIdToken(Boolean(forceRefresh));
+            const firebaseTokenSubject = getJwtSubject(firebaseToken);
+
+            if (
+                expiredQaTokenSubject &&
+                expectedSubject &&
+                firebaseTokenSubject !== expectedSubject
+            ) {
+                return {
+                    token: null,
+                    source: 'qa_storage_expired',
+                    tokenSubject: expiredQaTokenSubject,
+                };
+            }
+
             return {
-                token: await currentUser.getIdToken(Boolean(forceRefresh)),
-                source: 'firebase'
+                token: firebaseToken,
+                source: 'firebase',
+                tokenSubject: firebaseTokenSubject,
             };
         }
     } catch (tokenError) {
         Logger.warn('⚠️ [Axios] Falha ao obter token do Firebase:', tokenError);
     }
 
-    return {
-        token: null,
-        source: null
-    };
+    return expiredQaTokenSubject
+        ? {
+            token: null,
+            source: 'qa_storage_expired',
+            tokenSubject: expiredQaTokenSubject,
+        }
+        : {
+            token: null,
+            source: null
+        };
 }
 
 /**

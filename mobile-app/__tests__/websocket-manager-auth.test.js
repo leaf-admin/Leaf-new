@@ -2,11 +2,18 @@ const mockAsyncStorageGetItem = jest.fn();
 const mockFirebaseAuthState = {
   currentUser: null,
 };
+let mockQaSocketRuntimeAllowed = true;
 
 jest.mock('@react-native-firebase/auth', () => () => ({
   get currentUser() {
     return mockFirebaseAuthState.currentUser;
   },
+}));
+
+jest.mock('../src/config/runtimeAccessPolicy', () => ({
+  allowTestUserTools: jest.fn(() => mockQaSocketRuntimeAllowed),
+  isE2ETestBuild: jest.fn(() => mockQaSocketRuntimeAllowed),
+  isSimulatorBuild: jest.fn(() => mockQaSocketRuntimeAllowed),
 }));
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -74,6 +81,7 @@ describe('WebSocketManager auth QA bypass', () => {
     originalPlatformOS = Platform.OS;
     WebSocketManager.instance = null;
     mockFirebaseAuthState.currentUser = null;
+    mockQaSocketRuntimeAllowed = true;
     jest.clearAllMocks();
     mockAsyncStorageGetItem.mockImplementation(async (key) => {
       if (key === '@test_mode') return 'true';
@@ -151,6 +159,28 @@ describe('WebSocketManager auth QA bypass', () => {
         token: 'firebase-id-token-driver-two',
       }),
     );
+    expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
+  });
+
+  it('ignores QA socket credentials on a physical build and uses native Firebase', async () => {
+    mockQaSocketRuntimeAllowed = false;
+    const nativeGetIdToken = jest.fn(async () => 'native-firebase-token');
+    mockFirebaseAuthState.currentUser = {
+      uid: 'firebase-user-b',
+      getIdToken: nativeGetIdToken,
+    };
+    mockAsyncStorageGetItem.mockImplementation(async (key) => {
+      if (key === '@test_mode') return 'true';
+      if (key === '@qa_socket_id_token') return 'cached-user-a-token';
+      if (key === '@auth_uid') return 'cached-user-a';
+      return null;
+    });
+
+    const manager = WebSocketManager.getInstance();
+    const authPayload = await manager._buildSocketAuthPayload();
+
+    expect(nativeGetIdToken).toHaveBeenCalledWith(false);
+    expect(authPayload).toEqual({ token: 'native-firebase-token' });
     expect(manager.qaSocketBypassState).toEqual({ enabled: false, uid: null });
   });
 
@@ -775,6 +805,147 @@ describe('WebSocketManager auth QA bypass', () => {
         userId: 'driver-123',
         newSocketId: 'socket-new',
         previousSocketId: 'socket-old',
+        __source: 'socket_event',
+      }),
+    );
+  });
+
+  it.each(['newMessage', 'messageReceived'])(
+    'registers %s as a first-class server event for fresh and reconnected sockets',
+    (eventName) => {
+      const manager = WebSocketManager.getInstance();
+      manager.socket = {
+        connected: true,
+        id: 'socket-chat',
+        io: {
+          engine: {
+            transport: {
+              name: 'websocket',
+            },
+          },
+        },
+        on: jest.fn(),
+      };
+
+      manager.setupListeners();
+
+      const registration = manager.socket.on.mock.calls.find(
+        ([registeredEvent]) => registeredEvent === eventName,
+      );
+      expect(registration).toBeTruthy();
+
+      const listener = jest.fn();
+      manager.on(eventName, listener);
+      registration[1]({ bookingId: 'booking_chat_1', message: 'Cheguei' });
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingId: 'booking_chat_1',
+          message: 'Cheguei',
+          __source: 'socket_event',
+        }),
+      );
+
+      manager.socket = {
+        connected: true,
+        id: 'socket-chat-reconnected',
+        io: {
+          engine: {
+            transport: {
+              name: 'websocket',
+            },
+          },
+        },
+        on: jest.fn(),
+      };
+      manager.socketListeners.clear();
+      manager.setupListeners();
+
+      const reconnectedRegistration = manager.socket.on.mock.calls.find(
+        ([registeredEvent]) => registeredEvent === eventName,
+      );
+      expect(reconnectedRegistration).toBeTruthy();
+
+      reconnectedRegistration[1]({
+        bookingId: 'booking_chat_1',
+        message: 'Mensagem após reconexão',
+      });
+      expect(listener).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          bookingId: 'booking_chat_1',
+          message: 'Mensagem após reconexão',
+          __source: 'socket_event',
+        }),
+      );
+    },
+  );
+
+  it('ignores a legacy-shaped termination when the replacement is the active local socket', () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      id: 'socket-reconnected',
+      io: {
+        engine: {
+          transport: {
+            name: 'websocket',
+          },
+        },
+      },
+      on: jest.fn(),
+    };
+
+    manager.setupListeners();
+
+    const registration = manager.socket.on.mock.calls.find(
+      ([eventName]) => eventName === 'sessionTerminated',
+    );
+    const listener = jest.fn();
+    manager.on('sessionTerminated', listener);
+
+    registration[1]({
+      code: 'SESSION_REPLACED',
+      userId: 'driver-123',
+      newSocketId: 'socket-reconnected',
+    });
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('keeps enforcing a legacy-shaped termination from a different socket', () => {
+    const manager = WebSocketManager.getInstance();
+    manager.socket = {
+      connected: true,
+      id: 'socket-current-device',
+      io: {
+        engine: {
+          transport: {
+            name: 'websocket',
+          },
+        },
+      },
+      on: jest.fn(),
+    };
+
+    manager.setupListeners();
+
+    const registration = manager.socket.on.mock.calls.find(
+      ([eventName]) => eventName === 'sessionTerminated',
+    );
+    const listener = jest.fn();
+    manager.on('sessionTerminated', listener);
+
+    registration[1]({
+      code: 'SESSION_REPLACED',
+      userId: 'driver-123',
+      newSocketId: 'socket-other-device',
+    });
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'SESSION_REPLACED',
+        userId: 'driver-123',
+        newSocketId: 'socket-other-device',
         __source: 'socket_event',
       }),
     );

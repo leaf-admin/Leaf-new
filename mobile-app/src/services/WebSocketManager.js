@@ -6,6 +6,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { toUserFriendlyError } from "../utils/friendlyErrorMessages";
 import rideCostTelemetryService from "./RideCostTelemetryService";
+import {
+  allowTestUserTools,
+  isE2ETestBuild,
+  isSimulatorBuild,
+} from "../config/runtimeAccessPolicy";
 
 const CREATE_BOOKING_TIMEOUT_MS = 120000; // 2 minutos mínimo para evitar timeout prematuro em cenários de alta latência
 const CREATE_BOOKING_MAX_RETRIES = 4;
@@ -88,9 +93,12 @@ const getProcessEnvValue = (key) =>
   typeof process !== "undefined" ? process?.env?.[key] : undefined;
 
 const canUseClientQaSocketBypass = () =>
-  __DEV__ === true ||
-  isTruthyQaSocketFlag(getProcessEnvValue("EXPO_PUBLIC_E2E_TEST")) ||
-  isTruthyQaSocketFlag(getProcessEnvValue("EXPO_PUBLIC_ENABLE_QA_SOCKET_BYPASS"));
+  allowTestUserTools() &&
+  isSimulatorBuild() &&
+  (isE2ETestBuild() ||
+    isTruthyQaSocketFlag(
+      getProcessEnvValue("EXPO_PUBLIC_ENABLE_QA_SOCKET_BYPASS"),
+    ));
 
 const CREATE_BOOKING_RETRYABLE_CODES = new Set([
   "BOOKING_TIMEOUT",
@@ -126,6 +134,19 @@ function buildRideLifecycleCommandMetadata(options = {}) {
   return metadata;
 }
 
+const SAFE_SUPPORT_OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const SAFE_SUPPORT_REQUIREMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+function normalizeSupportOpaqueId(value) {
+  const normalized = String(value ?? "").trim();
+  return SAFE_SUPPORT_OPAQUE_ID_PATTERN.test(normalized) ? normalized : "";
+}
+
+function normalizeSupportRequirement(value) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return SAFE_SUPPORT_REQUIREMENT_PATTERN.test(normalized) ? normalized : "";
+}
+
 function buildSupportScopePayload(context = {}) {
   if (!context || typeof context !== "object") {
     return {};
@@ -148,6 +169,22 @@ function buildSupportScopePayload(context = {}) {
       scopedPayload[key] = value;
     }
   });
+
+  ["kycEvidenceId", "kycReviewCaseId", "kycChallengeId"].forEach((key) => {
+    const value = normalizeSupportOpaqueId(context[key]);
+    if (value) {
+      scopedPayload[key] = value;
+    }
+  });
+
+  const requirement = normalizeSupportRequirement(context.requirement);
+  if (requirement) {
+    scopedPayload.requirement = requirement;
+  }
+
+  if (typeof context.reviewAvailable === "boolean") {
+    scopedPayload.reviewAvailable = context.reviewAvailable;
+  }
 
   return scopedPayload;
 }
@@ -864,6 +901,10 @@ class WebSocketManager {
   }
 
   async _resolveQaSocketIdToken() {
+    if (!canUseClientQaSocketBypass()) {
+      return null;
+    }
+
     try {
       const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw, storedUserDataRaw] = await Promise.all([
         AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
@@ -934,6 +975,10 @@ class WebSocketManager {
   }
 
   async _resolveQaSocketIdentityOverride(requestedUserId = "", requestedUserType = "") {
+    if (!canUseClientQaSocketBypass()) {
+      return null;
+    }
+
     try {
       const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw, storedUserDataRaw] =
         await Promise.all([
@@ -1584,6 +1629,8 @@ class WebSocketManager {
       "boardingStatusError",
       "activeRideSync",
       "sessionTerminated",
+      "newMessage",
+      "messageReceived",
       "locationUpdated",
       "locationBatchUpdated",
       "mapH3Refresh",
@@ -1669,6 +1716,7 @@ class WebSocketManager {
               const activeSocketId = String(this.socket?.id || "");
               const sourceSocketId = String(listenerSocket?.id || "");
               const previousSocketId = String(data?.previousSocketId || "");
+              const replacementSocketId = String(data?.newSocketId || "");
 
               const fromStaleSocket =
                 Boolean(activeSocketId && sourceSocketId) &&
@@ -1676,15 +1724,22 @@ class WebSocketManager {
               const targetsDifferentSocket =
                 Boolean(previousSocketId && activeSocketId) &&
                 previousSocketId !== activeSocketId;
+              const replacedByActiveSocket =
+                Boolean(replacementSocketId && activeSocketId) &&
+                replacementSocketId === activeSocketId;
 
-              if (fromStaleSocket || targetsDifferentSocket) {
+              if (
+                fromStaleSocket ||
+                targetsDifferentSocket ||
+                replacedByActiveSocket
+              ) {
                 Logger.warn(
                   "⚠️ [WebSocketManager] Ignorando sessionTerminated de socket obsoleto",
                   {
                     activeSocketId,
                     sourceSocketId,
                     previousSocketId,
-                    newSocketId: data?.newSocketId || null,
+                    newSocketId: replacementSocketId || null,
                   },
                 );
                 return;

@@ -7,6 +7,7 @@ const LOCAL_DISMISS_TTL_MS = 48 * 60 * 60 * 1000;
 const CACHE_PREFIX = "@leaf_campaign_cache";
 const DISMISS_PREFIX = "@leaf_campaign_dismissals";
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
+const FEATURE_DISABLED_CODE = "FEATURE_DISABLED_IN_LAUNCH_PROFILE";
 
 function normalizeText(value, fallback = "") {
   const text = String(value ?? "").trim();
@@ -189,6 +190,7 @@ export async function loadCachedEligibleCampaigns(context = {}) {
       cached: true,
       stale: !expiresAt || Date.now() > expiresAt,
       updatedAt: parsed?.updatedAt || null,
+      disabled: parsed?.disabled === true,
     };
   } catch (_error) {
     return { campaigns: [], cached: false, stale: false };
@@ -217,7 +219,29 @@ export async function refreshEligibleCampaigns(context = {}) {
     params.append("completedTrips", String(context.completedTrips));
   }
 
-  const response = await apiClient.get(`/api/campaign-center/eligible?${params.toString()}`);
+  const response = await apiClient.get(
+    `/api/campaign-center/eligible?${params.toString()}`,
+    {
+      validateStatus: (status) =>
+        (status >= 200 && status < 300) || status === 503,
+    },
+  );
+  const featureDisabled = isCampaignCenterDisabledResponse(response);
+  if (featureDisabled) {
+    const payload = {
+      campaigns: [],
+      disabled: true,
+      updatedAt: new Date().toISOString(),
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    };
+    await AsyncStorage.setItem(buildCacheKey(context), JSON.stringify(payload));
+    return { ...payload, cached: false, stale: false };
+  }
+  if (Number(response?.status || 0) >= 400) {
+    const error = new Error(response?.data?.error || "Campaign Center indisponível");
+    error.response = response;
+    throw error;
+  }
   const campaigns = applyLimit(await filterDismissed(
     normalizeCampaignList(response?.data?.campaigns),
     context.userId,
@@ -233,7 +257,7 @@ export async function refreshEligibleCampaigns(context = {}) {
 
 export async function resolveEligibleCampaigns(context = {}) {
   const cached = await loadCachedEligibleCampaigns(context);
-  if (cached.campaigns.length > 0 && !cached.stale) {
+  if (!cached.stale && (cached.campaigns.length > 0 || cached.disabled === true)) {
     return cached;
   }
 
@@ -271,6 +295,13 @@ export async function recordCampaignEvent(eventType, campaign = {}, context = {}
 export async function dismissCampaign(campaign = {}, context = {}) {
   await saveDismissal(context.userId, campaign.id || campaign.campaignId);
   return recordCampaignEvent("dismiss", campaign, context);
+}
+
+export function isCampaignCenterDisabledResponse(response = {}) {
+  return (
+    Number(response?.status || 0) === 503 &&
+    normalizeText(response?.data?.code).toUpperCase() === FEATURE_DISABLED_CODE
+  );
 }
 
 export { normalizeCampaign };
