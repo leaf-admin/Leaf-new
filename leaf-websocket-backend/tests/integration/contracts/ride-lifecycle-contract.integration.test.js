@@ -69,15 +69,25 @@ describe('Ride lifecycle source contract audit', () => {
     const navigator = read('mobile-app/src/navigation/AppNavigator.js');
 
     [
-      'RobotaxiPrototypeBooking',
+      'RobotaxiPrototype',
+      'RobotaxiPrototypeDestination',
       'RobotaxiPrototypeDriverSearch',
       'RobotaxiPrototypeTrip',
       'RobotaxiPrototypeReceipt',
       'RobotaxiPrototypeRating',
-      'RobotaxiPrototypeDriverOffer',
-      'RobotaxiPrototypeDriverTrip'
+      'RobotaxiPrototypeCancellation',
+      'RobotaxiPrototypeNoDrivers'
     ].forEach((routeName) => {
       expect(navigator).toContain(`name="${routeName}"`);
+    });
+
+    [
+      'RobotaxiPrototypeBooking',
+      'RobotaxiPrototypeDriverOffer',
+      'RobotaxiPrototypeDriverTrip',
+      'RobotaxiPrototypePayment'
+    ].forEach((retiredRouteName) => {
+      expect(navigator).not.toContain(`name="${retiredRouteName}"`);
     });
   });
 
