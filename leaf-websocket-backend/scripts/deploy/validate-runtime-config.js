@@ -74,6 +74,7 @@ const PAYMENT_BYPASS_FLAGS = [
 ];
 
 const LEGACY_RUNTIME_FLAGS = [
+  'ENABLE_LEGACY_KYC_PROXY',
   'ENABLE_LEGACY_RUNTIME_ENDPOINTS',
   'ENABLE_LEGACY_SOCKET_BRIDGE',
   'ENABLE_LEGACY_SOCKET_NOTIFICATIONS',
@@ -133,6 +134,11 @@ const PAYMENT_PROVIDER_ROLES = new Set([
   'payment',
   'payments'
 ]);
+const DEFAULT_AWS_LIVENESS_CHALLENGE_TYPE = 'FaceMovementChallenge';
+const ALLOWED_AWS_LIVENESS_CHALLENGE_TYPES = [
+  'FaceMovementChallenge',
+  'FaceMovementAndLightChallenge'
+];
 const APPROVED_DRIVER_SEARCH_RADIUS_KM = 5;
 
 function presence(value) {
@@ -175,6 +181,19 @@ function booleanDiagnostic(name, fallback = false) {
   return {
     value: readBooleanLike(raw, fallback),
     source: configured ? 'env' : 'default'
+  };
+}
+
+function enumDiagnostic(name, fallback, allowedValues) {
+  const raw = process.env[name];
+  const configured = raw != null && String(raw).trim() !== '';
+  const value = configured ? String(raw).trim() : fallback;
+
+  return {
+    value,
+    source: configured ? 'env' : 'default',
+    valid: allowedValues.includes(value),
+    allowedValues
   };
 }
 
@@ -452,6 +471,17 @@ function main() {
     return acc;
   }, {});
   const biometricReadiness = evaluateProductionReadiness(process.env);
+  const adaptiveKycCadence = booleanDiagnostic('KYC_TRUST_CADENCE_ENABLED', false);
+  const onlineKycGate = booleanDiagnostic('DAILY_KYC_ONLINE_GATE_ENABLED', true);
+  const trustedRandomAuditPercent = Number(process.env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT || 5);
+  const awsLivenessS3Bucket = String(
+    process.env.KYC_AWS_LIVENESS_S3_BUCKET || process.env.AWS_LIVENESS_S3_BUCKET || ''
+  ).trim();
+  const awsLivenessChallengeType = enumDiagnostic(
+    'KYC_AWS_LIVENESS_CHALLENGE_TYPE',
+    DEFAULT_AWS_LIVENESS_CHALLENGE_TYPE,
+    ALLOWED_AWS_LIVENESS_CHALLENGE_TYPES
+  );
   const legacyRuntimeDiagnostics = LEGACY_RUNTIME_FLAGS.reduce((acc, key) => {
     acc[key] = booleanDiagnostic(key, false);
     return acc;
@@ -478,6 +508,29 @@ function main() {
     testBypass: booleanDiagnostic('AUTH_TEST_OTP_BYPASS_ENABLED', false),
     reviewBypass: booleanDiagnostic('AUTH_REVIEW_OTP_BYPASS_ENABLED', false)
   };
+
+  if (adaptiveKycCadence.value && !onlineKycGate.value) {
+    blockers.push('KYC_TRUST_CADENCE_ENABLED=true exige DAILY_KYC_ONLINE_GATE_ENABLED=true');
+  }
+  if (nodeEnv === 'production' && adaptiveKycCadence.value && !biometricReadiness.enabled) {
+    blockers.push('KYC_TRUST_CADENCE_ENABLED=true em produção exige KYC_PRODUCTION_BIOMETRICS_ENABLED=true');
+  }
+  if (
+    adaptiveKycCadence.value
+    && (!Number.isFinite(trustedRandomAuditPercent)
+      || trustedRandomAuditPercent <= 0
+      || trustedRandomAuditPercent > 100)
+  ) {
+    blockers.push('KYC_TRUSTED_RANDOM_AUDIT_PERCENT deve estar entre 0 (exclusivo) e 100 quando a cadência adaptativa estiver ativa');
+  }
+  if (adaptiveKycCadence.value && awsLivenessS3Bucket) {
+    blockers.push('KYC_AWS_LIVENESS_S3_BUCKET deve permanecer vazio com cadência adaptativa até o backend suportar ReferenceImage.S3Object');
+  }
+  if (!awsLivenessChallengeType.valid) {
+    blockers.push(
+      'KYC_AWS_LIVENESS_CHALLENGE_TYPE deve ser FaceMovementChallenge ou FaceMovementAndLightChallenge'
+    );
+  }
   const webhookProviderVerificationFallback =
     !hasWebhookVerifier &&
     (hasWebhookAuthorization || paymentProviderSandboxRuntime) &&
@@ -736,6 +789,19 @@ function main() {
     },
     diagnostics: {
       biometricReadiness,
+      awsLiveness: {
+        challengeType: awsLivenessChallengeType
+      },
+      adaptiveKycCadence: {
+        enabled: adaptiveKycCadence,
+        onlineGate: onlineKycGate,
+        policyVersion: String(
+          process.env.KYC_TRUST_POLICY_VERSION || 'driver_identity_recurring_v1'
+        ),
+        randomAuditPercent: trustedRandomAuditPercent,
+        verificationDuringActiveRide: false,
+        referenceImageMode: awsLivenessS3Bucket ? 's3_unsupported' : 'inline_bytes'
+      },
       webhookSignature: {
         verifierKeysPresent: effectiveWebhookVerifierKeysPresent,
         hasVerifier: hasWebhookVerifier,

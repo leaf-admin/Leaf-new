@@ -69,13 +69,48 @@ function buildPushSection() {
 }
 
 function buildKycSection() {
+  const randomAuditPercent = Number(process.env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT || 5);
+  const faceCompareProvider = String(
+    process.env.KYC_FACE_COMPARE_PROVIDER || 'leaf_face_compare_service'
+  ).trim().toLowerCase();
+  const awsCompareFacesConfigured = faceCompareProvider === 'aws_rekognition_compare_faces'
+    && envBool('KYC_AWS_COMPARE_FACES_ENABLED', false);
+  const faceServiceConfigured = presence('BIOMETRIC_FACE_SERVICE_URL');
   return {
-    configured: presence('KYC_PRODUCTION_BIOMETRICS_ENABLED') || presence('KYC_AWS_LIVENESS_ENABLED'),
+    configured:
+      presence('KYC_PRODUCTION_BIOMETRICS_ENABLED')
+      || presence('KYC_AWS_LIVENESS_ENABLED')
+      || presence('KYC_TRUST_CADENCE_ENABLED'),
     productionBiometricsEnabled: envBool('KYC_PRODUCTION_BIOMETRICS_ENABLED', false),
     awsLivenessConfigured: envBool('KYC_AWS_LIVENESS_ENABLED', false) || envBool('AWS_LIVENESS_ENABLED', false),
-    faceServiceConfigured: presence('BIOMETRIC_FACE_SERVICE_URL'),
+    faceCompareProvider,
+    faceServiceConfigured,
+    awsCompareFacesConfigured,
+    canonicalFaceCompareConfigured: awsCompareFacesConfigured || (
+      ['leaf_face_compare_service', 'biometric-face-service'].includes(faceCompareProvider)
+      && faceServiceConfigured
+    ),
     cnhFaceBiometricsConfigured: envBool('ENABLE_CNH_FACE_BIOMETRICS', false),
-    requireTrustedBiometricMatch: envBool('KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH', false)
+    requireTrustedBiometricMatch: envBool('KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH', false),
+    onlineGateEnabled: envBool('DAILY_KYC_ONLINE_GATE_ENABLED', true),
+    adaptiveCadenceEnabled: envBool('KYC_TRUST_CADENCE_ENABLED', false),
+    trustPolicyVersion: String(
+      process.env.KYC_TRUST_POLICY_VERSION || 'driver_identity_recurring_v1'
+    ),
+    cadenceHours: {
+      new: Number(process.env.KYC_TRUST_T0_MAX_AGE_HOURS || 24),
+      observed: Number(process.env.KYC_TRUST_T1_MAX_AGE_HOURS || 72),
+      trusted: Number(process.env.KYC_TRUST_T2_MAX_AGE_HOURS || 168)
+    },
+    trustedRandomAuditPercent: Number.isFinite(randomAuditPercent)
+      ? Math.min(100, Math.max(0, randomAuditPercent))
+      : 5,
+    verificationDuringActiveRide: false,
+    canonicalReferenceImageCompare: true,
+    canonicalReferenceImageMode: presence('KYC_AWS_LIVENESS_S3_BUCKET')
+      || presence('AWS_LIVENESS_S3_BUCKET')
+      ? 's3_unsupported'
+      : 'inline_bytes'
   };
 }
 
@@ -129,7 +164,7 @@ function buildRoleReadiness(health) {
     kycStrict: runtimeRole !== 'gateway' || (
       kyc.productionBiometricsEnabled &&
       kyc.awsLivenessConfigured &&
-      kyc.faceServiceConfigured &&
+      kyc.canonicalFaceCompareConfigured &&
       kyc.requireTrustedBiometricMatch &&
       !envBool('MOBILE_FACE_EMBEDDING_ENABLED', true)
     ),

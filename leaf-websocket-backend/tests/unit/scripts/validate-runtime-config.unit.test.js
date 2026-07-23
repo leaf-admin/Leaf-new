@@ -48,6 +48,18 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     );
   });
 
+  it('blocks the isolated legacy KYC proxy from being mounted in production', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ENABLE_LEGACY_KYC_PROXY: 'true'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'ENABLE_LEGACY_KYC_PROXY=true bloqueado em produção'
+    );
+  });
+
   it('blocks a pilot without cohorts, polygon, runtime version and strict KYC', () => {
     const result = runValidator({
       ...baseProdEnv,
@@ -617,6 +629,20 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     });
   });
 
+  it('blocks adaptive identity cadence in production until strict biometrics are enabled', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      KYC_TRUST_CADENCE_ENABLED: 'true',
+      DAILY_KYC_ONLINE_GATE_ENABLED: 'true',
+      KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '5'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'KYC_TRUST_CADENCE_ENABLED=true em produção exige KYC_PRODUCTION_BIOMETRICS_ENABLED=true'
+    );
+  });
+
   it('reports firebase diagnostics with all vars configured', () => {
     const result = runValidator({
       ...baseProdEnv,
@@ -828,7 +854,10 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       MOBILE_FACE_EMBEDDING_ENABLED: 'false',
       KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
       KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false',
-      KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false'
+      KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false',
+      KYC_TRUST_CADENCE_ENABLED: 'true',
+      DAILY_KYC_ONLINE_GATE_ENABLED: 'true',
+      KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '5'
     });
 
     expect(result.status).toBe(0);
@@ -837,6 +866,81 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       ok: true,
       enabled: true
     });
+    expect(result.report.diagnostics.awsLiveness.challengeType).toEqual({
+      value: 'FaceMovementChallenge',
+      source: 'default',
+      valid: true,
+      allowedValues: [
+        'FaceMovementChallenge',
+        'FaceMovementAndLightChallenge'
+      ]
+    });
+    expect(result.report.diagnostics.adaptiveKycCadence).toMatchObject({
+      enabled: { value: true, source: 'env' },
+      onlineGate: { value: true, source: 'env' },
+      randomAuditPercent: 5,
+      verificationDuringActiveRide: false,
+      referenceImageMode: 'inline_bytes'
+    });
     expect(result.stdout).not.toContain('face-key');
+  });
+
+  it('accepts the movement-and-light challenge override and reports it safely', () => {
+    const result = runValidator({
+      NODE_ENV: 'development',
+      RUNTIME_ROLE: 'sideeffects',
+      KYC_AWS_LIVENESS_CHALLENGE_TYPE: 'FaceMovementAndLightChallenge'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.diagnostics.awsLiveness.challengeType).toMatchObject({
+      value: 'FaceMovementAndLightChallenge',
+      source: 'env',
+      valid: true
+    });
+  });
+
+  it('blocks an unsupported AWS liveness challenge type', () => {
+    const result = runValidator({
+      NODE_ENV: 'development',
+      RUNTIME_ROLE: 'sideeffects',
+      KYC_AWS_LIVENESS_CHALLENGE_TYPE: 'UnsupportedChallenge'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.diagnostics.awsLiveness.challengeType).toMatchObject({
+      value: 'UnsupportedChallenge',
+      source: 'env',
+      valid: false
+    });
+    expect(result.report.summary.blockers).toContain(
+      'KYC_AWS_LIVENESS_CHALLENGE_TYPE deve ser FaceMovementChallenge ou FaceMovementAndLightChallenge'
+    );
+  });
+
+  it('blocks invalid random audit and S3-only reference output for adaptive cadence', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true',
+      KYC_AWS_LIVENESS_ENABLED: 'true',
+      KYC_AWS_LIVENESS_ASSUME_ROLE_ARN: 'arn:aws:iam::123456789012:role/leaf-liveness',
+      KYC_AWS_LIVENESS_S3_BUCKET: 'leaf-liveness-output',
+      BIOMETRIC_FACE_SERVICE_URL: 'https://face.leaf.internal',
+      BIOMETRIC_FACE_SERVICE_API_KEY: 'face-key',
+      ENABLE_CNH_FACE_BIOMETRICS: 'true',
+      MOBILE_FACE_EMBEDDING_ENABLED: 'false',
+      KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
+      KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false',
+      KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false',
+      KYC_TRUST_CADENCE_ENABLED: 'true',
+      DAILY_KYC_ONLINE_GATE_ENABLED: 'true',
+      KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '0'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'KYC_TRUSTED_RANDOM_AUDIT_PERCENT deve estar entre 0 (exclusivo) e 100 quando a cadência adaptativa estiver ativa',
+      'KYC_AWS_LIVENESS_S3_BUCKET deve permanecer vazio com cadência adaptativa até o backend suportar ReferenceImage.S3Object'
+    ]));
   });
 });

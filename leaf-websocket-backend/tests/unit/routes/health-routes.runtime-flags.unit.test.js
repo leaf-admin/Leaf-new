@@ -197,6 +197,10 @@ describe('health runtime flags route', () => {
     process.env.KYC_AWS_LIVENESS_ENABLED = 'true';
     process.env.ENABLE_CNH_FACE_BIOMETRICS = 'true';
     process.env.KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH = 'true';
+    process.env.KYC_TRUST_CADENCE_ENABLED = 'true';
+    process.env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT = '5';
+    delete process.env.KYC_AWS_LIVENESS_S3_BUCKET;
+    delete process.env.AWS_LIVENESS_S3_BUCKET;
     process.env.WOOVI_ENVIRONMENT = 'sandbox';
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
@@ -209,6 +213,20 @@ describe('health runtime flags route', () => {
     expect(response.body.kyc.awsLivenessConfigured).toBe(true);
     expect(response.body.kyc.cnhFaceBiometricsConfigured).toBe(true);
     expect(response.body.kyc.requireTrustedBiometricMatch).toBe(true);
+    expect(response.body.kyc).toEqual(expect.objectContaining({
+      onlineGateEnabled: true,
+      adaptiveCadenceEnabled: true,
+      trustPolicyVersion: 'driver_identity_recurring_v1',
+      cadenceHours: {
+        new: 24,
+        observed: 72,
+        trusted: 168
+      },
+      trustedRandomAuditPercent: 5,
+      verificationDuringActiveRide: false,
+      canonicalReferenceImageCompare: true,
+      canonicalReferenceImageMode: 'inline_bytes'
+    }));
   });
 
   it('reports maps section with booleans', async () => {

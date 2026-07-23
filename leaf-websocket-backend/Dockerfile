@@ -5,6 +5,7 @@ FROM node:20-alpine
 RUN apk add --no-cache \
     curl \
     bash \
+    poppler-utils \
     postgresql-client
 
 # Criar usuário não-root antes de copiar o código.
