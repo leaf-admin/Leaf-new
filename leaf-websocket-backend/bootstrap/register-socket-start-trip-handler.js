@@ -233,7 +233,8 @@ function registerSocketStartTripHandler({
                             firestore: getFirestoreSafely(),
                             bookingId,
                             references: paymentReferences,
-                            expectedAmountInCents
+                            expectedAmountInCents,
+                            paymentContext: bookingSnapshot
                         });
 
                         if (!paymentProof?.success) {
@@ -437,10 +438,10 @@ function registerSocketStartTripHandler({
                 // ✅ NOVO: Marcar corrida como iniciada no Firestore
                 try {
                     const ridePersistenceService = require('../services/ride-persistence-service');
-                    await ridePersistenceService.markRideStarted(bookingId);
+                    const bookingDataRaw = await redis.hgetall(`booking:${bookingId}`);
+                    await ridePersistenceService.markRideStarted(bookingId, bookingDataRaw);
 
                     // ✅ NOVO: Atualizar estado em bookings:active e activeBookings
-                    const bookingDataRaw = await redis.hgetall(`booking:${bookingId}`);
                     if (bookingDataRaw && Object.keys(bookingDataRaw).length > 0) {
                         const activeBookingData = {
                             ...bookingDataRaw,

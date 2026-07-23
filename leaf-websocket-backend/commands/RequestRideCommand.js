@@ -29,6 +29,7 @@ const fareEstimationService = require('../services/fare-estimation-service');
 const PaymentService = require('../services/payment-service');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
 const { resolveEstimatedFareSnapshot } = require('../utils/fare-snapshot-utils');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 
 const paymentService = new PaymentService();
 const PAID_PAYMENT_STATUSES = new Set(['confirmed', 'paid', 'in_holding']);
@@ -278,6 +279,17 @@ class RequestRideCommand extends Command {
                     this.paymentData?.paymentProfileSource ||
                     ''
                 ).trim();
+                const financialContextResult = resolveFinancialContext({
+                    financialContext: this.paymentData?.financialContext,
+                    financialNamespace: this.paymentData?.financialNamespace,
+                    providerEnvironment: paymentProviderEnvironment
+                }, { allowLegacyOperational: true });
+                if (!financialContextResult.ok) {
+                    const financialContextError = new Error(financialContextResult.error);
+                    financialContextError.code = financialContextResult.code;
+                    throw financialContextError;
+                }
+                const financialContext = financialContextResult.context;
                 const parsedPaymentAmountInCents = Number.parseInt(
                     String(this.paymentData?.amountInCents ?? ''),
                     10
@@ -415,6 +427,9 @@ class RequestRideCommand extends Command {
                     paymentProfileId,
                     paymentProfileReason,
                     paymentProfileSource,
+                    financialContext: JSON.stringify(financialContext),
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId,
                     paymentConfirmedAt,
                     preferences: { ...(this.preferences || {}) },
                     femaleDriverOnly: this.preferences?.femaleDriverOnly === true ||
@@ -465,6 +480,9 @@ class RequestRideCommand extends Command {
                     carType: this.carType,
                     paymentMethod: this.paymentMethod,
                     paymentStatus: normalizedPaymentStatus,
+                    financialContext,
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId,
                     ...(estimatedFareSnapshot || {}),
                     pricingSnapshotLocked: Boolean(estimatedFareSnapshot),
                     pricingSnapshotLockedAt,

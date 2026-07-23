@@ -354,7 +354,14 @@ function registerSocketAcceptRideHandler({
                 // ✅ NOVO: Atualizar motorista da corrida no Firestore
                 try {
                     const ridePersistenceService = require('../services/ride-persistence-service');
-                    await ridePersistenceService.updateRideDriver(bookingIdToUse, driverId);
+                    const persistenceBookingData = await redisPool
+                        .getConnection()
+                        .hgetall(`booking:${bookingIdToUse}`);
+                    await ridePersistenceService.updateRideDriver(
+                        bookingIdToUse,
+                        driverId,
+                        persistenceBookingData
+                    );
                 } catch (persistError) {
                     logStructured('error', 'Erro ao atualizar motorista da corrida no Firestore', {
                         bookingId: bookingIdToUse,

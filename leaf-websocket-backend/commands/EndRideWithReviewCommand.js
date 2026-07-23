@@ -11,6 +11,7 @@ const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 const {
   loadBookingContext,
   normalizeLocation,
@@ -31,6 +32,23 @@ function createNoopSpan() {
     recordException: () => {},
     end: () => {}
   };
+}
+
+async function applyDeferredIdentityReverification(driverId, context = {}) {
+  try {
+    const kycPolicyService = require('../services/kyc-policy-service');
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') {
+      return;
+    }
+    await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
+  } catch (error) {
+    logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos encerramento em revisao', {
+      service: 'end-ride-with-review-command',
+      bookingId: context.tripId || null,
+      driverId,
+      error: error.message
+    });
+  }
 }
 
 class EndRideWithReviewCommand extends Command {
@@ -194,13 +212,50 @@ class EndRideWithReviewCommand extends Command {
           `ride_excluded_drivers:${this.bookingId}`
         );
         await redis.hdel('bookings:active', this.bookingId);
-        await clearActiveTripForDriver(redis, driverId, this.bookingId);
+        const activeTripCleared = await clearActiveTripForDriver(
+          redis,
+          driverId,
+          this.bookingId
+        );
+        const financialContextResult = resolveFinancialContext(
+          context.bookingHash,
+          { allowLegacyOperational: true }
+        );
+        if (
+          activeTripCleared
+          && financialContextResult.ok
+          && financialContextResult.context.namespace === 'operational'
+        ) {
+          await applyDeferredIdentityReverification(driverId, {
+            source: 'ride_early_ended_review',
+            tripId: this.bookingId
+          });
+        } else if (!activeTripCleared) {
+          logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida em review', {
+            service: 'end-ride-with-review-command',
+            bookingId: this.bookingId,
+            driverId
+          });
+        } else {
+          logStructured('info', 'Revalidacao KYC adiada ignorada fora do namespace operacional', {
+            service: 'end-ride-with-review-command',
+            bookingId: this.bookingId,
+            driverId
+          });
+        }
 
         setImmediate(async () => {
           try {
             await tripLocationPersistenceService.forceFinalizeTrip(this.bookingId, {
               status: 'early_ended_review',
-              reason: reviewContext.reason
+              reason: reviewContext.reason,
+              financialContext: context.bookingHash.financialContext,
+              financialNamespace: context.bookingHash.financialNamespace,
+              financialContextId: context.bookingHash.financialContextId,
+              providerEnvironment:
+                context.bookingHash.paymentProviderEnvironment || context.bookingHash.providerEnvironment,
+              paymentProfileId: context.bookingHash.paymentProfileId,
+              testUserSandbox: context.bookingHash.testUserSandbox
             });
           } catch (locationFinalizeError) {
             logStructured('warn', 'Falha ao finalizar trilha de localização da corrida', {

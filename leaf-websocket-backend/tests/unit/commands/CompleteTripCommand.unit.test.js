@@ -66,7 +66,7 @@ jest.mock('../../../utils/trace-validator', () => ({
 }));
 
 jest.mock('../../../utils/active-trip-index', () => ({
-  clearActiveTripForDriver: jest.fn().mockResolvedValue(undefined)
+  clearActiveTripForDriver: jest.fn().mockResolvedValue(true)
 }));
 
 jest.mock('../../../services/trip-location-persistence-service', () => ({
@@ -113,7 +113,9 @@ const traceContext = require('../../../utils/trace-context');
 const { getTracer } = require('../../../utils/tracer');
 const lifecycleService = require('../../../services/ride-lifecycle-service');
 const heartbeatService = require('../../../services/heartbeat-service');
+const driverReferralRewardService = require('../../../services/driver-referral-reward-service');
 const kycPolicyService = require('../../../services/kyc-policy-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 const CompleteTripCommand = require('../../../commands/CompleteTripCommand');
 
 describe('CompleteTripCommand', () => {
@@ -349,6 +351,55 @@ describe('CompleteTripCommand', () => {
       })
     });
     expect(metrics.recordCommand).toHaveBeenCalledWith('CompleteTrip', expect.any(Number), true);
+  });
+
+  it('does not evaluate operational referral rewards when completing a sandbox trip', async () => {
+    RideStateManager.getBookingState.mockResolvedValue('IN_PROGRESS');
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'sandbox-test-user',
+      paymentProfileSource: 'test',
+      testUserSandbox: true
+    });
+    redis.hgetall.mockResolvedValue({
+      driverId: 'driver_1',
+      customerId: 'customer_1',
+      city: 'rio-de-janeiro',
+      carType: 'leaf_plus',
+      estimatedFare: '42',
+      paymentAmountInCents: '4200',
+      financialContext: JSON.stringify(financialContext),
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId,
+      paymentProviderEnvironment: financialContext.providerEnvironment,
+      testUserSandbox: 'true'
+    });
+
+    const command = new CompleteTripCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1',
+      endLocation: { lat: -23.57, lng: -46.66 },
+      finalFare: 42,
+      distance: 12.4,
+      duration: 1320
+    });
+
+    const result = await command.execute();
+    await Promise.allSettled(immediateTasks);
+
+    expect(result.success).toBe(true);
+    expect(RideStateManager.updateBookingState).toHaveBeenCalledWith(
+      redis,
+      'booking_1',
+      'COMPLETED',
+      expect.objectContaining({
+        financialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: financialContext.contextId
+      })
+    );
+    expect(kycPolicyService.applyDeferredIdentityReverificationIfSafe).not.toHaveBeenCalled();
+    expect(driverReferralRewardService.evaluateDriverRewardsForDriver).not.toHaveBeenCalled();
   });
 
   it('keeps paid gross fare immutable and sends driver offline adjustment to explicit settlement review', async () => {

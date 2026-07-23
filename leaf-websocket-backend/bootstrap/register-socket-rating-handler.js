@@ -4,6 +4,9 @@ const {
     getSocketIdentity,
     isSupportActor
 } = require('../services/socket-scope-guard');
+const {
+    resolveUserPersistenceScope
+} = require('../services/sandbox-persistence-context');
 
 function registerSocketRatingHandler({
     socket,
@@ -59,7 +62,8 @@ function registerSocketRatingHandler({
             }, {
                 socketUserId: participant.identity.userId,
                 socketUserType: participant.participantRole,
-                tripScope: participant.scope
+                tripScope: participant.scope,
+                persistenceScope: participant.scope?.raw || participant.scope
             });
 
             if (!result.success) {
@@ -130,16 +134,21 @@ function registerSocketRatingHandler({
                 return;
             }
 
-            const result = await ratingService.getTripRatings(tripId);
+            const result = await ratingService.getTripRatings(
+                tripId,
+                participant.scope?.raw || participant.scope
+            );
             socket.emit('tripRatings', result.success ? result : {
                 success: false,
                 error: result.error || 'Erro ao buscar avaliações',
+                code: result.code || null,
                 tripId
             });
         } catch (error) {
             socket.emit('tripRatings', {
                 success: false,
-                error: error.message || 'Erro ao buscar avaliações'
+                error: error.message || 'Erro ao buscar avaliações',
+                code: error.code || null
             });
         }
     });
@@ -168,16 +177,22 @@ function registerSocketRatingHandler({
                 return;
             }
 
-            const result = await ratingService.getUserRatings(targetUserId);
+            const persistenceScope = await resolveUserPersistenceScope({
+                userId: targetUserId,
+                actor: identity
+            });
+            const result = await ratingService.getUserRatings(targetUserId, persistenceScope);
             socket.emit('userRatings', result.success ? result : {
                 success: false,
                 error: result.error || 'Erro ao buscar avaliações do usuário',
+                code: result.code || null,
                 targetUserId
             });
         } catch (error) {
             socket.emit('userRatings', {
                 success: false,
-                error: error.message || 'Erro ao buscar avaliações do usuário'
+                error: error.message || 'Erro ao buscar avaliações do usuário',
+                code: error.code || null
             });
         }
     });
@@ -207,17 +222,23 @@ function registerSocketRatingHandler({
             const reviewerId = participant.participantRole === 'support'
                 ? data.reviewerId || data.userId || socket.userId
                 : participant.identity.userId;
-            const result = await ratingService.hasUserRatedTrip(tripId, reviewerId);
+            const result = await ratingService.hasUserRatedTrip(
+                tripId,
+                reviewerId,
+                participant.scope?.raw || participant.scope
+            );
             socket.emit('userRatedTrip', result.success ? result : {
                 success: false,
                 error: result.error || 'Erro ao verificar avaliação',
+                code: result.code || null,
                 tripId,
                 reviewerId
             });
         } catch (error) {
             socket.emit('userRatedTrip', {
                 success: false,
-                error: error.message || 'Erro ao verificar avaliação'
+                error: error.message || 'Erro ao verificar avaliação',
+                code: error.code || null
             });
         }
     });

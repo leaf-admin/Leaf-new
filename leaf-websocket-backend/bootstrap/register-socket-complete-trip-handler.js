@@ -553,7 +553,15 @@ function registerSocketCompleteTripHandler({
                             financialBreakdown: paymentDistribution || null,
                             authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
                             financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
-                            financialSnapshot: result.data?.financialSnapshot || null
+                            financialSnapshot: result.data?.financialSnapshot || null,
+                            financialContext: bookingSnapshot?.financialContext || null,
+                            financialNamespace: bookingSnapshot?.financialNamespace || null,
+                            financialContextId: bookingSnapshot?.financialContextId || null,
+                            providerEnvironment: bookingSnapshot?.providerEnvironment || null,
+                            paymentProviderEnvironment: bookingSnapshot?.paymentProviderEnvironment || null,
+                            paymentProfileId: bookingSnapshot?.paymentProfileId || null,
+                            testUserSandbox: bookingSnapshot?.testUserSandbox === true
+                                || bookingSnapshot?.testUserSandbox === 'true'
                         };
 
                         if (paymentMockEnabled) {

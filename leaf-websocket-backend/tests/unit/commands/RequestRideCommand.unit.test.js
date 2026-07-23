@@ -93,6 +93,7 @@ const traceContext = require('../../../utils/trace-context');
 const { metrics } = require('../../../utils/prometheus-metrics');
 const RideRequestedEvent = require('../../../events/ride.requested');
 const RequestRideCommand = require('../../../commands/RequestRideCommand');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 describe('RequestRideCommand', () => {
   beforeEach(() => {
@@ -233,6 +234,12 @@ describe('RequestRideCommand', () => {
   });
 
   test('deve preservar metadados de pagamento embedado no bookingData ativo', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
     const command = new RequestRideCommand({
       customerId: 'customer_123',
       pickupLocation: { lat: -22.9, lng: -43.17 },
@@ -261,6 +268,9 @@ describe('RequestRideCommand', () => {
         paymentProfileId: 'qa-test-users-sandbox-durable',
         paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
         paymentProfileSource: 'firestore',
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
         paymentStatus: 'confirmed',
         serverValidated: true,
         confirmedAt: '2026-04-07T23:59:00.000Z'

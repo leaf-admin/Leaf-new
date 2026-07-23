@@ -32,6 +32,20 @@ function normalizeStatus(value) {
     return String(value || '').trim().toUpperCase();
 }
 
+function buildTerminalRidePersistenceSnapshot(bookingSnapshot = {}, finalData = {}) {
+    return {
+        ...finalData,
+        financialContext: bookingSnapshot.financialContext || null,
+        financialNamespace: bookingSnapshot.financialNamespace || null,
+        financialContextId: bookingSnapshot.financialContextId || null,
+        providerEnvironment: bookingSnapshot.providerEnvironment || null,
+        paymentProviderEnvironment: bookingSnapshot.paymentProviderEnvironment || null,
+        paymentProfileId: bookingSnapshot.paymentProfileId || null,
+        testUserSandbox: bookingSnapshot.testUserSandbox === true
+            || bookingSnapshot.testUserSandbox === 'true'
+    };
+}
+
 function resolveParticipantId(source = {}, aliases = []) {
     for (const alias of aliases) {
         const rawValue = source?.[alias];
@@ -709,14 +723,12 @@ function registerSocketActiveRideHandlers({
             const driverId = socket.userId || data.driverId || socket.id;
             const bookingId = data.bookingId;
             const interruptionLocation = data.interruptionLocation || data.endLocation;
-            const distanceKm = Number.parseFloat(data.distanceKm ?? data.distance ?? 0) || 0;
-            const durationSecs = Number.parseFloat(data.durationSecs ?? data.duration ?? 0) || 0;
             const reason = String(data.reason || 'VEHICLE_BREAKDOWN').trim() || 'VEHICLE_BREAKDOWN';
             const note = String(data.note || '').trim();
 
-            if (!bookingId || !interruptionLocation?.lat || !interruptionLocation?.lng) {
+            if (!bookingId) {
                 socket.emit('rideOperationalInterruptionError', {
-                    error: 'bookingId e interruptionLocation são obrigatórios'
+                    error: 'bookingId é obrigatório'
                 });
                 return;
             }
@@ -726,8 +738,6 @@ function registerSocketActiveRideHandlers({
                 bookingId,
                 driverId,
                 interruptionLocation,
-                distanceKm,
-                durationSecs,
                 reason,
                 note,
                 correlationId: bookingId
@@ -882,6 +892,30 @@ function registerSocketActiveRideHandlers({
                 bookingId,
                 driverId: result.data.driverId || null
             });
+            setImmediate(async () => {
+                try {
+                    const ridePersistenceService = require('../services/ride-persistence-service');
+                    await ridePersistenceService.persistFinalRideDataWithOutbox(
+                        bookingId,
+                        buildTerminalRidePersistenceSnapshot(bookingSnapshot, {
+                            fare: result.data.finalFare || 0,
+                            netFare: null,
+                            distance: result.data.distance || 0,
+                            duration: result.data.duration || 0,
+                            endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: null,
+                            completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
+                            settlement: result.data.settlement || null,
+                            operationalContinuation: result.data.interruption || null
+                        })
+                    );
+                } catch (persistenceError) {
+                    logError(persistenceError, 'Falha ao persistir encerramento por interrupção operacional', {
+                        bookingId
+                    });
+                }
+            });
         } catch (error) {
             logError(error, 'Erro em respondOperationalContinuation', { bookingId: data.bookingId });
             socket.emit('rideOperationalContinuationError', {
@@ -977,6 +1011,31 @@ function registerSocketActiveRideHandlers({
                 reason: 'trip_review_completed',
                 bookingId,
                 driverId: result.data.driverId || null
+            });
+            setImmediate(async () => {
+                try {
+                    const ridePersistenceService = require('../services/ride-persistence-service');
+                    await ridePersistenceService.persistFinalRideDataWithOutbox(
+                        bookingId,
+                        buildTerminalRidePersistenceSnapshot(bookingSnapshot, {
+                            fare: result.data.finalFare || 0,
+                            netFare: null,
+                            distance: result.data.distance || 0,
+                            duration: result.data.duration || 0,
+                            endLocation: result.data.endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: result.data.paymentDistribution || null,
+                            completionType: 'EARLY_ENDED_REVIEW',
+                            settlement: result.data.settlement || null,
+                            reviewContext: result.data.reviewContext || null,
+                            operationalContinuation: result.data.interruption || null
+                        })
+                    );
+                } catch (persistenceError) {
+                    logError(persistenceError, 'Falha ao persistir encerramento para revisão', {
+                        bookingId
+                    });
+                }
             });
         } catch (error) {
             logError(error, 'Erro em endRideWithReview', { bookingId: data.bookingId });

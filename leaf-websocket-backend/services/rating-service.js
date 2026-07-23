@@ -1,6 +1,11 @@
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
 const kycPolicyService = require('./kyc-policy-service');
+const {
+  resolveRidePersistenceScope,
+  resolvePersistenceScope,
+  assertStoredRecordMatchesScope
+} = require('./sandbox-persistence-context');
 
 const MAX_COMMENT_LENGTH = 500;
 const RATING_ELIGIBLE_TRIP_STATUSES = new Set([
@@ -136,9 +141,28 @@ class RatingService {
     };
   }
 
-  async _reserveRatingIndex({ tripId, reviewerId, reservation }) {
+  _resolveRideScope(payload = {}, context = {}) {
+    return resolveRidePersistenceScope(
+      context.persistenceScope ||
+      context.tripScope?.raw ||
+      context.tripScope ||
+      payload
+    );
+  }
+
+  _persistenceError(error) {
+    return {
+      success: false,
+      code: error?.code || 'RATING_PERSISTENCE_SCOPE_INVALID',
+      error: error?.message || 'Escopo de persistência da avaliação inválido'
+    };
+  }
+
+  async _reserveRatingIndex({ tripId, reviewerId, reservation, persistenceScope }) {
     const realtimeDb = firebaseConfig.getRealtimeDB?.();
-    const indexRef = realtimeDb?.ref?.(`rating_trip_index/${tripId}/${reviewerId}`);
+    const indexRef = realtimeDb?.ref?.(
+      `${persistenceScope.collections.ratingTripIndex}/${tripId}/${reviewerId}`
+    );
     if (!indexRef || typeof indexRef.transaction !== 'function') {
       return {
         success: false,
@@ -188,7 +212,7 @@ class RatingService {
     }
   }
 
-  async _resolveExistingRatingReplay(collision = {}) {
+  async _resolveExistingRatingReplay(collision = {}, persistenceScope) {
     const ratingId = String(collision?.ratingId || '').trim();
     if (!ratingId) {
       return {
@@ -200,8 +224,15 @@ class RatingService {
       };
     }
 
-    const persistedRating = await firebaseConfig.getFromRealtimeDB(`ratings/${ratingId}`);
+    const persistedRating = await firebaseConfig.getFromRealtimeDB(
+      `${persistenceScope.collections.ratings}/${ratingId}`
+    );
     if (persistedRating) {
+      try {
+        assertStoredRecordMatchesScope(persistedRating, persistenceScope);
+      } catch (error) {
+        return this._persistenceError(error);
+      }
       return {
         success: true,
         ratingId,
@@ -230,6 +261,12 @@ class RatingService {
     const reviewerType = this._resolveReviewerType(payload, context);
     const ratingValue = safeRatingValue(payload.rating ?? payload.customerRating ?? payload.driverRating);
     const comment = normalizeComment(payload.comment ?? payload.customerComment ?? payload.driverComment);
+    let persistenceScope;
+    try {
+      persistenceScope = this._resolveRideScope(payload, context);
+    } catch (error) {
+      return this._persistenceError(error);
+    }
 
     if (!tripId || !reviewerId) {
       return {
@@ -267,7 +304,10 @@ class RatingService {
       rating: ratingValue,
       comment,
       selectedOptions: Array.isArray(payload.selectedOptions) ? payload.selectedOptions : [],
-      createdAt: now
+      createdAt: now,
+      financialContext: persistenceScope.financialContext,
+      financialNamespace: persistenceScope.namespace,
+      financialContextId: persistenceScope.financialContextId
     };
 
     const reservation = await this._reserveRatingIndex({
@@ -278,12 +318,21 @@ class RatingService {
         reviewerType,
         createdAt: now,
         reservationId,
-        status: 'pending'
-      }
+        status: 'pending',
+        financialContext: persistenceScope.financialContext,
+        financialNamespace: persistenceScope.namespace,
+        financialContextId: persistenceScope.financialContextId
+      },
+      persistenceScope
     });
     if (!reservation.success) {
       if (reservation.collision) {
-        return this._resolveExistingRatingReplay(reservation.collision);
+        try {
+          assertStoredRecordMatchesScope(reservation.collision, persistenceScope);
+        } catch (error) {
+          return this._persistenceError(error);
+        }
+        return this._resolveExistingRatingReplay(reservation.collision, persistenceScope);
       }
       return {
         success: false,
@@ -293,25 +342,28 @@ class RatingService {
     }
 
     const updates = {};
-    updates[`ratings/${ratingId}`] = rating;
-    updates[`trip_ratings/${tripId}/${ratingId}`] = rating;
-    updates[`rating_trip_index/${tripId}/${reviewerId}`] = {
+    updates[`${persistenceScope.collections.ratings}/${ratingId}`] = rating;
+    updates[`${persistenceScope.collections.tripRatings}/${tripId}/${ratingId}`] = rating;
+    updates[`${persistenceScope.collections.ratingTripIndex}/${tripId}/${reviewerId}`] = {
       ratingId,
       reviewerType,
       createdAt: now,
-      status: 'committed'
+      status: 'committed',
+      financialContext: persistenceScope.financialContext,
+      financialNamespace: persistenceScope.namespace,
+      financialContextId: persistenceScope.financialContextId
     };
 
     if (targetUserId) {
-      updates[`user_ratings/${targetUserId}/${ratingId}`] = rating;
+      updates[`${persistenceScope.collections.userRatings}/${targetUserId}/${ratingId}`] = rating;
     }
 
     if (reviewerType === 'passenger') {
-      updates[`bookings/${tripId}/rating`] = ratingValue;
-      updates[`bookings/${tripId}/feedback`] = comment || null;
+      updates[`${persistenceScope.collections.bookings}/${tripId}/rating`] = ratingValue;
+      updates[`${persistenceScope.collections.bookings}/${tripId}/feedback`] = comment || null;
     } else if (reviewerType === 'driver') {
-      updates[`bookings/${tripId}/driver_rating`] = ratingValue;
-      updates[`bookings/${tripId}/driver_feedback`] = comment || null;
+      updates[`${persistenceScope.collections.bookings}/${tripId}/driver_rating`] = ratingValue;
+      updates[`${persistenceScope.collections.bookings}/${tripId}/driver_feedback`] = comment || null;
     }
 
     const writeSucceeded = await firebaseConfig.updateRealtimeDBRoot(updates);
@@ -324,6 +376,7 @@ class RatingService {
     if (
       reviewerType === 'passenger'
       && targetUserId
+      && persistenceScope.namespace === 'operational'
       && kycPolicyService.isPhotoMismatchReport({
         ...payload,
         selectedOptions: rating.selectedOptions,
@@ -359,7 +412,8 @@ class RatingService {
       ratingId,
       reviewerId,
       reviewerType,
-      targetUserId
+      targetUserId,
+      financialNamespace: persistenceScope.namespace
     });
 
     return {
@@ -370,11 +424,26 @@ class RatingService {
     };
   }
 
-  async getTripRatings(tripId) {
+  async getTripRatings(tripId, scopeInput = {}) {
     if (!firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
     if (!tripId) return { success: false, error: 'tripId é obrigatório' };
 
-    const raw = (await firebaseConfig.getFromRealtimeDB(`trip_ratings/${tripId}`)) || {};
+    let persistenceScope;
+    try {
+      persistenceScope = resolveRidePersistenceScope(scopeInput);
+    } catch (error) {
+      return this._persistenceError(error);
+    }
+    const raw = (await firebaseConfig.getFromRealtimeDB(
+      `${persistenceScope.collections.tripRatings}/${tripId}`
+    )) || {};
+    try {
+      Object.values(raw).forEach((rating) => {
+        assertStoredRecordMatchesScope(rating, persistenceScope);
+      });
+    } catch (error) {
+      return this._persistenceError(error);
+    }
     const ratings = Object.values(raw).sort((a, b) => {
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
@@ -387,13 +456,28 @@ class RatingService {
     };
   }
 
-  async hasUserRatedTrip(tripId, reviewerId) {
+  async hasUserRatedTrip(tripId, reviewerId, scopeInput = {}) {
     if (!firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
     if (!tripId || !reviewerId) {
       return { success: false, error: 'tripId e reviewerId são obrigatórios' };
     }
 
-    const value = await firebaseConfig.getFromRealtimeDB(`rating_trip_index/${tripId}/${reviewerId}`);
+    let persistenceScope;
+    try {
+      persistenceScope = resolveRidePersistenceScope(scopeInput);
+    } catch (error) {
+      return this._persistenceError(error);
+    }
+    const value = await firebaseConfig.getFromRealtimeDB(
+      `${persistenceScope.collections.ratingTripIndex}/${tripId}/${reviewerId}`
+    );
+    if (value) {
+      try {
+        assertStoredRecordMatchesScope(value, persistenceScope);
+      } catch (error) {
+        return this._persistenceError(error);
+      }
+    }
     return {
       success: true,
       tripId,
@@ -403,11 +487,26 @@ class RatingService {
     };
   }
 
-  async getUserRatings(targetUserId) {
+  async getUserRatings(targetUserId, scopeInput = {}) {
     if (!firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
     if (!targetUserId) return { success: false, error: 'targetUserId é obrigatório' };
 
-    const raw = (await firebaseConfig.getFromRealtimeDB(`user_ratings/${targetUserId}`)) || {};
+    let persistenceScope;
+    try {
+      persistenceScope = resolvePersistenceScope(scopeInput, { allowLegacyOperational: true });
+    } catch (error) {
+      return this._persistenceError(error);
+    }
+    const raw = (await firebaseConfig.getFromRealtimeDB(
+      `${persistenceScope.collections.userRatings}/${targetUserId}`
+    )) || {};
+    try {
+      Object.values(raw).forEach((rating) => {
+        assertStoredRecordMatchesScope(rating, persistenceScope);
+      });
+    } catch (error) {
+      return this._persistenceError(error);
+    }
     const ratings = Object.values(raw).sort((a, b) => {
       return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });

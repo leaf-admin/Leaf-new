@@ -29,6 +29,7 @@ const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator'
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 
 const PASSENGER_CANCEL_FIXED_FEE_CENTS = Math.max(
     0,
@@ -69,6 +70,16 @@ function parseLocationCandidate(rawValue) {
         return { lat, lng };
     } catch (_error) {
         return null;
+    }
+}
+
+function safeJsonParse(value, fallback = null) {
+    if (!value) return fallback;
+    if (typeof value === 'object') return value;
+    try {
+        return JSON.parse(value);
+    } catch (_error) {
+        return fallback;
     }
 }
 
@@ -170,7 +181,9 @@ class CancelRideCommand extends Command {
         this.bookingId = data.bookingId;
         this.canceledBy = data.canceledBy; // userId que cancelou
         this.reason = data.reason || 'Cancelado pelo usuário';
-        this.cancellationFee = data.cancellationFee || 0;
+        // A taxa nunca vem do cliente. Ela é sempre derivada do estado e dos
+        // dados canônicos da corrida dentro deste command.
+        this.cancellationFee = 0;
         this.userType = data.userType; // Tipo de usuário (customer/driver)
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'CancelRide');
@@ -227,6 +240,22 @@ class CancelRideCommand extends Command {
                     metrics.recordCommand('CancelRide', (Date.now() - startTime) / 1000, false);
                     return CommandResult.failure('Corrida não encontrada')
                 }
+
+                const financialContextResult = resolveFinancialContext({
+                    financialContext: safeJsonParse(bookingData.financialContext, null),
+                    financialNamespace: bookingData.financialNamespace,
+                    providerEnvironment:
+                        bookingData.paymentProviderEnvironment || bookingData.providerEnvironment,
+                    testUserSandbox:
+                        bookingData.testUserSandbox === true || bookingData.testUserSandbox === 'true'
+                }, { allowLegacyOperational: true });
+                if (!financialContextResult.ok) {
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: financialContextResult.code });
+                    span.end();
+                    metrics.recordCommand('CancelRide', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure(financialContextResult.error);
+                }
+                const financialContext = financialContextResult.context;
 
                 // Verificar estado atual
                 const currentState = await RideStateManager.getBookingState(redis, this.bookingId);
@@ -287,7 +316,7 @@ class CancelRideCommand extends Command {
                 // ✅ Regra de negócio (passageiro):
                 // - sem motorista aceito: estorno integral
                 // - com motorista aceito: taxa = woovi + distância + tempo + R$2,00
-                if (this.userType === 'customer' && (!this.cancellationFee || this.cancellationFee === 0)) {
+                if (this.userType === 'customer') {
                     if (currentState === RideStateManager.STATES.SEARCHING || currentState === RideStateManager.STATES.PENDING || currentState === RideStateManager.STATES.NOTIFIED) {
                         this.cancellationFee = 0;
                         logger.info(`💸 [CancelRideCommand] Cancelamento antes de aceite. Estorno integral.`);
@@ -385,9 +414,16 @@ class CancelRideCommand extends Command {
 
                 // Processar reembolso se houver pagamento
                 let refundResult = null;
-                const paymentRecord = await paymentService.getStoredPayment(this.bookingId);
+                const paymentRecord = await paymentService.getStoredPayment(
+                    this.bookingId,
+                    financialContext
+                );
                 const paymentAmount = Number(paymentRecord?.amount || 0);
                 const chargeIdToRefund = paymentRecord?.chargeId || paymentRecord?.paymentId;
+
+                if (Number.isFinite(paymentAmount) && paymentAmount > 0) {
+                    this.cancellationFee = Math.min(this.cancellationFee, paymentAmount);
+                }
 
                 if (
                     paymentRecord &&
@@ -408,6 +444,7 @@ class CancelRideCommand extends Command {
                                 reason: this.reason || 'Cancelado pelo usuário',
                                 status: 'REFUNDED_PARTIAL',
                                 passengerId: customerId,
+                                financialContext,
                                 metadata: {
                                     source: 'CancelRideCommand',
                                     cancelledBy: this.canceledBy,
@@ -417,6 +454,30 @@ class CancelRideCommand extends Command {
                             if (!refundResult.success) {
                                 throw new Error(refundResult.error || 'Falha ao processar reembolso PIX');
                             }
+                        } else {
+                            const markResult = await paymentService.markPaymentRefunded(this.bookingId, {
+                                refundAmount: 0,
+                                cancellationFee: this.cancellationFee,
+                                chargeId: chargeIdToRefund,
+                                status: 'FEE_ONLY',
+                                reason: this.reason || 'Cancelado pelo usuário',
+                                passengerId: customerId,
+                                financialContext,
+                                metadata: {
+                                    source: 'CancelRideCommand',
+                                    cancelledBy: this.canceledBy,
+                                    userType: this.userType
+                                }
+                            });
+                            if (!markResult.success) {
+                                throw new Error(markResult.error || 'Falha ao registrar taxa de cancelamento');
+                            }
+                            refundResult = {
+                                success: true,
+                                noProviderRefund: true,
+                                amount: 0,
+                                chargeId: chargeIdToRefund
+                            };
                         }
                     } else {
                         // Reembolso total
@@ -427,6 +488,7 @@ class CancelRideCommand extends Command {
                             reason: this.reason || 'Cancelado pelo usuário',
                             status: 'REFUNDED_FULL',
                             passengerId: customerId,
+                            financialContext,
                             metadata: {
                                 source: 'CancelRideCommand',
                                 cancelledBy: this.canceledBy,
@@ -479,11 +541,30 @@ class CancelRideCommand extends Command {
                 await redis.hdel('bookings:active', this.bookingId);
                 await pricingH3ReadModelService.clearBookingSnapshot(redis, this.bookingId).catch(() => null);
                 if (driverId) {
-                    await clearActiveTripForDriver(redis, driverId, this.bookingId);
-                    await applyDeferredIdentityReverification(driverId, {
-                        source: 'ride_canceled',
-                        tripId: this.bookingId
-                    });
+                    const activeTripCleared = await clearActiveTripForDriver(
+                        redis,
+                        driverId,
+                        this.bookingId
+                    );
+                    if (activeTripCleared && financialContext.namespace === 'operational') {
+                        await applyDeferredIdentityReverification(driverId, {
+                            source: 'ride_canceled',
+                            tripId: this.bookingId
+                        });
+                    } else if (!activeTripCleared) {
+                        logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida cancelada', {
+                            service: 'cancel-ride-command',
+                            bookingId: this.bookingId,
+                            driverId
+                        });
+                    } else {
+                        logStructured('info', 'Revalidacao KYC adiada ignorada em cancelamento sandbox', {
+                            service: 'cancel-ride-command',
+                            bookingId: this.bookingId,
+                            driverId,
+                            financialNamespace: financialContext.namespace
+                        });
+                    }
                     const refreshedDriverState = await redis.hgetall(`driver:${driverId}`);
                     const driverLat = Number(refreshedDriverState?.lat);
                     const driverLng = Number(refreshedDriverState?.lng);
@@ -502,7 +583,14 @@ class CancelRideCommand extends Command {
                 try {
                     await tripLocationPersistenceService.forceFinalizeTrip(this.bookingId, {
                         status: 'canceled',
-                        reason: 'ride_canceled'
+                        reason: 'ride_canceled',
+                        financialContext: bookingData.financialContext,
+                        financialNamespace: bookingData.financialNamespace,
+                        financialContextId: bookingData.financialContextId,
+                        providerEnvironment:
+                            bookingData.paymentProviderEnvironment || bookingData.providerEnvironment,
+                        paymentProfileId: bookingData.paymentProfileId,
+                        testUserSandbox: bookingData.testUserSandbox
                     });
                 } catch (locationFinalizeError) {
                     logStructured('warn', 'Falha ao finalizar trilha de localização da corrida cancelada', {
@@ -519,6 +607,13 @@ class CancelRideCommand extends Command {
                     reason: this.reason,
                     cancellationFee: this.cancellationFee,
                     driverId: driverId, // ✅ Incluir driverId para processamento no billing-worker
+                    financialContext,
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId,
+                    providerEnvironment: financialContext.providerEnvironment,
+                    paymentProviderEnvironment: financialContext.providerEnvironment,
+                    paymentProfileId: financialContext.paymentProfileId || null,
+                    testUserSandbox: financialContext.testUserSandbox === true,
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
@@ -540,6 +635,9 @@ class CancelRideCommand extends Command {
                     reason: this.reason,
                     cancellationFee: this.cancellationFee,
                     driverId: driverId,
+                    financialContext,
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId,
                     event: event.toJSON(),
                     refundResult: refundResult
                 });

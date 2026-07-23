@@ -225,7 +225,8 @@ class StartTripCommand extends Command {
                     firestore: getFirestoreSafely(),
                     bookingId: this.bookingId,
                     references: paymentReferences,
-                    expectedAmountInCents
+                    expectedAmountInCents,
+                    paymentContext: bookingData
                 });
 
                 if (!paymentProof?.success) {

@@ -5,11 +5,21 @@ jest.mock('../../../services/rating-service', () => ({
   hasUserRatedTrip: jest.fn()
 }));
 
+jest.mock('../../../services/sandbox-persistence-context', () => ({
+  resolvePersistenceScope: jest.fn(() => ({
+    namespace: 'operational',
+    collections: { bookings: 'bookings' }
+  })),
+  resolveUserPersistenceScope: jest.fn(),
+  assertStoredRecordMatchesScope: jest.fn()
+}));
+
 jest.mock('../../../firebase-config', () => ({
   getFromRealtimeDB: jest.fn()
 }));
 
 const ratingService = require('../../../services/rating-service');
+const { resolveUserPersistenceScope } = require('../../../services/sandbox-persistence-context');
 const registerSocketRatingHandler = require('../../../bootstrap/register-socket-rating-handler');
 
 function createHarness(socketOverrides = {}) {
@@ -66,6 +76,11 @@ describe('registerSocketRatingHandler scope guards', () => {
     ratingService.getTripRatings.mockResolvedValue({ success: true, ratings: [] });
     ratingService.getUserRatings.mockResolvedValue({ success: true, ratings: [] });
     ratingService.hasUserRatedTrip.mockResolvedValue({ success: true, hasRated: false });
+    resolveUserPersistenceScope.mockResolvedValue({
+      namespace: 'sandbox',
+      financialContext: { contextId: 'sandbox-context' },
+      collections: { userRatings: 'sandbox_user_ratings' }
+    });
   });
 
   it('canonicalizes submitRating reviewer and target from the authenticated ride participant', async () => {
@@ -167,6 +182,37 @@ describe('registerSocketRatingHandler scope guards', () => {
       expect.objectContaining({
         code: 'RATING_SCOPE_DENIED'
       })
+    );
+  });
+
+  it('classifies the authenticated user before reading the namespaced rating history', async () => {
+    const { handlers } = createHarness();
+
+    await handlers.getUserRatings({ targetUserId: 'passenger_1' });
+
+    expect(resolveUserPersistenceScope).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'passenger_1'
+    }));
+    expect(ratingService.getUserRatings).toHaveBeenCalledWith(
+      'passenger_1',
+      expect.objectContaining({ namespace: 'sandbox' })
+    );
+  });
+
+  it('passes the canonical ride persistence envelope to trip rating reads', async () => {
+    const { handlers } = createHarness();
+
+    await handlers.getTripRatings({ tripId: 'ride_1' });
+    await handlers.hasUserRatedTrip({ tripId: 'ride_1' });
+
+    expect(ratingService.getTripRatings).toHaveBeenCalledWith(
+      'ride_1',
+      expect.objectContaining({ bookingId: 'ride_1' })
+    );
+    expect(ratingService.hasUserRatedTrip).toHaveBeenCalledWith(
+      'ride_1',
+      'passenger_1',
+      expect.objectContaining({ bookingId: 'ride_1' })
     );
   });
 });

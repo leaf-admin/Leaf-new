@@ -98,6 +98,11 @@ function registerSocketDisconnectHandler({
     const finalizeDriverDisconnect = async () => {
         const disconnectedAtMs = Date.now();
         const disconnectedAtIso = new Date(disconnectedAtMs).toISOString();
+        let supersededVehicleLease = false;
+
+        if (socket.vehicleLeaseSuperseded === true) {
+            return;
+        }
 
         // ✅ FASE 1: Liberar lock de veículo ao desconectar
         if (socket.vehiclePlate) {
@@ -108,12 +113,24 @@ function registerSocketDisconnectHandler({
                 vehiclePlate: socket.vehiclePlate
             });
             try {
-                await vehicleLockManager.releaseLock(socket.vehiclePlate, socket.userId);
-                logStructured('info', 'Lock de veículo liberado', {
-                    service: 'websocket',
-                    userId: socket.userId,
-                    vehiclePlate: socket.vehiclePlate
+                const disconnectedLeaseToken = socket.vehicleLockLeaseToken || socket.id;
+                const released = await vehicleLockManager.releaseLock(socket.vehiclePlate, socket.userId, {
+                    leaseToken: disconnectedLeaseToken
                 });
+                if (!released && typeof vehicleLockManager.getLockOwner === 'function') {
+                    const currentOwner = await vehicleLockManager.getLockOwner(socket.vehiclePlate);
+                    supersededVehicleLease = currentOwner?.driverId === socket.userId &&
+                        Boolean(currentOwner?.leaseToken) &&
+                        currentOwner.leaseToken !== disconnectedLeaseToken;
+                }
+                logStructured(released ? 'info' : 'debug', released
+                    ? 'Lock de veículo liberado'
+                    : 'Lease veicular não pertence a esta sessão; lock preservado', {
+                        service: 'websocket',
+                        userId: socket.userId,
+                        socketId: socket.id,
+                        vehiclePlate: socket.vehiclePlate
+                    });
             } catch (lockError) {
                 logStructured('error', 'Erro ao liberar lock de veículo', {
                     service: 'websocket',
@@ -122,6 +139,17 @@ function registerSocketDisconnectHandler({
                     error: lockError.message
                 });
             }
+            socket.vehiclePlate = null;
+            socket.vehicleLockLeaseToken = null;
+        }
+
+        if (supersededVehicleLease) {
+            logStructured('info', 'Desconexão de sessão substituída preservou o motorista online', {
+                service: 'websocket',
+                socketId: socket.id,
+                userId: socket.userId
+            });
+            return;
         }
 
         const redis = redisPool.getConnection();

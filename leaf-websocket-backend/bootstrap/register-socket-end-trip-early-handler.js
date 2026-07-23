@@ -127,7 +127,15 @@ function registerSocketEndTripEarlyHandler({
               driverEarnings: null,
               financialBreakdown: paymentDistribution || null,
               completionType: 'EARLY_ENDED_BY_RIDER',
-              settlement
+              settlement,
+              financialContext: bookingSnapshot?.financialContext || null,
+              financialNamespace: bookingSnapshot?.financialNamespace || null,
+              financialContextId: bookingSnapshot?.financialContextId || null,
+              providerEnvironment: bookingSnapshot?.providerEnvironment || null,
+              paymentProviderEnvironment: bookingSnapshot?.paymentProviderEnvironment || null,
+              paymentProfileId: bookingSnapshot?.paymentProfileId || null,
+              testUserSandbox: bookingSnapshot?.testUserSandbox === true
+                || bookingSnapshot?.testUserSandbox === 'true'
             });
           } catch (backgroundError) {
             logStructured('error', 'Erro no pós-processamento do endTripEarlyByRider', {

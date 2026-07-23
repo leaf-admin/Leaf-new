@@ -8,6 +8,7 @@ const { logStructured } = require('../utils/logger');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 const {
   loadBookingContext,
   normalizeLocation,
@@ -20,6 +21,23 @@ const {
   buildAuthoritativeCompletionArtifacts,
   buildInterruptedOperationalEndedSettlement
 } = require('../services/ride-settlement-service');
+
+async function applyDeferredIdentityReverification(driverId, context = {}) {
+  try {
+    const kycPolicyService = require('../services/kyc-policy-service');
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') {
+      return;
+    }
+    await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
+  } catch (error) {
+    logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos fim da interrupcao operacional', {
+      service: 'respond-operational-continuation-command',
+      bookingId: context.tripId || null,
+      driverId,
+      error: error.message
+    });
+  }
+}
 
 class RespondOperationalContinuationCommand extends Command {
   constructor(data) {
@@ -221,14 +239,51 @@ class RespondOperationalContinuationCommand extends Command {
         await redis.hdel('bookings:active', this.bookingId);
 
         if (interruptedDriverId) {
-          await clearActiveTripForDriver(redis, interruptedDriverId, this.bookingId);
+          const activeTripCleared = await clearActiveTripForDriver(
+            redis,
+            interruptedDriverId,
+            this.bookingId
+          );
+          const financialContextResult = resolveFinancialContext(
+            context.bookingHash,
+            { allowLegacyOperational: true }
+          );
+          if (
+            activeTripCleared
+            && financialContextResult.ok
+            && financialContextResult.context.namespace === 'operational'
+          ) {
+            await applyDeferredIdentityReverification(interruptedDriverId, {
+              source: 'ride_interrupted_operational_ended',
+              tripId: this.bookingId
+            });
+          } else if (!activeTripCleared) {
+            logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida continuada', {
+              service: 'respond-operational-continuation-command',
+              bookingId: this.bookingId,
+              driverId: interruptedDriverId
+            });
+          } else {
+            logStructured('info', 'Revalidacao KYC adiada ignorada fora do namespace operacional', {
+              service: 'respond-operational-continuation-command',
+              bookingId: this.bookingId,
+              driverId: interruptedDriverId
+            });
+          }
         }
 
         setImmediate(async () => {
           try {
             await tripLocationPersistenceService.forceFinalizeTrip(this.bookingId, {
               status: 'interrupted_operational_ended',
-              reason: completedContinuation.reason
+              reason: completedContinuation.reason,
+              financialContext: context.bookingHash.financialContext,
+              financialNamespace: context.bookingHash.financialNamespace,
+              financialContextId: context.bookingHash.financialContextId,
+              providerEnvironment:
+                context.bookingHash.paymentProviderEnvironment || context.bookingHash.providerEnvironment,
+              paymentProfileId: context.bookingHash.paymentProfileId,
+              testUserSandbox: context.bookingHash.testUserSandbox
             });
           } catch (locationFinalizeError) {
             logStructured('warn', 'Falha ao finalizar trilha de localização da corrida', {

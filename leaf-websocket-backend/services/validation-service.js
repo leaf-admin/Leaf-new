@@ -256,11 +256,10 @@ class ValidationService {
         '<': '&lt;',
         '>': '&gt;',
         '"': '&quot;',
-        "'": '&#x27;',
-        '/': '&#x2F;'
+        "'": '&#x27;'
       };
       
-      sanitized = sanitized.replace(/[&<>"'/]/g, (match) => htmlEscapes[match]);
+      sanitized = sanitized.replace(/[&<>"']/g, (match) => htmlEscapes[match]);
     }
     
     return sanitized;

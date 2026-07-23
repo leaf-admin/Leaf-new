@@ -41,6 +41,10 @@ jest.mock('../../../services/driver-destination-mode-service', () => ({
   }),
 }));
 
+jest.mock('../../../utils/active-trip-index', () => ({
+  resolveActiveTripForDriver: jest.fn().mockResolvedValue({ tripId: null, customerId: null })
+}));
+
 jest.mock('../../../services/driver-eligibility-service', () => ({
   isDriverEligibleForRide: jest.fn().mockResolvedValue({
     eligible: true,
@@ -61,11 +65,13 @@ const registerSocketDriverControlHandlers = require('../../../bootstrap/register
 const { assessDriverArrivalAtPickup } = require('../../../utils/pickup-arrival-policy');
 const { resolveDriverActivationState } = require('../../../services/driver-activation-state-service');
 const driverEligibilityService = require('../../../services/driver-eligibility-service');
+const activeTripIndex = require('../../../utils/active-trip-index');
 
 const createSocket = () => {
   const handlers = new Map();
 
   return {
+    id: 'socket_driver_1',
     userId: 'driver_1',
     on: jest.fn((event, handler) => {
       handlers.set(event, handler);
@@ -114,9 +120,13 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
   let io;
   let redis;
   let idempotencyService;
+  let vehicleLockManager;
+  let enforceSubscriptionForOnline;
+  let enforceDailyKYCForOnline;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({ tripId: null, customerId: null });
     driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
       eligible: true,
       code: 'ELIGIBLE',
@@ -143,6 +153,12 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
       cacheResult: jest.fn().mockResolvedValue(undefined),
       releaseInflight: jest.fn().mockResolvedValue(undefined),
     };
+    vehicleLockManager = {
+      acquireLock: jest.fn().mockResolvedValue({ success: true }),
+      releaseLock: jest.fn().mockResolvedValue(true),
+    };
+    enforceSubscriptionForOnline = jest.fn().mockResolvedValue({ allowed: true });
+    enforceDailyKYCForOnline = jest.fn().mockResolvedValue({ allowed: true });
 
     registerSocketDriverControlHandlers({
       socket,
@@ -152,6 +168,9 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
       },
       logStructured: jest.fn(),
       idempotencyService,
+      enforceSubscriptionForOnline,
+      enforceDailyKYCForOnline,
+      vehicleLockManager,
     });
   });
 
@@ -290,6 +309,293 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
           canonical: true,
           complete: true,
         },
+      })
+    );
+    expect(vehicleLockManager.acquireLock).toHaveBeenCalledWith('RJA2D41', 'driver_1', {
+      leaseToken: 'socket_driver_1',
+    });
+    expect(socket.vehicleLockLeaseToken).toBe('socket_driver_1');
+  });
+
+  it('forces the driver offline and out of dispatch when a random KYC audit is pending', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'OFFLINE',
+      isOnline: 'false',
+      dispatchEligible: 'true',
+    });
+    enforceDailyKYCForOnline.mockResolvedValueOnce({
+      allowed: false,
+      code: 'kycRequired',
+      reason: 'Validacao aleatoria de identidade necessaria.',
+      requirement: 'LIVENESS_REQUIRED',
+      challenge: { challengeId: 'kyc_random_audit_1' }
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    const tx = redis.multi.mock.results.at(-1).value;
+    expect(tx.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        status: 'OFFLINE',
+        isOnline: 'false',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'kycRequired'
+      })
+    );
+    expect(tx.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        code: 'kycRequired',
+        challengeId: 'kyc_random_audit_1'
+      })
+    );
+    expect(vehicleLockManager.acquireLock).not.toHaveBeenCalled();
+  });
+
+  it('treats an online request during a backend-indexed trip as continuity without KYC interruption', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: 'booking_active_1',
+      customerId: 'customer_1',
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'IN_PROGRESS',
+      isOnline: 'false',
+      dispatchEligible: 'true',
+      lat: '-22.9207',
+      lng: '-43.4059',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+      isInTrip: false,
+    });
+
+    expect(resolveDriverActivationState).not.toHaveBeenCalled();
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(vehicleLockManager.acquireLock).not.toHaveBeenCalled();
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        isOnline: 'true',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        kycRecheckPendingAfterTrip: 'true',
+        activeTripId: 'booking_active_1',
+      })
+    );
+    expect(redis.geoadd).not.toHaveBeenCalledWith(
+      'driver_locations_eligible',
+      expect.anything(),
+      expect.anything(),
+      'driver_1'
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({
+        success: true,
+        code: 'IN_TRIP_KYC_DEFERRED',
+        kycDeferred: true,
+        activeTripId: 'booking_active_1',
+      })
+    );
+  });
+
+  it('defers an offline request until the backend-indexed active trip ends', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: 'booking_active_offline',
+      customerId: 'customer_1',
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'IN_PROGRESS',
+      isOnline: 'true',
+      dispatchEligible: 'false',
+      vehiclePlate: 'RJA2D41',
+      lat: '-22.9207',
+      lng: '-43.4059',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'offline',
+      isOnline: false,
+    });
+
+    expect(vehicleLockManager.releaseLock).not.toHaveBeenCalled();
+    expect(redis.srem).not.toHaveBeenCalledWith('online_drivers', 'driver_1');
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        isOnline: 'true',
+        dispatchEligible: 'false',
+        kycRecheckPendingAfterTrip: 'true',
+      })
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({
+        code: 'OFFLINE_DEFERRED_ACTIVE_TRIP',
+        offlineDeferred: true,
+        isOnline: true,
+      })
+    );
+  });
+
+  it('preserves online continuity when the active-trip index is unavailable', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockRejectedValueOnce(new Error('redis unavailable'));
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'IN_PROGRESS',
+      isOnline: 'true',
+      dispatchEligible: 'false',
+      vehiclePlate: 'RJA2D41',
+      lat: '-22.9207',
+      lng: '-43.4059',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'offline',
+      isOnline: false,
+    });
+
+    expect(enforceSubscriptionForOnline).not.toHaveBeenCalled();
+    expect(enforceDailyKYCForOnline).not.toHaveBeenCalled();
+    expect(resolveDriverActivationState).not.toHaveBeenCalled();
+    expect(vehicleLockManager.releaseLock).not.toHaveBeenCalled();
+    expect(redis.zrem).not.toHaveBeenCalledWith('driver_locations', 'driver_1');
+    expect(redis.srem).not.toHaveBeenCalledWith('online_drivers', 'driver_1');
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        isOnline: 'true',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        kycRecheckPendingAfterTrip: 'true',
+      })
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({
+        isOnline: true,
+        offlineDeferred: true,
+        activeTripStateUnknown: true,
+        code: 'OFFLINE_DEFERRED_ACTIVE_TRIP_STATE_UNKNOWN',
+      })
+    );
+  });
+
+  it('honors continuityOnly when the active trip appears during the KYC gate', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: null,
+      customerId: null,
+    });
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    enforceDailyKYCForOnline.mockResolvedValue({
+      allowed: true,
+      deferred: true,
+      continuityOnly: true,
+      activeTripId: 'booking_race_1',
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'IN_PROGRESS',
+      isOnline: 'false',
+      dispatchEligible: 'true',
+      lat: '-22.9207',
+      lng: '-43.4059',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(vehicleLockManager.acquireLock).not.toHaveBeenCalled();
+    expect(redis.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        activeTripId: 'booking_race_1',
+      })
+    );
+  });
+
+  it('blocks the second profile from going online with the same vehicle lock', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      dispatchEligible: 'true',
+      lat: '-22.9207',
+      lng: '-43.4059',
+    });
+    vehicleLockManager.acquireLock.mockResolvedValueOnce({
+      success: false,
+      currentDriver: 'driver_2',
+      error: 'vehicle in use',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    expect(vehicleLockManager.acquireLock).toHaveBeenCalledWith('RJA2D41', 'driver_1', {
+      leaseToken: 'socket_driver_1',
+    });
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        success: false,
+        code: 'VEHICLE_ALREADY_ONLINE',
+      })
+    );
+    expect(socket.emit).not.toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({ isOnline: true })
+    );
+  });
+
+  it('releases the online vehicle lock when the driver goes offline', async () => {
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      vehiclePlate: 'RJA2D41',
+      activeVehicleId: 'vehicle_1',
+      isOnline: 'true',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'offline',
+      isOnline: false,
+    });
+
+    expect(vehicleLockManager.releaseLock).toHaveBeenCalledWith('RJA2D41', 'driver_1', {
+      leaseToken: 'socket_driver_1',
+    });
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({
+        success: true,
+        isOnline: false,
       })
     );
   });

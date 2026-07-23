@@ -1,4 +1,9 @@
 const firebaseConfig = require('../firebase-config');
+const {
+  resolvePersistenceScope,
+  resolveUserPersistenceScope,
+  assertStoredRecordMatchesScope
+} = require('./sandbox-persistence-context');
 
 const SUPPORT_ROLES = new Set([
   'admin',
@@ -111,6 +116,13 @@ function isSupportActor(socket = {}) {
   return identity.permissions.some((permission) => SUPPORT_PERMISSIONS.has(permission));
 }
 
+function isSupportIdentity(identity = {}) {
+  if (SUPPORT_ROLES.has(identity.role) || SUPPORT_ROLES.has(identity.userType)) {
+    return true;
+  }
+  return (identity.permissions || []).some((permission) => SUPPORT_PERMISSIONS.has(permission));
+}
+
 function parseMaybeJson(value) {
   if (!value || typeof value !== 'string') return value || null;
   try {
@@ -178,23 +190,75 @@ async function readRedisBooking(redis, bookingId) {
   return null;
 }
 
-async function resolveRideScope({ io, redisPool, bookingId, preferPersistentTerminal = false }) {
+async function resolveRideScope({
+  io,
+  redisPool,
+  bookingId,
+  preferPersistentTerminal = false,
+  actor = null
+}) {
   const safeBookingId = normalizeId(bookingId);
   if (!safeBookingId) {
     return { found: false, bookingId: '', customerId: '', driverId: '', status: '', raw: null };
   }
+
+  let persistenceScope;
+  try {
+    persistenceScope = actor?.userId && !isSupportIdentity(actor)
+      ? await resolveUserPersistenceScope({
+        userId: actor.userId,
+        actor
+      })
+      : resolvePersistenceScope({}, { allowLegacyOperational: true });
+  } catch (error) {
+    return {
+      found: false,
+      bookingId: safeBookingId,
+      customerId: '',
+      driverId: '',
+      status: '',
+      raw: null,
+      code: error.code || 'RIDE_SCOPE_CLASSIFICATION_UNAVAILABLE',
+      error: error.message || 'Não foi possível classificar o escopo da corrida'
+    };
+  }
+
+  const validateCachedScope = (record) => {
+    if (isSupportIdentity(actor || {})) {
+      return null;
+    }
+    try {
+      assertStoredRecordMatchesScope(record, persistenceScope);
+      return null;
+    } catch (error) {
+      return {
+        found: false,
+        bookingId: safeBookingId,
+        customerId: '',
+        driverId: '',
+        status: '',
+        raw: null,
+        code: error.code || 'RIDE_SCOPE_CONTEXT_MISMATCH',
+        error: error.message || 'A corrida pertence a outro ambiente'
+      };
+    }
+  };
 
   const fromMemory = io?.activeBookings?.get?.(safeBookingId);
   const memoryScope = fromMemory
     ? { found: true, ...extractRideScope(fromMemory, safeBookingId), source: 'memory' }
     : null;
   if (memoryScope && !preferPersistentTerminal) {
+    const scopeError = validateCachedScope(fromMemory);
+    if (scopeError) return scopeError;
     return memoryScope;
   }
 
   const redis = redisPool?.getConnection?.();
   const fromRedis = await readRedisBooking(redis, safeBookingId);
   if (fromRedis) {
+    const scopeError = validateCachedScope(fromRedis);
+    if (scopeError) return scopeError;
     const redisScope = { found: true, ...extractRideScope(fromRedis, safeBookingId), source: 'redis' };
     if (!memoryScope || !preferPersistentTerminal || isTerminalRideScopeStatus(redisScope.status)) {
       return redisScope;
@@ -202,12 +266,35 @@ async function resolveRideScope({ io, redisPool, bookingId, preferPersistentTerm
   }
 
   if (memoryScope) {
+    const scopeError = validateCachedScope(fromMemory);
+    if (scopeError) return scopeError;
     return memoryScope;
   }
 
-  const fromRealtime = await firebaseConfig.getFromRealtimeDB?.(`bookings/${safeBookingId}`);
+  const fromRealtime = await firebaseConfig.getFromRealtimeDB?.(
+    `${persistenceScope.collections.bookings}/${safeBookingId}`
+  );
   if (fromRealtime) {
-    return { found: true, ...extractRideScope(fromRealtime, safeBookingId), source: 'realtime_db' };
+    try {
+      assertStoredRecordMatchesScope(fromRealtime, persistenceScope);
+    } catch (error) {
+      return {
+        found: false,
+        bookingId: safeBookingId,
+        customerId: '',
+        driverId: '',
+        status: '',
+        raw: null,
+        code: error.code || 'RIDE_SCOPE_CONTEXT_MISMATCH',
+        error: error.message || 'A corrida pertence a outro ambiente'
+      };
+    }
+    return {
+      found: true,
+      ...extractRideScope(fromRealtime, safeBookingId),
+      source: 'realtime_db',
+      persistenceScope
+    };
   }
 
   return { found: false, bookingId: safeBookingId, customerId: '', driverId: '', status: '', raw: null };
@@ -244,13 +331,14 @@ async function assertRideParticipant({
     io,
     redisPool,
     bookingId,
-    preferPersistentTerminal
+    preferPersistentTerminal,
+    actor: identity
   });
   if (!scope.found) {
     return {
       allowed: false,
-      code: 'RIDE_SCOPE_NOT_FOUND',
-      error: 'Corrida não encontrada para validação de escopo',
+      code: scope.code || 'RIDE_SCOPE_NOT_FOUND',
+      error: scope.error || 'Corrida não encontrada para validação de escopo',
       identity,
       scope
     };

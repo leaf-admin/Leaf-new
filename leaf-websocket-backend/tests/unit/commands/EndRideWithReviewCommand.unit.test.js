@@ -61,11 +61,18 @@ jest.mock('../../../utils/trace-validator', () => ({
 }));
 
 jest.mock('../../../utils/active-trip-index', () => ({
-  clearActiveTripForDriver: jest.fn().mockResolvedValue(undefined)
+  clearActiveTripForDriver: jest.fn().mockResolvedValue(true)
 }));
 
 jest.mock('../../../services/trip-location-persistence-service', () => ({
   forceFinalizeTrip: jest.fn().mockResolvedValue(undefined)
+}));
+
+jest.mock('../../../services/kyc-policy-service', () => ({
+  applyDeferredIdentityReverificationIfSafe: jest.fn().mockResolvedValue({
+    success: true,
+    applied: true
+  })
 }));
 
 jest.mock('../../../services/ride-lifecycle-service', () => ({
@@ -73,7 +80,13 @@ jest.mock('../../../services/ride-lifecycle-service', () => ({
     bookingHash: {
       customerId: 'customer_1',
       driverId: 'driver_1',
-      tollFee: 0
+      tollFee: 0,
+      financialContext: '{"version":1,"namespace":"sandbox","contextId":"sandbox-context-id"}',
+      financialNamespace: 'sandbox',
+      financialContextId: 'sandbox-context-id',
+      paymentProviderEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox',
+      testUserSandbox: 'true'
     },
     activeBooking: {
       customerId: 'customer_1',
@@ -136,6 +149,7 @@ const driverLockManager = require('../../../services/driver-lock-manager');
 const redisPool = require('../../../utils/redis-pool');
 const { clearActiveTripForDriver } = require('../../../utils/active-trip-index');
 const tripLocationPersistenceService = require('../../../services/trip-location-persistence-service');
+const kycPolicyService = require('../../../services/kyc-policy-service');
 const lifecycleService = require('../../../services/ride-lifecycle-service');
 const settlementService = require('../../../services/ride-settlement-service');
 const EndRideWithReviewCommand = require('../../../commands/EndRideWithReviewCommand');
@@ -173,10 +187,91 @@ describe('EndRideWithReviewCommand', () => {
     );
     expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
     expect(clearActiveTripForDriver).toHaveBeenCalledWith(expect.anything(), 'driver_1', 'booking_1');
+    expect(kycPolicyService.applyDeferredIdentityReverificationIfSafe).not.toHaveBeenCalled();
     expect(settlementService.buildEarlyEndedReviewSettlement).toHaveBeenCalled();
     expect(RideCompletedEvent).toHaveBeenCalledWith(
       expect.objectContaining({ bookingId: 'booking_1', driverId: 'driver_1' })
     );
     expect(result.data.event.type).toBe('ride.completed');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(tripLocationPersistenceService.forceFinalizeTrip).toHaveBeenCalledWith(
+      'booking_1',
+      expect.objectContaining({
+        status: 'early_ended_review',
+        financialContext: '{"version":1,"namespace":"sandbox","contextId":"sandbox-context-id"}',
+        financialNamespace: 'sandbox',
+        financialContextId: 'sandbox-context-id',
+        providerEnvironment: 'sandbox',
+        paymentProfileId: 'qa-sandbox',
+        testUserSandbox: 'true'
+      })
+    );
+  });
+
+  test('aplica revalidacao adiada somente no namespace operacional e apos limpar a corrida ativa', async () => {
+    lifecycleService.loadBookingContext.mockResolvedValueOnce({
+      bookingHash: {
+        customerId: 'customer_1',
+        driverId: 'driver_1',
+        tollFee: 0
+      },
+      activeBooking: {
+        customerId: 'customer_1',
+        driverId: 'driver_1'
+      }
+    });
+    const command = new EndRideWithReviewCommand({
+      bookingId: 'booking_1',
+      actorId: 'support_1',
+      actorType: 'support',
+      endLocation: { lat: -22.9, lng: -43.1 },
+      reviewCategory: 'SAFETY',
+      reason: 'INCIDENT_REPORTED'
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(kycPolicyService.applyDeferredIdentityReverificationIfSafe).toHaveBeenCalledWith(
+      'driver_1',
+      { source: 'ride_early_ended_review', tripId: 'booking_1' }
+    );
+    expect(clearActiveTripForDriver.mock.invocationCallOrder[0]).toBeLessThan(
+      kycPolicyService.applyDeferredIdentityReverificationIfSafe.mock.invocationCallOrder[0]
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  test('nao aplica revalidacao quando o indice ativo nao corresponde mais a corrida encerrada', async () => {
+    lifecycleService.loadBookingContext.mockResolvedValueOnce({
+      bookingHash: {
+        customerId: 'customer_1',
+        driverId: 'driver_1',
+        tollFee: 0
+      },
+      activeBooking: {
+        customerId: 'customer_1',
+        driverId: 'driver_1'
+      }
+    });
+    clearActiveTripForDriver.mockResolvedValueOnce(false);
+
+    const result = await new EndRideWithReviewCommand({
+      bookingId: 'booking_1',
+      actorId: 'support_1',
+      actorType: 'support',
+      endLocation: { lat: -22.9, lng: -43.1 },
+      reviewCategory: 'SAFETY',
+      reason: 'INCIDENT_REPORTED'
+    }).execute();
+
+    expect(result.success).toBe(true);
+    expect(clearActiveTripForDriver).toHaveBeenCalledWith(
+      expect.anything(),
+      'driver_1',
+      'booking_1'
+    );
+    expect(kycPolicyService.applyDeferredIdentityReverificationIfSafe).not.toHaveBeenCalled();
+    await new Promise((resolve) => setImmediate(resolve));
   });
 });

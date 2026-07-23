@@ -36,6 +36,7 @@ const {
     buildContinuationRideLeg
 } = require('../services/ride-lifecycle-service');
 const { buildAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 
 function toMoney(value) {
     const parsed = Number(value);
@@ -307,6 +308,19 @@ class CompleteTripCommand extends Command {
                     return CommandResult.failure('Corrida não encontrada')
                 }
 
+                const financialContextResult = resolveFinancialContext({
+                    financialContext: safeJsonParse(bookingData.financialContext, null),
+                    financialNamespace: bookingData.financialNamespace,
+                    providerEnvironment: bookingData.paymentProviderEnvironment || bookingData.providerEnvironment
+                }, { allowLegacyOperational: true });
+                if (!financialContextResult.ok) {
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: financialContextResult.code });
+                    span.end();
+                    metrics.recordCommand('CompleteTrip', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure(financialContextResult.error);
+                }
+                const financialContext = financialContextResult.context;
+
                 // Verificar se motorista é o dono da corrida
                 if (bookingData.driverId !== this.driverId) {
                     span.setStatus({ code: SpanStatusCode.ERROR, message: 'Motorista não autorizado' });
@@ -344,6 +358,7 @@ class CompleteTripCommand extends Command {
                             ? safeJsonParse(bookingData.paymentDistribution, { status: 'PENDING', message: 'Processamento assíncrono em andamento' })
                             : { status: 'PENDING', message: 'Processamento assíncrono em andamento' },
                         ...resolveCompletedFinancialResultFields(bookingData),
+                        financialContext,
                         idempotentReplay: true
                     });
                 }
@@ -518,7 +533,10 @@ class CompleteTripCommand extends Command {
                         operationalContinuation: completedContinuation,
                         offlineSettlementReview,
                         settlementReviewRequired: !!offlineSettlementReview,
-                        paymentDistribution
+                        paymentDistribution,
+                        financialContext,
+                        financialNamespace: financialContext.namespace,
+                        financialContextId: financialContext.contextId
                     }
                 );
 
@@ -542,6 +560,9 @@ class CompleteTripCommand extends Command {
                     financialSnapshot: JSON.stringify(finalFinancialSnapshot),
                     completedAt,
                     paymentDistribution: JSON.stringify(paymentDistribution),
+                    financialContext: JSON.stringify(financialContext),
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId,
                     ...(offlineSettlementReview ? { offlineSettlementReview: JSON.stringify(offlineSettlementReview) } : {}),
                     ...(offlineSettlementReview ? { settlementReviewRequired: 'true' } : {}),
                     ...(rideLegSettlements.length > 0 ? { rideLegs: JSON.stringify(rideLegSettlements) } : {}),
@@ -564,11 +585,30 @@ class CompleteTripCommand extends Command {
 
                 // ✅ NOVO: Remover da lista de corridas ativas
                 await redis.hdel('bookings:active', this.bookingId);
-                await clearActiveTripForDriver(redis, this.driverId, this.bookingId);
-                await applyDeferredIdentityReverification(this.driverId, {
-                    source: 'ride_completed',
-                    tripId: this.bookingId
-                });
+                const activeTripCleared = await clearActiveTripForDriver(
+                    redis,
+                    this.driverId,
+                    this.bookingId
+                );
+                if (activeTripCleared && financialContext.namespace === 'operational') {
+                    await applyDeferredIdentityReverification(this.driverId, {
+                        source: 'ride_completed',
+                        tripId: this.bookingId
+                    });
+                } else if (!activeTripCleared) {
+                    logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida concluida', {
+                        service: 'complete-trip-command',
+                        bookingId: this.bookingId,
+                        driverId: this.driverId
+                    });
+                } else {
+                    logStructured('info', 'Revalidacao KYC adiada ignorada em corrida sandbox', {
+                        service: 'complete-trip-command',
+                        bookingId: this.bookingId,
+                        driverId: this.driverId,
+                        financialNamespace: financialContext.namespace
+                    });
+                }
                 await pricingH3ReadModelService.clearBookingSnapshot(redis, this.bookingId).catch(() => null);
 
                 const refreshedDriverState = await redis.hgetall(`driver:${this.driverId}`);
@@ -590,7 +630,14 @@ class CompleteTripCommand extends Command {
                     try {
                         await tripLocationPersistenceService.forceFinalizeTrip(this.bookingId, {
                             status: 'completed',
-                            reason: 'ride_completed'
+                            reason: 'ride_completed',
+                            financialContext: bookingData.financialContext,
+                            financialNamespace: bookingData.financialNamespace,
+                            financialContextId: bookingData.financialContextId,
+                            providerEnvironment:
+                                bookingData.paymentProviderEnvironment || bookingData.providerEnvironment,
+                            paymentProfileId: bookingData.paymentProfileId,
+                            testUserSandbox: bookingData.testUserSandbox
                         });
                     } catch (locationFinalizeError) {
                         logStructured('warn', 'Falha ao finalizar trilha de localização da corrida', {
@@ -601,21 +648,30 @@ class CompleteTripCommand extends Command {
                     }
                 });
 
-                setImmediate(async () => {
-                    try {
-                        await driverReferralRewardService.evaluateDriverRewardsForDriver(this.driverId, {
-                            source: 'ride_completed',
-                            bookingId: this.bookingId
-                        });
-                    } catch (referralRewardError) {
-                        logStructured('warn', 'Falha ao avaliar recompensa automática de indicação de motorista', {
-                            service: 'complete-trip-command',
-                            bookingId: this.bookingId,
-                            driverId: this.driverId,
-                            error: referralRewardError.message
-                        });
-                    }
-                });
+                if (financialContext.namespace === 'operational') {
+                    setImmediate(async () => {
+                        try {
+                            await driverReferralRewardService.evaluateDriverRewardsForDriver(this.driverId, {
+                                source: 'ride_completed',
+                                bookingId: this.bookingId
+                            });
+                        } catch (referralRewardError) {
+                            logStructured('warn', 'Falha ao avaliar recompensa automática de indicação de motorista', {
+                                service: 'complete-trip-command',
+                                bookingId: this.bookingId,
+                                driverId: this.driverId,
+                                error: referralRewardError.message
+                            });
+                        }
+                    });
+                } else {
+                    logStructured('info', 'Recompensa de indicação ignorada em corrida sandbox', {
+                        service: 'complete-trip-command',
+                        bookingId: this.bookingId,
+                        driverId: this.driverId,
+                        financialNamespace: financialContext.namespace
+                    });
+                }
 
                 // Criar evento canônico
                 const event = new RideCompletedEvent({
@@ -633,6 +689,9 @@ class CompleteTripCommand extends Command {
                     settlementReviewRequired: !!offlineSettlementReview,
                     paymentDistribution,
                     financialSnapshot: finalFinancialSnapshot,
+                    financialContext,
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId,
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
@@ -670,7 +729,8 @@ class CompleteTripCommand extends Command {
                     driverNetAmount: completedFareBreakdown.driverNetAmount,
                     authoritativeSnapshot: true,
                     financialSnapshotSource: 'backend_final',
-                    financialSnapshot: finalFinancialSnapshot
+                    financialSnapshot: finalFinancialSnapshot,
+                    financialContext
                 });
 
             } catch (error) {
