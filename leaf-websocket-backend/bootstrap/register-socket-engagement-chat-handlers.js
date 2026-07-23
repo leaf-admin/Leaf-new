@@ -4,6 +4,22 @@ const {
     normalizeUserType: normalizeSocketUserType
 } = require('../services/socket-scope-guard');
 const crypto = require('crypto');
+const {
+    resolveRidePersistenceScope,
+    assertRideParticipantsSharePersistenceScope
+} = require('../services/sandbox-persistence-context');
+
+const SUPPORT_SANDBOX_PERMISSION = 'support:sandbox';
+
+function supportExplicitlyRequestsSandbox(data = {}) {
+    return [data.supportScope, data.persistenceScope]
+        .some((value) => String(value || '').trim().toLowerCase() === 'sandbox');
+}
+
+function supportCanAccessSandbox(identity = {}) {
+    const permissions = Array.isArray(identity.permissions) ? identity.permissions : [];
+    return permissions.includes('*') || permissions.includes(SUPPORT_SANDBOX_PERMISSION);
+}
 
 function buildScopedMessageId({
     clientMessageId = '',
@@ -26,7 +42,19 @@ function registerSocketEngagementChatHandlers({
     rateLimiterService,
     redisPool
 }) {
-    const COMPLETED_RIDE_STATUSES = new Set(['COMPLETED', 'FINISHED', 'FINALIZED', 'DONE']);
+    const COMPLETED_RIDE_STATUSES = new Set([
+        'COMPLETED',
+        'COMPLETE',
+        'FINISHED',
+        'FINALIZED',
+        'DONE',
+        'TRIP_COMPLETED',
+        'RIDE_COMPLETED',
+        'COMPLETED_AFTER_REASSIGNMENT',
+        'EARLY_ENDED_BY_RIDER',
+        'EARLY_ENDED_REVIEW',
+        'INTERRUPTED_OPERATIONAL_ENDED'
+    ]);
     const CANCELED_RIDE_STATUSES = new Set(['CANCELED', 'CANCELLED', 'EXPIRED', 'NO_DRIVER']);
     const LOST_ITEM_CHAT_TTL_SECONDS = Number.parseInt(process.env.LOST_ITEM_CHAT_TTL_SECONDS || '86400', 10);
 
@@ -132,7 +160,8 @@ function registerSocketEngagementChatHandlers({
             redisPool,
             bookingId: conversationId,
             allowedRoles: ['passenger', 'driver'],
-            allowSupport: true
+            allowSupport: true,
+            preferPersistentTerminal: true
         });
         if (!participant.allowed) {
             return {
@@ -150,6 +179,42 @@ function registerSocketEngagementChatHandlers({
         const canonicalSenderType = participant.participantRole === 'support'
             ? normalizeUserType(senderType || socket.userType)
             : participant.participantRole;
+        let persistenceScope;
+        try {
+            persistenceScope = resolveRidePersistenceScope(state.raw || state);
+            const supportRequestedSandbox = supportExplicitlyRequestsSandbox(data);
+            if (participant.participantRole === 'support') {
+                if (supportRequestedSandbox && persistenceScope.namespace !== 'sandbox') {
+                    throw Object.assign(
+                        new Error('A corrida solicitada não pertence ao namespace sandbox'),
+                        { code: 'SANDBOX_PERSISTENCE_SCOPE_MISMATCH' }
+                    );
+                }
+                if (
+                    persistenceScope.namespace === 'sandbox' &&
+                    (!supportRequestedSandbox || !supportCanAccessSandbox(participant.identity))
+                ) {
+                    throw Object.assign(
+                        new Error('Acesso explícito ao chat sandbox não autorizado'),
+                        { code: 'SANDBOX_PERSISTENCE_ACCESS_DENIED' }
+                    );
+                }
+            }
+            persistenceScope = await assertRideParticipantsSharePersistenceScope(
+                persistenceScope,
+                {
+                    passengerId: state.customerId,
+                    driverId: state.driverId,
+                    requireBoth: true
+                }
+            );
+        } catch (error) {
+            return {
+                allowed: false,
+                code: error.code || 'CHAT_PERSISTENCE_CONTEXT_INVALID',
+                error: error.message || 'Contexto de persistência do chat inválido'
+            };
+        }
 
         if (CANCELED_RIDE_STATUSES.has(status)) {
             return {
@@ -195,7 +260,8 @@ function registerSocketEngagementChatHandlers({
             allowed: true,
             state,
             participantRole: participant.participantRole,
-            senderType: canonicalSenderType
+            senderType: canonicalSenderType,
+            persistenceScope
         };
     };
 
@@ -544,7 +610,10 @@ function registerSocketEngagementChatHandlers({
                             : policy.state.driverId || null,
                         message: messageText,
                         senderType: canonicalSenderType,
-                        timestamp: new Date().toISOString()
+                        timestamp: new Date().toISOString(),
+                        financialContext: policy.persistenceScope.financialContext,
+                        financialNamespace: policy.persistenceScope.namespace,
+                        financialContextId: policy.persistenceScope.financialContextId
                     }),
                     new Promise((resolve) => {
                         persistenceTimeout = setTimeout(() => resolve({
@@ -683,7 +752,8 @@ function registerSocketEngagementChatHandlers({
             const chatPersistenceService = require('../services/chat-persistence-service');
             const rawResult = await chatPersistenceService.getMessages(
                 conversationId,
-                (page + 1) * limit
+                (page + 1) * limit,
+                policy.persistenceScope
             );
             if (!rawResult?.success) {
                 socket.emit('messages_loaded', {
@@ -768,7 +838,11 @@ function registerSocketEngagementChatHandlers({
             }
 
             const chatPersistenceService = require('../services/chat-persistence-service');
-            const history = await chatPersistenceService.getMessages(conversationId, 50);
+            const history = await chatPersistenceService.getMessages(
+                conversationId,
+                50,
+                policy.persistenceScope
+            );
             if (!history?.success) {
                 socket.emit('messages_marked_read', {
                     success: false,
@@ -792,7 +866,10 @@ function registerSocketEngagementChatHandlers({
             });
             const results = await Promise.all(
                 messagesToMark.map((message) =>
-                    chatPersistenceService.markMessageAsRead(message.messageId || message.id)
+                    chatPersistenceService.markMessageAsRead(
+                        message.messageId || message.id,
+                        policy.persistenceScope
+                    )
                 )
             );
             const markedIds = messagesToMark

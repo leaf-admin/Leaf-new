@@ -1,6 +1,10 @@
 const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
 const { logStructured, logError } = require('../utils/logger');
+const {
+  resolvePersistenceScope,
+  assertStoredRecordMatchesScope
+} = require('./sandbox-persistence-context');
 
 /**
  * Serviço para persistir mensagens do chat no Firestore com TTL otimizado
@@ -50,8 +54,16 @@ class ChatPersistenceService {
    * @param {number} keepCount - Quantidade de mensagens para manter (padrão: maxMessagesPerConversation)
    * @returns {Promise<{success: boolean, deletedCount?: number, error?: string}>}
    */
-  async cleanupOldMessages(conversationId, keepCount = this.maxMessagesPerConversation) {
+  async cleanupOldMessages(
+    conversationId,
+    keepCount = this.maxMessagesPerConversation,
+    persistenceContext = null
+  ) {
     try {
+      const persistenceScope = resolvePersistenceScope(persistenceContext || {}, {
+        allowLegacyOperational: true,
+        allowExplicitSandboxAccess: true
+      });
       const firestore = firebaseConfig.getFirestore();
       
       if (!firestore) {
@@ -64,7 +76,7 @@ class ChatPersistenceService {
       // ✅ OTIMIZADO: Buscar todas as mensagens da conversa (sem orderBy para evitar índice composto)
       // Ordenação e filtro de expiração serão feitos em memória
       const messagesRef = firestore
-        .collection(this.collectionName)
+        .collection(persistenceScope.collections.chatMessages)
         .where('conversationId', '==', conversationId)
         .limit(100); // Limite razoável
       
@@ -75,6 +87,7 @@ class ChatPersistenceService {
       const activeMessages = snapshot.docs
         .filter(doc => {
           const data = doc.data();
+          assertStoredRecordMatchesScope(data, persistenceScope);
           return data.expiresAt && data.expiresAt > now;
         })
         .sort((a, b) => {
@@ -117,7 +130,8 @@ class ChatPersistenceService {
       logError(error, 'Erro ao limpar mensagens antigas', { service: 'chat-persistence', conversationId });
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
       };
     }
   }
@@ -128,7 +142,11 @@ class ChatPersistenceService {
    * @returns {Promise<Object>} - Resultado da operação
    */
   async saveMessage(messageData) {
+    let conversationId = null;
     try {
+      const persistenceScope = resolvePersistenceScope(messageData || {}, {
+        allowLegacyOperational: true
+      });
       const firestore = firebaseConfig.getFirestore();
       
       if (!firestore) {
@@ -151,7 +169,7 @@ class ChatPersistenceService {
       } = messageData;
 
       // Usar bookingId ou rideId como identificador da conversa
-      const conversationId = bookingId || rideId;
+      conversationId = bookingId || rideId;
 
       if (!conversationId || !senderId || !message) {
         return {
@@ -168,7 +186,7 @@ class ChatPersistenceService {
       expiresAt.setDate(expiresAt.getDate() + this.ttlDays);
 
       const messageRef = firestore
-        .collection(this.collectionName)
+        .collection(persistenceScope.collections.chatMessages)
         .doc(msgId);
 
       const messageDocument = {
@@ -189,6 +207,11 @@ class ChatPersistenceService {
         messageType: 'text', // Por enquanto só texto, pode expandir para imagem, áudio, etc.
         status: 'sent'
       };
+      if (persistenceScope.financialContext) {
+        messageDocument.financialContext = persistenceScope.financialContext;
+        messageDocument.financialNamespace = persistenceScope.namespace;
+        messageDocument.financialContextId = persistenceScope.financialContextId;
+      }
 
       // Salvar com retry
       await this.retryOperation(
@@ -204,7 +227,11 @@ class ChatPersistenceService {
       // Executar em background para não bloquear o envio
       setImmediate(async () => {
         try {
-          await this.cleanupOldMessages(conversationId, this.maxMessagesPerConversation);
+          await this.cleanupOldMessages(
+            conversationId,
+            this.maxMessagesPerConversation,
+            persistenceScope
+          );
         } catch (cleanupError) {
           logStructured('warn', 'Erro ao limpar mensagens antigas (não crítico)', { service: 'chat-persistence', error: cleanupError.message, conversationId });
         }
@@ -220,7 +247,8 @@ class ChatPersistenceService {
       logError(error, 'Erro ao salvar mensagem no Firestore', { service: 'chat-persistence', conversationId });
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
       };
     }
   }
@@ -231,8 +259,12 @@ class ChatPersistenceService {
    * @param {number} limit - Limite de mensagens (padrão: 50)
    * @returns {Promise<Object>} - Mensagens da conversa
    */
-  async getMessages(conversationId, limit = 50) {
+  async getMessages(conversationId, limit = 50, persistenceContext = null) {
     try {
+      const persistenceScope = resolvePersistenceScope(persistenceContext || {}, {
+        allowLegacyOperational: true,
+        allowExplicitSandboxAccess: true
+      });
       const firestore = firebaseConfig.getFirestore();
       
       if (!firestore) {
@@ -252,7 +284,7 @@ class ChatPersistenceService {
       // ✅ OTIMIZADO: Buscar mensagens (tudo em memória para evitar índices compostos)
       const now = admin.firestore.Timestamp.now();
       const messagesRef = firestore
-        .collection(this.collectionName)
+        .collection(persistenceScope.collections.chatMessages)
         .where('conversationId', '==', conversationId)
         .limit(100); // Buscar até 100 mensagens (mais que suficiente)
 
@@ -261,6 +293,7 @@ class ChatPersistenceService {
 
       snapshot.forEach((doc) => {
         const data = doc.data();
+        assertStoredRecordMatchesScope(data, persistenceScope);
         
         // Filtrar mensagens expiradas em memória
         if (data.expiresAt && data.expiresAt <= now) {
@@ -305,7 +338,8 @@ class ChatPersistenceService {
       logError(error, 'Erro ao obter mensagens', { service: 'chat-persistence', conversationId });
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
       };
     }
   }
@@ -315,8 +349,12 @@ class ChatPersistenceService {
    * @param {string} messageId - ID da mensagem
    * @returns {Promise<Object>} - Resultado da operação
    */
-  async markMessageAsRead(messageId) {
+  async markMessageAsRead(messageId, persistenceContext = null) {
     try {
+      const persistenceScope = resolvePersistenceScope(persistenceContext || {}, {
+        allowLegacyOperational: true,
+        allowExplicitSandboxAccess: true
+      });
       const firestore = firebaseConfig.getFirestore();
       
       if (!firestore) {
@@ -333,7 +371,7 @@ class ChatPersistenceService {
         };
       }
 
-      const messageRef = firestore.collection(this.collectionName).doc(messageId);
+      const messageRef = firestore.collection(persistenceScope.collections.chatMessages).doc(messageId);
       
       // Atualizar com retry
       await this.retryOperation(
@@ -346,7 +384,7 @@ class ChatPersistenceService {
         'markMessageAsRead'
       );
 
-      logStructured('info', 'Mensagem marcada como lida', { service: 'chat-persistence', messageId, conversationId });
+      logStructured('info', 'Mensagem marcada como lida', { service: 'chat-persistence', messageId });
       
       return {
         success: true,
@@ -354,10 +392,11 @@ class ChatPersistenceService {
       };
 
     } catch (error) {
-      logError(error, 'Erro ao marcar mensagem como lida', { service: 'chat-persistence', messageId, conversationId });
+      logError(error, 'Erro ao marcar mensagem como lida', { service: 'chat-persistence', messageId });
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
       };
     }
   }
@@ -368,8 +407,12 @@ class ChatPersistenceService {
    * @param {number} batchSize - Tamanho do batch (padrão: 500)
    * @returns {Promise<Object>} - Resultado da limpeza
    */
-  async cleanupExpiredMessages(batchSize = 500) {
+  async cleanupExpiredMessages(batchSize = 500, persistenceContext = null) {
     try {
+      const persistenceScope = resolvePersistenceScope(persistenceContext || {}, {
+        allowLegacyOperational: true,
+        allowExplicitSandboxAccess: true
+      });
       const firestore = firebaseConfig.getFirestore();
       
       if (!firestore) {
@@ -387,7 +430,7 @@ class ChatPersistenceService {
       // Processar em batches para evitar limites
       while (hasMore) {
         let query = firestore
-          .collection(this.collectionName)
+          .collection(persistenceScope.collections.chatMessages)
           .where('expiresAt', '<', now)
           .limit(batchSize);
 
@@ -406,6 +449,7 @@ class ChatPersistenceService {
         // Deletar em batch
         const batch = firestore.batch();
         snapshot.docs.forEach((doc) => {
+          assertStoredRecordMatchesScope(doc.data(), persistenceScope);
           batch.delete(doc.ref);
           totalDeleted++;
         });
@@ -434,7 +478,8 @@ class ChatPersistenceService {
       logError(error, 'Erro ao limpar mensagens expiradas', { service: 'chat-persistence' });
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
       };
     }
   }
@@ -444,8 +489,12 @@ class ChatPersistenceService {
    * @param {string} conversationId - ID da conversa
    * @returns {Promise<Object>} - Estatísticas da conversa
    */
-  async getConversationStats(conversationId) {
+  async getConversationStats(conversationId, persistenceContext = null) {
     try {
+      const persistenceScope = resolvePersistenceScope(persistenceContext || {}, {
+        allowLegacyOperational: true,
+        allowExplicitSandboxAccess: true
+      });
       const firestore = firebaseConfig.getFirestore();
       
       if (!firestore) {
@@ -459,7 +508,7 @@ class ChatPersistenceService {
       
       // ✅ OTIMIZADO: Buscar todas as mensagens e contar em memória (evita índices compostos)
       const messagesRef = firestore
-        .collection(this.collectionName)
+        .collection(persistenceScope.collections.chatMessages)
         .where('conversationId', '==', conversationId)
         .limit(100);
       
@@ -471,6 +520,7 @@ class ChatPersistenceService {
       
       snapshot.forEach((doc) => {
         const data = doc.data();
+        assertStoredRecordMatchesScope(data, persistenceScope);
         
         // Filtrar mensagens não expiradas
         if (data.expiresAt && data.expiresAt > now) {
@@ -497,13 +547,11 @@ class ChatPersistenceService {
       logError(error, 'Erro ao obter estatísticas', { service: 'chat-persistence' });
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
       };
     }
   }
 }
 
 module.exports = new ChatPersistenceService();
-
-
-

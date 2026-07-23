@@ -33,8 +33,21 @@ const supportTicketService = require('../services/support-ticket-service');
 const supportQueueService = require('../services/support-queue-service');
 const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const supportDriverIdentityReverificationService = require('../services/support-driver-identity-reverification-service');
+const { publishSupportEvent } = require('../services/support-realtime-publisher');
+const {
+  serializeSupportTicket,
+  serializeSupportMessage,
+  serializeSupportMessages
+} = require('../services/support-visibility-policy');
+const {
+  resolvePersistenceScope,
+  resolveUserPersistenceScope,
+  createExplicitSandboxAccessScope
+} = require('../services/sandbox-persistence-context');
 
 const AGENT_ROLES = ['admin', 'manager', 'super-admin', 'support', 'support_n1', 'support_n2', 'support_n3', 'development'];
+const SUPPORT_SANDBOX_PERMISSION = 'support:sandbox';
+const SUPPORT_PERSISTENCE_SCOPES = new Set(['operational', 'sandbox']);
 
 const supportRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -112,6 +125,99 @@ function canAccessTicket(req, ticket) {
   return isSupportAgent(req.user);
 }
 
+function createSupportPersistenceScopeError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function resolveRequestedSupportScope(req) {
+  const rawSignals = [
+    req.get?.('X-Leaf-Support-Scope'),
+    req.query?.scope,
+    req.query?.persistenceScope
+  ].flatMap((value) => Array.isArray(value) ? value : [value]);
+  const scopes = rawSignals
+    .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
+    .map((value) => String(value).trim().toLowerCase());
+
+  if (scopes.some((scope) => !SUPPORT_PERSISTENCE_SCOPES.has(scope))) {
+    throw createSupportPersistenceScopeError(
+      'SUPPORT_PERSISTENCE_SCOPE_INVALID',
+      'Escopo de persistência do suporte inválido'
+    );
+  }
+
+  const distinctScopes = [...new Set(scopes)];
+  if (distinctScopes.length > 1) {
+    throw createSupportPersistenceScopeError(
+      'SUPPORT_PERSISTENCE_SCOPE_CONFLICT',
+      'Sinais de escopo de persistência do suporte são divergentes'
+    );
+  }
+
+  return distinctScopes[0] || null;
+}
+
+function canAccessSandboxSupport(user = {}) {
+  const permissions = Array.isArray(user.permissions)
+    ? user.permissions.map((permission) => String(permission || '').trim().toLowerCase())
+    : [];
+  return permissions.includes('*') || permissions.includes(SUPPORT_SANDBOX_PERMISSION);
+}
+
+async function resolveSupportPersistenceScope(req) {
+  const requestedScope = resolveRequestedSupportScope(req);
+
+  if (isSupportAgent(req.user)) {
+    if (requestedScope !== 'sandbox') {
+      return resolvePersistenceScope({}, { allowLegacyOperational: true });
+    }
+    return createExplicitSandboxAccessScope({
+      authorized: canAccessSandboxSupport(req.user),
+      source: 'support_dashboard_explicit'
+    });
+  }
+
+  const authoritativeScope = await resolveUserPersistenceScope({
+    userId: getRequesterId(req),
+    phone: req.user?.phoneNumber || req.user?.phone || null,
+    actor: req.user
+  });
+
+  if (requestedScope && requestedScope !== authoritativeScope.namespace) {
+    throw createSupportPersistenceScopeError(
+      'SUPPORT_PERSISTENCE_SCOPE_MISMATCH',
+      'Escopo solicitado diverge da classificação autoritativa do usuário'
+    );
+  }
+
+  return authoritativeScope;
+}
+
+function respondPersistenceBoundaryError(res, error) {
+  const code = String(error?.code || '');
+  if (!code) return false;
+  if (code === 'SUPPORT_PERSISTENCE_SCOPE_INVALID') {
+    res.status(400).json({ success: false, code, error: error.message });
+    return true;
+  }
+  if (code === 'SANDBOX_PERSISTENCE_ACCESS_DENIED') {
+    res.status(403).json({ success: false, code, error: error.message });
+    return true;
+  }
+  if (
+    code.startsWith('SANDBOX_') ||
+    code.includes('PERSISTENCE_') ||
+    code.startsWith('FINANCIAL_') ||
+    code.includes('SANDBOX_SUPPORT_CONTEXT')
+  ) {
+    res.status(409).json({ success: false, code, error: error.message });
+    return true;
+  }
+  return false;
+}
+
 router.get('/faq', (_req, res) => {
   res.json({
     faqs: [
@@ -136,7 +242,8 @@ router.get('/faq', (_req, res) => {
 router.get('/queue/summary', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (_req, res) => {
   try {
     const autoEscalate = String(_req.query?.autoEscalate || '').toLowerCase() === 'true';
-    const summary = await supportQueueService.getQueueSummary({ autoEscalate });
+    const persistenceContext = await resolveSupportPersistenceScope(_req);
+    const summary = await supportQueueService.getQueueSummary({ autoEscalate, persistenceContext });
     const payload = await backofficeCostGuardService.attachToResponse(
       res,
       'support.queue.summary',
@@ -144,6 +251,7 @@ router.get('/queue/summary', authenticateSupport, requireSupportRoles(AGENT_ROLE
     );
     res.json(payload);
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'queueSummary' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -153,12 +261,14 @@ router.get('/queue/backlog', authenticateSupport, requireSupportRoles(AGENT_ROLE
   try {
     const { priority, status, limit = 100, offset = 0 } = req.query;
     const autoEscalate = String(req.query?.autoEscalate || '').toLowerCase() === 'true';
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     const backlog = await supportQueueService.getBacklog({
       priority,
       status,
       limit,
       offset,
-      autoEscalate
+      autoEscalate,
+      persistenceContext
     });
     const payload = await backofficeCostGuardService.attachToResponse(
       res,
@@ -168,6 +278,7 @@ router.get('/queue/backlog', authenticateSupport, requireSupportRoles(AGENT_ROLE
     );
     res.json(payload);
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'queueBacklog' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -183,6 +294,7 @@ router.post(
     try {
       const { subject, description, category = 'general', priority = 'N3', userInfo, metadata } = req.body;
       const requesterId = getRequesterId(req);
+      const persistenceContext = await resolveSupportPersistenceScope(req);
       const { ticket } = await supportQueueService.createSupportTicket({
         subject: subject.trim(),
         description: description.trim(),
@@ -194,20 +306,27 @@ router.post(
         metadata: metadata || {},
         requesterIsAgent: isSupportAgent(req.user),
         ipAddress: req.ip,
-        userAgent: req.get('User-Agent')
+        userAgent: req.get('User-Agent'),
+        persistenceContext
       });
 
-      await notifyAvailableAgents(ticket);
-      await supportDriverIdentityReverificationService.handleTicket(ticket).catch((identityError) => {
-        logError(identityError, {
-          service: 'support-routes',
-          operation: 'driverIdentityReverification',
-          ticketId: ticket.id
+      await notifyAvailableAgents(ticket, persistenceContext);
+      if (persistenceContext.namespace !== 'sandbox') {
+        await supportDriverIdentityReverificationService.handleTicket(ticket).catch((identityError) => {
+          logError(identityError, {
+            service: 'support-routes',
+            operation: 'driverIdentityReverification',
+            ticketId: ticket.id
+          });
         });
-      });
+      }
 
       // Garantir que o chat do usuário volte para ativo ao abrir novo ticket.
-      if (supportChatService && supportChatService.reopenChat) {
+      if (
+        persistenceContext.namespace !== 'sandbox' &&
+        supportChatService &&
+        supportChatService.reopenChat
+      ) {
         await supportChatService.reopenChat(requesterId, 'ticket_created', { ticketId: ticket.id });
       }
 
@@ -230,6 +349,7 @@ router.post(
         }
       });
     } catch (error) {
+      if (respondPersistenceBoundaryError(res, error)) return;
       logError(error, { service: 'support-routes', operation: 'createTicket' });
       res.status(500).json({ error: 'Erro interno do servidor' });
     }
@@ -240,23 +360,27 @@ router.get('/tickets', authenticateSupport, async (req, res) => {
   try {
     const { status, priority, category, limit = 50, offset = 0, userId } = req.query;
     const requesterId = getRequesterId(req);
+    const requesterIsAgent = isSupportAgent(req.user);
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     const { tickets, total, hasMore } = await supportTicketService.listTickets({
       status,
       priority,
       category,
       limit,
       offset,
-      userId: isSupportAgent(req.user) ? (userId ? String(userId) : null) : requesterId,
-      isAgent: isSupportAgent(req.user)
+      userId: requesterIsAgent ? (userId ? String(userId) : null) : requesterId,
+      isAgent: requesterIsAgent,
+      persistenceContext
     });
 
     res.json({
       success: true,
-      tickets,
+      tickets: tickets.map((ticket) => serializeSupportTicket(ticket, { isAgent: requesterIsAgent })),
       total,
       hasMore
     });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'listTickets' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -265,7 +389,8 @@ router.get('/tickets', authenticateSupport, async (req, res) => {
 router.get('/tickets/:ticketId', authenticateSupport, async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const ticket = await supportTicketService.getTicket(ticketId);
+    const persistenceContext = await resolveSupportPersistenceScope(req);
+    const ticket = await supportTicketService.getTicket(ticketId, persistenceContext);
 
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
@@ -275,8 +400,12 @@ router.get('/tickets/:ticketId', authenticateSupport, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
-    return res.json({ success: true, ticket });
+    return res.json({
+      success: true,
+      ticket: serializeSupportTicket(ticket, { isAgent: isSupportAgent(req.user) })
+    });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'getTicket' });
     return res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -285,7 +414,8 @@ router.get('/tickets/:ticketId', authenticateSupport, async (req, res) => {
 router.get('/tickets/:ticketId/messages', authenticateSupport, async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const ticket = await supportTicketService.getTicket(ticketId);
+    const persistenceContext = await resolveSupportPersistenceScope(req);
+    const ticket = await supportTicketService.getTicket(ticketId, persistenceContext);
 
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
@@ -295,10 +425,15 @@ router.get('/tickets/:ticketId/messages', authenticateSupport, async (req, res) 
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
-    const messages = await supportTicketService.listMessages(ticketId);
+    const requesterIsAgent = isSupportAgent(req.user);
+    const messages = await supportTicketService.listMessages(ticketId, { persistenceContext });
 
-    return res.json({ success: true, messages });
+    return res.json({
+      success: true,
+      messages: serializeSupportMessages(messages, { isAgent: requesterIsAgent })
+    });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'listTicketMessages' });
     return res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -308,6 +443,7 @@ router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, auth
   try {
     const { ticketId } = req.params;
     const { message, messageType = 'text', attachments = [] } = req.body;
+    const persistenceContext = await resolveSupportPersistenceScope(req);
 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Mensagem é obrigatória' });
@@ -317,7 +453,7 @@ router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, auth
       return res.status(400).json({ error: 'Mensagem muito longa (máximo 1000 caracteres)' });
     }
 
-    const ticket = await supportTicketService.getTicket(ticketId);
+    const ticket = await supportTicketService.getTicket(ticketId, persistenceContext);
 
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
@@ -336,9 +472,9 @@ router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, auth
       messageType,
       attachments,
       isInternal: false
-    });
+    }, persistenceContext);
 
-    await notifyParticipants(ticketId, newMessage);
+    await notifyParticipants(ticketId, newMessage, persistenceContext);
 
     logStructured('info', `Mensagem enviada no ticket ${ticketId}`, {
       service: 'support-routes',
@@ -347,8 +483,12 @@ router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, auth
       actor: getRequesterLabel(req)
     });
 
-    return res.status(201).json({ success: true, message: newMessage });
+    return res.status(201).json({
+      success: true,
+      message: serializeSupportMessage(newMessage, { isAgent: isSupportAgent(req.user) })
+    });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'sendTicketMessage' });
     return res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -363,14 +503,16 @@ router.post('/tickets/:ticketId/assign', authenticateSupport, requireSupportRole
       return res.status(400).json({ error: 'ID e nome do agente são obrigatórios' });
     }
 
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     await supportQueueService.assignTicket(ticketId, {
       agentId,
       agentName,
       actorId: getRequesterId(req)
-    });
+    }, persistenceContext);
 
     res.json({ success: true, message: 'Ticket atribuído com sucesso' });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'assignTicketAlias' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -385,13 +527,15 @@ router.post('/tickets/:ticketId/escalate', authenticateSupport, requireSupportRo
       return res.status(400).json({ error: 'Motivo da escalação é obrigatório' });
     }
 
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     const result = await supportQueueService.escalateTicket(ticketId, {
       reason: reason.trim(),
       actorId: getRequesterId(req)
-    });
+    }, persistenceContext);
 
     res.json({ success: true, message: 'Ticket escalado com sucesso', escalationLevel: result.escalationLevel });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'escalateTicketAlias' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -402,13 +546,15 @@ router.post('/tickets/:ticketId/resolve', authenticateSupport, requireSupportRol
     const { ticketId } = req.params;
     const { resolution } = req.body;
 
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     await supportQueueService.resolveTicket(ticketId, {
       resolution,
       actorId: getRequesterId(req)
-    });
+    }, persistenceContext);
 
     res.json({ success: true, message: 'Ticket resolvido com sucesso' });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'resolveTicketAlias' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -418,15 +564,18 @@ router.post('/tickets/:ticketId/resolve', authenticateSupport, requireSupportRol
 
 router.get('/admin/tickets', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
-    const { status, priority, category, agent, limit = 100, offset = 0 } = req.query;
+    const { status, priority, category, agent, userId, limit = 100, offset = 0 } = req.query;
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     const { tickets, total, hasMore } = await supportTicketService.listTickets({
       status,
       priority,
       category,
       agent,
+      userId: userId ? String(userId) : null,
       limit,
       offset,
-      isAgent: true
+      isAgent: true,
+      persistenceContext
     });
 
     res.json({
@@ -436,6 +585,7 @@ router.get('/admin/tickets', authenticateSupport, requireSupportRoles(AGENT_ROLE
       hasMore
     });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'listAdminTickets' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -451,11 +601,12 @@ router.post('/admin/tickets/:ticketId/assign', authenticateSupport, requireSuppo
     }
 
     const senderId = getRequesterId(req);
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     await supportQueueService.assignTicket(ticketId, {
       agentId,
       agentName,
       actorId: senderId
-    });
+    }, persistenceContext);
 
     logStructured('info', `Ticket ${ticketId} atribuído`, {
       service: 'support-routes',
@@ -466,6 +617,7 @@ router.post('/admin/tickets/:ticketId/assign', authenticateSupport, requireSuppo
 
     res.json({ success: true, message: 'Ticket atribuído com sucesso' });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'assignTicket' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -481,10 +633,11 @@ router.post('/admin/tickets/:ticketId/escalate', authenticateSupport, requireSup
     }
 
     const senderId = getRequesterId(req);
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     const result = await supportQueueService.escalateTicket(ticketId, {
       reason: reason.trim(),
       actorId: senderId
-    });
+    }, persistenceContext);
 
     logStructured('info', `Ticket ${ticketId} escalado`, {
       service: 'support-routes',
@@ -495,6 +648,7 @@ router.post('/admin/tickets/:ticketId/escalate', authenticateSupport, requireSup
 
     res.json({ success: true, message: 'Ticket escalado com sucesso', escalationLevel: result.escalationLevel });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'escalateTicket' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -506,10 +660,11 @@ router.post('/admin/tickets/:ticketId/resolve', authenticateSupport, requireSupp
     const { resolution } = req.body;
 
     const senderId = getRequesterId(req);
+    const persistenceContext = await resolveSupportPersistenceScope(req);
     await supportQueueService.resolveTicket(ticketId, {
       resolution,
       actorId: senderId
-    });
+    }, persistenceContext);
 
     logStructured('info', `Ticket ${ticketId} resolvido`, {
       service: 'support-routes',
@@ -519,6 +674,7 @@ router.post('/admin/tickets/:ticketId/resolve', authenticateSupport, requireSupp
 
     res.json({ success: true, message: 'Ticket resolvido com sucesso' });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'resolveTicket' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -527,10 +683,16 @@ router.post('/admin/tickets/:ticketId/resolve', authenticateSupport, requireSupp
 router.get('/admin/stats', authenticateSupport, requireSupportRoles(AGENT_ROLES), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    const stats = await supportTicketService.getAdminStats({ startDate, endDate });
+    const persistenceContext = await resolveSupportPersistenceScope(req);
+    const stats = await supportTicketService.getAdminStats({
+      startDate,
+      endDate,
+      persistenceContext
+    });
 
     res.json({ success: true, stats });
   } catch (error) {
+    if (respondPersistenceBoundaryError(res, error)) return;
     logError(error, { service: 'support-routes', operation: 'supportStats' });
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -542,11 +704,11 @@ function setIOInstance(io) {
   ioInstance = io;
 }
 
-async function notifyAvailableAgents(ticket) {
+async function notifyAvailableAgents(ticket, persistenceContext = null) {
   try {
     if (!ioInstance) return;
 
-    ioInstance.emit('support:ticket:new', {
+    const payload = {
       ticket: {
         id: ticket.id,
         subject: ticket.subject,
@@ -558,27 +720,43 @@ async function notifyAvailableAgents(ticket) {
         createdAt: ticket.createdAt,
         updatedAt: ticket.updatedAt
       }
+    };
+    publishSupportEvent(ioInstance, {
+      dashboardEvent: persistenceContext?.namespace === 'sandbox' ? null : 'support:ticket:new',
+      ownerEvent: 'support:ticket:new',
+      dashboardPayload: payload,
+      ownerPayload: payload,
+      userId: ticket.userId,
+      userType: ticket.userType
     });
   } catch (error) {
     logError(error, { service: 'support-routes', operation: 'notifyAvailableAgents' });
   }
 }
 
-async function notifyParticipants(ticketId, message) {
+async function notifyParticipants(ticketId, message, persistenceContext = null) {
   try {
     if (!ioInstance) return;
 
-    ioInstance.emit('support:message:new', {
+    const payload = {
       ticketId,
       message: {
         id: message.id,
         ticketId: message.ticketId,
-        senderId: message.senderId,
         senderType: message.senderType,
         message: message.message,
         messageType: message.messageType,
         createdAt: message.createdAt
       }
+    };
+    const ticket = await supportTicketService.getTicket(ticketId, persistenceContext);
+    publishSupportEvent(ioInstance, {
+      dashboardEvent: persistenceContext?.namespace === 'sandbox' ? null : 'support:message:new',
+      ownerEvent: 'support:message:new',
+      dashboardPayload: payload,
+      ownerPayload: payload,
+      userId: ticket?.userId,
+      userType: ticket?.userType
     });
   } catch (error) {
     logError(error, { service: 'support-routes', operation: 'notifyParticipants' });

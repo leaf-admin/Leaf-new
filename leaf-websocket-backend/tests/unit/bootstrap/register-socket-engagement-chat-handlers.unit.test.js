@@ -8,19 +8,29 @@ jest.mock('../../../firebase-config', () => ({
   getFromRealtimeDB: jest.fn()
 }));
 
+jest.mock('../../../services/payment-runtime-profile-service', () => ({
+  resolveProfile: jest.fn()
+}));
+
 const chatPersistenceService = require('../../../services/chat-persistence-service');
+const paymentRuntimeProfileService = require('../../../services/payment-runtime-profile-service');
 const registerSocketEngagementChatHandlers = require('../../../bootstrap/register-socket-engagement-chat-handlers');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 function createHarness({
   socketUserId = 'passenger_1',
   socketUserType = 'customer',
-  bookingStatus = 'ACCEPTED'
+  socketUserPermissions = [],
+  bookingStatus = 'ACCEPTED',
+  persistedBookingStatus = null,
+  bookingOverrides = {}
 } = {}) {
   const handlers = {};
   const socket = {
     id: 'socket_1',
     userId: socketUserId,
     userType: socketUserType,
+    userPermissions: socketUserPermissions,
     on: jest.fn((event, handler) => {
       handlers[event] = handler;
     }),
@@ -33,7 +43,8 @@ function createHarness({
         bookingId: 'ride_1',
         customerId: 'passenger_1',
         driverId: 'driver_1',
-        status: bookingStatus
+        status: bookingStatus,
+        ...bookingOverrides
       }]
     ]),
     connectedUsers: new Map([
@@ -49,16 +60,37 @@ function createHarness({
       resetAt: Date.now() + 1000
     }))
   };
+  const redis = persistedBookingStatus
+    ? {
+        hgetall: jest.fn(async (key) => (
+          key === 'booking:ride_1'
+            ? {
+                bookingId: 'ride_1',
+                customerId: 'passenger_1',
+                driverId: 'driver_1',
+                status: persistedBookingStatus,
+                ...bookingOverrides
+              }
+            : {}
+        )),
+        hget: jest.fn(async () => null),
+        get: jest.fn(async () => null),
+        setex: jest.fn(async () => 'OK')
+      }
+    : null;
+  const redisPool = redis
+    ? { getConnection: jest.fn(() => redis) }
+    : null;
 
   registerSocketEngagementChatHandlers({
     socket,
     io,
     logStructured: jest.fn(),
     rateLimiterService,
-    redisPool: null
+    redisPool
   });
 
-  return { handlers, io, rateLimiterService, receiverSocket, socket };
+  return { handlers, io, rateLimiterService, receiverSocket, redis, socket };
 }
 
 describe('registerSocketEngagementChatHandlers', () => {
@@ -67,6 +99,12 @@ describe('registerSocketEngagementChatHandlers', () => {
     chatPersistenceService.saveMessage.mockResolvedValue({ success: true });
     chatPersistenceService.getMessages.mockResolvedValue({ success: true, messages: [] });
     chatPersistenceService.markMessageAsRead.mockResolvedValue({ success: true });
+    paymentRuntimeProfileService.resolveProfile.mockResolvedValue({
+      profileId: 'env-default',
+      environment: 'production',
+      source: 'env',
+      testUserSandbox: false
+    });
   });
 
   it('uses the authenticated socket identity instead of spoofed chat sender fields', async () => {
@@ -187,6 +225,48 @@ describe('registerSocketEngagementChatHandlers', () => {
     );
   });
 
+  it.each(['EARLY_ENDED_BY_RIDER', 'INTERRUPTED_OPERATIONAL_ENDED'])(
+    'blocks create, send and history for terminal status %s',
+    async (bookingStatus) => {
+      const { handlers, socket } = createHarness({ bookingStatus });
+
+      await handlers.createChat({ bookingId: 'ride_1' });
+      await handlers.sendMessage({ bookingId: 'ride_1', message: 'Ainda está aberto?' });
+      await handlers.load_messages({ chatId: 'ride_1' });
+
+      expect(chatPersistenceService.saveMessage).not.toHaveBeenCalled();
+      expect(chatPersistenceService.getMessages).not.toHaveBeenCalled();
+      expect(socket.emit).toHaveBeenCalledWith(
+        'chatError',
+        expect.objectContaining({ code: 'CHAT_POST_TRIP_BLOCKED' })
+      );
+      expect(socket.emit).toHaveBeenCalledWith(
+        'messageError',
+        expect.objectContaining({ code: 'CHAT_POST_TRIP_BLOCKED' })
+      );
+      expect(socket.emit).toHaveBeenCalledWith(
+        'messages_loaded',
+        expect.objectContaining({ code: 'CHAT_POST_TRIP_BLOCKED' })
+      );
+    }
+  );
+
+  it('prefers a persistent terminal status over stale active-memory chat state', async () => {
+    const { handlers, redis, socket } = createHarness({
+      bookingStatus: 'ACCEPTED',
+      persistedBookingStatus: 'EARLY_ENDED_BY_RIDER'
+    });
+
+    await handlers.sendMessage({ bookingId: 'ride_1', message: 'Mensagem tardia' });
+
+    expect(redis.hgetall).toHaveBeenCalledWith('booking:ride_1');
+    expect(chatPersistenceService.saveMessage).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith(
+      'messageError',
+      expect.objectContaining({ code: 'CHAT_POST_TRIP_BLOCKED' })
+    );
+  });
+
   it('namespaces a retried client message id by conversation and authenticated sender', async () => {
     const passenger = createHarness();
     const driver = createHarness({
@@ -269,7 +349,11 @@ describe('registerSocketEngagementChatHandlers', () => {
 
     await handlers.load_messages({ chatId: 'ride_1', page: 0, limit: 20 });
 
-    expect(chatPersistenceService.getMessages).toHaveBeenCalledWith('ride_1', 20);
+    expect(chatPersistenceService.getMessages).toHaveBeenCalledWith(
+      'ride_1',
+      20,
+      expect.objectContaining({ namespace: 'operational' })
+    );
     expect(socket.emit).toHaveBeenCalledWith(
       'messages_loaded',
       expect.objectContaining({
@@ -310,10 +394,183 @@ describe('registerSocketEngagementChatHandlers', () => {
     });
 
     expect(chatPersistenceService.markMessageAsRead).toHaveBeenCalledTimes(1);
-    expect(chatPersistenceService.markMessageAsRead).toHaveBeenCalledWith('to_passenger');
+    expect(chatPersistenceService.markMessageAsRead).toHaveBeenCalledWith(
+      'to_passenger',
+      expect.objectContaining({ namespace: 'operational' })
+    );
     expect(socket.emit).toHaveBeenCalledWith(
       'messages_marked_read',
       expect.objectContaining({ markedCount: 1, messageIds: ['to_passenger'] })
+    );
+  });
+
+  it('uses one authoritative sandbox context for both ride participants', async () => {
+    paymentRuntimeProfileService.resolveProfile.mockResolvedValue({
+      profileId: 'qa-test-users-sandbox-durable',
+      environment: 'sandbox',
+      source: 'firestore',
+      testUserSandbox: true
+    });
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const bookingOverrides = {
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox',
+      paymentProfileId: financialContext.paymentProfileId
+    };
+    const passenger = createHarness({ bookingOverrides });
+    const driver = createHarness({
+      socketUserId: 'driver_1',
+      socketUserType: 'driver',
+      bookingStatus: 'STARTED',
+      bookingOverrides
+    });
+
+    await passenger.handlers.sendMessage({ bookingId: 'ride_1', message: 'Estou no embarque' });
+    await driver.handlers.sendMessage({ bookingId: 'ride_1', message: 'Estou chegando' });
+
+    const [passengerPayload, driverPayload] = chatPersistenceService.saveMessage.mock.calls.map(
+      ([payload]) => payload
+    );
+    expect(passengerPayload).toMatchObject({
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+    expect(driverPayload).toMatchObject({
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+    expect(driverPayload.financialContext).toEqual(passengerPayload.financialContext);
+  });
+
+  it('blocks the first sandbox message when the other ride participant diverges', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    paymentRuntimeProfileService.resolveProfile.mockImplementation(async ({ userId }) => (
+      userId === 'driver_1'
+        ? {
+            profileId: 'env-default',
+            environment: 'production',
+            source: 'env',
+            testUserSandbox: false
+          }
+        : {
+            profileId: 'qa-test-users-sandbox-durable',
+            environment: 'sandbox',
+            source: 'firestore',
+            testUserSandbox: true
+          }
+    ));
+    const { handlers, socket } = createHarness({
+      bookingOverrides: {
+        financialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: financialContext.contextId,
+        providerEnvironment: 'sandbox'
+      }
+    });
+
+    await handlers.sendMessage({ bookingId: 'ride_1', message: 'Não deve persistir' });
+
+    expect(chatPersistenceService.saveMessage).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith(
+      'messageError',
+      expect.objectContaining({ code: 'SANDBOX_PARTICIPANT_CONTEXT_MISMATCH' })
+    );
+  });
+
+  it('blocks QA sandbox users when the booking lost its entire financial envelope', async () => {
+    paymentRuntimeProfileService.resolveProfile.mockResolvedValue({
+      profileId: 'qa-test-users-sandbox-durable',
+      environment: 'sandbox',
+      source: 'firestore',
+      testUserSandbox: true
+    });
+    const { handlers, socket } = createHarness();
+
+    await handlers.sendMessage({ bookingId: 'ride_1', message: 'Não deve cair no operacional' });
+
+    expect(chatPersistenceService.saveMessage).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith(
+      'messageError',
+      expect.objectContaining({ code: 'SANDBOX_RECORD_CONTEXT_INVALID' })
+    );
+  });
+
+  it('requires an explicit sandbox request and permission from a support socket', async () => {
+    paymentRuntimeProfileService.resolveProfile.mockResolvedValue({
+      profileId: 'qa-test-users-sandbox-durable',
+      environment: 'sandbox',
+      source: 'firestore',
+      testUserSandbox: true
+    });
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const bookingOverrides = {
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox'
+    };
+    const denied = createHarness({
+      socketUserId: 'support_1',
+      socketUserType: 'support',
+      bookingOverrides
+    });
+
+    await denied.handlers.sendMessage({ bookingId: 'ride_1', message: 'Acesso sem escopo' });
+
+    expect(chatPersistenceService.saveMessage).not.toHaveBeenCalled();
+    expect(denied.socket.emit).toHaveBeenCalledWith(
+      'messageError',
+      expect.objectContaining({ code: 'SANDBOX_PERSISTENCE_ACCESS_DENIED' })
+    );
+
+    const allowed = createHarness({
+      socketUserId: 'support_1',
+      socketUserType: 'support',
+      socketUserPermissions: ['support:sandbox'],
+      bookingOverrides
+    });
+    await allowed.handlers.sendMessage({
+      bookingId: 'ride_1',
+      persistenceScope: 'sandbox',
+      message: 'Acesso autorizado'
+    });
+
+    expect(chatPersistenceService.saveMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ financialNamespace: 'sandbox' })
+    );
+  });
+
+  it('fails closed before persistence when a sandbox ride loses its financial context', async () => {
+    const { handlers, socket } = createHarness({
+      bookingOverrides: {
+        financialNamespace: 'sandbox',
+        providerEnvironment: 'sandbox'
+      }
+    });
+
+    await handlers.sendMessage({ bookingId: 'ride_1', message: 'Não deve persistir' });
+
+    expect(chatPersistenceService.saveMessage).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith(
+      'messageError',
+      expect.objectContaining({ code: 'SANDBOX_RECORD_OPERATIONAL_ACCESS_DENIED' })
     );
   });
 });

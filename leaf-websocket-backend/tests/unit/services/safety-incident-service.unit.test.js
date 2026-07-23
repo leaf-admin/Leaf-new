@@ -1,4 +1,5 @@
 const { SafetyIncidentService } = require('../../../services/safety-incident-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 function createFirestoreMock() {
   const store = new Map();
@@ -115,5 +116,102 @@ describe('safety-incident-service', () => {
     expect(trustService.recordSignal).toHaveBeenCalledWith('passenger-1', 'confirmed_incident', expect.objectContaining({
       incidentId: incident.incidentId
     }));
+  });
+
+  it('isolates a sandbox incident, linked support ticket and booking review marker', async () => {
+    const store = new Map();
+    const collection = jest.fn((collectionName) => ({
+      doc: (id) => ({
+        set: async (value) => store.set(`${collectionName}/${id}`, value)
+      })
+    }));
+    const bookingRef = jest.fn(() => ({ update: jest.fn(async () => true) }));
+    const redis = {
+      hset: jest.fn(async () => 1),
+      expire: jest.fn(async () => 1),
+      zadd: jest.fn(async () => 1),
+      zrem: jest.fn(async () => 1)
+    };
+    const queueService = {
+      buildQueueMetadata: jest.fn(() => ({ ackTargetAt: '2026-07-13T12:05:00.000Z' })),
+      createSupportTicket: jest.fn(async () => ({ ticket: { id: 'sandbox-ticket-1' } }))
+    };
+    const service = new SafetyIncidentService({
+      firebase: {
+        getFirestore: () => ({ collection }),
+        getRealtimeDB: () => ({ ref: bookingRef })
+      },
+      redis: { getConnection: () => redis },
+      queueService,
+      trustService: { recordSignal: jest.fn() }
+    });
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+
+    const incident = await service.createIncident({
+      bookingId: 'sandbox-booking-1',
+      userId: 'sandbox-passenger-1',
+      userType: 'passenger',
+      category: 'safety',
+      severity: 'high',
+      description: 'Incidente de teste isolado',
+      persistenceContext: { financialContext }
+    });
+
+    expect(collection).toHaveBeenCalledWith('sandbox_ops_incidents');
+    expect(collection).not.toHaveBeenCalledWith('ops_incidents');
+    expect(bookingRef).toHaveBeenCalledWith('sandbox_bookings/sandbox-booking-1');
+    expect(bookingRef).not.toHaveBeenCalledWith('bookings/sandbox-booking-1');
+    expect(queueService.createSupportTicket).toHaveBeenCalledWith(expect.objectContaining({
+      persistenceContext: expect.objectContaining({ namespace: 'sandbox' })
+    }));
+    expect(redis.hset).toHaveBeenCalledWith(
+      expect.stringMatching(/^sandbox:ops:incident:/),
+      expect.any(Object)
+    );
+    expect(redis.zadd).toHaveBeenCalledWith(
+      'sandbox:ops:incidents:open',
+      expect.any(Number),
+      incident.incidentId
+    );
+    expect(redis.hset).not.toHaveBeenCalledWith(
+      'booking:sandbox-booking-1',
+      expect.any(Object)
+    );
+    expect(store.get(`sandbox_ops_incidents/${incident.incidentId}`)).toMatchObject({
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+  });
+
+  it('fails before creating an incident when a sandbox signal lost its context', async () => {
+    const collection = jest.fn();
+    const queueService = {
+      buildQueueMetadata: jest.fn(),
+      createSupportTicket: jest.fn()
+    };
+    const service = new SafetyIncidentService({
+      firebase: {
+        getFirestore: () => ({ collection }),
+        getRealtimeDB: () => null
+      },
+      redis: { getConnection: () => null },
+      queueService,
+      trustService: { recordSignal: jest.fn() }
+    });
+
+    await expect(service.createIncident({
+      userId: 'sandbox-passenger-1',
+      description: 'Contexto ausente',
+      persistenceContext: { financialNamespace: 'sandbox' }
+    })).rejects.toMatchObject({
+      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+    });
+    expect(collection).not.toHaveBeenCalled();
+    expect(queueService.createSupportTicket).not.toHaveBeenCalled();
   });
 });

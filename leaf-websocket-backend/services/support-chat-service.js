@@ -12,6 +12,7 @@ const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
 const supportTicketService = require('./support-ticket-service');
+const { publishSupportEvent } = require('./support-realtime-publisher');
 
 class SupportChatService {
     constructor() {
@@ -154,11 +155,13 @@ class SupportChatService {
 
             // Notificar via WebSocket (se io estiver disponível)
             if (this.io) {
-                // Notificar usuário específico
-                this.io.to(`user:${userId}`).emit('support:chat:message', messageData);
-                
-                // Notificar agentes de suporte
-                this.io.emit('support:chat:new', messageData);
+                publishSupportEvent(this.io, {
+                    dashboardEvent: 'support:chat:new',
+                    ownerEvent: 'support:chat:message',
+                    dashboardPayload: messageData,
+                    ownerPayload: messageData,
+                    userId
+                });
             }
 
             logger.info(`💬 Mensagem armazenada no Redis para chat ${userId}`);
@@ -229,17 +232,18 @@ class SupportChatService {
 
             // ✅ Notificar via WebSocket
             if (this.io) {
-                this.io.to(`user:${userId}`).emit('support:chat:closed', {
+                const payload = {
                     userId,
                     closedAt: now,
                     closedBy,
                     messageCount: messages.length
-                });
-                this.io.emit('support:chat:closed', {
-                    userId,
-                    closedAt: now,
-                    closedBy,
-                    messageCount: messages.length
+                };
+                publishSupportEvent(this.io, {
+                    dashboardEvent: 'support:chat:closed',
+                    ownerEvent: 'support:chat:closed',
+                    dashboardPayload: payload,
+                    ownerPayload: payload,
+                    userId
                 });
             }
 
@@ -676,10 +680,18 @@ class SupportChatService {
             });
 
             if (this.io) {
-                this.io.emit('support:chat:converted', {
+                const payload = {
                     userId,
                     ticketId: result.ticket?.id || null,
                     convertedBy: actorId
+                };
+                publishSupportEvent(this.io, {
+                    dashboardEvent: 'support:chat:converted',
+                    ownerEvent: 'support:chat:converted',
+                    dashboardPayload: payload,
+                    ownerPayload: payload,
+                    userId,
+                    userType: metadata.userType || userInfo.userType
                 });
             }
 
