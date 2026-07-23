@@ -65,6 +65,6 @@
   },
   "devDependencies": {
     "expo": "^54.0.33",
-    "next": "^16.1.0"
+    "next": "16.1.0"
   }
 }
