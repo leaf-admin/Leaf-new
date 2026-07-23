@@ -63,6 +63,54 @@ function getFreePort() {
   });
 }
 
+function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off("exit", onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    timer.unref();
+    child.once("exit", onExit);
+  });
+}
+
+function signalServerTree(server, signal) {
+  try {
+    if (process.platform === "win32") {
+      server.kill(signal);
+    } else {
+      process.kill(-server.pid, signal);
+    }
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+}
+
+async function stopServerTree(server) {
+  const gracefulExit = waitForChildExit(server, 5000);
+  signalServerTree(server, "SIGTERM");
+  const exitedGracefully = await gracefulExit;
+
+  if (!exitedGracefully) {
+    const forcedExit = waitForChildExit(server, 2000);
+    signalServerTree(server, "SIGKILL");
+    await forcedExit;
+  }
+
+  server.stdout?.destroy();
+  server.stderr?.destroy();
+}
+
 function waitForServer(url, authorization, timeoutMs = 60000) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
@@ -829,6 +877,7 @@ async function main() {
         NEXT_PUBLIC_SUPPORT_ORCHESTRATOR_URL: `${baseURL}/api/support-orchestrator`,
       },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     },
   );
 
@@ -938,7 +987,7 @@ async function main() {
     throw error;
   } finally {
     if (browser) await browser.close().catch(() => {});
-    server.kill("SIGTERM");
+    await stopServerTree(server);
   }
 }
 
