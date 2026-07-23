@@ -2,6 +2,7 @@ import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, StyleSheet, StatusBar, Animated, Text, ActivityIndicator, Dimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import firebaseAuth from '@react-native-firebase/auth';
 import { useDispatch, useSelector } from 'react-redux';
 import { FETCH_USER_SUCCESS } from '../state/actionTypes';
 import { useOnboardingPersistence } from '../hooks/useOnboardingPersistence';
@@ -9,6 +10,15 @@ import AuthFlow from '../components/auth/AuthFlow';
 import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
 import { PROFILE_SELECTION_STEP_INDEX } from '../utils/onboardingSessionState';
 import { fonts } from '../theme/runtimeTokens';
+import {
+  allowTestUserTools,
+  isE2ETestBuild,
+  isSimulatorBuild,
+} from '../config/runtimeAccessPolicy';
+import {
+  isPersistedProfileOnboardingComplete,
+  isProfileIdentityConsistent,
+} from '../components/auth/authFlowRecovery';
 
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
@@ -121,7 +131,23 @@ export default function SplashScreen({ navigation }) {
       try {
         Logger.log('SplashScreen - 🔍 Verificando status do usuário nos bastidores...');
 
+        const nativeFirebaseUser = firebaseAuth().currentUser;
+        const nativeFirebaseUid = String(nativeFirebaseUser?.uid || '').trim();
         let resolvedProfile = auth.profile && auth.profile.uid ? auth.profile : null;
+        const canRestoreQaSeed =
+          allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild();
+
+        if (
+          resolvedProfile &&
+          !isProfileIdentityConsistent({
+            profile: resolvedProfile,
+            firebaseUser: nativeFirebaseUser,
+          }) &&
+          !canRestoreQaSeed
+        ) {
+          Logger.warn('SplashScreen - perfil Redux divergente da sessão Firebase ignorado');
+          resolvedProfile = null;
+        }
 
         if (!resolvedProfile) {
           try {
@@ -136,7 +162,12 @@ export default function SplashScreen({ navigation }) {
               try {
                 const parsedProfile = JSON.parse(storedUserData);
                 const normalizedProfile = normalizePersistedProfile(parsedProfile);
-                if (normalizedProfile?.uid) {
+                const localProfileMatchesFirebase = isProfileIdentityConsistent({
+                  profile: normalizedProfile,
+                  firebaseUser: nativeFirebaseUser,
+                  storedUid,
+                });
+                if (normalizedProfile?.uid && (localProfileMatchesFirebase || canRestoreQaSeed)) {
                   resolvedProfile = normalizedProfile;
                   dispatch({
                     type: FETCH_USER_SUCCESS,
@@ -147,7 +178,7 @@ export default function SplashScreen({ navigation }) {
                     usertype: normalizedProfile.usertype || normalizedProfile.userType || null
                   });
                 }
-                if (!resolvedProfile && storedUid) {
+                if (!resolvedProfile && storedUid && canRestoreQaSeed) {
                   const rebuiltQaProfile = await restoreQaSeedProfile({
                     AsyncStorage,
                     authUidKey: AUTH_UID_STORAGE_KEY,
@@ -169,7 +200,7 @@ export default function SplashScreen({ navigation }) {
                 }
               } catch (parseError) {
                 Logger.warn('SplashScreen - ⚠️ @user_data inválido, limpando cache local');
-                const rebuiltQaProfile = storedUid
+                const rebuiltQaProfile = storedUid && canRestoreQaSeed
                   ? await restoreQaSeedProfile({
                       AsyncStorage,
                       authUidKey: AUTH_UID_STORAGE_KEY,
@@ -189,16 +220,18 @@ export default function SplashScreen({ navigation }) {
                     usertype: resolvedProfile.usertype || resolvedProfile.userType || null
                   });
                 } else {
-                  await AsyncStorage.multiRemove([USER_DATA_STORAGE_KEY, AUTH_UID_STORAGE_KEY]);
+                  await AsyncStorage.multiRemove([USER_DATA_STORAGE_KEY]);
                 }
               }
             } else if (storedUid) {
-              const rebuiltQaProfile = await restoreQaSeedProfile({
-                AsyncStorage,
-                authUidKey: AUTH_UID_STORAGE_KEY,
-                userDataKey: USER_DATA_STORAGE_KEY,
-                driverActivationKey: `@prototype_driver_activation_${storedUid}`
-              });
+              const rebuiltQaProfile = canRestoreQaSeed
+                ? await restoreQaSeedProfile({
+                    AsyncStorage,
+                    authUidKey: AUTH_UID_STORAGE_KEY,
+                    userDataKey: USER_DATA_STORAGE_KEY,
+                    driverActivationKey: `@prototype_driver_activation_${storedUid}`
+                  })
+                : null;
 
               if (rebuiltQaProfile?.uid) {
                 resolvedProfile = normalizePersistedProfile(rebuiltQaProfile);
@@ -219,7 +252,26 @@ export default function SplashScreen({ navigation }) {
           }
         }
 
-        const hasAnyAuthSession = Boolean(resolvedProfile?.uid);
+        if (!resolvedProfile && nativeFirebaseUid) {
+          resolvedProfile = {
+            uid: nativeFirebaseUid,
+            phoneNumber: nativeFirebaseUser?.phoneNumber || null,
+            profileIncomplete: true,
+            onboardingPending: true,
+          };
+        }
+
+        const hasAnyAuthSession = Boolean(
+          nativeFirebaseUid &&
+          resolvedProfile?.uid &&
+          (
+            isProfileIdentityConsistent({
+              profile: resolvedProfile,
+              firebaseUser: nativeFirebaseUser,
+            }) ||
+            canRestoreQaSeed
+          )
+        );
         Logger.log('SplashScreen - 🔐 Sessão autenticada disponível?', hasAnyAuthSession);
 
         // Se não está autenticado, mostrar onboarding
@@ -259,10 +311,7 @@ export default function SplashScreen({ navigation }) {
         }
 
         // Verificar se o usuário tem dados completos no Realtime Database
-        const hasCompleteProfile = Boolean(
-          resolvedProfile &&
-          (resolvedProfile.usertype || resolvedProfile.userType)
-        );
+        const hasCompleteProfile = isPersistedProfileOnboardingComplete(resolvedProfile);
         Logger.log('SplashScreen - 📊 Perfil completo no Realtime Database?', !!hasCompleteProfile);
 
         clearTimeout(bootTimeoutId);

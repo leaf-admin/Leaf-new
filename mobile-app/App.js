@@ -21,15 +21,26 @@ import { registerPortraitOrientationGuard } from './src/utils/appOrientationGuar
 import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
 
-// LogBox allowlist — only known non-critical warnings are ignored
-// All other warnings remain visible so QA and dev can catch regressions early
+const qaHideDevOverlays =
+  __DEV__ &&
+  String(process.env.EXPO_PUBLIC_QA_HIDE_DEV_OVERLAYS || '')
+    .trim()
+    .toLowerCase() === 'true';
+
+// LogBox allowlist — only known non-critical warnings are ignored by default.
+// Visual evidence runs may explicitly suppress development overlays while
+// preserving the underlying console logs collected by Metro.
 if (__DEV__) {
-  LogBox.ignoreLogs([
-    // Deprecated Firebase namespaced API — pending migration to modular API
-    'This method is deprecated (as well as all React Native Firebase namespaced API)',
-    // Socket QA token expiry — expected in dev with short-lived tokens
-    'Token QA do socket expirado ou próximo de expirar',
-  ]);
+  if (qaHideDevOverlays) {
+    LogBox.ignoreAllLogs(true);
+  } else {
+    LogBox.ignoreLogs([
+      // Deprecated Firebase namespaced API — pending migration to modular API
+      'This method is deprecated (as well as all React Native Firebase namespaced API)',
+      // Socket QA token expiry — expected in dev with short-lived tokens
+      'Token QA do socket expirado ou próximo de expirar',
+    ]);
+  }
 }
 
 const FRIENDLY_ALERT_PATCH_BYPASS_OPTION_KEY = '__skipFriendlyAlertPatch';
